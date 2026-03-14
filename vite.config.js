@@ -19,6 +19,31 @@ export default defineConfig({
   plugins: [
     react(),
   ],
+  build: {
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': [
+            '@radix-ui/react-accordion',
+            '@radix-ui/react-alert-dialog',
+            '@radix-ui/react-avatar',
+            '@radix-ui/react-checkbox',
+            '@radix-ui/react-dialog',
+            '@radix-ui/react-dropdown-menu',
+            '@radix-ui/react-popover',
+            '@radix-ui/react-select',
+            '@radix-ui/react-tabs',
+            '@radix-ui/react-tooltip',
+          ],
+          'vendor-utils': ['lodash', 'date-fns', 'lucide-react', 'framer-motion'],
+          'vendor-charts': ['recharts'],
+          'vendor-pdf': ['jspdf', 'html2canvas', 'html2pdf.js'],
+        },
+      },
+    },
+  },
   test: {
     environment: 'jsdom',
     globals: true,
