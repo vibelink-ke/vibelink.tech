@@ -22,9 +22,13 @@ export const AuthProvider = ({ children }) => {
       const currentUser = await vibelink.auth.me();
       setUser(currentUser);
       setIsAuthenticated(true);
+      setAuthError(null);
     } catch (error) {
       console.log('No active session found.');
       setIsAuthenticated(false);
+      if (error.status === 401) {
+        setAuthError({ type: 'auth_required' });
+      }
     } finally {
       setIsLoadingAuth(false);
     }
