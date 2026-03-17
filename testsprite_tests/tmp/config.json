@@ -1,0 +1,19 @@
+{
+  "status": "commited",
+  "type": "backend",
+  "scope": "codebase",
+  "localEndpoint": "http://localhost:5173",
+  "backendAuthType": "public",
+  "executionArgs": {
+    "projectName": "successful-isp-bill-pro (1)",
+    "projectPath": "c:\\Users\\khan\\Desktop\\successful-isp-bill-pro (1)-20260316T071943Z-1-001\\successful-isp-bill-pro (1)",
+    "testIds": [],
+    "additionalInstruction": "",
+    "serverMode": "development",
+    "envs": {
+      "API_KEY": "sk-user-Gu09VVbICMK00hSRRoseg2Dmnd0MUGM-6J9nl2o9xpXX6r6ANg9h-9GHeUXCsLRD9n8qDpH5G2Ty9fIMPdlHYWwnZFD1yc1iLquSmIHYGX11pb2fErl96U-c5wLw117zA0M"
+    }
+  },
+  "serverPort": 62102,
+  "proxy": "http://216311ca-91d9-4e0d-89f2-38e8d673f758:Fj8e96w0gF8V6P2VN1JYEWlhCQe1yeIk@tun.testsprite.com:8080"
+}

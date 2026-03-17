@@ -1,0 +1,95 @@
+﻿
+> VIBELINK@0.0.0 build
+> vite build
+
+[36mvite v6.4.1 [32mbuilding for production...[36m[39m
+transforming...
+[32mΓ£ô[39m 1203 modules transformed.
+node.exe : 
+[31mΓ£ù[39m Build 
+failed in 5.35s
+At line:1 char:1
++ & "C:\nvm4w\nodejs/no
+de.exe" "C:\nvm4w\nodej
+s/node_modules/npm/bin/
+np ...
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: ([31mΓ£ù[39m   
+  Build failed in 5    
+.35s:String) [], R    
+emoteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+[31merror during 
+build:
+[31m[vite:load-fallbac
+k] Could not load C:\Us
+ers\khan\Desktop\succes
+sful-isp-bill-pro (1)-2
+0260316T071943Z-1-001\s
+uccessful-isp-bill-pro 
+(1)\src/components/cust
+omers/CustomerMessaging
+ (imported by src/pages
+/Tickets.jsx): ENOENT: 
+no such file or 
+directory, open 'C:\Use
+rs\khan\Desktop\success
+ful-isp-bill-pro (1)-20
+260316T071943Z-1-001\su
+ccessful-isp-bill-pro (
+1)\src\components\custo
+mers\CustomerMessaging'
+[31m
+    at async open (node
+:internal/fs/promises:6
+36:25)
+    at async 
+Object.readFile (node:i
+nternal/fs/promises:126
+9:14)
+    at async 
+Object.handler (file://
+/C:/Users/khan/Desktop/
+successful-isp-bill-pro
+%20(1)-20260316T071943Z
+-1-001/successful-isp-b
+ill-pro%20(1)/node_modu
+les/vite/dist/node/chun
+ks/dep-D4NMHUTW.js:4587
+2:27)
+    at async PluginDriv
+er.hookFirstAndGetPlugi
+n (file:///C:/Users/kha
+n/Desktop/successful-is
+p-bill-pro%20(1)-202603
+16T071943Z-1-001/succes
+sful-isp-bill-pro%20(1)
+/node_modules/rollup/di
+st/es/shared/node-entry
+.js:22453:28)
+    at async file:///C:
+/Users/khan/Desktop/suc
+cessful-isp-bill-pro%20
+(1)-20260316T071943Z-1-
+001/successful-isp-bill
+-pro%20(1)/node_modules
+/rollup/dist/es/shared/
+node-entry.js:21445:33
+    at async 
+Queue.work (file:///C:/
+Users/khan/Desktop/succ
+essful-isp-bill-pro%20(
+1)-20260316T071943Z-1-0
+01/successful-isp-bill-
+pro%20(1)/node_modules/
+rollup/dist/es/shared/n
+ode-entry.js:22681:32)
+[39m

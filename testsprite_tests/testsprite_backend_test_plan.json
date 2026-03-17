@@ -1,0 +1,37 @@
+[
+  {
+    "id": "TC001",
+    "title": "getloginpage",
+    "description": "Test the GET /login endpoint to ensure it renders the login page with status 200 and displays the login form correctly without requiring authentication."
+  },
+  {
+    "id": "TC002",
+    "title": "getdashboardwithvalidtoken",
+    "description": "Test the GET / endpoint with a valid Authorization Bearer token to verify it returns status 200 with dashboard metrics and links to customer and finance sections."
+  },
+  {
+    "id": "TC003",
+    "title": "getdashboardwithoutauthorization",
+    "description": "Test the GET / endpoint without an Authorization header to confirm it returns 401 Unauthorized and redirects to the login page with status 200."
+  },
+  {
+    "id": "TC004",
+    "title": "getcustomerslistwithvalidtoken",
+    "description": "Test the GET /customers endpoint with a valid Authorization Bearer token to verify it returns status 200 with a list of customers."
+  },
+  {
+    "id": "TC005",
+    "title": "getcustomerslistwithexpiredtoken",
+    "description": "Test the GET /customers endpoint with an expired Authorization token to ensure it returns 401 Unauthorized and redirects to the login page with status 200."
+  },
+  {
+    "id": "TC006",
+    "title": "getfinanceoverviewwithvalidtoken",
+    "description": "Test the GET /finance endpoint with a valid Authorization Bearer token to verify it returns status 200 with finance overview data including balances and due amounts."
+  },
+  {
+    "id": "TC007",
+    "title": "getfinanceoverviewwithoutauthorization",
+    "description": "Test the GET /finance endpoint without an Authorization header to confirm it returns 401 Unauthorized and redirects to the login page with status 200."
+  }
+]

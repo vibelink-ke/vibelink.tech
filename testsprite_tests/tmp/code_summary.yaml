@@ -1,0 +1,48 @@
+version: "2"
+type: frontend
+tech_stack:
+  - React
+  - Vite
+  - TailwindCSS
+  - Radix UI
+features:
+  - name: Dashboard
+    description: Main dashboard of the ISP system
+    files:
+      - src/pages/Dashboard.jsx
+    endpoints:
+      - method: GET
+        path: /
+        description: View dashboard
+        auth_required: true
+  - name: Authentication
+    description: User login
+    files:
+      - src/pages/Login.jsx
+    endpoints:
+      - method: GET
+        path: /login
+        description: Render login page
+        auth_required: false
+  - name: Customers Management
+    description: Manage customers
+    files:
+      - src/pages/Customers.jsx
+      - src/pages/CustomerProfile.jsx
+      - src/pages/CustomerOnboarding.jsx
+    endpoints:
+      - method: GET
+        path: /customers
+        description: List customers
+        auth_required: true
+  - name: Finance
+    description: Billing and plans
+    files:
+      - src/pages/Finance.jsx
+      - src/pages/Invoices.jsx
+    endpoints:
+      - method: GET
+        path: /finance
+        description: Finance overview
+        auth_required: true
+known_limitations: []
