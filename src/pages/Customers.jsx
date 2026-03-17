@@ -23,6 +23,7 @@ import StatusBadge from '@/components/shared/StatusBadge';
 import DataTable from '@/components/shared/DataTable';
 import EmptyState from '@/components/shared/EmptyState';
 import SearchInput from '@/components/shared/SearchInput';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -60,10 +61,26 @@ export default function Customers() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [planFilter, setPlanFilter] = useState('all');
+  const [selectedIds, setSelectedIds] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [viewCustomer, setViewCustomer] = useState(null);
   const queryClient = useQueryClient();
+
+  const toggleSelection = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = (customersList) => {
+    if (selectedIds.length === customersList.length && customersList.length > 0) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(customersList.map(c => c.id));
+    }
+  };
 
   const { data: customers = [], isLoading } = useQuery({
     queryKey: ['customers'],
@@ -126,7 +143,36 @@ export default function Customers() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => vibelink.entities.Customer.delete(id),
-    onSuccess: () => queryClient.invalidateQueries(['customers']),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      toast.success('Customer deleted');
+    },
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: async (ids) => {
+      for (const id of ids) {
+        await vibelink.entities.Customer.delete(id);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      setSelectedIds([]);
+      toast.success('Selected customers deleted');
+    },
+  });
+
+  const bulkUpdateMutation = useMutation({
+    mutationFn: async ({ ids, data }) => {
+      for (const id of ids) {
+        await vibelink.entities.Customer.update(id, data);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['customers'] });
+      setSelectedIds([]);
+      toast.success('Selected customers updated');
+    },
   });
 
   const activeCustomers = customers.filter(c => c.status === 'active').length;
@@ -141,6 +187,20 @@ export default function Customers() {
   });
 
   const columns = [
+    {
+      header: (
+        <Checkbox 
+          checked={selectedIds.length === filteredCustomers.length && filteredCustomers.length > 0} 
+          onCheckedChange={() => toggleSelectAll(filteredCustomers)}
+        />
+      ),
+      cell: (row) => (
+        <Checkbox 
+          checked={selectedIds.includes(row.id)} 
+          onCheckedChange={() => toggleSelection(row.id)}
+        />
+      )
+    },
     {
       header: 'Customer',
       cell: (row) => (
@@ -183,7 +243,7 @@ export default function Customers() {
     },
     {
       header: 'Status',
-      cell: (row) => <StatusBadge status={row.status} />
+      cell: (row) => <StatusBadge status={row.status} className="" />
     },
     {
       header: '',
@@ -284,6 +344,60 @@ export default function Customers() {
               <SelectItem value="terminated">Terminated</SelectItem>
             </SelectContent>
           </Select>
+
+          <Select value={planFilter} onValueChange={setPlanFilter}>
+            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm">
+              <Filter className="w-4 h-4 mr-2" />
+              <SelectValue placeholder="All Plans" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Plans</SelectItem>
+              {plans.map(plan => (
+                <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {selectedIds.length > 0 && (
+            <motion.div 
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800 rounded-xl shadow-sm ml-auto"
+            >
+              <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                {selectedIds.length} selected
+              </span>
+              <div className="h-4 w-[1px] bg-indigo-200 dark:bg-indigo-700 mx-1" />
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-amber-600 dark:text-amber-400 hover:text-amber-700"
+                onClick={() => bulkUpdateMutation.mutate({ ids: selectedIds, data: { status: 'suspended' } })}
+              >
+                Suspend
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
+                onClick={() => bulkUpdateMutation.mutate({ ids: selectedIds, data: { status: 'active' } })}
+              >
+                Activate
+              </Button>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="text-rose-600 dark:text-rose-400 hover:text-rose-700"
+                onClick={() => {
+                  if(confirm(`Delete ${selectedIds.length} customers?`)) {
+                    bulkDeleteMutation.mutate(selectedIds);
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            </motion.div>
+          )}
         </motion.div>
 
         {/* Table */}
@@ -291,6 +405,7 @@ export default function Customers() {
           columns={columns}
           data={filteredCustomers}
           isLoading={isLoading}
+          onRowClick={() => {}}
           emptyState={
             <EmptyState
               icon={Users}
