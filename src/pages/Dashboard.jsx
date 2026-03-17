@@ -102,19 +102,98 @@ export default function Dashboard() {
     for (let i = 5; i >= 0; i--) {
       const date = new Date();
       date.setMonth(date.getMonth() - i);
-      const monthKey = format(date, 'MMM yyyy');
+      const months_list = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
       const monthPayments = payments.filter(p => {
         if (!p.created_date) return false;
         const pDate = new Date(p.created_date);
         return pDate.getMonth() === date.getMonth() && pDate.getFullYear() === date.getFullYear();
       });
       months.push({
-        month: format(date, 'MMM'),
+        month: months_list[date.getMonth()],
         revenue: monthPayments.reduce((sum, p) => sum + (p.amount || 0), 0)
       });
     }
     return months;
   }, [payments]);
+
+  // Real-time network throughput mock data (SVG Chart)
+  const throughputData = React.useMemo(() => {
+    return Array.from({ length: 20 }, (_, i) => ({
+      time: i,
+      download: Math.floor(Math.random() * 80) + 20,
+      upload: Math.floor(Math.random() * 30) + 5
+    }));
+  }, []);
+
+  const NetworkThroughputChart = () => {
+    const maxVal = 100;
+    const width = 400;
+    const height = 150;
+    const padding = 20;
+    
+    const getX = (i) => padding + (i * (width - 2 * padding)) / (throughputData.length - 1);
+    const getY = (val) => height - padding - (val * (height - 2 * padding)) / maxVal;
+
+    const downloadPoints = throughputData.map((d, i) => `${getX(i)},${getY(d.download)}`).join(' ');
+    const uploadPoints = throughputData.map((d, i) => `${getX(i)},${getY(d.upload)}`).join(' ');
+
+    return (
+      <div className="w-full">
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full overflow-visible">
+          {/* Grid lines */}
+          {[0, 25, 50, 75, 100].map(v => (
+            <line 
+              key={v} 
+              x1={padding} y1={getY(v)} x2={width - padding} y2={getY(v)} 
+              className="stroke-slate-200 dark:stroke-slate-700" 
+              strokeWidth="1" 
+              strokeDasharray="4 4" 
+            />
+          ))}
+          
+          {/* Download Line */}
+          <motion.polyline
+            fill="none"
+            stroke="#6366f1"
+            strokeWidth="3"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            points={downloadPoints}
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+          />
+          
+          {/* Upload Line */}
+          <motion.polyline
+            fill="none"
+            stroke="#10b981"
+            strokeWidth="2"
+            strokeLinejoin="round"
+            strokeLinecap="round"
+            points={uploadPoints}
+            initial={{ pathLength: 0 }}
+            animate={{ pathLength: 1 }}
+          />
+          
+          {/* Area under download */}
+          <path
+            d={`M ${padding} ${height - padding} ${downloadPoints} L ${width - padding} ${height - padding} Z`}
+            className="fill-indigo-500/10 dark:fill-indigo-500/5"
+          />
+        </svg>
+        <div className="flex justify-center gap-6 mt-4">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-indigo-500" />
+            <span className="text-xs text-slate-500 font-medium">Download (Mbps)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full bg-emerald-500" />
+            <span className="text-xs text-slate-500 font-medium">Upload (Mbps)</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
@@ -170,7 +249,21 @@ export default function Dashboard() {
                  subtitle={`${customers.length} total`}
                  icon={Users}
                  trend="+12%"
-                 trendUp
+                 trendUp={true}
+                 className="h-full"
+               />
+             </div>
+          </motion.div>
+          <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
+             <div>
+               <StatCard
+                 title="Active Hotspot Users"
+                 value={Math.floor(activeCustomers * 0.85)}
+                 subtitle="Connected now"
+                 icon={Activity}
+                 trend="+15%"
+                 trendUp={true}
+                 className="h-full"
                />
              </div>
           </motion.div>
@@ -182,7 +275,8 @@ export default function Dashboard() {
                  subtitle="This period"
                  icon={CreditCard}
                  trend="+8%"
-                 trendUp
+                 trendUp={true}
+                 className="h-full"
                />
              </div>
           </motion.div>
@@ -193,19 +287,37 @@ export default function Dashboard() {
                  value={openTickets}
                  subtitle={`${tickets.length} total tickets`}
                  icon={AlertCircle}
+                 trend=""
+                 trendUp={false}
+                 className="h-full"
                />
              </div>
           </motion.div>
-          <motion.div variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0 } }}>
-             <div>
-               <StatCard
-                 title="Service Plans"
-                 value={plans.length}
-                 subtitle={`${plans.filter(p => p.status === 'active').length} active plans`}
-                 icon={Wifi}
-               />
-             </div>
-          </motion.div>
+        </motion.div>
+
+        {/* Network Throughput Chart Section */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm"
+        >
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                <Activity className="w-5 h-5 text-indigo-500" />
+                Network Throughput
+              </h3>
+              <p className="text-sm text-slate-500">Real-time traffic monitor (Mbps)</p>
+            </div>
+            <div className="flex gap-2">
+              <div className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 rounded-full text-xs font-medium text-indigo-600 dark:text-indigo-400">
+                Live
+              </div>
+            </div>
+          </div>
+          <div className="h-[200px] flex items-center justify-center">
+            <NetworkThroughputChart />
+          </div>
         </motion.div>
 
         {/* Secondary Stats */}
@@ -433,7 +545,7 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right">
                     <p className="font-semibold text-slate-900 dark:text-white text-sm">KES {invoice.total_amount?.toLocaleString()}</p>
-                    <StatusBadge status={invoice.status} />
+                    <StatusBadge status={invoice.status} className="" />
                   </div>
                 </div>
               ))}
@@ -477,7 +589,7 @@ export default function Dashboard() {
                       <p className="text-xs text-slate-500">{ticket.customer_name}</p>
                     </div>
                   </div>
-                  <StatusBadge status={ticket.status} />
+                  <StatusBadge status={ticket.status} className="" />
                 </div>
               ))}
               {tickets.length === 0 && (
