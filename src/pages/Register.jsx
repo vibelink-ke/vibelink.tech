@@ -5,34 +5,32 @@ import { useAuth } from '@/lib/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Mail, Lock, Zap, ArrowRight, Loader2 } from 'lucide-react';
+import { Mail, Lock, Zap, ArrowRight, Loader2, Building2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 
-export default function Login() {
+export default function Register() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [organization, setOrganization] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { register } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-
-  const [isForgotModalOpen, setIsForgotModalOpen] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      await login(email, password);
+      await register(email, password, organization);
       toast({
-        title: "Welcome to VIBELINK",
-        description: "Authenticated successfully.",
+        title: "Account Created",
+        description: "Your ISP portal is ready.",
       });
       navigate('/');
     } catch (error) {
       toast({
-        title: "Authentication Failed",
-        description: "Please check your credentials and try again.",
+        title: "Registration Failed",
+        description: "An error occurred during registration.",
         variant: "destructive",
       });
     } finally {
@@ -40,18 +38,8 @@ export default function Login() {
     }
   };
 
-  const handleForgotPassword = (e) => {
-    e.preventDefault();
-    toast({
-      title: "Reset Link Sent",
-      description: `Instructions sent to ${resetEmail}`,
-    });
-    setIsForgotModalOpen(false);
-  };
-
   return (
     <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 relative overflow-hidden">
-      {/* Dynamic Background */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-indigo-500/10 rounded-full blur-[120px] animate-pulse" />
         <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-purple-500/10 rounded-full blur-[120px] animate-pulse" style={{ animationDelay: '1s' }} />
@@ -64,7 +52,6 @@ export default function Login() {
         className="w-full max-w-md relative"
       >
         <div className="bg-slate-900/50 backdrop-blur-xl border border-slate-800 rounded-3xl p-8 shadow-2xl">
-          {/* Logo & Header */}
           <div className="flex flex-col items-center mb-8">
             <motion.div
               whileHover={{ rotate: 360, scale: 1.1 }}
@@ -74,14 +61,32 @@ export default function Login() {
               <Zap className="w-8 h-8 text-white fill-white/20" />
             </motion.div>
             <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
-              VIBELINK
+              Create Account
             </h1>
             <p className="text-slate-500 mt-2 text-center">
-              Enter your credentials to access the ISP portal
+              Launch your independent ISP system today
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <Label htmlFor="organization" className="text-slate-300 ml-1">Organization Name</Label>
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
+                  <Building2 className="h-4 w-4" />
+                </div>
+                <Input
+                  id="organization"
+                  type="text"
+                  placeholder="Vibelink Networks"
+                  value={organization}
+                  onChange={(e) => setOrganization(e.target.value)}
+                  className="pl-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600 focus:border-indigo-500 focus:ring-indigo-500/20 rounded-xl py-6 transition-all"
+                  required
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="email" className="text-slate-300 ml-1">Email Address</Label>
               <div className="relative group">
@@ -101,16 +106,7 @@ export default function Login() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex items-center justify-between ml-1">
-                <Label htmlFor="password" className="text-slate-300">Password</Label>
-                <button 
-                  type="button" 
-                  onClick={() => setIsForgotModalOpen(true)}
-                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
-                >
-                  Forgot?
-                </button>
-              </div>
+              <Label htmlFor="password" className="text-slate-300 ml-1">Password</Label>
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500 group-focus-within:text-indigo-400 transition-colors">
                   <Lock className="h-4 w-4" />
@@ -135,70 +131,26 @@ export default function Login() {
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
                 <>
-                  Sign In
+                  Create Account
                   <ArrowRight className="ml-2 w-4 h-4 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
             </Button>
           </form>
 
-          {/* Footer */}
           <div className="mt-8 text-center border-t border-slate-800 pt-6">
             <p className="text-slate-500 text-sm">
-              Don't have an account?{' '}
+              Already have an account?{' '}
               <button 
-                onClick={() => navigate('/register')}
+                onClick={() => navigate('/login')}
                 className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
               >
-                Register
+                Sign In
               </button>
             </p>
           </div>
         </div>
       </motion.div>
-
-      {/* Forgot Password Modal */}
-      {isForgotModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="bg-slate-900 border border-slate-800 p-8 rounded-3xl w-full max-w-sm shadow-2xl"
-          >
-            <h2 className="text-2xl font-bold text-white mb-2">Reset Password</h2>
-            <p className="text-slate-400 text-sm mb-6">Enter your email and we'll send you a reset link.</p>
-            <form onSubmit={handleForgotPassword} className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-slate-300">Email Address</Label>
-                <Input
-                  type="email"
-                  value={resetEmail}
-                  onChange={(e) => setResetEmail(e.target.value)}
-                  className="bg-slate-800/50 border-slate-700 text-white"
-                  placeholder="admin@vibelink.tech"
-                  required
-                />
-              </div>
-              <div className="flex gap-3 pt-2">
-                <Button 
-                  type="button" 
-                  variant="ghost" 
-                  onClick={() => setIsForgotModalOpen(false)}
-                  className="flex-1 text-slate-400 hover:text-white"
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white"
-                >
-                  Send
-                </Button>
-              </div>
-            </form>
-          </motion.div>
-        </div>
-      )}
     </div>
   );
 }

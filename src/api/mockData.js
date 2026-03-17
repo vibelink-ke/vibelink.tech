@@ -166,6 +166,14 @@ export const mockApi = {
       saveData(STORAGE_KEYS.USER, user);
       return user;
     },
+    register: async (email, password, organization) => {
+      const user = { id: 'u' + Math.random().toString(36).substr(2, 5), name: organization + ' Admin', email: email, role: 'admin', onboarding_completed: false };
+      saveData(STORAGE_KEYS.USER, user);
+      // Also save to tenants list
+      const tenants = getData(STORAGE_KEYS.TENANTS);
+      saveData(STORAGE_KEYS.TENANTS, [...tenants, { ...user, organization, status: 'active', created_at: new Date().toISOString() }]);
+      return user;
+    },
     updateMe: async (data) => {
       const user = JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || '{}');
       const updatedUser = { ...user, ...data };

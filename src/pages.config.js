@@ -80,6 +80,7 @@ import Tickets from './pages/Tickets';
 import HotspotFileManager from './pages/HotspotFileManager';
 import MikrotikManagement from './pages/MikrotikManagement';
 import Login from './pages/Login';
+import Register from './pages/Register';
 import __Layout from './Layout.jsx';
 
 
@@ -117,6 +118,7 @@ export const PAGES = {
     "HotspotFileManager": HotspotFileManager,
     "MikrotikManagement": MikrotikManagement,
     "Login": Login,
+    "Register": Register,
 }
 
 export const pagesConfig = {

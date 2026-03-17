@@ -59,6 +59,13 @@ export const AuthProvider = ({ children }) => {
     return user;
   };
 
+  const register = async (email, password, organization) => {
+    const user = await vibelink.auth.register(email, password, organization);
+    setUser(user);
+    setIsAuthenticated(true);
+    return user;
+  };
+
   const updateMe = async (data) => {
     const updatedUser = await vibelink.auth.updateMe(data);
     setUser(updatedUser);
@@ -74,6 +81,7 @@ export const AuthProvider = ({ children }) => {
       authError,
       appPublicSettings,
       login,
+      register,
       updateMe,
       logout,
       navigateToLogin,
