@@ -26,10 +26,10 @@ const SEED_DATA = {
       id: 'v1',
       tenant_id: 't1',
       type: 'server',
-      name: 'Primary VPN Gateway',
-      public_endpoint: 'vpn.vibelink.cloud',
+      name: 'Primary VPN Hub (VPS)',
+      public_endpoint: '45.150.190.46',
       port: 51820,
-      public_key: 'server-public-key-abcdef1234567890=',
+      public_key: 'aQYsS+G4926F12fUxv5uN8p9jU2p5f8Yn+yZ8z7x8wA=',
       allowed_ips: '0.0.0.0/0'
     },
     {

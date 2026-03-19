@@ -1,0 +1,11 @@
+name = "vibelink-api"
+main = "index.js"
+compatibility_date = "2024-03-01"
+
+[vars]
+VPN_SYNC_KEY = "your-very-secret-shared-key-here"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "vibelink-db"
+database_id = "50a4e732-27a0-40cc-8031-84a68a62d328"
