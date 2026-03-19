@@ -84,12 +84,13 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
       setNodes(updatedNodes);
 
       // Draw
+      const isDark = document.documentElement.classList.contains('dark');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#f8fafc';
+      ctx.fillStyle = isDark ? '#0f172a' : '#f8fafc';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       // Draw connections
-      ctx.strokeStyle = '#cbd5e1';
+      ctx.strokeStyle = isDark ? '#334155' : '#cbd5e1';
       ctx.lineWidth = 2;
       updatedNodes.forEach(node => {
         updatedNodes.forEach(other => {
@@ -107,14 +108,14 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
         const hasAlert = node.router.cpu_usage >= 80 || node.router.memory_usage >= 80;
 
         // Node circle
-        ctx.fillStyle = hasAlert ? '#fca5a5' : isOnline ? '#10b981' : '#e2e8f0';
+        ctx.fillStyle = hasAlert ? '#fca5a5' : isOnline ? '#10b981' : (isDark ? '#475569' : '#e2e8f0');
         ctx.beginPath();
         ctx.arc(node.x, node.y, 25, 0, Math.PI * 2);
         ctx.fill();
 
         // Glow effect
         if (node.id === selectedRouter) {
-          ctx.strokeStyle = '#4f46e5';
+          ctx.strokeStyle = '#6366f1';
           ctx.lineWidth = 3;
           ctx.beginPath();
           ctx.arc(node.x, node.y, 28, 0, Math.PI * 2);
@@ -176,9 +177,9 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
       animate={{ opacity: 1, y: 0 }}
       className="space-y-4"
     >
-      <Card>
+      <Card className="dark:bg-slate-900 dark:border-slate-800">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 dark:text-white">
             <Wifi className="w-5 h-5" />
             Network Topology
           </CardTitle>
@@ -187,19 +188,19 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
           <div className="flex flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-emerald-500" />
-              <span className="text-xs text-slate-600">Online</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Online</span>
             </div>
             <div className="flex items-center gap-2">
-              <div className="w-4 h-4 rounded-full bg-slate-400" />
-              <span className="text-xs text-slate-600">Offline</span>
+              <div className="w-4 h-4 rounded-full bg-slate-400 dark:bg-slate-600" />
+              <span className="text-xs text-slate-600 dark:text-slate-400">Offline</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-red-400" />
-              <span className="text-xs text-slate-600">Alert</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Alert</span>
             </div>
           </div>
 
-          <div className="border rounded-lg overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100">
+          <div className="border rounded-lg overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 dark:border-slate-700">
             <canvas
               ref={canvasRef}
               width={800}
@@ -213,7 +214,7 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
           {/* Device List */}
           {routers.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-slate-900">Devices ({routers.length})</h4>
+              <h4 className="text-sm font-semibold text-slate-900 dark:text-white">Devices ({routers.length})</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {routers.map(router => {
                   const isSelected = router.id === selectedRouter;
@@ -232,10 +233,10 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
                       className={cn(
                         'p-3 rounded-lg border-2 cursor-pointer transition-all',
                         isSelected
-                          ? 'border-indigo-500 bg-indigo-50'
+                          ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20'
                           : isHovered
-                          ? 'border-slate-300 bg-slate-50'
-                          : 'border-slate-200 hover:border-slate-300'
+                          ? 'border-slate-300 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/50'
+                          : 'border-slate-200 hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700'
                       )}
                     >
                       <div className="flex items-start gap-2">
@@ -243,18 +244,18 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
                           {isOnline ? (
                             <Wifi className={cn('w-4 h-4', hasAlert ? 'text-red-500' : 'text-emerald-500')} />
                           ) : (
-                            <WifiOff className="w-4 h-4 text-slate-400" />
+                            <WifiOff className="w-4 h-4 text-slate-400 dark:text-slate-500" />
                           )}
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-900">{router.router_name}</p>
-                          <p className="text-xs text-slate-600">{router.ip_address}</p>
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">{router.router_name}</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">{router.ip_address}</p>
                           <div className="flex gap-1 mt-1">
-                            <Badge variant="outline" className="text-xs">
+                            <Badge variant="outline" className="text-xs dark:border-slate-700 dark:text-slate-400">
                               {router.status}
                             </Badge>
                             {hasAlert && (
-                              <Badge variant="outline" className="text-xs bg-red-50 border-red-200 text-red-700">
+                              <Badge variant="outline" className="text-xs bg-red-50 border-red-200 text-red-700 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400">
                                 Alert
                               </Badge>
                             )}

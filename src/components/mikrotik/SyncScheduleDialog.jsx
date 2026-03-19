@@ -83,7 +83,7 @@ export default function SyncScheduleDialog({ open, onOpenChange, routers }) {
               {routers.map(router => (
                 <div
                   key={router.id}
-                  className="flex items-center gap-3 p-2 hover:bg-slate-50 dark:hover:bg-slate-800 rounded cursor-pointer"
+                  className="flex items-center gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer"
                   onClick={() => toggleRouter(router.id)}
                 >
                   <input

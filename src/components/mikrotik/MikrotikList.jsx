@@ -26,14 +26,14 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
       header: 'Router Name',
       accessor: 'router_name',
       cell: (row) => (
-        <div className="font-medium text-slate-900 dark:text-white">{row.router_name}</div>
+        <div className="font-medium text-slate-900">{row.router_name}</div>
       ),
     },
     {
       header: 'IP Address',
       accessor: 'ip_address',
       cell: (row) => (
-        <code className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
+        <code className="text-xs bg-slate-100 px-2 py-1 rounded">
           {row.ip_address}
         </code>
       ),
@@ -47,7 +47,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
       header: 'Customers',
       accessor: 'total_customers',
       cell: (row) => (
-        <span className="text-sm text-slate-600 dark:text-slate-400">
+        <span className="text-sm text-slate-600">
           {row.total_customers || 0}
         </span>
       ),
@@ -56,7 +56,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
       header: 'CPU / Memory',
       accessor: 'cpu_usage',
       cell: (row) => (
-        <span className="text-sm text-slate-600 dark:text-slate-400">
+        <span className="text-sm text-slate-600">
           {row.cpu_usage || 0}% / {row.memory_usage || 0}%
         </span>
       ),
@@ -65,7 +65,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
       header: 'Last Seen',
       accessor: 'last_connected',
       cell: (row) => (
-        <span className="text-sm text-slate-600 dark:text-slate-400">
+        <span className="text-sm text-slate-600">
           {row.last_connected
             ? format(new Date(row.last_connected), 'MMM dd, HH:mm')
             : 'Never'}
@@ -188,7 +188,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
               animate={{ opacity: 1, y: 0 }}
               className="space-y-4"
             >
-              <Card className="border-indigo-200 dark:border-indigo-800">
+              <Card className="border-indigo-200">
                 <CardHeader>
                   <CardTitle className="text-lg">
                     {router.router_name} - Real-time Metrics

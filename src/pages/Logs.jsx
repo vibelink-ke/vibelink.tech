@@ -73,12 +73,12 @@ const DATE_RANGES = [
 
 export default function Logs() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader title="Logs & Audit Trail" subtitle="Monitor system activity and track user actions" />
 
         <Tabs defaultValue="audit">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1">
+          <TabsList className="bg-white border p-1">
             <TabsTrigger value="audit" className="gap-2">
               <Shield className="w-4 h-4" /> Audit Trail
             </TabsTrigger>
@@ -212,7 +212,7 @@ function AuditTrail() {
       </div>
 
       {/* Table */}
-      <div className="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
         {isLoading ? (
           <div className="p-8 text-center text-slate-500">Loading audit trail...</div>
         ) : filteredLogs.length === 0 ? (
@@ -223,7 +223,7 @@ function AuditTrail() {
         ) : (
           <Table>
             <TableHeader>
-              <TableRow className="bg-slate-50 dark:bg-slate-900/50">
+              <TableRow className="bg-slate-50">
                 <TableHead className="w-8"></TableHead>
                 <TableHead>Timestamp</TableHead>
                 <TableHead>Action</TableHead>
@@ -240,7 +240,7 @@ function AuditTrail() {
                 return (
                   <React.Fragment key={log.id}>
                     <TableRow
-                      className={`cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${isExpanded ? 'bg-indigo-50/50 dark:bg-indigo-900/20' : ''}`}
+                      className={`cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-indigo-50/50' : ''}`}
                       onClick={() => setExpandedLog(isExpanded ? null : log.id)}
                     >
                       <TableCell>
@@ -376,7 +376,7 @@ function SystemLogs() {
         <Button variant="outline" onClick={() => refetch()}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
 
-      <div className="bg-white dark:bg-slate-800/50 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden">
+      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
         {isLoading ? (
           <div className="p-8 text-center text-slate-500">Loading logs...</div>
         ) : filteredLogs.length === 0 ? (

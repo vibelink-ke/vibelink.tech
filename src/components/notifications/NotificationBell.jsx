@@ -42,9 +42,9 @@ export default function NotificationBell({ user }) {
           variant="ghost"
           size="icon"
           onClick={() => setShowCenter(!showCenter)}
-          className="relative rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"
+          className="relative rounded-full hover:bg-slate-100"
         >
-          <Bell className="w-5 h-5 text-slate-700 dark:text-slate-300" />
+          <Bell className="w-5 h-5 text-slate-700" />
           {unreadCount > 0 && (
             <motion.span
               initial={{ scale: 0 }}
@@ -72,7 +72,7 @@ export default function NotificationBell({ user }) {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md max-h-[calc(100vh-5rem)] bg-white dark:bg-slate-800 rounded-lg shadow-xl"
+              className="w-full max-w-md max-h-[calc(100vh-5rem)] bg-white rounded-lg shadow-xl"
             >
               <NotificationCenter
                 user={user}

@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Copy, Download, Terminal, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { vibelink } from '@/api/vibelinkClient';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 
 export default function MikrotikOnboardingScript({ open, onOpenChange, router }) {
   const [formData, setFormData] = useState({
@@ -24,13 +24,21 @@ export default function MikrotikOnboardingScript({ open, onOpenChange, router })
     api_password: Math.random().toString(36).slice(-10),
     bandwidth_limit: '1000',
     vpn_enabled: true,
-    vpn_protocol: 'wireguard'
+    vpn_protocol: 'wireguard',
+    assigned_inner_ip: '10.8.0.' + (Math.floor(Math.random() * 253) + 2)
   });
 
   const [generatedScript, setGeneratedScript] = useState('');
   const [step, setStep] = useState(1); // 1: Config, 2: Script
   const [saveStatus, setSaveStatus] = useState('idle'); // idle, success, error
   const queryClient = useQueryClient();
+  
+  const { data: vpnConfigs = [] } = useQuery({
+    queryKey: ['vpnConfigs'],
+    queryFn: () => vibelink.entities.VPNConfig.list(),
+  });
+
+  const serverConfig = vpnConfigs.find(c => c.type === 'server');
 
   useEffect(() => {
     if (router) {
@@ -41,7 +49,8 @@ export default function MikrotikOnboardingScript({ open, onOpenChange, router })
         api_password: router.password || Math.random().toString(36).slice(-10),
         bandwidth_limit: router.bandwidth_limit?.toString() || '1000',
         vpn_enabled: router.vpn_enabled ?? true,
-        vpn_protocol: router.vpn_protocol || 'wireguard'
+        vpn_protocol: router.vpn_protocol || 'wireguard',
+        assigned_inner_ip: router.assigned_inner_ip || '10.8.0.' + (Math.floor(Math.random() * 253) + 2)
       });
       setStep(1);
       setSaveStatus('idle');
@@ -68,9 +77,13 @@ export default function MikrotikOnboardingScript({ open, onOpenChange, router })
 /queue simple add name="${data.router_name}-bw" max-limit=${data.bandwidth_limit}M/${data.bandwidth_limit}M target=0.0.0.0/0
 
 # 4. VPN Client Setup
-${data.vpn_enabled ? `
-/interface ${data.vpn_protocol} add name=wg-vibelink comment="Vibelink Management Tunnel"
-# Additional VPN configuration should be added here
+${data.vpn_enabled && data.vpn_protocol === 'wireguard' && serverConfig ? `
+/interface wireguard add name=wg-vibelink comment="Vibelink Management Tunnel"
+/interface wireguard peers add interface=wg-vibelink public-key="${serverConfig.public_key}" endpoint-address=${serverConfig.public_endpoint} endpoint-port=${serverConfig.port} allowed-address=${serverConfig.allowed_ips || '0.0.0.0/0'} persistent-keepalive=25s
+/ip address add address=${data.assigned_inner_ip || '10.8.0.x'}/24 interface=wg-vibelink comment="Management IP"
+` : data.vpn_enabled ? `
+/interface ${data.vpn_protocol} add name=vpn-vibelink comment="Vibelink Management Tunnel"
+# Manual configuration required for ${data.vpn_protocol}
 ` : '# VPN disabled'}
 
 # 5. Heartbeat / Auto-registration
@@ -88,11 +101,14 @@ ${data.vpn_enabled ? `
       bandwidth_limit: parseInt(data.bandwidth_limit),
       vpn_enabled: data.vpn_enabled,
       vpn_protocol: data.vpn_protocol,
+      assigned_inner_ip: data.assigned_inner_ip,
       status: 'pending'
     }),
     onSuccess: (newRouter) => {
       queryClient.invalidateQueries({ queryKey: ['mikrotiks'] });
-      setGeneratedScript(generateScript({ ...formData, id: newRouter.id }));
+      // Use any to avoid lint errors with mock return types
+      const routerData = newRouter; 
+      setGeneratedScript(generateScript({ ...formData, id: routerData?.id }));
       setSaveStatus('success');
       toast.success('Router record saved to dashboard');
     },
@@ -188,7 +204,7 @@ ${data.vpn_enabled ? `
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="">Bandwidth Limit (Mbps)</Label>
+                <Label>Bandwidth Limit (Mbps)</Label>
                 <Input
                   type="number"
                   value={formData.bandwidth_limit}
@@ -196,21 +212,31 @@ ${data.vpn_enabled ? `
                 />
               </div>
               <div className="space-y-2">
-                <Label className="">VPN Protocol</Label>
+                <Label>VPN Protocol</Label>
                 <Select
                   value={formData.vpn_protocol}
                   onValueChange={(v) => setFormData({ ...formData, vpn_protocol: v })}
                 >
-                  <SelectTrigger className="">
-                    <SelectValue className="" />
+                  <SelectTrigger>
+                    <SelectValue />
                   </SelectTrigger>
-                  <SelectContent className="">
+                  <SelectContent>
                     <SelectItem value="wireguard">WireGuard</SelectItem>
                     <SelectItem value="pptp">PPTP</SelectItem>
                     <SelectItem value="l2tp">L2TP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Assigned Management IP (VPN Inner IP)</Label>
+              <Input
+                value={formData.assigned_inner_ip}
+                onChange={(e) => setFormData({ ...formData, assigned_inner_ip: e.target.value })}
+                placeholder="10.8.0.5"
+              />
+              <p className="text-xs text-slate-500 italic">This IP will be used to manage the router via the VPN tunnel.</p>
             </div>
 
             <DialogFooter className="">

@@ -105,12 +105,12 @@ export default function Finance() {
         const Icon = paymentMethodIcons[row.payment_method] || CreditCard;
         return (
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-50 flex items-center justify-center">
-              <Icon className="w-5 h-5 text-emerald-600" />
+            <div className="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+              <Icon className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
             </div>
             <div>
-              <p className="font-medium text-slate-900">{row.payment_id || `PAY-${row.id?.slice(0,6)}`}</p>
-              <p className="text-sm text-slate-500 capitalize">{row.payment_method?.replace('_', ' ')}</p>
+              <p className="font-medium text-slate-900 dark:text-white">{row.payment_id || `PAY-${row.id?.slice(0,6)}`}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 capitalize">{row.payment_method?.replace('_', ' ')}</p>
             </div>
           </div>
         );
@@ -119,13 +119,13 @@ export default function Finance() {
     {
       header: 'Customer',
       cell: (row) => (
-        <span className="text-slate-700">{row.customer_name}</span>
+        <span className="text-slate-700 dark:text-slate-300">{row.customer_name}</span>
       )
     },
     {
       header: 'Date',
       cell: (row) => (
-        <span className="text-slate-600">
+        <span className="text-slate-600 dark:text-slate-400">
           {row.created_date ? format(new Date(row.created_date), 'MMM d, yyyy') : '-'}
         </span>
       )
@@ -133,7 +133,7 @@ export default function Finance() {
     {
       header: 'Amount',
       cell: (row) => (
-        <span className="font-semibold text-emerald-600">KES {row.amount?.toFixed(2)}</span>
+        <span className="font-semibold text-emerald-600 dark:text-emerald-400">KES {row.amount?.toFixed(2)}</span>
       )
     },
     {
@@ -143,7 +143,7 @@ export default function Finance() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Finance"
@@ -162,17 +162,17 @@ export default function Finance() {
             />
           </div>
           <Select value={methodFilter} onValueChange={setMethodFilter}>
-            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 dark:text-slate-200">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder="Payment Method" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Methods</SelectItem>
-              <SelectItem value="cash">Cash</SelectItem>
-              <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-              <SelectItem value="credit_card">Credit Card</SelectItem>
-              <SelectItem value="e_wallet">E-Wallet</SelectItem>
-              <SelectItem value="other">Other</SelectItem>
+            <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+              <SelectItem value="all" className="dark:text-slate-200 dark:focus:bg-slate-800">All Methods</SelectItem>
+              <SelectItem value="cash" className="dark:text-slate-200 dark:focus:bg-slate-800">Cash</SelectItem>
+              <SelectItem value="bank_transfer" className="dark:text-slate-200 dark:focus:bg-slate-800">Bank Transfer</SelectItem>
+              <SelectItem value="credit_card" className="dark:text-slate-200 dark:focus:bg-slate-800">Credit Card</SelectItem>
+              <SelectItem value="e_wallet" className="dark:text-slate-200 dark:focus:bg-slate-800">E-Wallet</SelectItem>
+              <SelectItem value="other" className="dark:text-slate-200 dark:focus:bg-slate-800">Other</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -272,20 +272,20 @@ function PaymentFormDialog({ open, onOpenChange, customers, invoices, onSubmit, 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-md dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
         <DialogHeader>
-          <DialogTitle>Record Payment</DialogTitle>
+          <DialogTitle className="dark:text-white">Record Payment</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
-            <Label>Customer *</Label>
+            <Label className="dark:text-slate-300">Customer *</Label>
             <Select value={formData.customer_id} onValueChange={handleCustomerChange}>
-              <SelectTrigger>
+              <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                 <SelectValue placeholder="Select customer" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                 {customers.map(customer => (
-                  <SelectItem key={customer.id} value={customer.id}>
+                  <SelectItem key={customer.id} value={customer.id} className="dark:text-slate-200 dark:focus:bg-slate-800">
                     {customer.full_name} {customer.balance > 0 && `(Balance: KES ${customer.balance})`}
                   </SelectItem>
                 ))}
@@ -295,14 +295,14 @@ function PaymentFormDialog({ open, onOpenChange, customers, invoices, onSubmit, 
 
           {customerInvoices.length > 0 && (
             <div className="space-y-2">
-              <Label>Link to Invoice (Optional)</Label>
+              <Label className="dark:text-slate-300">Link to Invoice (Optional)</Label>
               <Select value={formData.invoice_id} onValueChange={handleInvoiceChange}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select invoice" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                   {customerInvoices.map(invoice => (
-                    <SelectItem key={invoice.id} value={invoice.id}>
+                    <SelectItem key={invoice.id} value={invoice.id} className="dark:text-slate-200 dark:focus:bg-slate-800">
                       {invoice.invoice_number} - KES {invoice.total_amount}
                     </SelectItem>
                   ))}
@@ -312,53 +312,56 @@ function PaymentFormDialog({ open, onOpenChange, customers, invoices, onSubmit, 
           )}
 
           <div className="space-y-2">
-            <Label>Amount *</Label>
+            <Label className="dark:text-slate-300">Amount *</Label>
             <Input
               type="number"
               step="0.01"
               value={formData.amount}
               onChange={(e) => setFormData({...formData, amount: Number(e.target.value)})}
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               required
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Payment Method *</Label>
+            <Label className="dark:text-slate-300">Payment Method *</Label>
             <Select value={formData.payment_method} onValueChange={(v) => setFormData({...formData, payment_method: v})}>
-              <SelectTrigger>
+              <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cash">Cash</SelectItem>
-                <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                <SelectItem value="credit_card">Credit Card</SelectItem>
-                <SelectItem value="e_wallet">E-Wallet</SelectItem>
-                <SelectItem value="other">Other</SelectItem>
+              <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+                <SelectItem value="cash" className="dark:text-slate-200 dark:focus:bg-slate-800">Cash</SelectItem>
+                <SelectItem value="bank_transfer" className="dark:text-slate-200 dark:focus:bg-slate-800">Bank Transfer</SelectItem>
+                <SelectItem value="credit_card" className="dark:text-slate-200 dark:focus:bg-slate-800">Credit Card</SelectItem>
+                <SelectItem value="e_wallet" className="dark:text-slate-200 dark:focus:bg-slate-800">E-Wallet</SelectItem>
+                <SelectItem value="other" className="dark:text-slate-200 dark:focus:bg-slate-800">Other</SelectItem>
               </SelectContent>
             </Select>
           </div>
 
           <div className="space-y-2">
-            <Label>Reference Number</Label>
+            <Label className="dark:text-slate-300">Reference Number</Label>
             <Input
               value={formData.reference_number}
               onChange={(e) => setFormData({...formData, reference_number: e.target.value})}
               placeholder="Transaction reference..."
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Notes</Label>
+            <Label className="dark:text-slate-300">Notes</Label>
             <Textarea
               value={formData.notes}
               onChange={(e) => setFormData({...formData, notes: e.target.value})}
               placeholder="Additional notes..."
               rows={2}
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
             />
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading} className="bg-emerald-600 hover:bg-emerald-700">

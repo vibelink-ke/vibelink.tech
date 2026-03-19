@@ -2,17 +2,13 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { vibelink } from '@/api/vibelinkClient';
 import { 
-  TrendingDown,
-  Users, 
-  CreditCard,
-  FileText,
-  Clock,
-  CheckCircle,
   XCircle,
   DollarSign,
   Activity,
   ArrowUpRight,
-  ArrowDownRight
+  ArrowDownRight,
+  TrendingUp,
+  Download
 } from 'lucide-react';
 import { format, subMonths, startOfMonth, endOfMonth, differenceInHours } from 'date-fns';
 import PageHeader from '@/components/shared/PageHeader';
@@ -60,6 +56,17 @@ import {
 } from 'recharts';
 
 const COLORS = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#10b981', '#f59e0b'];
+
+const tooltipStyles = {
+  contentStyle: { 
+    backgroundColor: 'white', 
+    border: '1px solid #e2e8f0', 
+    borderRadius: '12px',
+    fontSize: '12px'
+  },
+  itemStyle: { color: '#1e293b' },
+  labelStyle: { fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' }
+};
 
 export default function Reports() {
   const [period, setPeriod] = useState('6months');
@@ -403,24 +410,29 @@ export default function Reports() {
   }, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Reports & Analytics"
           subtitle="Comprehensive business insights and performance metrics"
+          actionLabel="Export Overall Data"
+          onAction={() => {}}
+          actionIcon={Download}
         >
-          <Select value={activeReport} onValueChange={setActiveReport}>
-            <SelectTrigger className="w-56 bg-white dark:bg-slate-800 dark:border-slate-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="overview">Dashboard Overview</SelectItem>
-              <SelectItem value="revenue">Monthly Revenue Report</SelectItem>
-              <SelectItem value="payments">Payment History Report</SelectItem>
-              <SelectItem value="usage">Service Usage Statistics</SelectItem>
-              <SelectItem value="acquisition">Customer Acquisition Cost</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-4">
+            <Select value={activeReport} onValueChange={setActiveReport}>
+              <SelectTrigger className="w-56 bg-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-white border-slate-200">
+                <SelectItem value="overview">Dashboard Overview</SelectItem>
+                <SelectItem value="revenue">Monthly Revenue Report</SelectItem>
+                <SelectItem value="payments">Payment History Report</SelectItem>
+                <SelectItem value="usage">Service Usage Statistics</SelectItem>
+                <SelectItem value="acquisition">Customer Acquisition Cost</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </PageHeader>
 
         {activeReport === 'revenue' && <MonthlyRevenueReport payments={payments} invoices={invoices} />}
@@ -461,7 +473,7 @@ export default function Reports() {
 
         {/* Tabs for different reports */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1 flex-wrap h-auto">
+          <TabsList className="bg-white border p-1 flex-wrap h-auto">
             <TabsTrigger value="revenue" className="gap-2">
               <DollarSign className="w-4 h-4" /> Revenue
             </TabsTrigger>
@@ -494,21 +506,23 @@ export default function Reports() {
                             <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="month" stroke="#94a3b8" />
-                        <YAxis yAxisId="left" stroke="#94a3b8" tickFormatter={(v) => `$${v}`} />
-                        <YAxis yAxisId="right" orientation="right" stroke="#10b981" tickFormatter={(v) => `${v}%`} />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                        <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
+                        <YAxis yAxisId="left" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+                        <YAxis yAxisId="right" orientation="right" stroke="#10b981" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `${v}%`} />
                         <Tooltip 
-                          contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px' }}
+                          contentStyle={tooltipStyles.contentStyle}
+                          itemStyle={tooltipStyles.itemStyle}
+                          labelStyle={tooltipStyles.labelStyle}
                           formatter={(value, name) => [
                             name === 'collectionRate' ? `${value}%` : `$${value.toLocaleString()}`,
                             name === 'collectionRate' ? 'Collection Rate' : name.charAt(0).toUpperCase() + name.slice(1)
                           ]}
                         />
-                        <Legend />
-                        <Bar yAxisId="left" dataKey="invoiced" name="Invoiced" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
+                        <Legend iconType="circle" />
+                        <Bar yAxisId="left" dataKey="invoiced" name="Invoiced" fill="#f1f5f9" radius={[4, 4, 0, 0]} />
                         <Area yAxisId="left" type="monotone" dataKey="revenue" name="Collected" fill="url(#revenueGradient)" stroke="#6366f1" strokeWidth={2} />
-                        <Line yAxisId="right" type="monotone" dataKey="collectionRate" name="Collection %" stroke="#10b981" strokeWidth={2} dot={{ r: 4 }} />
+                        <Line yAxisId="right" type="monotone" dataKey="collectionRate" name="Collection %" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: '#10b981' }} />
                       </ComposedChart>
                     </ResponsiveContainer>
                   </div>
@@ -583,19 +597,19 @@ export default function Reports() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left py-2 font-medium text-slate-600">Plan</th>
-                          <th className="text-right py-2 font-medium text-slate-600">Customers</th>
-                          <th className="text-right py-2 font-medium text-slate-600">Revenue</th>
-                          <th className="text-right py-2 font-medium text-slate-600">MRR</th>
+                          <th className="text-left py-3 font-medium text-slate-500">Plan</th>
+                          <th className="text-right py-3 font-medium text-slate-500">Customers</th>
+                          <th className="text-right py-3 font-medium text-slate-500">Revenue</th>
+                          <th className="text-right py-3 font-medium text-slate-500">MRR</th>
                         </tr>
                       </thead>
                       <tbody>
                         {revenueAnalytics.byPlan.map((plan, i) => (
-                          <tr key={i} className="border-b border-slate-50">
-                            <td className="py-2 font-medium">{plan.name}</td>
-                            <td className="py-2 text-right">{plan.customers}</td>
-                            <td className="py-2 text-right">${plan.revenue.toLocaleString()}</td>
-                            <td className="py-2 text-right font-semibold text-indigo-600">${plan.mrr.toLocaleString()}</td>
+                          <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                            <td className="py-3 font-medium text-slate-900">{plan.name}</td>
+                            <td className="py-3 text-right text-slate-600">{plan.customers}</td>
+                            <td className="py-3 text-right text-slate-600">${plan.revenue.toLocaleString()}</td>
+                            <td className="py-3 text-right font-semibold text-indigo-600">${plan.mrr.toLocaleString()}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1027,15 +1041,15 @@ export default function Reports() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-medium text-slate-600">Method</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Transactions</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Amount</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Success Rate</th>
+                        <th className="text-left py-3 px-4 font-medium text-slate-500">Method</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-500">Transactions</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-500">Amount</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-500">Success Rate</th>
                       </tr>
                     </thead>
                     <tbody>
                       {paymentAnalytics.methodData.map((method, i) => (
-                        <tr key={i} className="border-b border-slate-50 hover:bg-slate-50">
+                        <tr key={i} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
                           <td className="py-3 px-4 font-medium">{method.name}</td>
                           <td className="py-3 px-4 text-right">{method.transactions}</td>
                           <td className="py-3 px-4 text-right">${method.amount.toLocaleString()}</td>

@@ -217,12 +217,12 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-slate-50 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         <PageHeader title="Settings" subtitle="Configure your ISP billing system" />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 flex-wrap h-auto p-1">
+          <TabsList className="bg-white border flex-wrap h-auto p-1">
             <TabsTrigger value="general" className="gap-2"><Building className="w-4 h-4" /> General</TabsTrigger>
             <TabsTrigger value="sms" className="gap-2"><MessageSquare className="w-4 h-4" /> SMS Gateway</TabsTrigger>
             <TabsTrigger value="payment" className="gap-2"><CreditCard className="w-4 h-4" /> Payment Gateway</TabsTrigger>
@@ -1545,12 +1545,12 @@ function EditRoleDialog({ open, onOpenChange, user, roles, onSubmit, isLoading }
               <p className="text-sm font-medium text-indigo-900 mb-2">Permissions:</p>
               <div className="flex flex-wrap gap-1">
                 {selectedRole.permissions?.slice(0, 8).map(p => (
-                  <span key={p} className="text-xs px-2 py-1 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 rounded-full">
+                  <span key={p} className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
                     {p}
                   </span>
                 ))}
                 {(selectedRole.permissions?.length || 0) > 8 && (
-                  <span className="text-xs px-2 py-1 bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 rounded-full">
+                  <span className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
                     +{selectedRole.permissions.length - 8} more
                   </span>
                 )}

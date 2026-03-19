@@ -81,7 +81,7 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        className="mb-4 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg flex items-center gap-2 text-slate-600 dark:text-slate-300"
+        className="mb-4 p-4 bg-slate-50 rounded-lg flex items-center gap-2 text-slate-600"
       >
         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-indigo-600" />
         <span className="text-sm">Analyzing ticket with AI...</span>
@@ -95,9 +95,9 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
       animate={{ opacity: 1, y: 0 }}
       className="mb-4"
     >
-      <Card className="border-indigo-200 dark:border-indigo-900">
+      <Card className="border-indigo-200">
         <CardHeader 
-          className="cursor-pointer flex flex-row items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 pb-3"
+          className="cursor-pointer flex flex-row items-center justify-between bg-gradient-to-r from-indigo-50 to-purple-50 pb-3"
           onClick={() => setExpanded(!expanded)}
         >
           <div className="flex items-center gap-2">
@@ -121,10 +121,10 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
               <CardContent className="pt-4 space-y-4">
                 {/* Suggested Response */}
                 <div>
-                  <label className="text-sm font-semibold text-slate-900 dark:text-white block mb-2">
+                  <label className="text-sm font-semibold text-slate-900 block mb-2">
                     Suggested Response
                   </label>
-                  <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                  <div className="bg-slate-50 p-4 rounded-lg text-sm text-slate-700 whitespace-pre-wrap">
                     {aiResponse.suggested_response}
                   </div>
                   <Button
@@ -150,12 +150,12 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
                 {/* Recommended Actions */}
                 {aiResponse.recommended_actions && aiResponse.recommended_actions.length > 0 && (
                   <div>
-                    <label className="text-sm font-semibold text-slate-900 dark:text-white block mb-2">
+                    <label className="text-sm font-semibold text-slate-900 block mb-2">
                       Recommended Actions
                     </label>
                     <ul className="space-y-2">
                       {aiResponse.recommended_actions.map((action, idx) => (
-                        <li key={idx} className="flex items-start gap-2 text-sm text-slate-600 dark:text-slate-400">
+                        <li key={idx} className="flex items-start gap-2 text-sm text-slate-600">
                           <AlertCircle className="w-4 h-4 mt-0.5 text-indigo-600 flex-shrink-0" />
                           <span>{action}</span>
                         </li>
@@ -166,12 +166,12 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
 
                 {/* Auto-Resolution Info */}
                 {aiResponse.should_auto_resolve && (
-                  <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-900 rounded-lg p-3">
-                    <p className="text-sm font-medium text-green-900 dark:text-green-300 flex items-center gap-2">
+                  <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                    <p className="text-sm font-medium text-green-900 flex items-center gap-2">
                       <Check className="w-4 h-4" />
                       This ticket can be auto-resolved with high confidence
                     </p>
-                    <p className="text-xs text-green-800 dark:text-green-400 mt-1">
+                    <p className="text-xs text-green-800 mt-1">
                       Suggested Resolution: {aiResponse.suggested_resolution}
                     </p>
                   </div>

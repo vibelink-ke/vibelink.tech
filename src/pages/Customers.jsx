@@ -236,7 +236,7 @@ export default function Customers() {
     {
       header: 'Balance',
       cell: (row) => (
-        <span className={`font-medium ${(row.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+        <span className={`font-medium ${(row.balance || 0) > 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
           KES {(row.balance || 0).toFixed(2)}
         </span>
       )
@@ -297,7 +297,7 @@ export default function Customers() {
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ delay: 0.2, type: "spring" }}
-                className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-xs font-semibold rounded-full"
+                className="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-400 text-xs font-semibold rounded-full"
               >
                 {activeCustomers} active
               </motion.div>
@@ -309,7 +309,7 @@ export default function Customers() {
           >
             <Button 
               onClick={() => { setEditingCustomer(null); setShowForm(true); }}
-              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-lg shadow-indigo-200 dark:shadow-indigo-900/30"
+              className="bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 shadow-lg shadow-indigo-200 dark:shadow-none"
             >
               <Plus className="w-4 h-4 mr-2" />
               Add Customer
@@ -332,7 +332,7 @@ export default function Customers() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm">
+            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm dark:text-slate-200">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -346,7 +346,7 @@ export default function Customers() {
           </Select>
 
           <Select value={planFilter} onValueChange={setPlanFilter}>
-            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 shadow-sm">
+            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 shadow-sm dark:text-slate-200">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder="All Plans" />
             </SelectTrigger>
@@ -362,16 +362,16 @@ export default function Customers() {
             <motion.div 
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/40 border border-indigo-100 dark:border-indigo-800 rounded-xl shadow-sm ml-auto"
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800 rounded-xl shadow-sm ml-auto"
             >
               <span className="text-sm font-medium text-indigo-600 dark:text-indigo-400">
                 {selectedIds.length} selected
               </span>
-              <div className="h-4 w-[1px] bg-indigo-200 dark:bg-indigo-700 mx-1" />
+              <div className="h-4 w-[1px] bg-indigo-200 dark:bg-indigo-800 mx-1" />
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="text-amber-600 dark:text-amber-400 hover:text-amber-700"
+                className="text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300"
                 onClick={() => bulkUpdateMutation.mutate({ ids: selectedIds, data: { status: 'suspended' } })}
               >
                 Suspend
@@ -379,7 +379,7 @@ export default function Customers() {
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700"
+                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
                 onClick={() => bulkUpdateMutation.mutate({ ids: selectedIds, data: { status: 'active' } })}
               >
                 Activate
@@ -387,7 +387,7 @@ export default function Customers() {
               <Button 
                 variant="ghost" 
                 size="sm" 
-                className="text-rose-600 dark:text-rose-400 hover:text-rose-700"
+                className="text-rose-600 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300"
                 onClick={() => {
                   if(confirm(`Delete ${selectedIds.length} customers?`)) {
                     bulkDeleteMutation.mutate(selectedIds);
@@ -568,14 +568,14 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
         <form onSubmit={handleSubmit} className="space-y-6 mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label className="flex items-center justify-between">
+              <Label className="flex items-center justify-between dark:text-slate-200">
                 <span>Customer ID</span>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={generateCustomerId}
-                  className="gap-1 text-xs"
+                  className="gap-1 text-xs dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   <RefreshCw className="w-3 h-3" />
                   Generate
@@ -586,6 +586,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
                   value={formData.customer_id}
                   onChange={(e) => setFormData({...formData, customer_id: e.target.value})}
                   placeholder="e.g., 123456"
+                  className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                 />
                 {formData.customer_id && (
                   <Button
@@ -600,28 +601,31 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Full Name *</Label>
+              <Label className="dark:text-slate-200">Full Name *</Label>
               <Input
                 value={formData.full_name}
                 onChange={(e) => setFormData({...formData, full_name: e.target.value})}
                 required
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
             <div className="space-y-2">
-              <Label>Email *</Label>
+              <Label className="dark:text-slate-200">Email *</Label>
               <Input
                 type="email"
                 value={formData.email}
                 onChange={(e) => setFormData({...formData, email: e.target.value})}
                 required
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
             <div className="space-y-2">
-              <Label>Phone *</Label>
+              <Label className="dark:text-slate-200">Phone *</Label>
               <Input
                 value={formData.phone}
                 onChange={(e) => setFormData({...formData, phone: e.target.value})}
                 required
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
             <div className="space-y-2 sm:col-span-2">
@@ -633,16 +637,17 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               />
             </div>
             <div className="space-y-2">
-              <Label>City</Label>
+              <Label className="dark:text-slate-200">City</Label>
               <Input
                 value={formData.city}
                 onChange={(e) => setFormData({...formData, city: e.target.value})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label className="dark:text-slate-200">Status</Label>
               <Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -654,9 +659,9 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Service Plan</Label>
+              <Label className="dark:text-slate-200">Service Plan</Label>
               <Select value={formData.plan_id} onValueChange={handlePlanChange}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select plan" />
                 </SelectTrigger>
                 <SelectContent>
@@ -669,12 +674,12 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Billing Day</Label>
+              <Label className="dark:text-slate-200">Billing Day</Label>
               <Select 
                 value={formData.billing_cycle_day.toString()} 
                 onValueChange={(v) => setFormData({...formData, billing_cycle_day: parseInt(v)})}
               >
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -687,7 +692,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>MikroTik Router</Label>
+              <Label className="dark:text-slate-200">MikroTik Router</Label>
               <Select
                 value={formData.mikrotik_id}
                 onValueChange={(v) => {
@@ -695,7 +700,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
                   setFormData({ ...formData, mikrotik_id: v, mikrotik_name: mt?.router_name || '' });
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select router" />
                 </SelectTrigger>
                 <SelectContent>
@@ -710,28 +715,29 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>IP Address</Label>
+              <Label className="dark:text-slate-200">IP Address</Label>
               <IPAddressSelector
                 value={formData.ip_address}
                 onChange={(v) => setFormData({ ...formData, ip_address: v })}
                 excludeIds={customer ? [customer.id] : []}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
             <div className="space-y-2">
-              <Label className="flex items-center gap-2">
+              <Label className="flex items-center gap-2 dark:text-slate-200">
                 MAC Address
-                <span className="text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
+                <span className="text-xs font-normal text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
               </Label>
               <Input
                 value={formData.mac_address}
                 onChange={(e) => setFormData({...formData, mac_address: e.target.value})}
                 placeholder="Will be populated automatically"
-                className="text-slate-500"
+                className="text-slate-500 dark:text-slate-400 dark:bg-slate-800 dark:border-slate-700"
               />
             </div>
             <div className="sm:col-span-2 space-y-3 border-t pt-4">
               <div className="flex items-center justify-between">
-                <Label className="flex items-center gap-2 font-semibold">
+                <Label className="flex items-center gap-2 font-semibold dark:text-white">
                   <Lock className="w-4 h-4" />
                   Portal Login Credentials
                 </Label>
@@ -740,7 +746,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
                   variant="outline"
                   size="sm"
                   onClick={generateCredentials}
-                  className="gap-2"
+                  className="gap-2 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
                 >
                   <RefreshCw className="w-3 h-3" />
                   Generate
@@ -748,12 +754,13 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Username</Label>
+                  <Label className="dark:text-slate-200">Username</Label>
                   <div className="flex gap-2">
                     <Input
                       value={formData.portal_username}
                       onChange={(e) => setFormData({...formData, portal_username: e.target.value})}
                       placeholder="e.g., customer.user1234"
+                      className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                     />
                     {formData.portal_username && (
                       <Button
@@ -768,13 +775,14 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Password</Label>
+                  <Label className="dark:text-slate-200">Password</Label>
                   <div className="flex gap-2">
                     <Input
                       type={showPassword ? 'text' : 'password'}
                       value={formData.portal_password}
                       onChange={(e) => setFormData({...formData, portal_password: e.target.value})}
                       placeholder="Auto-generated password"
+                      className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                     />
                     {formData.portal_password && (
                       <>
@@ -841,52 +849,52 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
               {customer.full_name?.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h3 className="text-xl font-semibold text-slate-900 dark:text-white">{customer.full_name}</h3>
-              <p className="text-slate-500 dark:text-slate-400">{customer.customer_id || 'No ID assigned'}</p>
+              <h3 className="text-xl font-semibold text-slate-900">{customer.full_name}</h3>
+              <p className="text-slate-500">{customer.customer_id || 'No ID assigned'}</p>
               <StatusBadge status={customer.status} className="mt-2" />
             </div>
           </div>
 
           {/* Contact Info */}
           <div className="space-y-4">
-            <h4 className="font-semibold text-slate-900 dark:text-white">Contact Information</h4>
+            <h4 className="font-semibold text-slate-900">Contact Information</h4>
             <div className="space-y-2">
-              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <Mail className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                <span className="text-slate-700 dark:text-slate-300">{customer.email}</span>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <Mail className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-700">{customer.email}</span>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <Phone className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                <span className="text-slate-700 dark:text-slate-300">{customer.phone}</span>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <Phone className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-700">{customer.phone}</span>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <MapPin className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-                <span className="text-slate-700 dark:text-slate-300">{customer.address}, {customer.city}</span>
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <MapPin className="w-4 h-4 text-slate-500" />
+                <span className="text-slate-700">{customer.address}, {customer.city}</span>
               </div>
             </div>
           </div>
 
           {/* Service Info */}
           <div className="space-y-4">
-            <h4 className="font-semibold text-slate-900 dark:text-white">Service Information</h4>
+            <h4 className="font-semibold text-slate-900">Service Information</h4>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Plan</p>
-                <p className="font-medium text-slate-900 dark:text-white">{customer.plan_name || 'No plan'}</p>
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <p className="text-xs text-slate-500 mb-1">Plan</p>
+                <p className="font-medium text-slate-900">{customer.plan_name || 'No plan'}</p>
               </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Monthly Rate</p>
-                <p className="font-medium text-slate-900 dark:text-white">KES {customer.monthly_rate || 0}</p>
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <p className="text-xs text-slate-500 mb-1">Monthly Rate</p>
+                <p className="font-medium text-slate-900">KES {customer.monthly_rate || 0}</p>
               </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Balance</p>
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <p className="text-xs text-slate-500 mb-1">Balance</p>
                 <p className={`font-medium ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                   KES {(customer.balance || 0).toFixed(2)}
                 </p>
               </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Billing Day</p>
-                <p className="font-medium text-slate-900 dark:text-white">Day {customer.billing_cycle_day || 1}</p>
+              <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                <p className="text-xs text-slate-500 mb-1">Billing Day</p>
+                <p className="font-medium text-slate-900">Day {customer.billing_cycle_day || 1}</p>
               </div>
             </div>
           </div>
@@ -894,18 +902,18 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
           {/* Technical Info */}
           {(customer.mac_address || customer.ip_address) && (
             <div className="space-y-4">
-              <h4 className="font-semibold text-slate-900 dark:text-white">Technical Details</h4>
+              <h4 className="font-semibold text-slate-900">Technical Details</h4>
               <div className="grid grid-cols-2 gap-3">
                 {customer.mac_address && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">MAC Address</p>
-                    <p className="font-mono text-sm text-slate-900 dark:text-white">{customer.mac_address}</p>
+                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                    <p className="text-xs text-slate-500 mb-1">MAC Address</p>
+                    <p className="font-mono text-sm text-slate-900">{customer.mac_address}</p>
                   </div>
                 )}
                 {customer.ip_address && (
-                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">IP Address</p>
-                    <p className="font-mono text-sm text-slate-900 dark:text-white">{customer.ip_address}</p>
+                  <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl">
+                    <p className="text-xs text-slate-500 mb-1">IP Address</p>
+                    <p className="font-mono text-sm text-slate-900">{customer.ip_address}</p>
                   </div>
                 )}
               </div>
@@ -915,8 +923,8 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
           {/* Notes */}
           {customer.notes && (
             <div className="space-y-4">
-              <h4 className="font-semibold text-slate-900 dark:text-white">Notes</h4>
-              <p className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl text-slate-700 dark:text-slate-300 text-sm leading-relaxed">{customer.notes}</p>
+              <h4 className="font-semibold text-slate-900">Notes</h4>
+              <p className="p-4 bg-slate-50 border border-slate-100 rounded-xl text-slate-700 text-sm leading-relaxed">{customer.notes}</p>
             </div>
           )}
 

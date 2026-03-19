@@ -139,7 +139,7 @@ export default function OnboardingTour({ user, updateMe, onComplete }) {
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.9 }}
-        className={`fixed z-50 bg-white dark:bg-slate-800 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 max-w-sm ${
+        className={`fixed z-50 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-800 max-w-sm ${
           isCenterPosition ? 'inset-0 m-auto h-fit' : ''
         }`}
         style={
@@ -165,9 +165,9 @@ export default function OnboardingTour({ user, updateMe, onComplete }) {
             </div>
             <button
               onClick={handleSkip}
-              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
+              className="p-1 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
             >
-              <X className="w-5 h-5 text-slate-400" />
+              <X className="w-5 h-5 text-slate-400 dark:text-slate-500" />
             </button>
           </div>
 
@@ -177,7 +177,7 @@ export default function OnboardingTour({ user, updateMe, onComplete }) {
           </p>
 
           {/* Progress Bar */}
-          <div className="w-full bg-slate-200 dark:bg-slate-700 h-1 rounded-full mb-6 overflow-hidden">
+          <div className="w-full bg-slate-200 dark:bg-slate-800 h-1 rounded-full mb-6 overflow-hidden">
             <motion.div
               initial={{ width: 0 }}
               animate={{
@@ -215,7 +215,7 @@ export default function OnboardingTour({ user, updateMe, onComplete }) {
           {/* Skip Button */}
           <button
             onClick={handleSkip}
-            className="w-full mt-3 text-sm text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
+            className="w-full mt-3 text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
           >
             Skip tour
           </button>

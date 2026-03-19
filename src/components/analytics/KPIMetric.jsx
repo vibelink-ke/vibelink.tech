@@ -2,28 +2,28 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown } from 'lucide-react';
 
-export default function KPIMetric({ label, value, unit = '', trend = null, Icon = null, color = 'indigo' }) {
+export default function KPIMetric({ label, value, unit = '', trend = null, Icon = null, color = 'indigo', className = '' }) {
   const colorClasses = {
-    indigo: 'from-indigo-50 to-indigo-100 border-indigo-200',
-    green: 'from-green-50 to-green-100 border-green-200',
-    blue: 'from-blue-50 to-blue-100 border-blue-200',
-    purple: 'from-purple-50 to-purple-100 border-purple-200',
-    orange: 'from-orange-50 to-orange-100 border-orange-200',
+    indigo: 'from-indigo-50 to-indigo-100 border-indigo-200 text-indigo-900',
+    green: 'from-green-50 to-green-100 border-green-200 text-green-900',
+    blue: 'from-blue-50 to-blue-100 border-blue-200 text-blue-900',
+    purple: 'from-purple-50 to-purple-100 border-purple-200 text-purple-900',
+    orange: 'from-orange-50 to-orange-100 border-orange-200 text-orange-900',
   };
 
   const iconColorClasses = {
-    indigo: 'bg-indigo-100 text-indigo-600',
-    green: 'bg-green-100 text-green-600',
-    blue: 'bg-blue-100 text-blue-600',
-    purple: 'bg-purple-100 text-purple-600',
-    orange: 'bg-orange-100 text-orange-600',
+    indigo: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-400',
+    green: 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400',
+    blue: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
+    purple: 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400',
+    orange: 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400',
   };
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`bg-gradient-to-br ${colorClasses[color]} border rounded-xl p-6`}
+      className={`bg-gradient-to-br ${colorClasses[color]} dark:bg-none border rounded-xl p-6 transition-all duration-300 ${className}`}
     >
       <div className="flex items-start justify-between">
         <div className="flex-1">

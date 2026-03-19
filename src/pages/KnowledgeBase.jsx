@@ -12,7 +12,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   Tag,
-  Filter
+  Filter,
+  Sparkles
 } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import EmptyState from '@/components/shared/EmptyState';
@@ -174,7 +175,7 @@ Identify articles that semantically match the user's intent, even if exact keywo
   const draftArticles = filteredArticles.filter(a => a.status === 'draft');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Knowledge Base"
@@ -185,37 +186,37 @@ Identify articles that semantically match the user's intent, even if exact keywo
         />
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="pt-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-indigo-600">{publishedArticles.length}</p>
-                <p className="text-sm text-slate-500">Published</p>
+                <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{publishedArticles.length}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Published</p>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="pt-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-amber-600">{draftArticles.length}</p>
-                <p className="text-sm text-slate-500">Drafts</p>
+                <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{draftArticles.length}</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Drafts</p>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="pt-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-emerald-600">
+                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                   {articles.reduce((sum, a) => sum + (a.views || 0), 0)}
                 </p>
-                <p className="text-sm text-slate-500">Total Views</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Total Views</p>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="pt-4">
               <div className="text-center">
-                <p className="text-2xl font-bold text-purple-600">5</p>
-                <p className="text-sm text-slate-500">Categories</p>
+                <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">5</p>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Categories</p>
               </div>
             </CardContent>
           </Card>
@@ -252,24 +253,24 @@ Identify articles that semantically match the user's intent, even if exact keywo
             )}
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 dark:text-slate-200">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="billing">Billing</SelectItem>
-              <SelectItem value="technical">Technical</SelectItem>
-              <SelectItem value="account">Account</SelectItem>
-              <SelectItem value="network">Network</SelectItem>
-              <SelectItem value="general">General</SelectItem>
+            <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+              <SelectItem value="all" className="dark:text-slate-200 dark:focus:bg-slate-800">All Categories</SelectItem>
+              <SelectItem value="billing" className="dark:text-slate-200 dark:focus:bg-slate-800">Billing</SelectItem>
+              <SelectItem value="technical" className="dark:text-slate-200 dark:focus:bg-slate-800">Technical</SelectItem>
+              <SelectItem value="account" className="dark:text-slate-200 dark:focus:bg-slate-800">Account</SelectItem>
+              <SelectItem value="network" className="dark:text-slate-200 dark:focus:bg-slate-800">Network</SelectItem>
+              <SelectItem value="general" className="dark:text-slate-200 dark:focus:bg-slate-800">General</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-48 bg-white rounded-2xl animate-pulse" />)}
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-48 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-2xl animate-pulse" />)}
           </div>
         ) : filteredArticles.length === 0 ? (
           <EmptyState
@@ -288,19 +289,19 @@ Identify articles that semantically match the user's intent, even if exact keywo
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
               >
-                <Card className="hover:shadow-lg transition-all cursor-pointer h-full" onClick={() => setViewArticle(article)}>
+                <Card className="hover:shadow-lg transition-all cursor-pointer h-full dark:bg-slate-900 dark:border-slate-800" onClick={() => setViewArticle(article)}>
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex-1">
-                        <CardTitle className="text-lg line-clamp-2">{article.title}</CardTitle>
+                        <CardTitle className="text-lg line-clamp-2 dark:text-white">{article.title}</CardTitle>
                         <div className="flex gap-2 mt-2">
                           <Badge variant="outline" className={categoryColors[article.category]}>
                             {article.category}
                           </Badge>
                           {article.status === 'draft' ? (
-                            <Badge variant="outline">Draft</Badge>
+                            <Badge variant="outline" className="dark:border-slate-700 dark:text-slate-400">Draft</Badge>
                           ) : (
-                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800">
                               <CheckCircle className="w-3 h-3 mr-1" />
                               Published
                             </Badge>
@@ -332,31 +333,31 @@ Identify articles that semantically match the user's intent, even if exact keywo
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm text-slate-600 line-clamp-3 mb-3">
+                    <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-3 mb-3">
                       {article.content?.substring(0, 150)}...
                     </p>
                     
                     {article.tags?.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-3">
                         {article.tags.slice(0, 3).map((tag, i) => (
-                          <span key={i} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
+                          <span key={i} className="text-xs px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">
                             {tag}
                           </span>
                         ))}
                       </div>
                     )}
 
-                    <div className="flex items-center justify-between text-xs text-slate-500 pt-3 border-t">
+                    <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-500 pt-3 border-t dark:border-slate-800">
                       <span className="flex items-center gap-1">
                         <Eye className="w-3 h-3" />
                         {article.views || 0} views
                       </span>
                       <div className="flex items-center gap-3">
-                        <span className="flex items-center gap-1 text-emerald-600">
+                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                           <ThumbsUp className="w-3 h-3" />
                           {article.helpful_count || 0}
                         </span>
-                        <span className="flex items-center gap-1 text-slate-400">
+                        <span className="flex items-center gap-1 text-slate-400 dark:text-slate-500">
                           <ThumbsDown className="w-3 h-3" />
                           {article.not_helpful_count || 0}
                         </span>
@@ -442,30 +443,31 @@ function ArticleFormDialog({ open, onOpenChange, article, onSubmit, isLoading })
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto dark:bg-slate-900 dark:border-slate-800">
         <DialogHeader>
-          <DialogTitle>{article ? 'Edit Article' : 'Create Article'}</DialogTitle>
+          <DialogTitle className="dark:text-white">{article ? 'Edit Article' : 'Create Article'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
-            <Label>Title *</Label>
+            <Label className="dark:text-slate-300">Title *</Label>
             <Input
               value={formData.title}
               onChange={(e) => setFormData({...formData, title: e.target.value})}
               placeholder="How to configure your router"
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               required
             />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Category *</Label>
+              <Label className="dark:text-slate-300">Category *</Label>
               <Select value={formData.category} onValueChange={(v) => setFormData({...formData, category: v})}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="billing">Billing</SelectItem>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+                  <SelectItem value="billing" className="dark:text-slate-200 dark:focus:bg-slate-800">Billing</SelectItem>
                   <SelectItem value="technical">Technical</SelectItem>
                   <SelectItem value="account">Account</SelectItem>
                   <SelectItem value="network">Network</SelectItem>
@@ -475,13 +477,13 @@ function ArticleFormDialog({ open, onOpenChange, article, onSubmit, isLoading })
             </div>
 
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label className="dark:text-slate-300">Status</Label>
               <Select value={formData.status} onValueChange={(v) => setFormData({...formData, status: v})}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="draft">Draft</SelectItem>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+                  <SelectItem value="draft" className="dark:text-slate-200 dark:focus:bg-slate-800">Draft</SelectItem>
                   <SelectItem value="published">Published</SelectItem>
                   <SelectItem value="archived">Archived</SelectItem>
                 </SelectContent>
@@ -490,25 +492,26 @@ function ArticleFormDialog({ open, onOpenChange, article, onSubmit, isLoading })
           </div>
 
           <div className="space-y-2">
-            <Label>Tags (comma separated)</Label>
+            <Label className="dark:text-slate-300">Tags (comma separated)</Label>
             <Input
               value={formData.tags}
               onChange={(e) => setFormData({...formData, tags: e.target.value})}
               placeholder="router, wifi, setup, troubleshooting"
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Content (Markdown) *</Label>
+            <Label className="dark:text-slate-300">Content (Markdown) *</Label>
             <Textarea
               value={formData.content}
               onChange={(e) => setFormData({...formData, content: e.target.value})}
               placeholder="Write your article content using Markdown..."
               rows={12}
               required
-              className="font-mono text-sm"
+              className="font-mono text-sm dark:bg-slate-800 dark:border-slate-700 dark:text-white"
             />
-            <p className="text-xs text-slate-500">Supports Markdown formatting</p>
+            <p className="text-xs text-slate-500 dark:text-slate-500">Supports Markdown formatting</p>
           </div>
 
           <div className="space-y-2">
@@ -540,11 +543,11 @@ function ArticleViewDialog({ article, open, onOpenChange, onEdit }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto dark:bg-slate-900 dark:border-slate-800">
         <DialogHeader>
           <div className="flex items-start justify-between gap-4">
             <div className="flex-1">
-              <DialogTitle className="text-2xl">{article.title}</DialogTitle>
+              <DialogTitle className="text-2xl dark:text-white">{article.title}</DialogTitle>
               <div className="flex gap-2 mt-2">
                 <Badge variant="outline" className={categoryColors[article.category]}>
                   {article.category}
@@ -563,7 +566,7 @@ function ArticleViewDialog({ article, open, onOpenChange, onEdit }) {
           {article.tags?.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {article.tags.map((tag, i) => (
-                <span key={i} className="flex items-center gap-1 text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full">
+                <span key={i} className="flex items-center gap-1 text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">
                   <Tag className="w-3 h-3" />
                   {tag}
                 </span>
@@ -571,17 +574,17 @@ function ArticleViewDialog({ article, open, onOpenChange, onEdit }) {
             </div>
           )}
 
-          <div className="prose prose-slate max-w-none">
+          <div className="prose prose-slate dark:prose-invert max-w-none">
             <ReactMarkdown>{article.content}</ReactMarkdown>
           </div>
 
-          <div className="flex items-center justify-between pt-4 border-t">
-            <div className="flex items-center gap-4 text-sm text-slate-500">
+          <div className="flex items-center justify-between pt-4 border-t dark:border-slate-800">
+            <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-500">
               <span className="flex items-center gap-1">
                 <Eye className="w-4 h-4" />
                 {article.views || 0} views
               </span>
-              <span className="flex items-center gap-1 text-emerald-600">
+              <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
                 <ThumbsUp className="w-4 h-4" />
                 {article.helpful_count || 0}
               </span>

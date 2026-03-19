@@ -121,15 +121,15 @@ export default function Invoices() {
       header: 'Invoice',
       cell: (row) => (
         <div>
-          <p className="font-medium text-slate-900">{row.invoice_number || `INV-${row.id?.slice(0,6)}`}</p>
-          <p className="text-sm text-slate-500">{row.customer_name}</p>
+          <p className="font-medium text-slate-900 dark:text-white">{row.invoice_number || `INV-${row.id?.slice(0,6)}`}</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">{row.customer_name}</p>
         </div>
       )
     },
     {
       header: 'Period',
       cell: (row) => (
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-slate-400">
           {row.billing_period_start && row.billing_period_end ? (
             <>
               {format(new Date(row.billing_period_start), 'MMM d')} -{' '}
@@ -142,7 +142,7 @@ export default function Invoices() {
     {
       header: 'Due Date',
       cell: (row) => (
-        <span className="text-slate-700">
+        <span className="text-slate-700 dark:text-slate-300">
           {row.due_date ? format(new Date(row.due_date), 'MMM d, yyyy') : '-'}
         </span>
       )
@@ -150,7 +150,7 @@ export default function Invoices() {
     {
       header: 'Amount',
       cell: (row) => (
-        <span className="font-semibold text-slate-900">KES {row.total_amount?.toFixed(2)}</span>
+        <span className="font-semibold text-slate-900 dark:text-white">KES {row.total_amount?.toFixed(2)}</span>
       )
     },
     {
@@ -194,7 +194,7 @@ export default function Invoices() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Invoices & Billing"
@@ -204,11 +204,11 @@ export default function Invoices() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1">
-            <TabsTrigger value="list" className="gap-2">
+          <TabsList className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-1">
+            <TabsTrigger value="list" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white transition-all">
               <FileText className="w-4 h-4" /> All Invoices
             </TabsTrigger>
-            <TabsTrigger value="generate" className="gap-2">
+            <TabsTrigger value="generate" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white transition-all">
               <Play className="w-4 h-4" /> Auto Generate
             </TabsTrigger>
           </TabsList>
@@ -224,17 +224,17 @@ export default function Invoices() {
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 dark:text-slate-200">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="sent">Sent</SelectItem>
-                  <SelectItem value="paid">Paid</SelectItem>
-                  <SelectItem value="overdue">Overdue</SelectItem>
-                  <SelectItem value="cancelled">Cancelled</SelectItem>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+                  <SelectItem value="all" className="dark:text-slate-200 dark:focus:bg-slate-800">All Status</SelectItem>
+                  <SelectItem value="draft" className="dark:text-slate-200 dark:focus:bg-slate-800">Draft</SelectItem>
+                  <SelectItem value="sent" className="dark:text-slate-200 dark:focus:bg-slate-800">Sent</SelectItem>
+                  <SelectItem value="paid" className="dark:text-slate-200 dark:focus:bg-slate-800">Paid</SelectItem>
+                  <SelectItem value="overdue" className="dark:text-slate-200 dark:focus:bg-slate-800">Overdue</SelectItem>
+                  <SelectItem value="cancelled" className="dark:text-slate-200 dark:focus:bg-slate-800">Cancelled</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -600,63 +600,63 @@ function GenerateInvoicesContent({
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-600" />
+              <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+                <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{eligibleCustomers.length}</p>
-                <p className="text-xs text-slate-500">Eligible</p>
+                <p className="text-2xl font-bold dark:text-white">{eligibleCustomers.length}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Eligible</p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                <CheckCircle className="w-5 h-5 text-indigo-600" />
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
+                <CheckCircle className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{selectedCustomers.length}</p>
-                <p className="text-xs text-slate-500">Selected</p>
+                <p className="text-2xl font-bold dark:text-white">{selectedCustomers.length}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Selected</p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-                <DollarSign className="w-5 h-5 text-emerald-600" />
+              <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+                <DollarSign className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               </div>
               <div>
-                <p className="text-2xl font-bold">KES {totalSelectedAmount.toFixed(0)}</p>
-                <p className="text-xs text-slate-500">Est. Total</p>
+                <p className="text-2xl font-bold dark:text-white">KES {totalSelectedAmount.toFixed(0)}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Est. Total</p>
               </div>
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
           <CardContent className="pt-4">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-purple-600" />
+              <div className="w-10 h-10 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center">
+                <Calendar className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </div>
               <div>
-                <p className="text-lg font-bold">{format(new Date(), 'MMM yyyy')}</p>
-                <p className="text-xs text-slate-500">Period</p>
+                <p className="text-lg font-bold dark:text-white">{format(new Date(), 'MMM yyyy')}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Period</p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
+      <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
+          <CardTitle className="flex items-center gap-2 dark:text-white">
             <FileText className="w-5 h-5" />
             Generate Invoices
           </CardTitle>
@@ -682,7 +682,7 @@ function GenerateInvoicesContent({
                   checked={sendEmails}
                   onCheckedChange={setSendEmails}
                 />
-                <Label htmlFor="sendEmails" className="flex items-center gap-1">
+                <Label htmlFor="sendEmails" className="flex items-center gap-1 dark:text-slate-300">
                   <Mail className="w-4 h-4" />
                   Email notifications
                 </Label>
@@ -710,29 +710,29 @@ function GenerateInvoicesContent({
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
         <CardContent className="p-0">
           <Table>
             <TableHeader>
-              <TableRow>
-                <TableHead className="w-12">
+              <TableRow className="hover:bg-transparent dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+                <TableHead className="w-12 dark:text-slate-400">
                   <Checkbox
                     checked={selectAll && eligibleCustomers.length > 0}
                     onCheckedChange={handleSelectAll}
                   />
                 </TableHead>
-                <TableHead>Customer</TableHead>
-                <TableHead>Plan</TableHead>
-                <TableHead>Monthly Rate</TableHead>
-                <TableHead>Balance</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Billing Day</TableHead>
+                <TableHead className="dark:text-slate-400">Customer</TableHead>
+                <TableHead className="dark:text-slate-400">Plan</TableHead>
+                <TableHead className="dark:text-slate-400">Monthly Rate</TableHead>
+                <TableHead className="dark:text-slate-400">Balance</TableHead>
+                <TableHead className="dark:text-slate-400">Status</TableHead>
+                <TableHead className="dark:text-slate-400">Billing Day</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {eligibleCustomers.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-slate-500">
+                  <TableCell colSpan={7} className="text-center py-8 text-slate-500 dark:text-slate-400">
                     No eligible customers found
                   </TableCell>
                 </TableRow>
@@ -742,7 +742,7 @@ function GenerateInvoicesContent({
                   const monthlyRate = plan?.monthly_price || customer.monthly_rate || 0;
                   
                   return (
-                    <TableRow key={customer.id} className="hover:bg-slate-50">
+                    <TableRow key={customer.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:border-slate-800">
                       <TableCell>
                         <Checkbox
                           checked={selectedCustomers.includes(customer.id)}
@@ -751,15 +751,15 @@ function GenerateInvoicesContent({
                       </TableCell>
                       <TableCell>
                         <div>
-                          <p className="font-medium text-slate-900">{customer.full_name}</p>
-                          <p className="text-sm text-slate-500">{customer.email}</p>
+                          <p className="font-medium text-slate-900 dark:text-white">{customer.full_name}</p>
+                          <p className="text-sm text-slate-500 dark:text-slate-400">{customer.email}</p>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="text-slate-700">{plan?.name || customer.plan_name || '-'}</span>
+                        <span className="text-slate-700 dark:text-slate-300">{plan?.name || customer.plan_name || '-'}</span>
                       </TableCell>
                       <TableCell>
-                        <span className="font-semibold text-slate-900">KES {monthlyRate.toFixed(2)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-white">KES {monthlyRate.toFixed(2)}</span>
                       </TableCell>
                       <TableCell>
                         <span className={`font-medium ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
@@ -770,7 +770,7 @@ function GenerateInvoicesContent({
                         <StatusBadge status={customer.status} />
                       </TableCell>
                       <TableCell>
-                        <span className="text-slate-600">Day {customer.billing_cycle_day || 1}</span>
+                        <span className="text-slate-600 dark:text-slate-400">Day {customer.billing_cycle_day || 1}</span>
                       </TableCell>
                     </TableRow>
                   );
@@ -782,36 +782,36 @@ function GenerateInvoicesContent({
       </Card>
 
       <Dialog open={showResults} onOpenChange={setShowResults}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-lg dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
           <DialogHeader>
-            <DialogTitle>Invoice Generation Complete</DialogTitle>
+            <DialogTitle className="dark:text-white">Invoice Generation Complete</DialogTitle>
           </DialogHeader>
           {results && (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 bg-emerald-50 rounded-xl text-center">
-                  <CheckCircle className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-emerald-700">{results.success.length}</p>
-                  <p className="text-sm text-emerald-600">Successful</p>
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl text-center">
+                  <CheckCircle className="w-8 h-8 text-emerald-600 dark:text-emerald-400 mx-auto mb-2" />
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{results.success.length}</p>
+                  <p className="text-sm text-emerald-600 dark:text-emerald-500">Successful</p>
                 </div>
-                <div className="p-4 bg-rose-50 rounded-xl text-center">
-                  <AlertCircle className="w-8 h-8 text-rose-600 mx-auto mb-2" />
-                  <p className="text-2xl font-bold text-rose-700">{results.failed.length}</p>
-                  <p className="text-sm text-rose-600">Failed</p>
+                <div className="p-4 bg-rose-50 dark:bg-rose-900/20 rounded-xl text-center">
+                  <X className="w-8 h-8 text-rose-600 dark:text-rose-400 mx-auto mb-2" />
+                  <p className="text-2xl font-bold text-rose-700 dark:text-rose-400">{results.failed.length}</p>
+                  <p className="text-sm text-rose-600 dark:text-rose-500">Failed</p>
                 </div>
               </div>
 
-              <div className="p-4 bg-indigo-50 rounded-xl text-center">
-                <p className="text-sm text-indigo-600 mb-1">Total Amount Generated</p>
-                <p className="text-3xl font-bold text-indigo-700">KES {results.totalAmount.toFixed(2)}</p>
+              <div className="p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl text-center">
+                <p className="text-sm text-indigo-600 dark:text-indigo-400 mb-1">Total Amount Generated</p>
+                <p className="text-3xl font-bold text-indigo-700 dark:text-indigo-400">KES {results.totalAmount.toFixed(2)}</p>
               </div>
 
               {results.failed.length > 0 && (
                 <div className="space-y-2">
-                  <p className="font-medium text-slate-700">Failed Invoices:</p>
+                  <p className="font-medium text-slate-700 dark:text-slate-300">Failed Invoices:</p>
                   <div className="max-h-32 overflow-y-auto space-y-1">
                     {results.failed.map((item, i) => (
-                      <div key={i} className="text-sm p-2 bg-rose-50 rounded-lg">
+                      <div key={i} className="text-sm p-2 bg-rose-50 dark:bg-rose-900/20 rounded-lg dark:text-slate-300">
                         <span className="font-medium">{item.customer.full_name}</span>: {item.reason}
                       </div>
                     ))}
@@ -906,21 +906,21 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
         <DialogHeader>
-          <DialogTitle>Create Invoice</DialogTitle>
+          <DialogTitle className="dark:text-white">Create Invoice</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-6 mt-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2 sm:col-span-2">
-              <Label>Customer *</Label>
+              <Label className="dark:text-slate-300">Customer *</Label>
               <Select value={formData.customer_id} onValueChange={handleCustomerChange}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                   {customers.filter(c => c.status === 'active').map(customer => (
-                    <SelectItem key={customer.id} value={customer.id}>
+                    <SelectItem key={customer.id} value={customer.id} className="dark:text-slate-200 dark:focus:bg-slate-800 transition-colors">
                       {customer.full_name} - {customer.email}
                     </SelectItem>
                   ))}
@@ -929,48 +929,52 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
             </div>
 
             <div className="space-y-2">
-              <Label>Billing Period Start</Label>
+              <Label className="dark:text-slate-300">Billing Period Start</Label>
               <Input
                 type="date"
                 value={formData.billing_period_start}
                 onChange={(e) => setFormData({...formData, billing_period_start: e.target.value})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Billing Period End</Label>
+              <Label className="dark:text-slate-300">Billing Period End</Label>
               <Input
                 type="date"
                 value={formData.billing_period_end}
                 onChange={(e) => setFormData({...formData, billing_period_end: e.target.value})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Due Date *</Label>
+              <Label className="dark:text-slate-300">Due Date *</Label>
               <Input
                 type="date"
                 value={formData.due_date}
                 onChange={(e) => setFormData({...formData, due_date: e.target.value})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                 required
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Tax Rate (%)</Label>
+              <Label className="dark:text-slate-300">Tax Rate (%)</Label>
               <Input
                 type="number"
                 step="0.01"
                 value={formData.tax_rate}
                 onChange={(e) => setFormData({...formData, tax_rate: Number(e.target.value)})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
           </div>
 
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <Label>Line Items</Label>
-              <Button type="button" variant="outline" size="sm" onClick={addItem}>
+              <Label className="dark:text-white">Line Items</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addItem} className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
                 <Plus className="w-4 h-4 mr-1" /> Add Item
               </Button>
             </div>
@@ -981,6 +985,7 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
                     placeholder="Description"
                     value={item.description}
                     onChange={(e) => updateItem(index, 'description', e.target.value)}
+                    className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                   />
                 </div>
                 <div className="col-span-2">
@@ -989,6 +994,7 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
                     placeholder="Qty"
                     value={item.quantity}
                     onChange={(e) => updateItem(index, 'quantity', Number(e.target.value))}
+                    className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                   />
                 </div>
                 <div className="col-span-2">
@@ -998,9 +1004,10 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
                     placeholder="Price"
                     value={item.unit_price}
                     onChange={(e) => updateItem(index, 'unit_price', Number(e.target.value))}
+                    className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                   />
                 </div>
-                <div className="col-span-2 text-right font-medium">
+                <div className="col-span-2 text-right font-medium dark:text-white">
                   KES {item.total.toFixed(2)}
                 </div>
                 <div className="col-span-1">
@@ -1014,7 +1021,7 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
             ))}
           </div>
 
-          <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl p-4 space-y-2">
+          <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm">
               <span className="text-slate-600 dark:text-slate-400">Subtotal</span>
               <span className="font-medium text-slate-900 dark:text-white">KES {subtotal.toFixed(2)}</span>
@@ -1032,17 +1039,18 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
           </div>
 
           <div className="space-y-2">
-            <Label>Notes</Label>
+            <Label className="dark:text-slate-300">Notes</Label>
             <Textarea
               value={formData.notes}
               onChange={(e) => setFormData({...formData, notes: e.target.value})}
               placeholder="Additional notes..."
               rows={2}
+              className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
             />
           </div>
 
           <div className="flex justify-end gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
               Cancel
             </Button>
             <Button type="submit" disabled={isLoading} className="bg-indigo-600 hover:bg-indigo-700">
@@ -1060,9 +1068,9 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-lg overflow-y-auto dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
         <SheetHeader>
-          <SheetTitle>Invoice Details</SheetTitle>
+          <SheetTitle className="dark:text-white">Invoice Details</SheetTitle>
         </SheetHeader>
         <div className="mt-6 space-y-6">
           <div className="flex items-center justify-between">
@@ -1074,7 +1082,7 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 rounded-xl">
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Billing Period</p>
               <p className="font-medium text-slate-900 dark:text-white">
                 {invoice.billing_period_start && invoice.billing_period_end ? (
@@ -1085,7 +1093,7 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
                 ) : '-'}
               </p>
             </div>
-            <div className="p-3 bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 rounded-xl">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 rounded-xl">
               <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">Due Date</p>
               <p className="font-medium text-slate-900 dark:text-white">
                 {invoice.due_date ? format(new Date(invoice.due_date), 'MMM d, yyyy') : '-'}
@@ -1098,7 +1106,7 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
               <h4 className="font-semibold text-slate-900 dark:text-white">Line Items</h4>
               <div className="space-y-2">
                 {invoice.items.map((item, i) => (
-                  <div key={i} className="flex justify-between p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl">
+                  <div key={i} className="flex justify-between p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 rounded-xl">
                     <div>
                       <p className="font-medium text-slate-900 dark:text-white">{item.description}</p>
                       <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{item.quantity} × KES {item.unit_price?.toFixed(2)}</p>
@@ -1130,7 +1138,7 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
           {invoice.notes && (
             <div className="space-y-2">
               <h4 className="font-semibold text-slate-900 dark:text-white">Notes</h4>
-              <p className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/50 rounded-xl text-slate-700 dark:text-slate-300 text-sm">{invoice.notes}</p>
+              <p className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 rounded-xl text-slate-700 dark:text-slate-300 text-sm">{invoice.notes}</p>
             </div>
           )}
         </div>

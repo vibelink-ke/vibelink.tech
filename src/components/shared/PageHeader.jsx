@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 
-function PageHeader({ title, subtitle, actionLabel, onAction, actionIcon: ActionIcon = Plus, children }) {
+function PageHeader({ title, subtitle, actionLabel = null, onAction = () => {}, actionIcon: ActionIcon = Plus, children = null }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: -10 }}
@@ -19,9 +19,9 @@ function PageHeader({ title, subtitle, actionLabel, onAction, actionIcon: Action
       <div className="flex items-center gap-3">
         {children}
         {actionLabel && (
-          <Button onClick={onAction} className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 dark:shadow-none">
+          <Button onClick={onAction} className="bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200">
             <ActionIcon className="w-4 h-4 mr-2" />
-            {actionLabel}
+            <span>{actionLabel}</span>
           </Button>
         )}
       </div>

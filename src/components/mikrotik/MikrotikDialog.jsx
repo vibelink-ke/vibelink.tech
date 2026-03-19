@@ -122,7 +122,7 @@ export default function MikrotikDialog({ open, onOpenChange, router }) {
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Basic Settings */}
           <div className="space-y-4">
-            <h3 className="font-semibold text-slate-900 dark:text-white">Basic Settings</h3>
+            <h3 className="font-semibold text-slate-900">Basic Settings</h3>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
@@ -197,7 +197,7 @@ export default function MikrotikDialog({ open, onOpenChange, router }) {
           {/* VPN Settings */}
           <div className="space-y-4 border-t pt-4">
             <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-slate-900 dark:text-white">VPN Settings</h3>
+              <h3 className="font-semibold text-slate-900">VPN Settings</h3>
               <Switch
                 checked={formData.vpn_enabled}
                 onCheckedChange={(checked) =>

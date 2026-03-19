@@ -104,16 +104,16 @@ export default function NotificationCenter({ user, onClose }) {
 
   return (
     <div className="w-full max-w-2xl mx-auto">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700">
+      <div className="bg-white rounded-lg shadow-lg border border-slate-200">
         {/* Header */}
-        <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-slate-700 border-b border-slate-200 dark:border-slate-700 p-4">
+        <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-50 to-purple-50 border-b border-slate-200 p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h2 className="text-lg font-bold text-slate-900">
                 Notifications
               </h2>
               {unreadCount > 0 && (
-                <p className="text-sm text-slate-600 dark:text-slate-400">
+                <p className="text-sm text-slate-600">
                   {unreadCount} unread
                 </p>
               )}
@@ -134,7 +134,7 @@ export default function NotificationCenter({ user, onClose }) {
           <div className="flex gap-3 flex-wrap">
             <div className="flex-1 min-w-48">
               <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="bg-white dark:bg-slate-700">
+                <SelectTrigger className="bg-white">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue />
                 </SelectTrigger>
@@ -147,7 +147,7 @@ export default function NotificationCenter({ user, onClose }) {
             </div>
             <div className="flex-1 min-w-48">
               <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="bg-white dark:bg-slate-700">
+                <SelectTrigger className="bg-white">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -167,7 +167,7 @@ export default function NotificationCenter({ user, onClose }) {
               <p className="mt-2">Loading notifications...</p>
             </div>
           ) : sortedNotifications.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+            <div className="p-8 text-center text-slate-500">
               <CheckCircle className="w-12 h-12 mx-auto mb-2 opacity-50" />
               <p>No notifications</p>
             </div>
@@ -182,8 +182,8 @@ export default function NotificationCenter({ user, onClose }) {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
                     transition={{ delay: idx * 0.05 }}
-                    className={`border-b border-slate-100 dark:border-slate-700 p-4 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${
-                      !notif.read ? 'bg-indigo-50 dark:bg-slate-700' : ''
+                    className={`border-b border-slate-100 p-4 hover:bg-slate-50 transition-colors ${
+                      !notif.read ? 'bg-indigo-50' : ''
                     }`}
                   >
                     <div className="flex gap-4">
@@ -209,17 +209,17 @@ export default function NotificationCenter({ user, onClose }) {
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
-                          <h3 className="font-semibold text-slate-900 dark:text-white text-sm">
+                          <h3 className="font-semibold text-slate-900 text-sm">
                             {notif.title}
                           </h3>
                           <Badge className={PRIORITY_COLORS[notif.priority]}>
                             {notif.priority}
                           </Badge>
                         </div>
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">
+                        <p className="text-sm text-slate-600 mb-2">
                           {notif.message}
                         </p>
-                        <p className="text-xs text-slate-500 dark:text-slate-500">
+                        <p className="text-xs text-slate-500">
                           {formatDistanceToNow(new Date(notif.created_date), { addSuffix: true })}
                         </p>
                       </div>
@@ -260,7 +260,7 @@ export default function NotificationCenter({ user, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-200 dark:border-slate-700 p-4 flex justify-between">
+        <div className="border-t border-slate-200 p-4 flex justify-between">
           <Button variant="outline" onClick={onClose}>
             Close
           </Button>

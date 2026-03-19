@@ -61,13 +61,13 @@ export default function OnboardingStep2Network({ mikrotiks = [], formData, setFo
 
   return (
     <div className="space-y-6">
-      <Card className="bg-blue-50 border-blue-200">
+      <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 transition-colors">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-blue-900">
+          <CardTitle className="flex items-center gap-2 text-blue-900 dark:text-blue-200">
             <Network className="w-5 h-5" />
             Network Configuration
           </CardTitle>
-          <CardDescription className="text-blue-800">
+          <CardDescription className="text-blue-800 dark:text-blue-300">
             Configure the customer's network settings and router assignment
           </CardDescription>
         </CardHeader>
@@ -76,35 +76,35 @@ export default function OnboardingStep2Network({ mikrotiks = [], formData, setFo
       <div className="space-y-4">
         {/* Router/MikroTik Selection */}
         <div className="space-y-2">
-          <Label htmlFor="mikrotik">Assign MikroTik Router</Label>
+          <Label htmlFor="mikrotik" className="dark:text-slate-300">Assign MikroTik Router</Label>
           <Select value={formData.mikrotik_id} onValueChange={handleMikrotikSelect}>
-            <SelectTrigger id="mikrotik">
+            <SelectTrigger id="mikrotik" className="dark:bg-slate-900 dark:border-slate-800 dark:text-white">
               <SelectValue placeholder="Select a router..." />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
               {mikrotiks.map(mikrotik => (
-                <SelectItem key={mikrotik.id} value={mikrotik.id}>
+                <SelectItem key={mikrotik.id} value={mikrotik.id} className="dark:text-slate-200 dark:focus:bg-slate-800">
                   {mikrotik.router_name || mikrotik.name} ({mikrotik.status})
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             Choose which MikroTik router will manage this customer's connection
           </p>
         </div>
 
         {/* IP Address */}
          <div className="space-y-2">
-           <Label htmlFor="ip">IP Address *</Label>
+           <Label htmlFor="ip" className="dark:text-slate-300">IP Address *</Label>
            {availableIPs.length > 0 ? (
              <Select value={formData.ip_address} onValueChange={(value) => handleInputChange('ip_address', value)}>
-               <SelectTrigger id="ip">
+               <SelectTrigger id="ip" className="dark:bg-slate-900 dark:border-slate-800 dark:text-white">
                  <SelectValue placeholder="Select an available IP address..." />
                </SelectTrigger>
-               <SelectContent>
+               <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                  {availableIPs.map((ip) => (
-                   <SelectItem key={ip} value={ip}>
+                   <SelectItem key={ip} value={ip} className="dark:text-slate-200 dark:focus:bg-slate-800">
                      {ip}
                    </SelectItem>
                  ))}
@@ -116,20 +116,20 @@ export default function OnboardingStep2Network({ mikrotiks = [], formData, setFo
                placeholder="e.g., 192.168.1.100"
                value={formData.ip_address}
                onChange={(e) => handleInputChange('ip_address', e.target.value)}
-               className={
+               className={`dark:bg-slate-900 dark:border-slate-800 dark:text-white transition-colors ${
                  formData.ip_address && !validateIPAddress(formData.ip_address)
                    ? 'border-rose-500'
                    : ''
-               }
+               }`}
              />
            )}
            {formData.ip_address && !validateIPAddress(formData.ip_address) && (
-             <p className="text-xs text-rose-600 flex items-center gap-1">
+             <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1">
                <AlertCircle className="w-3 h-3" />
                Invalid IP address format
              </p>
            )}
-           <p className="text-xs text-slate-500">
+           <p className="text-xs text-slate-500 dark:text-slate-400">
              {availableIPs.length > 0 
                ? 'Select from available IP addresses in your network pools'
                : 'The IP address assigned to this customer\'s CPE (Customer Premises Equipment)'}
@@ -138,51 +138,51 @@ export default function OnboardingStep2Network({ mikrotiks = [], formData, setFo
 
         {/* MAC Address */}
         <div className="space-y-2">
-          <Label htmlFor="mac">MAC Address</Label>
+          <Label htmlFor="mac" className="dark:text-slate-300">MAC Address</Label>
           <Input
             id="mac"
             placeholder="e.g., 00:1A:2B:3C:4D:5E"
             value={formData.mac_address}
             onChange={(e) => handleInputChange('mac_address', e.target.value)}
-            className={
+            className={`dark:bg-slate-900 dark:border-slate-800 dark:text-white transition-colors ${
               formData.mac_address && !validateMAC(formData.mac_address)
                 ? 'border-rose-500'
                 : ''
-            }
+            }`}
           />
           {formData.mac_address && !validateMAC(formData.mac_address) && (
-            <p className="text-xs text-rose-600 flex items-center gap-1">
+            <p className="text-xs text-rose-600 dark:text-rose-400 flex items-center gap-1">
               <AlertCircle className="w-3 h-3" />
               Invalid MAC address format
             </p>
           )}
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             MAC address of the customer's device (optional, can be auto-detected)
           </p>
         </div>
       </div>
 
       {/* Validation Status */}
-      <Card className="bg-slate-50 border-slate-200">
+      <Card className="bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-800 transition-colors">
         <CardContent className="pt-4">
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center">
-              <div className={`text-2xl ${formData.mikrotik_id ? '✓ text-emerald-600' : 'text-slate-400'}`}>
+              <div className={`text-2xl ${formData.mikrotik_id ? '✓ text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
                 {formData.mikrotik_id ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">Router</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Router</p>
             </div>
             <div className="text-center">
-              <div className={`text-2xl ${formData.ip_address && validateIPAddress(formData.ip_address) ? '✓ text-emerald-600' : 'text-slate-400'}`}>
+              <div className={`text-2xl ${formData.ip_address && validateIPAddress(formData.ip_address) ? '✓ text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
                 {formData.ip_address && validateIPAddress(formData.ip_address) ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">IP Address</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">IP Address</p>
             </div>
             <div className="text-center">
-              <div className={`text-2xl ${!formData.mac_address || validateMAC(formData.mac_address) ? '✓ text-emerald-600' : 'text-slate-400'}`}>
+              <div className={`text-2xl ${!formData.mac_address || validateMAC(formData.mac_address) ? '✓ text-emerald-600 dark:text-emerald-400' : 'text-slate-400'}`}>
                 {!formData.mac_address || validateMAC(formData.mac_address) ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">MAC Address</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">MAC Address</p>
             </div>
           </div>
         </CardContent>

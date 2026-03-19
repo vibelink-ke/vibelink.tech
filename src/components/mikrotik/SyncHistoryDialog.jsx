@@ -66,7 +66,7 @@ export default function SyncHistoryDialog({ open, onOpenChange, routerId }) {
             {syncHistory.map((log, idx) => (
               <div
                 key={log.id}
-                className="p-4 border rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                className="p-4 border rounded-lg hover:bg-slate-50 transition-colors"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1">
@@ -74,14 +74,14 @@ export default function SyncHistoryDialog({ open, onOpenChange, routerId }) {
                       <span className="text-sm font-medium">Sync #{syncHistory.length - idx}</span>
                       <StatusBadge status={log.level} />
                     </div>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
+                    <p className="text-xs text-slate-600 mb-2">
                       {format(new Date(log.created_date), 'MMM dd, yyyy HH:mm:ss')}
                     </p>
-                    <p className="text-sm text-slate-700 dark:text-slate-300">
+                    <p className="text-sm text-slate-700">
                       {log.details}
                     </p>
                     {log.changes && (
-                      <div className="mt-2 text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 p-2 rounded">
+                      <div className="mt-2 text-xs text-slate-500 bg-slate-100 p-2 rounded">
                         <details>
                           <summary className="cursor-pointer font-medium">View Details</summary>
                           <pre className="mt-2 whitespace-pre-wrap break-words">

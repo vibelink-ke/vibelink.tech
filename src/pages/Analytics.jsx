@@ -51,15 +51,15 @@ export default function Analytics() {
 
     // Customer Acquisition Cost (estimate from recent new customers)
     const recentNewCustomers = customers.filter(c => {
-      const createdDate = new Date(c.created_date);
-      return createdDate > subMonths(new Date(), 1);
+      const createdDate = new Date(c.created_date).getTime();
+      return createdDate > subMonths(new Date(), 1).getTime();
     }).length;
 
     // Churn Rate (suspended/terminated customers in last month)
     const churnedCustomers = customers.filter(c => {
-      const updatedDate = new Date(c.updated_date);
+      const updatedDate = new Date(c.updated_date).getTime();
       return (c.status === 'suspended' || c.status === 'terminated') &&
-        updatedDate > subMonths(new Date(), 1);
+        updatedDate > subMonths(new Date(), 1).getTime();
     }).length;
     const churnRate = activeCustomers > 0 ? (churnedCustomers / activeCustomers) * 100 : 0;
 
@@ -68,8 +68,8 @@ export default function Analytics() {
     let avgResolutionTime = 0;
     if (resolvedTickets.length > 0) {
       const totalTime = resolvedTickets.reduce((sum, t) => {
-        const created = new Date(t.created_date);
-        const resolved = new Date(t.resolved_date || new Date());
+        const created = new Date(t.created_date).getTime();
+        const resolved = new Date(t.resolved_date || new Date()).getTime();
         return sum + (resolved - created) / (1000 * 60 * 60); // hours
       }, 0);
       avgResolutionTime = totalTime / resolvedTickets.length;
@@ -79,8 +79,8 @@ export default function Analytics() {
     const totalOutageDuration = outages
       .filter(o => o.actual_resolution)
       .reduce((sum, o) => {
-        const start = new Date(o.created_date);
-        const end = new Date(o.actual_resolution);
+        const start = new Date(o.created_date).getTime();
+        const end = new Date(o.actual_resolution).getTime();
         return sum + (end - start) / (1000 * 60 * 60); // hours
       }, 0);
     const uptime = 100 - Math.min((totalOutageDuration / (30 * 24)) * 100, 100); // estimate for 30 days
@@ -111,20 +111,20 @@ export default function Analytics() {
       const monthEnd = startOfMonth(subMonths(monthDate, -1));
 
       const monthCustomers = customers.filter(c => {
-        const createdDate = new Date(c.created_date);
-        return createdDate >= monthStart && createdDate < monthEnd;
+        const createdDate = new Date(c.created_date).getTime();
+        return createdDate >= monthStart.getTime() && createdDate < monthEnd.getTime();
       }).length;
 
       const monthRevenue = payments
         .filter(p => {
-          const paidDate = new Date(p.created_date);
-          return paidDate >= monthStart && paidDate < monthEnd && p.status === 'completed';
+          const paidDate = new Date(p.created_date).getTime();
+          return paidDate >= monthStart.getTime() && paidDate < monthEnd.getTime() && p.status === 'completed';
         })
         .reduce((sum, p) => sum + p.amount, 0);
 
       const monthTickets = tickets.filter(t => {
-        const createdDate = new Date(t.created_date);
-        return createdDate >= monthStart && createdDate < monthEnd;
+        const createdDate = new Date(t.created_date).getTime();
+        return createdDate >= monthStart.getTime() && createdDate < monthEnd.getTime();
       }).length;
 
       months.push({
@@ -138,7 +138,7 @@ export default function Analytics() {
   }, [customers, payments, tickets]);
 
   return (
-    <div className="p-6 space-y-8">
+    <div className="p-6 space-y-8 bg-slate-50 dark:bg-slate-900/50 min-h-screen transition-colors duration-500">
       <PageHeader
         title="Analytics Dashboard"
         subtitle="Track key performance indicators for your ISP business"
@@ -151,18 +151,21 @@ export default function Analytics() {
           value={`KES ${(kpis.totalRevenue / 1000).toFixed(0)}K`}
           Icon={TrendingUp}
           color="green"
+          className="dark:from-green-900/20 dark:to-green-900/10 dark:border-green-800/50"
         />
         <KPIMetric
           label="Active Customers"
           value={kpis.activeCustomers}
           Icon={Users}
           color="blue"
+          className="dark:from-blue-900/20 dark:to-blue-900/10 dark:border-blue-800/50"
         />
         <KPIMetric
           label="ARPU"
           value={`KES ${kpis.arpu.toFixed(0)}`}
           Icon={Activity}
           color="purple"
+          className="dark:from-purple-900/20 dark:to-purple-900/10 dark:border-purple-800/50"
         />
         <KPIMetric
           label="Churn Rate"
@@ -171,6 +174,7 @@ export default function Analytics() {
           Icon={TrendingUp}
           color="orange"
           trend={-kpis.churnRate}
+          className="dark:from-orange-900/20 dark:to-orange-900/10 dark:border-orange-800/50"
         />
         <KPIMetric
           label="Network Uptime"
@@ -178,6 +182,7 @@ export default function Analytics() {
           unit="%"
           Icon={Wifi}
           color="indigo"
+          className="dark:from-indigo-900/20 dark:to-indigo-900/10 dark:border-indigo-800/50"
         />
       </div>
 
@@ -189,6 +194,7 @@ export default function Analytics() {
           unit="hours"
           Icon={Clock}
           color="blue"
+          className="dark:from-blue-900/20 dark:to-blue-900/10 dark:border-blue-800/50"
         />
         <KPIMetric
           label="Collection Rate"
@@ -196,6 +202,7 @@ export default function Analytics() {
           unit="%"
           Icon={TrendingUp}
           color="green"
+          className="dark:from-green-900/20 dark:to-green-900/10 dark:border-green-800/50"
         />
         <KPIMetric
           label="New Customers (30d)"
@@ -210,10 +217,17 @@ export default function Analytics() {
         <ChartContainer title="Monthly Customer Acquisition">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.1} />
+              <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+              <YAxis stroke="#94a3b8" fontSize={12} />
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'rgb(15 23 42)', 
+                  border: '1px solid rgb(30 41 59)',
+                  borderRadius: '12px',
+                  color: 'white'
+                }}
+              />
               <Bar dataKey="customers" fill="#6366f1" radius={[8, 8, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -228,10 +242,17 @@ export default function Analytics() {
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.1} />
+              <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+              <YAxis stroke="#94a3b8" fontSize={12} />
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'rgb(15 23 42)', 
+                  border: '1px solid rgb(30 41 59)',
+                  borderRadius: '12px',
+                  color: 'white'
+                }}
+              />
               <Area
                 type="monotone"
                 dataKey="revenue"
@@ -246,10 +267,17 @@ export default function Analytics() {
         <ChartContainer title="Support Tickets by Month">
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
-              <Tooltip />
+              <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.1} />
+              <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+              <YAxis stroke="#94a3b8" fontSize={12} />
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'rgb(15 23 42)', 
+                  border: '1px solid rgb(30 41 59)',
+                  borderRadius: '12px',
+                  color: 'white'
+                }}
+              />
               <Legend />
               <Line type="monotone" dataKey="tickets" stroke="#f59e0b" strokeWidth={2} />
             </LineChart>
@@ -258,21 +286,21 @@ export default function Analytics() {
 
         <ChartContainer title="Key Metrics Summary">
           <div className="space-y-4">
-            <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Collection Rate</span>
-              <span className="font-semibold">{kpis.collectionRate.toFixed(1)}%</span>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-slate-600 dark:text-slate-400">Collection Rate</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{kpis.collectionRate.toFixed(1)}%</span>
             </div>
-            <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Avg Ticket Resolution</span>
-              <span className="font-semibold">{kpis.avgResolutionTime.toFixed(1)} hrs</span>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-slate-600 dark:text-slate-400">Avg Ticket Resolution</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{kpis.avgResolutionTime.toFixed(1)} hrs</span>
             </div>
-            <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Network Uptime</span>
-              <span className="font-semibold">{kpis.uptime.toFixed(2)}%</span>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-slate-800">
+              <span className="text-slate-600 dark:text-slate-400">Network Uptime</span>
+              <span className="font-semibold text-slate-900 dark:text-white">{kpis.uptime.toFixed(2)}%</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-600">Total Invoiced</span>
-              <span className="font-semibold">KES {(kpis.totalInvoiced / 1000).toFixed(0)}K</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Invoiced</span>
+              <span className="font-semibold text-slate-900 dark:text-white">KES {(kpis.totalInvoiced / 1000).toFixed(0)}K</span>
             </div>
           </div>
         </ChartContainer>

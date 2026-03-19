@@ -93,7 +93,7 @@ export default function ServicePlans() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <div className="flex items-center justify-between">
           <PageHeader
@@ -127,7 +127,7 @@ export default function ServicePlans() {
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-72 bg-white dark:bg-slate-800 rounded-2xl animate-pulse" />
+              <div key={i} className="h-72 bg-white rounded-2xl animate-pulse" />
             ))}
           </div>
         ) : plans.length === 0 ? (

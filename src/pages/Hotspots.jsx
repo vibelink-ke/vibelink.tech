@@ -28,20 +28,20 @@ export default function Hotspots() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1">
-            <TabsTrigger value="dashboard" className="gap-2">
+          <TabsList className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-1">
+            <TabsTrigger value="dashboard" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <LayoutDashboard className="w-4 h-4" /> Dashboard
             </TabsTrigger>
-            <TabsTrigger value="plans" className="gap-2">
+            <TabsTrigger value="plans" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <FileText className="w-4 h-4" /> Plans
             </TabsTrigger>
-            <TabsTrigger value="vouchers" className="gap-2">
+            <TabsTrigger value="vouchers" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Ticket className="w-4 h-4" /> Vouchers
             </TabsTrigger>
-            <TabsTrigger value="design" className="gap-2">
+            <TabsTrigger value="design" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Palette className="w-4 h-4" /> Design
             </TabsTrigger>
-            <TabsTrigger value="revenue" className="gap-2">
+            <TabsTrigger value="revenue" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <DollarSign className="w-4 h-4" /> Revenue
             </TabsTrigger>
           </TabsList>

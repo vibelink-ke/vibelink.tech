@@ -61,14 +61,14 @@ export default function MikrotikMetrics({ router, showAlerts = true }) {
               className={cn(
                 'p-3 rounded-lg border',
                 alertLevel === 'critical'
-                  ? 'bg-rose-50 border-rose-200 dark:bg-rose-900/20 dark:border-rose-700'
+                  ? 'bg-rose-50 border-rose-200'
                   : alertLevel === 'warning'
-                  ? 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-700'
-                  : 'bg-slate-50 border-slate-200 dark:bg-slate-800 dark:border-slate-700'
+                  ? 'bg-amber-50 border-amber-200'
+                  : 'bg-slate-50 border-slate-200'
               )}
             >
               <div className="flex items-start justify-between mb-2">
-                <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+                <span className="text-xs font-semibold text-slate-600">
                   {metric.label}
                 </span>
                 {alertLevel && (
@@ -89,7 +89,7 @@ export default function MikrotikMetrics({ router, showAlerts = true }) {
                 <span className="text-xs ml-1">{metric.unit}</span>
               </div>
               {metric.threshold && (
-                <div className="mt-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full h-1.5 overflow-hidden">
+                <div className="mt-2 w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                   <motion.div
                     initial={{ width: 0 }}
                     animate={{ width: `${Math.min((metric.value / metric.threshold) * 100, 100)}%` }}
@@ -124,8 +124,8 @@ export default function MikrotikMetrics({ router, showAlerts = true }) {
                 className={cn(
                   'p-3 rounded-lg flex gap-2 items-start',
                   getAlertLevel(metric) === 'critical'
-                    ? 'bg-rose-50 border border-rose-200 dark:bg-rose-900/20 dark:border-rose-700'
-                    : 'bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700'
+                    ? 'bg-rose-50 border border-rose-200'
+                    : 'bg-amber-50 border border-amber-200'
                 )}
               >
                 {getAlertLevel(metric) === 'critical' ? (
@@ -144,7 +144,7 @@ export default function MikrotikMetrics({ router, showAlerts = true }) {
                   >
                     {metric.label} {getAlertLevel(metric) === 'critical' ? 'Critical' : 'High'}
                   </p>
-                  <p className="text-xs text-slate-600 dark:text-slate-400">
+                  <p className="text-xs text-slate-600">
                     {metric.value}{metric.unit} {metric.threshold ? `(threshold: ${metric.threshold}${metric.unit.includes('%') ? '%' : ''})` : ''}
                   </p>
                 </div>

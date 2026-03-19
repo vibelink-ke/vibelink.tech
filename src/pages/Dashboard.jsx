@@ -145,7 +145,7 @@ export default function Dashboard() {
             <line 
               key={v} 
               x1={padding} y1={getY(v)} x2={width - padding} y2={getY(v)} 
-              className="stroke-slate-200 dark:stroke-slate-700" 
+              className="stroke-slate-200 dark:stroke-slate-800" 
               strokeWidth="1" 
               strokeDasharray="4 4" 
             />
@@ -178,17 +178,17 @@ export default function Dashboard() {
           {/* Area under download */}
           <path
             d={`M ${padding} ${height - padding} ${downloadPoints} L ${width - padding} ${height - padding} Z`}
-            className="fill-indigo-500/10 dark:fill-indigo-500/5"
+            className="fill-indigo-500/10"
           />
         </svg>
         <div className="flex justify-center gap-6 mt-4">
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-indigo-500" />
-            <span className="text-xs text-slate-500 font-medium">Download (Mbps)</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Download (Mbps)</span>
           </div>
           <div className="flex items-center gap-2">
             <div className="w-3 h-3 rounded-full bg-emerald-500" />
-            <span className="text-xs text-slate-500 font-medium">Upload (Mbps)</span>
+            <span className="text-xs text-slate-500 dark:text-slate-400 font-medium">Upload (Mbps)</span>
           </div>
         </div>
       </div>
@@ -212,13 +212,13 @@ export default function Dashboard() {
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-amber-50 border border-amber-200 rounded-2xl p-4"
+            className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-900/40 rounded-2xl p-4"
           >
             <div className="flex items-center gap-3">
               <AlertCircle className="w-5 h-5 text-amber-600" />
               <div className="flex-1">
-                <p className="font-semibold text-amber-900">SLA Breach Warning</p>
-                <p className="text-sm text-amber-700">
+                <p className="font-semibold text-amber-900 dark:text-amber-400">SLA Breach Warning</p>
+                <p className="text-sm text-amber-700 dark:text-amber-500">
                   {slaAlerts} {slaAlerts === 1 ? 'ticket is' : 'tickets are'} approaching SLA breach threshold
                 </p>
               </div>
@@ -299,7 +299,7 @@ export default function Dashboard() {
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm"
+          className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-sm"
         >
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -307,10 +307,10 @@ export default function Dashboard() {
                 <Activity className="w-5 h-5 text-indigo-500" />
                 Network Throughput
               </h3>
-              <p className="text-sm text-slate-500">Real-time traffic monitor (Mbps)</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Real-time traffic monitor (Mbps)</p>
             </div>
             <div className="flex gap-2">
-              <div className="px-3 py-1 bg-indigo-50 dark:bg-indigo-900/30 rounded-full text-xs font-medium text-indigo-600 dark:text-indigo-400">
+              <div className="px-3 py-1 bg-indigo-50 rounded-full text-xs font-medium text-indigo-600">
                 Live
               </div>
             </div>
@@ -327,23 +327,23 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.02, y: -4 }}
             transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/30 to-purple-50/30 dark:from-indigo-900/10 dark:to-purple-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute inset-0 bg-gradient-to-br from-indigo-50/30 to-purple-50/30 dark:from-indigo-500/5 dark:to-purple-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative flex items-center gap-3 mb-3">
               <motion.div 
                 whileHover={{ rotate: 360 }}
                 transition={{ duration: 0.5 }}
-                className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/30 dark:to-indigo-800/30 flex items-center justify-center"
+                className="w-10 h-10 rounded-lg bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-900/20 dark:to-indigo-800/20 flex items-center justify-center"
               >
-                <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <FileText className="w-5 h-5 text-indigo-600" />
               </motion.div>
               <div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{pendingInvoices.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Pending Invoices</p>
               </div>
             </div>
-            <p className="relative text-sm text-slate-600 dark:text-slate-300 font-medium">
+            <p className="relative text-sm text-slate-600 dark:text-slate-400 font-medium">
               KES {pendingInvoices.reduce((s, i) => s + (i.total_amount || 0), 0).toLocaleString()}
             </p>
           </motion.div>
@@ -353,23 +353,23 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.02, y: -4 }}
             transition={{ delay: 0.15 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-rose-50/30 to-pink-50/30 dark:from-rose-900/10 dark:to-pink-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute inset-0 bg-gradient-to-br from-rose-50/30 to-pink-50/30 dark:from-rose-500/5 dark:to-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative flex items-center gap-3 mb-3">
               <motion.div 
                 whileHover={{ rotate: 360 }}
                 transition={{ duration: 0.5 }}
-                className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/30 dark:to-rose-800/30 flex items-center justify-center"
+                className="w-10 h-10 rounded-lg bg-gradient-to-br from-rose-50 to-rose-100 dark:from-rose-900/20 dark:to-rose-800/20 flex items-center justify-center"
               >
-                <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+                <AlertCircle className="w-5 h-5 text-rose-600" />
               </motion.div>
               <div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{overdueInvoices.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Overdue Invoices</p>
               </div>
             </div>
-            <p className="relative text-sm text-slate-600 dark:text-slate-300 font-medium">
+            <p className="relative text-sm text-slate-600 dark:text-slate-400 font-medium">
               KES {overdueInvoices.reduce((s, i) => s + (i.total_amount || 0), 0).toLocaleString()}
             </p>
           </motion.div>
@@ -379,23 +379,23 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.02, y: -4 }}
             transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/30 to-teal-50/30 dark:from-emerald-900/10 dark:to-teal-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute inset-0 bg-gradient-to-br from-emerald-50/30 to-teal-50/30 dark:from-emerald-500/5 dark:to-teal-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative flex items-center gap-3 mb-3">
               <motion.div 
                 whileHover={{ rotate: 360 }}
                 transition={{ duration: 0.5 }}
-                className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:to-emerald-800/30 flex items-center justify-center"
+                className="w-10 h-10 rounded-lg bg-gradient-to-br from-emerald-50 to-emerald-100 dark:from-emerald-900/20 dark:to-emerald-800/20 flex items-center justify-center"
               >
-                <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <Shield className="w-5 h-5 text-emerald-600" />
               </motion.div>
               <div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{customersWithSLA.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">SLA Customers</p>
               </div>
             </div>
-            <p className="relative text-sm text-slate-600 dark:text-slate-300 font-medium">
+            <p className="relative text-sm text-slate-600 dark:text-slate-400 font-medium">
               {slaAlerts > 0 ? `${slaAlerts} at risk` : 'All compliant'}
             </p>
           </motion.div>
@@ -405,23 +405,23 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.02, y: -4 }}
             transition={{ delay: 0.25 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 hover:shadow-lg transition-shadow group relative overflow-hidden"
           >
-            <div className="absolute inset-0 bg-gradient-to-br from-purple-50/30 to-pink-50/30 dark:from-purple-900/10 dark:to-pink-900/10 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="absolute inset-0 bg-gradient-to-br from-purple-50/30 to-pink-50/30 dark:from-purple-500/5 dark:to-pink-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="relative flex items-center gap-3 mb-3">
               <motion.div 
                 whileHover={{ rotate: 360 }}
                 transition={{ duration: 0.5 }}
-                className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 flex items-center justify-center"
+                className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 flex items-center justify-center"
               >
-                <Wifi className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                <Wifi className="w-5 h-5 text-purple-600" />
               </motion.div>
               <div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-white">{plans.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Service Plans</p>
               </div>
             </div>
-            <p className="relative text-sm text-slate-600 dark:text-slate-300 font-medium">
+            <p className="relative text-sm text-slate-600 dark:text-slate-400 font-medium">
               {plans.filter(p => p.status === 'active').length} active
             </p>
           </motion.div>
@@ -435,12 +435,12 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.01 }}
             transition={{ delay: 0.1 }}
-            className="lg:col-span-2 bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm hover:shadow-lg transition-shadow"
+            className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-sm hover:shadow-lg transition-shadow"
           >
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Revenue Overview</h3>
-                <p className="text-sm text-slate-500">Last 6 months</p>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Revenue Overview</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Last 6 months</p>
               </div>
               <div className="flex items-center gap-2 text-emerald-600">
                 <TrendingUp className="w-4 h-4" />
@@ -456,15 +456,16 @@ export default function Dashboard() {
                       <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.1} />
                   <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
                   <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={v => `KES ${v}`} />
                   <Tooltip 
                     contentStyle={{ 
-                      background: 'white', 
-                      border: '1px solid #e2e8f0',
+                      background: 'rgb(15 23 42)', 
+                      border: '1px solid rgb(30 41 59)',
                       borderRadius: '12px',
-                      boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
+                      boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+                      color: 'white'
                     }}
                     formatter={(value) => [`KES ${value.toLocaleString()}`, 'Revenue']}
                   />
@@ -487,7 +488,7 @@ export default function Dashboard() {
             animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.01 }}
             transition={{ delay: 0.2 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm hover:shadow-lg transition-shadow"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6 shadow-sm hover:shadow-lg transition-shadow"
           >
             <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">Quick Actions</h3>
             <div className="space-y-3">
@@ -500,12 +501,12 @@ export default function Dashboard() {
                 <Link
                   key={i}
                   to={createPageUrl(action.href)}
-                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors group"
+                  className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors group"
                 >
-                  <div className={`p-2 rounded-lg ${action.color}`}>
+                  <div className={`p-2 rounded-lg ${action.color.replace('bg-', 'dark:bg-').replace('-50', '-900/20')}`}>
                     <action.icon className="w-4 h-4" />
                   </div>
-                  <span className="font-medium text-slate-700 dark:text-slate-200 flex-1">{action.label}</span>
+                  <span className="font-medium text-slate-700 dark:text-slate-300 flex-1">{action.label}</span>
                   <ArrowRight className="w-4 h-4 text-slate-400 group-hover:translate-x-1 transition-transform" />
                 </Link>
               ))}
@@ -520,27 +521,27 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Recent Invoices</h3>
               <Link 
                 to={createPageUrl('Invoices')} 
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium"
               >
                 View all
               </Link>
             </div>
             <div className="space-y-3">
               {invoices.slice(0, 5).map((invoice, i) => (
-                <div key={invoice.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                <div key={invoice.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-slate-500" />
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-slate-500 dark:text-slate-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900 dark:text-slate-200 text-sm">{invoice.customer_name}</p>
-                      <p className="text-xs text-slate-500">{invoice.invoice_number}</p>
+                      <p className="font-medium text-slate-900 dark:text-white text-sm">{invoice.customer_name}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{invoice.invoice_number}</p>
                     </div>
                   </div>
                   <div className="text-right">
@@ -550,7 +551,7 @@ export default function Dashboard() {
                 </div>
               ))}
               {invoices.length === 0 && (
-                <p className="text-center text-slate-500 py-8 text-sm">No invoices yet</p>
+                <p className="text-center text-slate-500 dark:text-slate-400 py-8 text-sm">No invoices yet</p>
               )}
             </div>
           </motion.div>
@@ -560,40 +561,40 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Support Tickets</h3>
               <Link 
                 to={createPageUrl('Tickets')} 
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium"
               >
                 View all
               </Link>
             </div>
             <div className="space-y-3">
               {tickets.slice(0, 5).map((ticket, i) => (
-                <div key={ticket.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                <div key={ticket.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      ticket.priority === 'urgent' ? 'bg-rose-100' :
-                      ticket.priority === 'high' ? 'bg-amber-100' : 'bg-slate-100'
+                      ticket.priority === 'urgent' ? 'bg-rose-100 dark:bg-rose-900/20' :
+                      ticket.priority === 'high' ? 'bg-amber-100 dark:bg-amber-900/20' : 'bg-slate-100 dark:bg-slate-800'
                     }`}>
                       <Clock className={`w-5 h-5 ${
                         ticket.priority === 'urgent' ? 'text-rose-500' :
-                        ticket.priority === 'high' ? 'text-amber-500' : 'text-slate-500'
+                        ticket.priority === 'high' ? 'text-amber-500' : 'text-slate-500 dark:text-slate-400'
                       }`} />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900 dark:text-slate-200 text-sm">{ticket.subject}</p>
-                      <p className="text-xs text-slate-500">{ticket.customer_name}</p>
+                      <p className="font-medium text-slate-900 dark:text-white text-sm">{ticket.subject}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">{ticket.customer_name}</p>
                     </div>
                   </div>
                   <StatusBadge status={ticket.status} className="" />
                 </div>
               ))}
               {tickets.length === 0 && (
-                <p className="text-center text-slate-500 py-8 text-sm">No tickets yet</p>
+                <p className="text-center text-slate-500 dark:text-slate-400 py-8 text-sm">No tickets yet</p>
               )}
             </div>
           </motion.div>
@@ -603,34 +604,34 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-slate-900 dark:text-white">System Activity</h3>
               <Link 
                 to={createPageUrl('Logs')} 
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
+                className="text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-medium"
               >
                 View logs
               </Link>
             </div>
             <div className="space-y-3">
               {logs.slice(0, 5).map((log, i) => (
-                <div key={log.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700/50">
+                <div key={log.id} className="flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800/50">
                   <div className={`w-2 h-2 rounded-full ${
                     log.level === 'error' ? 'bg-rose-500' :
                     log.level === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-900 dark:text-slate-200 text-sm truncate">{log.action || log.message}</p>
-                    <p className="text-xs text-slate-500">
+                    <p className="font-medium text-slate-900 dark:text-white text-sm truncate">{log.action || log.message}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
                       {log.created_date ? format(new Date(log.created_date), 'MMM d, h:mm a') : 'Just now'}
                     </p>
                   </div>
                 </div>
               ))}
               {logs.length === 0 && (
-                <p className="text-center text-slate-500 py-8 text-sm">No recent activity</p>
+                <p className="text-center text-slate-500 dark:text-slate-400 py-8 text-sm">No recent activity</p>
               )}
             </div>
           </motion.div>

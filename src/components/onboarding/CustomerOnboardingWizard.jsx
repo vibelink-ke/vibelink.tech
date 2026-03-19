@@ -121,26 +121,26 @@ export default function CustomerOnboardingWizard({
 
   if (!selectedCustomer) {
     return (
-      <Card>
+      <Card className="dark:bg-slate-900 dark:border-slate-800 transition-colors">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5" />
+          <CardTitle className="flex items-center gap-2 dark:text-white">
+            <Users className="w-5 h-5 dark:text-indigo-400" />
             Select Customer to Onboard
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="dark:text-slate-400">
             Choose a pending customer to complete their setup
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Select value={selectedCustomerId || ''} onValueChange={handleCustomerSelect}>
-            <SelectTrigger>
+            <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
               <SelectValue placeholder="Select a customer..." />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
               {customers
                 .filter(c => c.status === 'pending')
                 .map(customer => (
-                  <SelectItem key={customer.id} value={customer.customer_id}>
+                  <SelectItem key={customer.id} value={customer.customer_id} className="dark:text-slate-200 dark:focus:bg-slate-800">
                     {customer.full_name} ({customer.email})
                   </SelectItem>
                 ))}
@@ -148,7 +148,7 @@ export default function CustomerOnboardingWizard({
           </Select>
           {customers.filter(c => c.status === 'pending').length === 0 && (
             <div className="text-center py-8">
-              <p className="text-slate-500">No pending customers available</p>
+              <p className="text-slate-500 dark:text-slate-400">No pending customers available</p>
             </div>
           )}
         </CardContent>
@@ -159,15 +159,15 @@ export default function CustomerOnboardingWizard({
   return (
     <div className="space-y-6">
       {/* Customer Info Card */}
-      <Card className="bg-gradient-to-br from-indigo-50 to-purple-50 border-indigo-200">
+      <Card className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-indigo-200 dark:border-indigo-800 transition-colors">
         <CardContent className="pt-6">
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-slate-900">{selectedCustomer.full_name}</h3>
-              <p className="text-sm text-slate-600">{selectedCustomer.email}</p>
-              <Badge className="mt-2">{selectedCustomer.status}</Badge>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{selectedCustomer.full_name}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{selectedCustomer.email}</p>
+              <Badge className="mt-2 dark:bg-slate-800 dark:text-slate-200">{selectedCustomer.status}</Badge>
             </div>
-            <Button variant="outline" size="sm" onClick={handleReset}>
+            <Button variant="outline" size="sm" onClick={handleReset} className="dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
               Change Customer
             </Button>
           </div>
@@ -177,8 +177,8 @@ export default function CustomerOnboardingWizard({
       {/* Progress */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-slate-900">Setup Progress</h3>
-          <span className="text-sm text-slate-600">{currentStep + 1} of {steps.length}</span>
+          <h3 className="font-semibold text-slate-900 dark:text-white">Setup Progress</h3>
+          <span className="text-sm text-slate-600 dark:text-slate-400">{currentStep + 1} of {steps.length}</span>
         </div>
         <Progress value={progressPercentage} />
         
@@ -191,8 +191,8 @@ export default function CustomerOnboardingWizard({
                 idx === currentStep
                   ? 'bg-indigo-600 text-white'
                   : idx < currentStep
-                  ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-100 text-slate-600'
+                  ? 'bg-emerald-100 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
               }`}
             >
               <div className="font-semibold">{step.title}</div>
@@ -202,10 +202,10 @@ export default function CustomerOnboardingWizard({
       </div>
 
       {/* Step Content */}
-      <Card>
+      <Card className="dark:bg-slate-900 dark:border-slate-800 transition-colors">
         <CardHeader>
-          <CardTitle>{steps[currentStep].title}</CardTitle>
-          <CardDescription>{steps[currentStep].description}</CardDescription>
+          <CardTitle className="dark:text-white">{steps[currentStep].title}</CardTitle>
+          <CardDescription className="dark:text-slate-400">{steps[currentStep].description}</CardDescription>
         </CardHeader>
         <CardContent>
           <AnimatePresence mode="wait">
@@ -254,17 +254,18 @@ export default function CustomerOnboardingWizard({
           variant="outline"
           onClick={handlePrevious}
           disabled={currentStep === 0}
+          className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
         >
           <ChevronLeft className="w-4 h-4 mr-2" />
           Previous
         </Button>
 
         <div className="flex gap-3">
-          <Button variant="outline" onClick={handleReset}>
+          <Button variant="outline" onClick={handleReset} className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
             Cancel
           </Button>
           {currentStep < 3 ? (
-            <Button onClick={handleNext} className="bg-indigo-600 hover:bg-indigo-700">
+            <Button onClick={handleNext} className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 dark:text-white">
               Next
               <ChevronRight className="w-4 h-4 ml-2" />
             </Button>

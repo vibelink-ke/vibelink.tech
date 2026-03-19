@@ -51,11 +51,11 @@ import {
 import { toast } from 'sonner';
 
 const typeColors = {
-  promotional: 'bg-purple-50 text-purple-700',
-  service_update: 'bg-blue-50 text-blue-700',
-  alert: 'bg-rose-50 text-rose-700',
-  billing_reminder: 'bg-amber-50 text-amber-700',
-  general: 'bg-slate-100 text-slate-700',
+  promotional: 'bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
+  service_update: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+  alert: 'bg-rose-50 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400',
+  billing_reminder: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+  general: 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-400',
 };
 
 export default function Messages() {
@@ -174,7 +174,7 @@ export default function Messages() {
   const smsEnabled = settings.find(s => s.key === 'sms_enabled')?.value === 'true';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Messaging & Notifications"
@@ -184,48 +184,48 @@ export default function Messages() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1">
-            <TabsTrigger value="bulk" className="gap-2">
+          <TabsList className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-1">
+            <TabsTrigger value="bulk" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Mail className="w-4 h-4" /> Bulk Messages
             </TabsTrigger>
-            <TabsTrigger value="sms" className="gap-2">
+            <TabsTrigger value="sms" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <MessageSquare className="w-4 h-4" /> SMS
             </TabsTrigger>
           </TabsList>
 
           {/* BULK MESSAGES TAB */}
           <TabsContent value="bulk" className="space-y-6">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <Card>
+             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <Card className="dark:bg-slate-900 dark:border-slate-800">
                 <CardContent className="p-6 flex items-center gap-4">
-                  <div className="p-3 bg-indigo-50 rounded-xl">
-                    <Send className="w-6 h-6 text-indigo-600" />
+                  <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl">
+                    <Send className="w-6 h-6 text-indigo-600 dark:text-indigo-400" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{totalSent}</p>
-                    <p className="text-sm text-slate-500">Messages Sent</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalSent}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Messages Sent</p>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800">
                 <CardContent className="p-6 flex items-center gap-4">
-                  <div className="p-3 bg-emerald-50 rounded-xl">
-                    <Users className="w-6 h-6 text-emerald-600" />
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-900/20 rounded-xl">
+                    <Users className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{totalRecipients}</p>
-                    <p className="text-sm text-slate-500">Total Recipients</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">{totalRecipients}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Total Recipients</p>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800">
                 <CardContent className="p-6 flex items-center gap-4">
-                  <div className="p-3 bg-purple-50 rounded-xl">
-                    <Mail className="w-6 h-6 text-purple-600" />
+                  <div className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-xl">
+                    <Mail className="w-6 h-6 text-purple-600 dark:text-purple-400" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{customers.filter(c => c.status === 'active').length}</p>
-                    <p className="text-sm text-slate-500">Active Subscribers</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-white">{customers.filter(c => c.status === 'active').length}</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400">Active Subscribers</p>
                   </div>
                 </CardContent>
               </Card>
@@ -262,18 +262,18 @@ export default function Messages() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.05 }}
                   >
-                    <Card className="hover:shadow-md transition-shadow">
+                    <Card className="hover:shadow-md transition-shadow dark:bg-slate-900 dark:border-slate-800">
                       <CardContent className="p-6">
                         <div className="flex items-start justify-between">
                           <div className="space-y-2">
                             <div className="flex items-center gap-3">
-                              <h3 className="font-semibold text-slate-900">{message.title}</h3>
+                              <h3 className="font-semibold text-slate-900 dark:text-white">{message.title}</h3>
                               <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${typeColors[message.type]}`}>
                                 {message.type?.replace('_', ' ')}
                               </span>
                             </div>
-                            <p className="text-slate-600 line-clamp-2">{message.content}</p>
-                            <div className="flex items-center gap-4 text-sm text-slate-500">
+                            <p className="text-slate-600 dark:text-slate-400 line-clamp-2">{message.content}</p>
+                            <div className="flex items-center gap-4 text-sm text-slate-500 dark:text-slate-500">
                               <span className="flex items-center gap-1">
                                 <Users className="w-4 h-4" />
                                 {message.recipients_count || 0} recipients
@@ -319,19 +319,19 @@ export default function Messages() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SMSForm customers={customers} onSend={(data) => sendSMSMutation.mutate(data)} isLoading={sendSMSMutation.isPending} smsEnabled={smsEnabled} />
+               <SMSForm customers={customers} onSend={(data) => sendSMSMutation.mutate(data)} isLoading={sendSMSMutation.isPending} smsEnabled={smsEnabled} />
 
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
+                  <CardTitle className="flex items-center gap-2 dark:text-white">
                     <Clock className="w-5 h-5" />
                     Recent Messages
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-3 max-h-96 overflow-y-auto">
+                  <div className="space-y-3 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                     {smsLogs.length === 0 ? (
-                      <p className="text-center text-slate-500 py-8">No messages sent yet</p>
+                      <p className="text-center text-slate-500 dark:text-slate-400 py-8">No messages sent yet</p>
                     ) : (
                       smsLogs.slice(0, 10).map((log, i) => (
                         <motion.div
@@ -339,19 +339,19 @@ export default function Messages() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: i * 0.05 }}
-                          className="p-3 bg-slate-50 rounded-lg"
+                          className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg group hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                           <div className="flex items-start justify-between">
                             <div>
-                              <p className="font-medium text-slate-900">{log.recipient}</p>
+                              <p className="font-medium text-slate-900 dark:text-white">{log.recipient}</p>
                               {log.customer_name && (
-                                <p className="text-sm text-slate-500">{log.customer_name}</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">{log.customer_name}</p>
                               )}
                             </div>
                             <StatusBadge status={log.status} />
                           </div>
-                          <p className="text-sm text-slate-600 mt-2 line-clamp-2">{log.message}</p>
-                          <p className="text-xs text-slate-400 mt-2">
+                          <p className="text-sm text-slate-600 dark:text-slate-300 mt-2 line-clamp-2">{log.message}</p>
+                          <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
                             {log.created_date ? format(new Date(log.created_date), 'MMM d, HH:mm') : '-'}
                           </p>
                         </motion.div>

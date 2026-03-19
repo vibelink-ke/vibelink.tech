@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Plus } from 'lucide-react';
 
-export default function EmptyState({ icon: Icon, title, description, actionLabel, onAction }) {
+export default function EmptyState({ icon: Icon = null, title = '', description = '', actionLabel = null, onAction = null }) {
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.95 }}
@@ -20,7 +20,7 @@ export default function EmptyState({ icon: Icon, title, description, actionLabel
       {actionLabel && onAction && (
         <Button onClick={onAction} className="bg-indigo-600 hover:bg-indigo-700">
           <Plus className="w-4 h-4 mr-2" />
-          {actionLabel}
+          <span>{actionLabel}</span>
         </Button>
       )}
     </motion.div>

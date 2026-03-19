@@ -299,7 +299,7 @@ export default function Tickets() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Support Tickets"
@@ -313,7 +313,7 @@ export default function Tickets() {
           <motion.div 
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
+            className="bg-white rounded-xl p-4 border border-slate-200"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
@@ -329,7 +329,7 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
+            className="bg-white rounded-xl p-4 border border-slate-200"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
@@ -345,7 +345,7 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
+            className="bg-white rounded-xl p-4 border border-slate-200"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
@@ -361,7 +361,7 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
-            className="bg-white dark:bg-slate-800 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
+            className="bg-white rounded-xl p-4 border border-slate-200"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
@@ -385,7 +385,7 @@ export default function Tickets() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-800 dark:border-slate-700">
+            <SelectTrigger className="w-full bg-white border-slate-200">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -398,7 +398,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-full sm:w-36 bg-white dark:bg-slate-800 dark:border-slate-700">
+            <SelectTrigger className="w-full sm:w-36 bg-white">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -410,7 +410,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-800 dark:border-slate-700">
+            <SelectTrigger className="w-full sm:w-40 bg-white">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>

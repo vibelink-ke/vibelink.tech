@@ -96,7 +96,7 @@ const portalPages = ['CustomerPortal'];
 
 export default function Layout({ children, currentPageName }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { user, updateMe, logout } = useAuth();
+  const { user, updateMe, logout, organizationName } = useAuth();
   const [expandedSections, setExpandedSections] = useState({});
   const location = useLocation();
 
@@ -114,24 +114,32 @@ export default function Layout({ children, currentPageName }) {
 
   // Get user permissions
   const isAdmin = user?.role === 'admin';
+  const isSuperAdmin = user?.role === 'superadmin';
   const staffRole = user?.staff_role_id ? roles.find(r => r.id === user.staff_role_id) : null;
   const userPermissions = staffRole?.permissions || [];
 
   const hasPermission = (permission) => {
     if (!permission) return true; // No permission required
-    if (permission === 'super_admin') return user?.role === 'super_admin'; // Super admin only
+    if (permission === 'super_admin') return isSuperAdmin; // Super admin only
     if (isAdmin && !user?.staff_role_id) return true; // Admin without role has all access
     return userPermissions.includes(permission);
   };
 
   // Filter navigation based on permissions
   const filteredNavigation = navigation
-    .filter(item => hasPermission(item.permission))
+    .filter(item => {
+      // Hide Tenants and Super Admin from regular tenant admins
+      if (item.name === 'Tenants' || item.name === 'Super Admin') return isSuperAdmin;
+      return hasPermission(item.permission);
+    })
     .map(item => {
       if (item.children) {
         return {
           ...item,
-          children: item.children.filter(child => hasPermission(child.permission))
+          children: item.children.filter(child => {
+            if (child.name === 'Super Admin' || child.name === 'Tenant Billing') return isSuperAdmin;
+            return hasPermission(child.permission);
+          })
         };
       }
       return item;
@@ -159,13 +167,18 @@ export default function Layout({ children, currentPageName }) {
 
   return (
     <>
-      <OnboardingTour user={user} updateMe={updateMe} />
+      <OnboardingTour 
+        user={user} 
+        updateMe={updateMe} 
+        onComplete={() => console.log('Tour completed')} 
+      />
       <LayoutContent 
         children={children} 
         currentPageName={currentPageName}
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
         user={user}
+        organizationName={organizationName}
         expandedSections={expandedSections}
         toggleSection={toggleSection}
         isActivePage={isActivePage}
@@ -179,20 +192,20 @@ export default function Layout({ children, currentPageName }) {
   );
 }
 
-function ThemeToggleButton() {
+function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   
   return (
-    <Button 
-      variant="ghost" 
+    <Button
+      variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      className="rounded-full"
+      className="w-10 h-10 rounded-xl bg-white/50 dark:bg-slate-800/50 backdrop-blur-md border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 transition-all active:scale-95"
     >
-      {theme === 'dark' ? (
-        <Sun className="w-5 h-5 text-yellow-500" />
+      {theme === 'light' ? (
+        <Moon className="w-5 h-5 text-slate-600" />
       ) : (
-        <Moon className="w-5 h-5 text-slate-700" />
+        <Sun className="w-5 h-5 text-amber-400 fill-amber-400/20" />
       )}
     </Button>
   );
@@ -204,6 +217,7 @@ function LayoutContent({
   sidebarOpen, 
   setSidebarOpen, 
   user, 
+  organizationName,
   expandedSections, 
   toggleSection, 
   isActivePage, 
@@ -213,7 +227,6 @@ function LayoutContent({
   hotspots,
   portalPages
 }) {
-  const { theme, toggleTheme } = useTheme();
 
   // If this is a portal page, render without the admin layout
   if (portalPages.includes(currentPageName)) {
@@ -244,14 +257,16 @@ function LayoutContent({
       `}>
         <div className="flex flex-col h-full">
           {/* Logo */}
-          <div className="flex items-center justify-between h-16 px-6 border-b border-slate-100 dark:border-slate-700" data-tour="sidebar">
+          <div className="flex items-center justify-between h-16 px-6 border-b border-slate-100 dark:border-slate-800" data-tour="sidebar">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
                 <Zap className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="font-bold text-slate-900 dark:text-white">VIBELINK</h1>
-                <p className="text-xs text-slate-500 dark:text-slate-400">ISP Management</p>
+                <h1 className="font-bold text-slate-900 dark:text-white truncate max-w-[140px] leading-tight">
+                  {organizationName || 'VIBELINK'}
+                </h1>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase tracking-wider font-semibold">ISP Portal</p>
               </div>
             </div>
             <Button 
@@ -278,15 +293,15 @@ function LayoutContent({
                       className={`
                         w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all relative overflow-hidden group
                         ${hasActiveChild
-                          ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 shadow-sm' 
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                          ? 'bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 text-indigo-600 dark:text-indigo-400 shadow-sm' 
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
                         }
                       `}
                     >
                       {hasActiveChild && (
                         <motion.div
                           layoutId="activeSection"
-                          className="absolute inset-0 bg-gradient-to-r from-indigo-50 to-purple-50"
+                          className="absolute inset-0 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20"
                           initial={false}
                           transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                         />
@@ -334,8 +349,8 @@ function LayoutContent({
                                     className={`
                                       flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all relative group
                                       ${isActive 
-                                        ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 shadow-sm' 
-                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                        ? 'bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 text-indigo-600 dark:text-indigo-400 shadow-sm' 
+                                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
                                       }
                                     `}
                                   >
@@ -370,8 +385,8 @@ function LayoutContent({
                   className={`
                     flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all
                     ${isActive 
-                      ? 'bg-indigo-50 text-indigo-600' 
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      ? 'bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400' 
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'
                     }
                   `}
                 >
@@ -389,10 +404,10 @@ function LayoutContent({
           </nav>
 
           {/* User */}
-          <div className="p-4 border-t border-slate-100 dark:border-slate-700">
+          <div className="p-4 border-t border-slate-100 dark:border-slate-800">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+                <button className="flex items-center gap-3 w-full p-3 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
                   <Avatar className="w-10 h-10">
                     <AvatarFallback className="bg-gradient-to-br from-indigo-400 to-purple-500 text-white font-semibold">
                       {user?.full_name?.charAt(0).toUpperCase() || 'U'}
@@ -410,19 +425,6 @@ function LayoutContent({
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign out
                 </DropdownMenuItem>
-              <DropdownMenuItem onClick={toggleTheme}>
-                {theme === 'dark' ? (
-                  <>
-                    <Sun className="w-4 h-4 mr-2" />
-                    Light Mode
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-4 h-4 mr-2" />
-                    Dark Mode
-                  </>
-                )}
-              </DropdownMenuItem>
               <DropdownMenuSeparator />
               </DropdownMenuContent>
               </DropdownMenu>
@@ -433,8 +435,8 @@ function LayoutContent({
       {/* Main content */}
       <div className="lg:pl-72">
         {/* Mobile header */}
-        <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700 lg:hidden">
-          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)}>
+        <header className="sticky top-0 z-30 flex items-center justify-between h-16 px-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800 lg:hidden">
+          <Button variant="ghost" size="icon" onClick={() => setSidebarOpen(true)} className="dark:text-slate-200">
             <Menu className="w-5 h-5" />
           </Button>
           <div className="flex items-center gap-2">
@@ -443,18 +445,18 @@ function LayoutContent({
             </div>
             <span className="font-bold text-slate-900 dark:text-white">VIBELINK</span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
             <NotificationBell user={user} />
-            <ThemeToggleButton />
           </div>
         </header>
 
         {/* Desktop header */}
-        <header className="sticky top-0 z-30 hidden lg:flex items-center justify-end gap-4 h-16 px-6 bg-white/80 dark:bg-slate-800/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-700">
+        <header className="sticky top-0 z-30 hidden lg:flex items-center justify-end gap-4 h-16 px-6 bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl border-b border-slate-200 dark:border-slate-800">
+          <ThemeToggle />
           <div data-tour="notifications">
             <NotificationBell user={user} />
           </div>
-          <ThemeToggleButton />
         </header>
 
         {/* Page content */}

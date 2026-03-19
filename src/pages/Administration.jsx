@@ -122,12 +122,16 @@ export default function Administration() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader 
           title="Administration" 
           subtitle="Manage roles, permissions, and staff access"
-        />
+          actionLabel="Quick Action"
+          onAction={() => {}}
+        >
+          <div />
+        </PageHeader>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="bg-white border p-1">
@@ -170,7 +174,7 @@ function RolesTab() {
   const createMutation = useMutation({
     mutationFn: (data) => vibelink.entities.Role.create(data),
     onSuccess: (created, data) => {
-      queryClient.invalidateQueries(['roles']);
+      queryClient.invalidateQueries({ queryKey: ['roles'] });
       setShowForm(false);
       setEditingRole(null);
       toast.success('Role created successfully');
@@ -181,7 +185,7 @@ function RolesTab() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => vibelink.entities.Role.update(id, data),
     onSuccess: (updated, { id, data }) => {
-      queryClient.invalidateQueries(['roles']);
+      queryClient.invalidateQueries({ queryKey: ['roles'] });
       setShowForm(false);
       const before = editingRole;
       setEditingRole(null);
@@ -193,7 +197,7 @@ function RolesTab() {
   const deleteMutation = useMutation({
     mutationFn: (role) => vibelink.entities.Role.delete(role.id),
     onSuccess: (_, role) => {
-      queryClient.invalidateQueries(['roles']);
+      queryClient.invalidateQueries({ queryKey: ['roles'] });
       toast.success('Role deleted successfully');
       auditLog({ action: 'Role Deleted', category: 'user_management', level: 'warning', details: `Deleted role "${role.name}"`, entity_type: 'Role', entity_id: role.id, entity_name: role.name }, currentUser);
     },
@@ -371,7 +375,7 @@ function StaffTab() {
   const updateUserMutation = useMutation({
     mutationFn: ({ id, data }) => vibelink.entities.User.update(id, data),
     onSuccess: (_, { id, data }) => {
-      queryClient.invalidateQueries(['users']);
+      queryClient.invalidateQueries({ queryKey: ['users'] });
       const target = selectedUser;
       const newRole = roles.find(r => r.id === data.staff_role_id);
       const oldRole = roles.find(r => r.id === target?.staff_role_id);
@@ -542,7 +546,7 @@ function StaffTab() {
                               <MoreVertical className="w-4 h-4" />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
+                          <DropdownMenuContent align="end" className="bg-white">
                             <DropdownMenuItem onClick={() => { setSelectedUser(user); setShowEditDialog(true); }}>
                               <Edit2 className="w-4 h-4 mr-2" />
                               Edit Role

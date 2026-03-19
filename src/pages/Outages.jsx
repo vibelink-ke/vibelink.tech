@@ -183,7 +183,7 @@ export default function Outages() {
   const resolvedOutages = outages.filter(o => o.status === 'resolved');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Service Outages"
@@ -195,58 +195,58 @@ export default function Outages() {
 
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800">
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
-                  <AlertTriangle className="w-5 h-5 text-rose-600" />
+                <div className="w-10 h-10 rounded-lg bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
+                  <AlertTriangle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-rose-600">{activeOutages.length}</p>
-                  <p className="text-xs text-slate-500">Active Outages</p>
+                  <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{activeOutages.length}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Active Outages</p>
                 </div>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800">
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-                  <CheckCircle className="w-5 h-5 text-emerald-600" />
+                <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+                  <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-emerald-600">{resolvedOutages.length}</p>
-                  <p className="text-xs text-slate-500">Resolved</p>
+                  <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{resolvedOutages.length}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Resolved</p>
                 </div>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800">
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-                  <Zap className="w-5 h-5 text-amber-600" />
+                <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
+                  <Zap className="w-5 h-5 text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-amber-600">
+                  <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">
                     {activeOutages.filter(o => o.severity === 'critical' || o.severity === 'high').length}
                   </p>
-                  <p className="text-xs text-slate-500">High Priority</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">High Priority</p>
                 </div>
               </div>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800">
             <CardContent className="pt-4">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                  <Users className="w-5 h-5 text-indigo-600" />
+                <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-indigo-600">
+                  <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
                     {outages.reduce((sum, o) => sum + (o.customers_notified || 0), 0)}
                   </p>
-                  <p className="text-xs text-slate-500">Notifications Sent</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Notifications Sent</p>
                 </div>
               </div>
             </CardContent>
@@ -256,7 +256,7 @@ export default function Outages() {
         {/* Active Outages */}
         {activeOutages.length > 0 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900">Active Outages</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Active Outages</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {activeOutages.map((outage, index) => {
                 const config = SEVERITY_CONFIG[outage.severity] || SEVERITY_CONFIG.medium;
@@ -268,15 +268,15 @@ export default function Outages() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.1 }}
                   >
-                    <Card className={`border-l-4 ${config.border} hover:shadow-lg transition-shadow`}>
+                    <Card className={`border-l-4 ${config.border} dark:bg-slate-900 dark:border-slate-800 hover:shadow-lg transition-shadow`}>
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-start gap-3 flex-1">
-                            <div className={`p-2 rounded-lg ${config.bg}`}>
+                            <div className={`p-2 rounded-lg ${config.bg} dark:bg-slate-800`}>
                               <Icon className={`w-5 h-5 ${config.color}`} />
                             </div>
                             <div className="flex-1">
-                              <CardTitle className="text-base mb-1">{outage.title}</CardTitle>
+                              <CardTitle className="text-base mb-1 dark:text-white">{outage.title}</CardTitle>
                               <div className="flex flex-wrap gap-2">
                                 <Badge className={STATUS_CONFIG[outage.status].color}>
                                   {STATUS_CONFIG[outage.status].label}
@@ -296,8 +296,8 @@ export default function Outages() {
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-sm text-slate-600 mb-3 line-clamp-2">{outage.description}</p>
-                        <div className="flex items-center justify-between text-xs text-slate-500">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 line-clamp-2">{outage.description}</p>
+                        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                           <span>
                             {outage.customers_notified || 0} customers notified
                           </span>
@@ -333,14 +333,14 @@ export default function Outages() {
           </CardHeader>
           <CardContent className="p-0">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Severity</TableHead>
-                  <TableHead>Reported</TableHead>
-                  <TableHead>Resolved</TableHead>
-                  <TableHead>Notified</TableHead>
+              <TableHeader className="dark:bg-slate-800/50">
+                <TableRow className="dark:border-slate-800">
+                  <TableHead className="dark:text-slate-400">Title</TableHead>
+                  <TableHead className="dark:text-slate-400">Type</TableHead>
+                  <TableHead className="dark:text-slate-400">Severity</TableHead>
+                  <TableHead className="dark:text-slate-400">Reported</TableHead>
+                  <TableHead className="dark:text-slate-400">Resolved</TableHead>
+                  <TableHead className="dark:text-slate-400">Notified</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -366,13 +366,13 @@ export default function Outages() {
                   outages.map((outage) => (
                     <TableRow 
                       key={outage.id} 
-                      className="hover:bg-slate-50 cursor-pointer"
+                      className="hover:bg-slate-50 dark:hover:bg-slate-800/50 cursor-pointer dark:border-slate-800"
                       onClick={() => { setSelectedOutage(outage); setShowDetails(true); }}
                     >
                       <TableCell>
                         <div>
-                          <p className="font-medium text-slate-900">{outage.title}</p>
-                          <p className="text-xs text-slate-500 line-clamp-1">{outage.description}</p>
+                          <p className="font-medium text-slate-900 dark:text-white">{outage.title}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1">{outage.description}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -381,13 +381,13 @@ export default function Outages() {
                       <TableCell>
                         <Badge variant="outline" className="capitalize">{outage.severity}</Badge>
                       </TableCell>
-                      <TableCell className="text-sm text-slate-500">
+                      <TableCell className="text-sm text-slate-500 dark:text-slate-400">
                         {format(new Date(outage.created_date), 'MMM d, HH:mm')}
                       </TableCell>
-                      <TableCell className="text-sm text-slate-500">
+                      <TableCell className="text-sm text-slate-500 dark:text-slate-400">
                         {outage.actual_resolution ? format(new Date(outage.actual_resolution), 'MMM d, HH:mm') : '-'}
                       </TableCell>
-                      <TableCell className="text-sm text-slate-500">
+                      <TableCell className="text-sm text-slate-500 dark:text-slate-400">
                         {outage.customers_notified || 0}
                       </TableCell>
                     </TableRow>
@@ -509,7 +509,7 @@ function OutageFormDialog({ open, onOpenChange, outage, onSubmit, isLoading }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-900 dark:border-slate-800">
         <DialogHeader>
           <DialogTitle>{outage ? 'Update Outage' : 'Report Service Outage'}</DialogTitle>
           <DialogDescription>
@@ -711,13 +711,13 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+      <SheetContent className="w-full sm:max-w-lg overflow-y-auto dark:bg-slate-900 dark:border-slate-800">
         <SheetHeader>
           <SheetTitle>Outage Details</SheetTitle>
         </SheetHeader>
 
         <div className="space-y-6 mt-6">
-          <div className={`flex items-start gap-3 p-4 rounded-lg ${config.bg}`}>
+          <div className={`flex items-start gap-3 p-4 rounded-lg ${config.bg} dark:bg-slate-800/80`}>
             <Icon className={`w-6 h-6 ${config.color} mt-1`} />
             <div className="flex-1">
               <h3 className="font-semibold text-slate-900 mb-1">{outage.title}</h3>

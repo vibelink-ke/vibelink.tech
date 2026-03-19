@@ -109,7 +109,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
       <motion.div 
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 p-6"
+        className="bg-white rounded-lg border border-slate-200 p-6"
       >
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
@@ -278,7 +278,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
                 </thead>
                 <tbody>
                   {acquisitionByPlan.map((plan, i) => (
-                    <tr key={i} className="border-b hover:bg-slate-50 dark:hover:bg-slate-700">
+                    <tr key={i} className="border-b hover:bg-slate-50">
                       <td className="py-2 px-3 font-medium">{plan.name}</td>
                       <td className="py-2 px-3 text-right">{plan.acquisitions}</td>
                       <td className="py-2 px-3 text-right">{plan.retention}%</td>

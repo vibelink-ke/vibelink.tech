@@ -90,7 +90,7 @@ export default function Tenants() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-6 transition-colors duration-500">
+    <div className="min-h-screen bg-slate-50 p-6 transition-colors duration-500">
       <div className="max-w-7xl mx-auto">
         <PageHeader
           title="Tenants"

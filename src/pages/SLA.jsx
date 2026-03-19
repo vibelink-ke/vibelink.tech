@@ -76,6 +76,17 @@ import {
 
 const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
 
+const tooltipStyles = {
+  contentStyle: { 
+    backgroundColor: 'white', 
+    border: '1px solid #e2e8f0', 
+    borderRadius: '12px',
+    fontSize: '12px'
+  },
+  itemStyle: { color: '#1e293b' },
+  labelStyle: { fontWeight: 'bold', marginBottom: '4px', color: '#1e293b' }
+};
+
 export default function SLA() {
   const [showForm, setShowForm] = useState(false);
   const [editingSLA, setEditingSLA] = useState(null);
@@ -110,7 +121,7 @@ export default function SLA() {
   const createMutation = useMutation({
     mutationFn: (data) => vibelink.entities.SLA.create(data),
     onSuccess: () => {
-      queryClient.invalidateQueries(['slas']);
+      queryClient.invalidateQueries({ queryKey: ['slas'] });
       setShowForm(false);
       setEditingSLA(null);
     },
@@ -119,7 +130,7 @@ export default function SLA() {
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => vibelink.entities.SLA.update(id, data),
     onSuccess: () => {
-      queryClient.invalidateQueries(['slas']);
+      queryClient.invalidateQueries({ queryKey: ['slas'] });
       setShowForm(false);
       setEditingSLA(null);
     },
@@ -127,7 +138,7 @@ export default function SLA() {
 
   const deleteMutation = useMutation({
     mutationFn: (id) => vibelink.entities.SLA.delete(id),
-    onSuccess: () => queryClient.invalidateQueries(['slas']),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['slas'] }),
   });
 
   const plansWithSLA = (slaId) => plans.filter(p => p.sla_id === slaId).length;
@@ -238,22 +249,24 @@ export default function SLA() {
   }, [customers, slas, plans, tickets, outages]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="SLA Management"
           subtitle="Manage policies and track compliance"
           actionLabel="Create SLA"
-          actionIcon={Plus}
           onAction={() => { setEditingSLA(null); setShowForm(true); }}
-        />
+          actionIcon={Plus}
+        >
+          <div />
+        </PageHeader>
 
         <Tabs defaultValue="policies" className="space-y-6">
-          <TabsList className="bg-white dark:bg-slate-800 border dark:border-slate-700 p-1">
-            <TabsTrigger value="policies" className="gap-2">
+          <TabsList className="bg-white dark:bg-slate-900 border dark:border-slate-800 p-1">
+            <TabsTrigger value="policies" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Shield className="w-4 h-4" /> Policies
             </TabsTrigger>
-            <TabsTrigger value="compliance" className="gap-2">
+            <TabsTrigger value="compliance" className="gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <CheckCircle className="w-4 h-4" /> Compliance
             </TabsTrigger>
           </TabsList>
@@ -261,56 +274,56 @@ export default function SLA() {
           {/* POLICIES TAB */}
           <TabsContent value="policies" className="space-y-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                      <Shield className="w-5 h-5 text-indigo-600" />
+                    <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
+                      <Shield className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{slas.length}</p>
-                      <p className="text-xs text-slate-500">SLA Policies</p>
+                      <p className="text-2xl font-bold dark:text-white">{slas.length}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">SLA Policies</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-                      <CheckCircle className="w-5 h-5 text-emerald-600" />
+                    <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{slas.filter(s => s.status === 'active').length}</p>
-                      <p className="text-xs text-slate-500">Active</p>
+                      <p className="text-2xl font-bold dark:text-white">{slas.filter(s => s.status === 'active').length}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Active</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
-                      <Award className="w-5 h-5 text-blue-600" />
+                    <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
+                      <Award className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">
+                      <p className="text-2xl font-bold dark:text-white">
                         {slas.reduce((max, s) => Math.max(max, s.uptime_percentage || 0), 0)}%
                       </p>
-                      <p className="text-xs text-slate-500">Best Uptime SLA</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Best Uptime SLA</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
-                      <TrendingUp className="w-5 h-5 text-purple-600" />
+                    <div className="w-10 h-10 rounded-lg bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center">
+                      <TrendingUp className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{plans.filter(p => p.sla_id).length}</p>
-                      <p className="text-xs text-slate-500">Plans with SLA</p>
+                      <p className="text-2xl font-bold dark:text-white">{plans.filter(p => p.sla_id).length}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Plans with SLA</p>
                     </div>
                   </div>
                 </CardContent>
@@ -338,20 +351,20 @@ export default function SLA() {
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: index * 0.1 }}
                   >
-                    <Card className="hover:shadow-lg transition-shadow">
+                    <Card className="hover:shadow-lg transition-shadow dark:bg-slate-900 dark:border-slate-800">
                       <CardHeader className="pb-3">
                         <div className="flex items-start justify-between">
                           <div className="flex items-center gap-3">
-                            <div className="p-2 rounded-lg bg-indigo-50">
-                              <Shield className="w-5 h-5 text-indigo-600" />
+                             <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-900/20">
+                              <Shield className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                             </div>
                             <div>
-                              <CardTitle className="text-lg">{sla.name}</CardTitle>
+                              <CardTitle className="text-lg dark:text-white">{sla.name}</CardTitle>
                               <div className="flex gap-2 mt-1">
-                                <Badge variant={sla.status === 'active' ? 'default' : 'secondary'}>
+                                <Badge variant={sla.status === 'active' ? 'default' : 'secondary'} className={sla.status !== 'active' ? 'dark:bg-slate-800 dark:text-slate-400' : ''}>
                                   {sla.status}
                                 </Badge>
-                                <Badge variant="outline">{plansWithSLA(sla.id)} plans</Badge>
+                                <Badge variant="outline" className="dark:border-slate-800 dark:text-slate-400">{plansWithSLA(sla.id)} plans</Badge>
                               </div>
                             </div>
                           </div>
@@ -359,10 +372,10 @@ export default function SLA() {
                             <Button size="icon" variant="ghost" onClick={() => { setEditingSLA(sla); setShowForm(true); }}>
                               <Edit2 className="w-4 h-4" />
                             </Button>
-                            <Button 
+                             <Button 
                               size="icon" 
                               variant="ghost" 
-                              className="text-rose-500" 
+                              className="text-rose-500 hover:text-rose-600 hover:bg-rose-50" 
                               onClick={() => {
                                 if (confirm('Delete this SLA policy?')) {
                                   deleteMutation.mutate(sla.id);
@@ -375,58 +388,58 @@ export default function SLA() {
                         </div>
                       </CardHeader>
                       <CardContent>
-                        {sla.description && (
-                          <p className="text-sm text-slate-600 mb-4">{sla.description}</p>
+                         {sla.description && (
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{sla.description}</p>
                         )}
                         
                         <div className="space-y-3">
-                          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                             <div className="flex items-center gap-2">
                               <TrendingUp className="w-4 h-4 text-emerald-500" />
-                              <span className="text-sm text-slate-700">Uptime Guarantee</span>
+                              <span className="text-sm text-slate-700 dark:text-slate-300">Uptime Guarantee</span>
                             </div>
-                            <span className="font-semibold text-emerald-600">{sla.uptime_percentage}%</span>
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">{sla.uptime_percentage}%</span>
                           </div>
 
                           {sla.ticket_response_time_hours && (
-                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                               <div className="flex items-center gap-2">
                                 <Clock className="w-4 h-4 text-blue-500" />
-                                <span className="text-sm text-slate-700">Response Time</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-300">Response Time</span>
                               </div>
-                              <span className="font-semibold text-slate-900">{sla.ticket_response_time_hours}h</span>
+                              <span className="font-semibold text-slate-900 dark:text-white">{sla.ticket_response_time_hours}h</span>
                             </div>
                           )}
 
                           {sla.ticket_resolution_time_hours && (
-                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                               <div className="flex items-center gap-2">
                                 <CheckCircle className="w-4 h-4 text-purple-500" />
-                                <span className="text-sm text-slate-700">Resolution Time</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-300">Resolution Time</span>
                               </div>
-                              <span className="font-semibold text-slate-900">{sla.ticket_resolution_time_hours}h</span>
+                              <span className="font-semibold text-slate-900 dark:text-white">{sla.ticket_resolution_time_hours}h</span>
                             </div>
                           )}
 
                           {sla.penalty_percentage && (
-                            <div className="flex items-center justify-between p-3 bg-rose-50 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-rose-50 dark:bg-rose-900/20 rounded-lg">
                               <div className="flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4 text-rose-500" />
-                                <span className="text-sm text-rose-700">Service Credit</span>
+                                <span className="text-sm text-rose-700 dark:text-rose-400">Service Credit</span>
                               </div>
-                              <span className="font-semibold text-rose-600">{sla.penalty_percentage}%</span>
+                              <span className="font-semibold text-rose-600 dark:text-rose-400">{sla.penalty_percentage}%</span>
                             </div>
                           )}
 
                           <div className="flex flex-wrap gap-2 pt-2">
                             {sla.priority_support && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="outline" className="text-xs dark:border-slate-800 dark:text-slate-400">
                                 <Award className="w-3 h-3 mr-1" />
                                 Priority Support
                               </Badge>
                             )}
                             {sla.dedicated_support && (
-                              <Badge variant="outline" className="text-xs">
+                              <Badge variant="outline" className="text-xs dark:border-slate-800 dark:text-slate-400">
                                 <Shield className="w-3 h-3 mr-1" />
                                 Dedicated Support
                               </Badge>
@@ -446,68 +459,68 @@ export default function SLA() {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <Select value={period} onValueChange={setPeriod}>
-                  <SelectTrigger className="w-40 bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700">
+                  <SelectTrigger className="w-40 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 dark:text-slate-200">
                     <Calendar className="w-4 h-4 mr-2" />
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="current">Current Month</SelectItem>
-                    <SelectItem value="last">Last Month</SelectItem>
-                    <SelectItem value="quarter">Last Quarter</SelectItem>
+                  <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+                    <SelectItem value="current" className="dark:text-slate-200 dark:focus:bg-slate-800">Current Month</SelectItem>
+                    <SelectItem value="last" className="dark:text-slate-200 dark:focus:bg-slate-800">Last Month</SelectItem>
+                    <SelectItem value="quarter" className="dark:text-slate-200 dark:focus:bg-slate-800">Last Quarter</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                      <Users className="w-5 h-5 text-indigo-600" />
+                    <div className="w-10 h-10 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 flex items-center justify-center">
+                      <Users className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold">{complianceData.customersWithSLA.length}</p>
-                      <p className="text-xs text-slate-500">Under SLA</p>
+                      <p className="text-2xl font-bold dark:text-white">{complianceData.customersWithSLA.length}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Under SLA</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-emerald-50 flex items-center justify-center">
-                      <CheckCircle className="w-5 h-5 text-emerald-600" />
+                    <div className="w-10 h-10 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 flex items-center justify-center">
+                      <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-emerald-600">{complianceData.compliantCount}</p>
-                      <p className="text-xs text-slate-500">Compliant</p>
+                      <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{complianceData.compliantCount}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Compliant</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
-                      <AlertTriangle className="w-5 h-5 text-amber-600" />
+                    <div className="w-10 h-10 rounded-lg bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-amber-600">{complianceData.warningCount}</p>
-                      <p className="text-xs text-slate-500">Warnings</p>
+                      <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{complianceData.warningCount}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Warnings</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardContent className="pt-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
-                      <XCircle className="w-5 h-5 text-rose-600" />
+                    <div className="w-10 h-10 rounded-lg bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
+                      <XCircle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
                     </div>
                     <div>
-                      <p className="text-2xl font-bold text-rose-600">{complianceData.breachedCount}</p>
-                      <p className="text-xs text-slate-500">Breaches</p>
+                      <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{complianceData.breachedCount}</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">Breaches</p>
                     </div>
                   </div>
                 </CardContent>
@@ -515,20 +528,24 @@ export default function SLA() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <Card className="lg:col-span-2">
+              <Card className="lg:col-span-2 dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardHeader>
-                  <CardTitle>Compliance by SLA Policy</CardTitle>
-                  <CardDescription>Performance across different SLA tiers</CardDescription>
+                  <CardTitle className="dark:text-white">Compliance by SLA Policy</CardTitle>
+                  <CardDescription className="dark:text-slate-400">Performance across different SLA tiers</CardDescription>
                 </CardHeader>
                 <CardContent>
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={complianceData.policyData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="name" stroke="#94a3b8" />
-                        <YAxis stroke="#94a3b8" />
-                        <ChartTooltip contentStyle={{ background: 'white', border: '1px solid #e2e8f0', borderRadius: '12px' }} />
-                        <Legend />
+                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} className="dark:stroke-slate-800" />
+                        <XAxis dataKey="name" stroke="#94a3b8" fontSize={12} axisLine={false} tickLine={false} />
+                        <YAxis stroke="#94a3b8" fontSize={12} axisLine={false} tickLine={false} />
+                        <ChartTooltip 
+                          contentStyle={tooltipStyles.contentStyle}
+                          itemStyle={tooltipStyles.itemStyle}
+                          labelStyle={tooltipStyles.labelStyle}
+                        />
+                        <Legend iconType="circle" />
                         <Bar dataKey="compliant" name="Compliant" fill="#10b981" radius={[4, 4, 0, 0]} />
                         <Bar dataKey="breached" name="Breached" fill="#ef4444" radius={[4, 4, 0, 0]} />
                       </BarChart>
@@ -537,9 +554,9 @@ export default function SLA() {
                 </CardContent>
               </Card>
 
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
                 <CardHeader>
-                  <CardTitle>Overall Status</CardTitle>
+                  <CardTitle className="dark:text-white">Overall Status</CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="h-64">
@@ -567,11 +584,11 @@ export default function SLA() {
               </Card>
             </div>
 
-            <Card>
+            <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
               <CardHeader>
                 <div className="flex items-center justify-between">
-                  <CardTitle>Customer SLA Performance</CardTitle>
-                  <Button variant="outline" size="sm">
+                  <CardTitle className="dark:text-white">Customer SLA Performance</CardTitle>
+                  <Button variant="outline" size="sm" className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
                     <Download className="w-4 h-4 mr-2" />
                     Export Report
                   </Button>
@@ -580,34 +597,34 @@ export default function SLA() {
               <CardContent className="p-0">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead>Customer</TableHead>
-                      <TableHead>SLA Policy</TableHead>
-                      <TableHead>Uptime</TableHead>
-                      <TableHead>Avg Response</TableHead>
-                      <TableHead>Avg Resolution</TableHead>
-                      <TableHead>Tickets</TableHead>
-                      <TableHead>Status</TableHead>
+                    <TableRow className="hover:bg-transparent dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/50">
+                      <TableHead className="dark:text-slate-400">Customer</TableHead>
+                      <TableHead className="dark:text-slate-400">SLA Policy</TableHead>
+                      <TableHead className="dark:text-slate-400">Uptime</TableHead>
+                      <TableHead className="dark:text-slate-400">Avg Response</TableHead>
+                      <TableHead className="dark:text-slate-400">Avg Resolution</TableHead>
+                      <TableHead className="dark:text-slate-400">Tickets</TableHead>
+                      <TableHead className="dark:text-slate-400">Status</TableHead>
                     </TableRow>
                   </TableHeader>
-                  <TableBody>
+                   <TableBody>
                     {complianceData.metrics.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-slate-500">
+                      <TableRow className="dark:border-slate-800">
+                        <TableCell colSpan={7} className="text-center py-8 text-slate-500 dark:text-slate-400">
                           No customers with SLA policies
                         </TableCell>
                       </TableRow>
                     ) : (
                       complianceData.metrics.map((item) => (
-                        <TableRow key={item.customer.id} className="hover:bg-slate-50">
+                        <TableRow key={item.customer.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 dark:border-slate-800">
                           <TableCell>
                             <div>
-                              <p className="font-medium text-slate-900">{item.customer.full_name}</p>
-                              <p className="text-xs text-slate-500">{item.customer.customer_id}</p>
+                              <p className="font-medium text-slate-900 dark:text-white">{item.customer.full_name}</p>
+                              <p className="text-xs text-slate-500 dark:text-slate-400">{item.customer.customer_id}</p>
                             </div>
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline">{item.sla.name}</Badge>
+                            <Badge variant="outline" className="dark:border-slate-700 dark:text-slate-400">{item.sla.name}</Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -620,7 +637,7 @@ export default function SLA() {
                                 <AlertTriangle className="w-4 h-4 text-rose-500" />
                               )}
                             </div>
-                            <p className="text-xs text-slate-500">Target: {item.sla.uptime_percentage}%</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">Target: {item.sla.uptime_percentage}%</p>
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -633,7 +650,7 @@ export default function SLA() {
                                 <AlertTriangle className="w-4 h-4 text-rose-500" />
                               )}
                             </div>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               Target: {item.sla.ticket_response_time_hours || 'N/A'}h
                             </p>
                           </TableCell>
@@ -648,22 +665,22 @@ export default function SLA() {
                                 <AlertTriangle className="w-4 h-4 text-rose-500" />
                               )}
                             </div>
-                            <p className="text-xs text-slate-500">
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
                               Target: {item.sla.ticket_resolution_time_hours || 'N/A'}h
                             </p>
                           </TableCell>
                           <TableCell>
-                            <p className="font-medium">{item.metrics.ticketsCount}</p>
-                            <p className="text-xs text-slate-500">{item.metrics.resolvedCount} resolved</p>
+                            <p className="font-medium dark:text-white">{item.metrics.ticketsCount}</p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">{item.metrics.resolvedCount} resolved</p>
                           </TableCell>
                           <TableCell>
                             {item.compliance.overall ? (
-                              <Badge className="bg-emerald-100 text-emerald-700">
+                              <Badge className="bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border-none">
                                 <CheckCircle className="w-3 h-3 mr-1" />
                                 Compliant
                               </Badge>
                             ) : (
-                              <Badge className="bg-rose-100 text-rose-700">
+                              <Badge className="bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400 border-none">
                                 <XCircle className="w-3 h-3 mr-1" />
                                 Breach
                               </Badge>
@@ -746,29 +763,31 @@ function SLAFormDialog({ open, onOpenChange, sla, onSubmit, isLoading }) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
         <DialogHeader>
-          <DialogTitle>{sla ? 'Edit SLA Policy' : 'Create SLA Policy'}</DialogTitle>
+          <DialogTitle className="dark:text-white">{sla ? 'Edit SLA Policy' : 'Create SLA Policy'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => { e.preventDefault(); onSubmit(formData); }} className="space-y-4 mt-4">
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2 space-y-2">
-              <Label>Policy Name *</Label>
+              <Label className="dark:text-slate-300">Policy Name *</Label>
               <Input 
                 value={formData.name} 
                 onChange={(e) => setFormData({...formData, name: e.target.value})} 
                 placeholder="e.g., Premium SLA"
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                 required 
               />
             </div>
 
             <div className="col-span-2 space-y-2">
-              <Label>Description</Label>
+              <Label className="dark:text-slate-300">Description</Label>
               <Textarea 
                 value={formData.description} 
                 onChange={(e) => setFormData({...formData, description: e.target.value})} 
                 rows={2}
                 placeholder="Brief description of this SLA policy"
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
 

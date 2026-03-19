@@ -17,13 +17,13 @@ function DataTable({ columns, data, isLoading, onRowClick, emptyState }) {
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.2 }}
-        className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+        className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
       >
         <Table>
           <TableHeader>
-            <TableRow className="bg-slate-50/50">
+            <TableRow className="bg-slate-50/50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-800">
               {columns.map((col, i) => (
-                <TableHead key={i} className="text-slate-600 font-semibold">
+                <TableHead key={i} className="text-slate-600 dark:text-slate-400 font-semibold">
                   {col.header}
                 </TableHead>
               ))}
@@ -50,7 +50,7 @@ function DataTable({ columns, data, isLoading, onRowClick, emptyState }) {
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700"
+        className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800"
       >
         {emptyState}
       </motion.div>
@@ -62,13 +62,13 @@ function DataTable({ columns, data, isLoading, onRowClick, emptyState }) {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2 }}
-      className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
+      className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden shadow-sm hover:shadow-md transition-shadow"
     >
       <Table>
         <TableHeader>
-          <TableRow className="bg-slate-50/50 dark:bg-slate-900/50 hover:bg-slate-50/50 dark:hover:bg-slate-900/50">
+          <TableRow className="bg-slate-50/50 dark:bg-slate-800/50 hover:bg-slate-50/50 dark:hover:bg-slate-800/50 border-slate-100 dark:border-slate-800">
             {columns.map((col, i) => (
-              <TableHead key={i} className="text-slate-600 dark:text-slate-300 font-semibold text-sm">
+              <TableHead key={i} className="text-slate-600 dark:text-slate-400 font-semibold text-sm">
                 {col.header}
               </TableHead>
             ))}
@@ -82,8 +82,8 @@ function DataTable({ columns, data, isLoading, onRowClick, emptyState }) {
               animate={{ opacity: 1 }}
               transition={{ delay: i * 0.03 }}
               onClick={() => onRowClick?.(row)}
-              className={`border-b border-slate-100 dark:border-slate-700 last:border-0 ${
-                onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors' : ''
+              className={`border-b border-slate-100 dark:border-slate-800 last:border-0 ${
+                onRowClick ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors' : ''
               }`}
             >
               {columns.map((col, j) => (

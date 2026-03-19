@@ -41,24 +41,25 @@ export default function HotspotFileManager() {
   const deleteFileMutation = useMutation({
     mutationFn: (id) => vibelink.entities.HotspotFile.delete(id),
     onSuccess: () => {
-      queryClient.invalidateQueries(['hotspotFiles']);
+      queryClient.invalidateQueries({ queryKey: ['hotspotFiles'] });
       toast.success('File deleted successfully');
     },
   });
 
   const retryUploadMutation = useMutation({
     mutationFn: async (hotspotFileId) => {
+      const file = hotspotFiles.find(f => f.id === hotspotFileId);
       return vibelink.functions.invoke('uploadHotspotToMikrotik', {
         hotspotFileId,
-        mikrotikId: hotspotFiles.find(f => f.id === hotspotFileId)?.mikrotik_id
+        mikrotikId: file?.mikrotik_id
       });
     },
     onSuccess: () => {
-      queryClient.invalidateQueries(['hotspotFiles']);
+      queryClient.invalidateQueries({ queryKey: ['hotspotFiles'] });
       toast.success('Upload completed');
     },
-    onError: () => {
-      toast.error('Upload failed');
+    onError: (error) => {
+      toast.error('Upload failed: ' + error.message);
     },
   });
 
@@ -70,7 +71,7 @@ export default function HotspotFileManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Hotspot File Manager"
@@ -81,28 +82,28 @@ export default function HotspotFileManager() {
 
         {/* Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="p-6">
-              <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
-              <p className="text-sm text-slate-500">Total Files</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">{stats.total}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Total Files</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="p-6">
-              <p className="text-2xl font-bold text-emerald-600">{stats.uploaded}</p>
-              <p className="text-sm text-slate-500">Uploaded</p>
+              <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.uploaded}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Uploaded</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="p-6">
-              <p className="text-2xl font-bold text-amber-600">{stats.pending}</p>
-              <p className="text-sm text-slate-500">Pending</p>
+              <p className="text-2xl font-bold text-amber-600 dark:text-amber-400">{stats.pending}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Pending</p>
             </CardContent>
           </Card>
-          <Card>
+          <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm">
             <CardContent className="p-6">
-              <p className="text-2xl font-bold text-rose-600">{stats.failed}</p>
-              <p className="text-sm text-slate-500">Failed</p>
+              <p className="text-2xl font-bold text-rose-600 dark:text-rose-400">{stats.failed}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Failed</p>
             </CardContent>
           </Card>
         </div>
@@ -111,7 +112,7 @@ export default function HotspotFileManager() {
         {loadingFiles ? (
           <div className="space-y-4">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-20 bg-white rounded-xl animate-pulse" />
+              <div key={i} className="h-20 bg-white dark:bg-slate-900 border dark:border-slate-800 rounded-xl animate-pulse" />
             ))}
           </div>
         ) : hotspotFiles.length === 0 ? (
@@ -131,27 +132,27 @@ export default function HotspotFileManager() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: index * 0.05 }}
               >
-                <Card className="hover:shadow-md transition-shadow">
+                <Card className="hover:shadow-md transition-shadow dark:bg-slate-900 dark:border-slate-800">
                   <CardContent className="p-6">
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-slate-900">{file.file_name}</h3>
-                          <Badge variant="outline" className="text-xs">
-                            {file.file_type.toUpperCase()}
+                          <h3 className="font-semibold text-slate-900 dark:text-white">{file.file_name}</h3>
+                          <Badge variant="outline" className="text-xs dark:border-slate-700 dark:text-slate-400">
+                            {file.file_type?.toUpperCase()}
                           </Badge>
-                          <StatusBadge status={file.upload_status} />
+                          <StatusBadge status={file.upload_status} className="" />
                         </div>
-                        <p className="text-sm text-slate-600 mb-3">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
                           Hotspot: {file.hotspot_name}
                         </p>
-                        <div className="flex flex-wrap gap-4 text-xs text-slate-500">
-                          <span>Created: {format(new Date(file.created_date), 'MMM d, HH:mm')}</span>
+                        <div className="flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-500">
+                          <span>Created: {file.created_date ? format(new Date(file.created_date), 'MMM d, HH:mm') : 'N/A'}</span>
                           {file.uploaded_date && (
-                            <span>Uploaded: {format(new Date(file.uploaded_date), 'MMM d, HH:mm')}</span>
+                             <span className="dark:text-emerald-400">Uploaded: {format(new Date(file.uploaded_date), 'MMM d, HH:mm')}</span>
                           )}
                           {file.upload_error && (
-                            <span className="text-rose-600">Error: {file.upload_error}</span>
+                            <span className="text-rose-600 dark:text-rose-400">Error: {file.upload_error}</span>
                           )}
                         </div>
                       </div>
@@ -165,7 +166,7 @@ export default function HotspotFileManager() {
                             disabled={retryUploadMutation.isPending}
                           >
                             <RefreshCw className="w-4 h-4 mr-1" />
-                            Retry
+                            <span>Retry</span>
                           </Button>
                         )}
                         <Button
@@ -187,16 +188,17 @@ export default function HotspotFileManager() {
 
         {/* Upload Dialog */}
         <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl bg-white dark:bg-slate-900 border dark:border-slate-800 p-6">
             <DialogHeader>
-              <DialogTitle>Create Hotspot Configuration</DialogTitle>
+              <DialogTitle className="text-slate-900 dark:text-white">Create Hotspot Configuration</DialogTitle>
             </DialogHeader>
             <HotspotFileUpload
+              hotspotId=""
               hotspots={hotspots}
               mikrotiks={mikrotiks}
               onComplete={() => {
                 setShowUploadDialog(false);
-                queryClient.invalidateQueries(['hotspotFiles']);
+                queryClient.invalidateQueries({ queryKey: ['hotspotFiles'] });
                 toast.success('Hotspot configuration created');
               }}
             />

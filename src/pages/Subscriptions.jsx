@@ -143,14 +143,14 @@ export default function SubscriptionsPage() {
   });
 
   const columns = [
-    { key: 'customer_name', label: 'Customer', render: (_, row) => <span className="font-medium">{row.customer_name}</span> },
-    { key: 'plan_name', label: 'Plan' },
-    { key: 'monthly_price', label: 'Monthly Price', render: (value) => `KES ${value.toLocaleString()}` },
+    { key: 'customer_name', label: 'Customer', render: (_, row) => <span className="font-medium dark:text-white">{row.customer_name}</span> },
+    { key: 'plan_name', label: 'Plan', render: (value) => <span className="dark:text-slate-300">{value}</span> },
+    { key: 'monthly_price', label: 'Monthly Price', render: (value) => <span className="dark:text-slate-300">KES {value.toLocaleString()}</span> },
     { key: 'status', label: 'Status', render: (value) => <StatusBadge status={value} /> },
     {
       key: 'renewal_date',
       label: 'Next Renewal',
-      render: (value) => new Date(value).toLocaleDateString()
+      render: (value) => <span className="dark:text-slate-300">{new Date(value).toLocaleDateString()}</span>
     },
     {
       key: 'auto_renew',
@@ -184,7 +184,7 @@ export default function SubscriptionsPage() {
     .slice(0, 5);
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-6 min-h-screen bg-slate-50 dark:bg-slate-950/20 transition-colors duration-500">
       <PageHeader
         title="Subscription Management"
         subtitle="Manage customer subscriptions and billing cycles"
@@ -198,12 +198,12 @@ export default function SubscriptionsPage() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex gap-3"
+          className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex gap-3 transition-colors duration-500"
         >
-          <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <AlertCircle className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
           <div>
-            <p className="font-medium text-blue-900">Upcoming Renewals</p>
-            <p className="text-sm text-blue-800 mt-1">
+            <p className="font-medium text-blue-900 dark:text-blue-200">Upcoming Renewals</p>
+            <p className="text-sm text-blue-800 dark:text-blue-300 mt-1">
               {upcomingRenewals.length} subscription(s) renewing in the next 7 days
             </p>
           </div>
@@ -212,36 +212,36 @@ export default function SubscriptionsPage() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Active Subscriptions</CardTitle>
+            <CardTitle className="text-sm font-medium dark:text-slate-400">Active Subscriptions</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{subscriptions.filter(s => s.status === 'active').length}</p>
+            <p className="text-2xl font-bold dark:text-white">{subscriptions.filter(s => s.status === 'active').length}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Total MRR</CardTitle>
+            <CardTitle className="text-sm font-medium dark:text-slate-400">Total MRR</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">KES {subscriptions.filter(s => s.status === 'active').reduce((sum, s) => sum + s.monthly_price, 0).toLocaleString()}</p>
+            <p className="text-2xl font-bold dark:text-white">KES {subscriptions.filter(s => s.status === 'active').reduce((sum, s) => sum + s.monthly_price, 0).toLocaleString()}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Paused</CardTitle>
+            <CardTitle className="text-sm font-medium dark:text-slate-400">Paused</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{subscriptions.filter(s => s.status === 'paused').length}</p>
+            <p className="text-2xl font-bold dark:text-white">{subscriptions.filter(s => s.status === 'paused').length}</p>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">Cancelled</CardTitle>
+            <CardTitle className="text-sm font-medium dark:text-slate-400">Cancelled</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{subscriptions.filter(s => s.status === 'cancelled').length}</p>
+            <p className="text-2xl font-bold dark:text-white">{subscriptions.filter(s => s.status === 'cancelled').length}</p>
           </CardContent>
         </Card>
       </div>
@@ -253,18 +253,19 @@ export default function SubscriptionsPage() {
             placeholder="Search customer or plan..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            className="dark:bg-slate-900 dark:border-slate-800 dark:text-white dark:placeholder:text-slate-500"
           />
         </div>
         <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-full sm:w-40">
+          <SelectTrigger className="w-full sm:w-40 dark:bg-slate-900 dark:border-slate-800 dark:text-white">
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="paused">Paused</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
+          <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
+            <SelectItem value="all" className="dark:text-slate-200 dark:focus:bg-slate-800">All Status</SelectItem>
+            <SelectItem value="active" className="dark:text-slate-200 dark:focus:bg-slate-800">Active</SelectItem>
+            <SelectItem value="paused" className="dark:text-slate-200 dark:focus:bg-slate-800">Paused</SelectItem>
+            <SelectItem value="cancelled" className="dark:text-slate-200 dark:focus:bg-slate-800">Cancelled</SelectItem>
+            <SelectItem value="pending" className="dark:text-slate-200 dark:focus:bg-slate-800">Pending</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -274,47 +275,48 @@ export default function SubscriptionsPage() {
 
       {/* Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent>
+        <DialogContent className="dark:bg-slate-900 dark:border-slate-800 transition-colors duration-500">
           <DialogHeader>
-            <DialogTitle>{selectedSubscription ? 'Edit Subscription' : 'Create Subscription'}</DialogTitle>
+            <DialogTitle className="dark:text-white">{selectedSubscription ? 'Edit Subscription' : 'Create Subscription'}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label>Customer</Label>
+              <Label className="dark:text-slate-300">Customer</Label>
               <Select value={formData.customer_id} onValueChange={(value) => setFormData({...formData, customer_id: value})}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select customer" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                   {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.full_name}</SelectItem>
+                    <SelectItem key={c.id} value={c.id} className="dark:text-slate-200 dark:focus:bg-slate-800 transition-colors">{c.full_name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>Service Plan</Label>
+              <Label className="dark:text-slate-300">Service Plan</Label>
               <Select value={formData.plan_id} onValueChange={(value) => setFormData({...formData, plan_id: value})}>
-                <SelectTrigger>
+                <SelectTrigger className="dark:bg-slate-800 dark:border-slate-700 dark:text-white">
                   <SelectValue placeholder="Select plan" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent className="dark:bg-slate-900 dark:border-slate-800">
                   {plans.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.name} - KES {p.monthly_price}</SelectItem>
+                    <SelectItem key={p.id} value={p.id} className="dark:text-slate-200 dark:focus:bg-slate-800 transition-colors">{p.name} - KES {p.monthly_price}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label>Billing Cycle Day (1-31)</Label>
+              <Label className="dark:text-slate-300">Billing Cycle Day (1-31)</Label>
               <Input
                 type="number"
                 min="1"
                 max="31"
                 value={formData.billing_cycle_day}
                 onChange={(e) => setFormData({...formData, billing_cycle_day: e.target.value})}
+                className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
               />
             </div>
 
@@ -324,9 +326,9 @@ export default function SubscriptionsPage() {
                 id="auto_renew"
                 checked={formData.auto_renew}
                 onChange={(e) => setFormData({...formData, auto_renew: e.target.checked})}
-                className="rounded"
+                className="rounded dark:bg-slate-800 dark:border-slate-700 transition-colors"
               />
-              <Label htmlFor="auto_renew" className="cursor-pointer">Auto-renew on billing cycle date</Label>
+              <Label htmlFor="auto_renew" className="cursor-pointer dark:text-slate-300">Auto-renew on billing cycle date</Label>
             </div>
 
             <div className="flex items-center gap-2">
@@ -335,27 +337,28 @@ export default function SubscriptionsPage() {
                 id="is_trial"
                 checked={formData.is_trial}
                 onChange={(e) => setFormData({...formData, is_trial: e.target.checked})}
-                className="rounded"
+                className="rounded dark:bg-slate-800 dark:border-slate-700 transition-colors"
               />
-              <Label htmlFor="is_trial" className="cursor-pointer">This is a trial subscription</Label>
+              <Label htmlFor="is_trial" className="cursor-pointer dark:text-slate-300">This is a trial subscription</Label>
             </div>
 
             {formData.is_trial && (
               <div className="space-y-2">
-                <Label>Trial End Date</Label>
+                <Label className="dark:text-slate-300">Trial End Date</Label>
                 <Input
                   type="date"
                   value={formData.trial_end_date}
                   onChange={(e) => setFormData({...formData, trial_end_date: e.target.value})}
+                  className="dark:bg-slate-800 dark:border-slate-700 dark:text-white"
                 />
               </div>
             )}
 
             <div className="flex gap-2 justify-end">
-              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
+              <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800">
                 Cancel
               </Button>
-              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending}>
+              <Button type="submit" disabled={createMutation.isPending || updateMutation.isPending} className="bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-600 dark:hover:bg-indigo-700 dark:text-white">
                 {selectedSubscription ? 'Update' : 'Create'} Subscription
               </Button>
             </div>

@@ -2,11 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { vibelink } from '@/api/vibelinkClient';
 import { AnimatePresence } from 'framer-motion';
-import { createPageUrl } from '@/utils';
+import { toast } from 'sonner';
 import OnboardingProgress from '../components/onboarding/OnboardingProgress';
 import OnboardingStep1 from '../components/onboarding/OnboardingStep1';
 import OnboardingStep2 from '../components/onboarding/OnboardingStep2';
 import OnboardingStep3 from '../components/onboarding/OnboardingStep3';
+import { useAuth } from '@/lib/AuthContext';
 
 const steps = [
   { id: 'company', label: 'Company Info' },
@@ -17,7 +18,8 @@ const steps = [
 export default function TenantOnboarding() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const tenantId = searchParams.get('tenant_id');
+  const { tenantId: ctxTenantId, updateMe } = useAuth();
+  const tenantId = searchParams.get('tenant_id') || ctxTenantId;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [tenant, setTenant] = useState(null);
@@ -33,22 +35,27 @@ export default function TenantOnboarding() {
 
   useEffect(() => {
     if (!tenantId) {
-      navigate(createPageUrl('Tenants'));
+      navigate('/Register');
       return;
     }
 
     const loadTenant = async () => {
       const t = await vibelink.entities.Tenant.get(tenantId);
-      setTenant(t);
-      setFormData({
-        company_name: t.company_name || '',
-        subdomain: t.subdomain || '',
-        city: t.city || '',
-        country: t.country || '',
-        admin_name: t.admin_name || '',
-        admin_email: t.admin_email || '',
-        phone: t.phone || ''
-      });
+      if (t) {
+        setTenant(t);
+        setFormData({
+          company_name: t.company_name || '',
+          subdomain: t.subdomain || '',
+          city: t.city || '',
+          country: t.country || '',
+          admin_name: t.admin_name || '',
+          admin_email: t.admin_email || '',
+          phone: t.phone || ''
+        });
+      } else {
+        // Handle case where tenant lookup fails
+        setTenant({});
+      }
     };
     loadTenant();
   }, [tenantId, navigate]);
@@ -68,10 +75,25 @@ export default function TenantOnboarding() {
   };
 
   const handleComplete = async () => {
-    // Show success and redirect
-    setTimeout(() => {
-      navigate(createPageUrl('Tenants'));
-    }, 1500);
+    try {
+      // Mark onboarding as completed for this user/tenant
+      await updateMe({ onboarding_completed: true });
+      
+      // Update tenant info with the final form data
+      await vibelink.entities.Tenant.update(tenantId, {
+        ...formData,
+        onboarding_completed_at: new Date().toISOString()
+      });
+
+      toast.success('Setup complete! Welcome aboard.');
+      
+      // Show success and redirect to dashboard
+      setTimeout(() => {
+        navigate('/');
+      }, 1500);
+    } catch (error) {
+      toast.error('Failed to save settings: ' + error.message);
+    }
   };
 
   if (!tenant) {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { vibelink } from '@/api/vibelinkClient';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, RefreshCw, AlertTriangle, Search, Zap, Layers } from 'lucide-react';
+import { Plus, RefreshCw, AlertTriangle, Search, Zap, Layers, Shield } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -16,6 +16,7 @@ import TemplateEditor from '@/components/mikrotik/TemplateEditor.jsx';
 import TemplateList from '@/components/mikrotik/TemplateList.jsx';
 import MikrotikOnboardingScript from '@/components/mikrotik/MikrotikOnboardingScript.jsx';
 import ApplyTemplateDialog from '@/components/mikrotik/ApplyTemplateDialog.jsx';
+import WireguardManagement from '@/components/mikrotik/WireguardManagement.jsx';
 
 export default function MikrotikManagement() {
   const [activeTab, setActiveTab] = useState('routers');
@@ -77,14 +78,14 @@ export default function MikrotikManagement() {
   };
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-6">
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-6 transition-colors duration-500">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="MikroTik Management"
           subtitle="Manage routers, templates, and configurations"
           actionLabel={activeTab === 'routers' ? 'Add Router' : 'Create Template'}
           onAction={() => activeTab === 'routers' ? handleAddNew() : setTemplateEditorOpen(true)}
-          icon={activeTab === 'routers' ? Plus : Layers}
+          actionIcon={activeTab === 'routers' ? Plus : Layers}
         />
 
         {/* Critical Alerts - Only show in routers tab */}
@@ -93,22 +94,26 @@ export default function MikrotikManagement() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <Alert className="border-rose-200 bg-rose-50 dark:bg-rose-900/20 dark:border-rose-800">
-              <AlertTriangle className="h-4 w-4 text-rose-600" />
-              <AlertDescription className="text-rose-700 dark:text-rose-400">
-                <strong>{criticalAlerts.length}</strong> router(s) require immediate attention: {criticalAlerts.map(r => r.router_name).join(', ')}
+            <Alert className="border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-900/20">
+              <AlertTriangle className="h-4 w-4 text-rose-600 dark:text-rose-400" />
+              <AlertDescription className="text-rose-700 dark:text-rose-300">
+                <strong className="dark:text-rose-200">{criticalAlerts.length}</strong> router(s) require immediate attention: {criticalAlerts.map(r => r.router_name).join(', ')}
               </AlertDescription>
             </Alert>
           </motion.div>
         )}
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="routers" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-3 bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 p-1">
+            <TabsTrigger value="routers" className="flex items-center gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Search className="w-4 h-4" />
               Routers
             </TabsTrigger>
-            <TabsTrigger value="templates" className="flex items-center gap-2">
+            <TabsTrigger value="vpn" className="flex items-center gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
+              <Shield className="w-4 h-4" />
+              VPN & Connectivity
+            </TabsTrigger>
+            <TabsTrigger value="templates" className="flex items-center gap-2 dark:text-slate-400 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white">
               <Layers className="w-4 h-4" />
               Templates
             </TabsTrigger>
@@ -117,40 +122,40 @@ export default function MikrotikManagement() {
           <TabsContent value="routers" className="space-y-6">
             {/* Quick Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium">Total Routers</CardTitle>
+                  <CardTitle className="text-sm font-medium dark:text-slate-200">Total Routers</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">{routers.length}</div>
+                  <div className="text-2xl font-bold dark:text-white">{routers.length}</div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium">Online</CardTitle>
+                  <CardTitle className="text-sm font-medium dark:text-slate-200">Online</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-emerald-600">
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                     {routers.filter(r => r.status === 'online').length}
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium">Offline</CardTitle>
+                  <CardTitle className="text-sm font-medium dark:text-slate-200">Offline</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-slate-600">
+                  <div className="text-2xl font-bold text-slate-600 dark:text-slate-400">
                     {routers.filter(r => r.status === 'offline').length}
                   </div>
                 </CardContent>
               </Card>
-              <Card>
+              <Card className="dark:bg-slate-900 dark:border-slate-800 shadow-sm transition-colors duration-500">
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm font-medium">Alerts</CardTitle>
+                  <CardTitle className="text-sm font-medium dark:text-slate-200">Alerts</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-rose-600">{criticalAlerts.length}</div>
+                  <div className="text-2xl font-bold text-rose-600 dark:text-rose-400">{criticalAlerts.length}</div>
                 </CardContent>
               </Card>
             </div>
@@ -205,6 +210,10 @@ export default function MikrotikManagement() {
                 setOnboardingOpen(true);
               }}
             />
+          </TabsContent>
+
+          <TabsContent value="vpn" className="space-y-6">
+            <WireguardManagement />
           </TabsContent>
 
           <TabsContent value="templates" className="space-y-4">

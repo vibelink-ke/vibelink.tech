@@ -24,11 +24,11 @@ export default function CustomerOnboarding() {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 p-4 sm:p-8 transition-colors duration-500">
       <div className="max-w-4xl mx-auto space-y-6">
         <PageHeader
           title="Customer Onboarding"
-          description="Complete setup for new customers with guided steps"
+          subtitle="Complete setup for new customers with guided steps"
         />
 
         <motion.div

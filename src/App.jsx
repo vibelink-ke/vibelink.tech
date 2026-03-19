@@ -18,9 +18,9 @@ const LayoutWrapper = ({ children, currentPageName }) => Layout ?
   : <>{children}</>;
 
 const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin, isAuthenticated } = useAuth();
+  const { isLoadingAuth, isLoadingPublicSettings, authError, navigateToLogin, isAuthenticated, onboardingCompleted } = useAuth();
   const location = useLocation();
-  const isPublicPage = location.pathname === '/login' || location.pathname === '/register';
+  const isPublicPage = location.pathname === '/login' || location.pathname === '/register' || location.pathname === '/TenantSignup';
 
   // Show loading spinner while checking app public settings or auth
   if (isLoadingPublicSettings || (isLoadingAuth && !isPublicPage)) {
@@ -45,6 +45,12 @@ const AuthenticatedApp = () => {
   // Double check auth status for protected routes
   if (!isAuthenticated && !isPublicPage) {
     navigateToLogin();
+    return null;
+  }
+
+  // Redirect to onboarding if not completed
+  if (isAuthenticated && !onboardingCompleted && location.pathname !== '/TenantOnboarding' && !isPublicPage) {
+    window.location.href = '/TenantOnboarding';
     return null;
   }
 
