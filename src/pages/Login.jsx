@@ -191,8 +191,20 @@ export default function Login() {
 
           {/* Footer */}
           <div className="mt-8 text-center border-t border-slate-800 pt-6 space-y-4">
+            <div className="mb-2">
+              <p className="text-slate-500 text-sm">
+                Don't have a workspace yet?{' '}
+                <button 
+                  type="button"
+                  onClick={() => navigate('/TenantSignup')}
+                  className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+                >
+                  Create an account
+                </button>
+              </p>
+            </div>
             <div>
-              <p className="text-slate-400 mb-2 font-medium">Need help accessing your account?</p>
+              <p className="text-slate-400 mb-2 text-xs font-medium">Need help accessing your account?</p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4 text-sm">
                 <a 
                   href="mailto:support@skybridge.co.ke" 

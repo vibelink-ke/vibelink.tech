@@ -203,7 +203,7 @@ export default function TenantSignup() {
                             placeholder="yourisp"
                             required
                           />
-                          <span className="text-slate-500">.vibelink.app</span>
+                          <span className="text-slate-500">.skybridge.co.ke</span>
                         </div>
                         <p className="text-xs text-slate-500">Your unique URL for accessing the platform</p>
                       </div>
@@ -323,7 +323,7 @@ export default function TenantSignup() {
               <div className="p-4 bg-indigo-50 rounded-lg border border-indigo-200 mb-6">
                 <p className="text-sm text-slate-700 dark:text-slate-300">
                   Your 14-day free trial starts now. You can access your dashboard at:<br />
-                  <strong className="text-indigo-600">{formData.subdomain}.vibelink.app</strong>
+                  <strong className="text-indigo-600">{formData.subdomain}.skybridge.co.ke</strong>
                 </p>
               </div>
               <Button className="bg-indigo-600 hover:bg-indigo-700" onClick={() => vibelink.auth.redirectToLogin()}>
