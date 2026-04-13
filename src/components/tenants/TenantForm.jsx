@@ -131,7 +131,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
                   className="rounded-r-none"
                 />
                 <div className="flex items-center px-3 bg-slate-100 dark:bg-slate-800 border border-l-0 border-input rounded-r-md text-slate-600 dark:text-slate-400 text-sm font-mono">
-                  .vibelink.tech
+                  .skybridge.co.ke
                 </div>
               </div>
             </div>
