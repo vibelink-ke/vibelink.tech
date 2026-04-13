@@ -29,7 +29,7 @@ export default function CustomerTicketsTab({ customerId, tickets }) {
               </div>
               <div>
                 <p className="text-sm text-slate-500">Total Tickets</p>
-                <p className="text-2xl font-bold text-slate-900">{tickets.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{tickets.length}</p>
               </div>
             </div>
           </CardContent>
@@ -42,7 +42,7 @@ export default function CustomerTicketsTab({ customerId, tickets }) {
               </div>
               <div>
                 <p className="text-sm text-slate-500">Open</p>
-                <p className="text-2xl font-bold text-slate-900">{openTickets}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{openTickets}</p>
               </div>
             </div>
           </CardContent>
@@ -55,7 +55,7 @@ export default function CustomerTicketsTab({ customerId, tickets }) {
               </div>
               <div>
                 <p className="text-sm text-slate-500">Resolved</p>
-                <p className="text-2xl font-bold text-slate-900">{resolvedTickets}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{resolvedTickets}</p>
               </div>
             </div>
           </CardContent>
@@ -68,7 +68,7 @@ export default function CustomerTicketsTab({ customerId, tickets }) {
               </div>
               <div>
                 <p className="text-sm text-slate-500">Urgent</p>
-                <p className="text-2xl font-bold text-slate-900">
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                   {tickets.filter(t => t.priority === 'urgent').length}
                 </p>
               </div>
@@ -96,12 +96,12 @@ export default function CustomerTicketsTab({ customerId, tickets }) {
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <p className="font-medium text-slate-900">{ticket.subject}</p>
+                        <p className="font-medium text-slate-900 dark:text-slate-50">{ticket.subject}</p>
                         <Badge className={priorityColors[ticket.priority || 'medium']}>
                           {ticket.priority || 'medium'}
                         </Badge>
                       </div>
-                      <p className="text-sm text-slate-600 mb-2">{ticket.description}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{ticket.description}</p>
                       <div className="flex items-center gap-4 text-xs text-slate-500">
                         <span>#{ticket.ticket_number}</span>
                         <span>{ticket.category}</span>

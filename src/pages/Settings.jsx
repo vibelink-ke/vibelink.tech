@@ -217,12 +217,12 @@ export default function Settings() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-6xl mx-auto space-y-6">
         <PageHeader title="Settings" subtitle="Configure your ISP billing system" />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border flex-wrap h-auto p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border flex-wrap h-auto p-1">
             <TabsTrigger value="general" className="gap-2"><Building className="w-4 h-4" /> General</TabsTrigger>
             <TabsTrigger value="sms" className="gap-2"><MessageSquare className="w-4 h-4" /> SMS Gateway</TabsTrigger>
             <TabsTrigger value="payment" className="gap-2"><CreditCard className="w-4 h-4" /> Payment Gateway</TabsTrigger>
@@ -285,7 +285,7 @@ export default function Settings() {
                 <CardDescription>Configure SMS provider for sending notifications</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                   <div>
                     <p className="font-medium">Enable SMS Notifications</p>
                     <p className="text-sm text-slate-500">Send SMS to customers</p>
@@ -347,7 +347,7 @@ export default function Settings() {
                   <CardDescription>Configure payment provider for recurring monthly subscriptions</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
                       <p className="font-medium">Enable Subscription Payments</p>
                       <p className="text-sm text-slate-500">Accept recurring payments for subscriptions</p>
@@ -566,7 +566,7 @@ export default function Settings() {
                   <CardDescription>Configure separate payment provider for hotspot voucher purchases</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
                       <p className="font-medium">Enable Hotspot Payments</p>
                       <p className="text-sm text-slate-500">Accept payments for hotspot vouchers</p>
@@ -795,21 +795,21 @@ export default function Settings() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
                       <p className="font-medium">Payment Received</p>
                       <p className="text-sm text-slate-500">Notify customers when payment is received</p>
                     </div>
                     <Switch checked={settings.notify_payment_received === 'true'} onCheckedChange={(v) => setSettings({...settings, notify_payment_received: String(v)})} />
                   </div>
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
                       <p className="font-medium">Invoice Due Reminder</p>
                       <p className="text-sm text-slate-500">Send reminder before invoice due date</p>
                     </div>
                     <Switch checked={settings.notify_invoice_due === 'true'} onCheckedChange={(v) => setSettings({...settings, notify_invoice_due: String(v)})} />
                   </div>
-                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-lg">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
                       <p className="font-medium">Service Suspended</p>
                       <p className="text-sm text-slate-500">Notify when service is suspended</p>
@@ -1215,9 +1215,9 @@ function EmailServerTab({ showSecrets, toggleSecret, testingGateway, setTestingG
               { label: 'From Email', value: smtpConfig.from_email },
               { label: 'From Name', value: smtpConfig.from_name },
             ].map(item => (
-              <div key={item.label} className="p-3 bg-slate-50 rounded-lg">
+              <div key={item.label} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-xs text-slate-500 mb-1">{item.label}</p>
-                <p className="text-sm font-medium text-slate-800 truncate">{item.value || '—'}</p>
+                <p className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">{item.value || '—'}</p>
               </div>
             ))}
           </div>
@@ -1299,7 +1299,7 @@ function RoleFormDialog({ open, onOpenChange, role, onSubmit, isLoading }) {
                       checked={group.permissions.every(p => formData.permissions.includes(p.code))}
                       onCheckedChange={() => toggleGroup(group)}
                     />
-                    <span className="font-semibold text-slate-900">{group.group}</span>
+                    <span className="font-semibold text-slate-900 dark:text-slate-50">{group.group}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 ml-6">
                     {group.permissions.map(p => (
@@ -1308,7 +1308,7 @@ function RoleFormDialog({ open, onOpenChange, role, onSubmit, isLoading }) {
                           checked={formData.permissions.includes(p.code)}
                           onCheckedChange={() => togglePermission(p.code)}
                         />
-                        <span className="text-sm text-slate-600">{p.label}</span>
+                        <span className="text-sm text-slate-600 dark:text-slate-400">{p.label}</span>
                       </div>
                     ))}
                   </div>
@@ -1453,7 +1453,7 @@ function AutomationFunction({ title, description, icon, functionName, params, te
           {icon}
         </div>
         <div className="flex-1">
-          <h4 className="font-medium text-slate-900">{title}</h4>
+          <h4 className="font-medium text-slate-900 dark:text-slate-50">{title}</h4>
           <p className="text-sm text-slate-500 mt-1">{description}</p>
           {result && (
             <div className={`mt-2 p-2 rounded text-xs ${result.success ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
@@ -1511,14 +1511,14 @@ function EditRoleDialog({ open, onOpenChange, user, roles, onSubmit, isLoading }
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-4">
-          <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+          <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <Avatar>
               <AvatarFallback className="bg-gradient-to-br from-indigo-400 to-purple-500 text-white">
                 {user.full_name?.charAt(0).toUpperCase() || 'U'}
               </AvatarFallback>
             </Avatar>
             <div>
-              <p className="font-medium text-slate-900">{user.full_name || 'Unnamed'}</p>
+              <p className="font-medium text-slate-900 dark:text-slate-50">{user.full_name || 'Unnamed'}</p>
               <p className="text-sm text-slate-500">{user.email}</p>
             </div>
           </div>
@@ -1545,12 +1545,12 @@ function EditRoleDialog({ open, onOpenChange, user, roles, onSubmit, isLoading }
               <p className="text-sm font-medium text-indigo-900 mb-2">Permissions:</p>
               <div className="flex flex-wrap gap-1">
                 {selectedRole.permissions?.slice(0, 8).map(p => (
-                  <span key={p} className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
+                  <span key={p} className="text-xs px-2 py-1 bg-white dark:bg-slate-900 text-indigo-700 rounded-full">
                     {p}
                   </span>
                 ))}
                 {(selectedRole.permissions?.length || 0) > 8 && (
-                  <span className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
+                  <span className="text-xs px-2 py-1 bg-white dark:bg-slate-900 text-indigo-700 rounded-full">
                     +{selectedRole.permissions.length - 8} more
                   </span>
                 )}

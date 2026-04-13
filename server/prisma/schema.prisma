@@ -1,0 +1,146 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id                   String   @id @default(uuid())
+  name                 String
+  email                String   @unique
+  role                 String   @default("admin")
+  onboarding_completed Boolean  @default(false)
+  created_at           DateTime @default(now())
+}
+
+model Tenant {
+  id           String   @id @default(uuid())
+  name         String
+  created_date DateTime @default(now())
+}
+
+model Customer {
+  id                String   @id @default(uuid())
+  full_name         String
+  phone             String?
+  email             String?
+  address           String?
+  city              String?
+  status            String   @default("active")
+  plan_id           String?
+  billing_cycle_day Int      @default(1)
+  mikrotik_id       String?
+  mikrotik_name     String?
+  ip_address        String?
+  mac_address       String?
+  connection_type   String   @default("pppoe")
+  portal_username   String?
+  portal_password   String?
+  pppoe_username    String?
+  pppoe_password    String?
+  notes             String?
+  balance           Float    @default(0)
+  created_date      DateTime @default(now())
+
+  // Relations
+  plan              ServicePlan? @relation(fields: [plan_id], references: [id])
+  mikrotik          Mikrotik?    @relation(fields: [mikrotik_id], references: [id])
+}
+
+model ServicePlan {
+  id            String   @id @default(uuid())
+  name          String
+  monthly_price Float    @default(0)
+  speed         String?
+  description   String?
+  customers     Customer[]
+}
+
+model Invoice {
+  id           String   @id @default(uuid())
+  customer_id  String
+  amount       Float
+  status       String   @default("unpaid")
+  due_date     DateTime
+  created_date DateTime @default(now())
+}
+
+model Payment {
+  id           String   @id @default(uuid())
+  customer_id  String
+  amount       Float
+  method       String
+  reference    String?
+  date         DateTime @default(now())
+}
+
+model SupportTicket {
+  id           String   @id @default(uuid())
+  customer_id  String
+  subject      String
+  status       String   @default("open")
+  priority     String   @default("medium")
+  assigned_to  String?
+  created_date DateTime @default(now())
+  
+  notes        TicketNote[]
+}
+
+model TicketNote {
+  id         String   @id @default(uuid())
+  ticket_id  String
+  content    String
+  author     String
+  created_at DateTime @default(now())
+  
+  ticket     SupportTicket @relation(fields: [ticket_id], references: [id])
+}
+
+model Mikrotik {
+  id          String   @id @default(uuid())
+  router_name String
+  ip_address  String
+  username    String
+  password    String
+  status      String   @default("offline")
+  customers   Customer[]
+}
+
+model Hotspot {
+  id         String   @id @default(uuid())
+  name       String
+  ip_range   String?
+  location   String?
+}
+
+model SLA {
+  id          String   @id @default(uuid())
+  name        String
+  uptime_goal Float
+}
+
+model SystemLog {
+  id        String   @id @default(uuid())
+  level     String
+  message   String
+  source    String?
+  timestamp DateTime @default(now())
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String
+  permissions String
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  user_id   String
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  timestamp DateTime @default(now())
+}

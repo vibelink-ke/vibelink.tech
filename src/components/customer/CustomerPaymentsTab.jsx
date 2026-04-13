@@ -21,7 +21,7 @@ export default function CustomerPaymentsTab({ customerId, payments, invoices }) 
               </div>
               <div>
                 <p className="text-sm text-slate-500">Total Paid</p>
-                <p className="text-2xl font-bold text-slate-900">KES {totalPaid.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {totalPaid.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -34,7 +34,7 @@ export default function CustomerPaymentsTab({ customerId, payments, invoices }) 
               </div>
               <div>
                 <p className="text-sm text-slate-500">Pending Amount</p>
-                <p className="text-2xl font-bold text-slate-900">KES {pendingAmount.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {pendingAmount.toLocaleString()}</p>
               </div>
             </div>
           </CardContent>
@@ -47,7 +47,7 @@ export default function CustomerPaymentsTab({ customerId, payments, invoices }) 
               </div>
               <div>
                 <p className="text-sm text-slate-500">Total Payments</p>
-                <p className="text-2xl font-bold text-slate-900">{payments.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{payments.length}</p>
               </div>
             </div>
           </CardContent>
@@ -69,10 +69,10 @@ export default function CustomerPaymentsTab({ customerId, payments, invoices }) 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
                   >
                     <div>
-                      <p className="font-medium text-slate-900">KES {payment.amount?.toLocaleString()}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">KES {payment.amount?.toLocaleString()}</p>
                       <p className="text-xs text-slate-500">
                         {payment.created_date ? format(new Date(payment.created_date), 'MMM d, yyyy HH:mm') : 'N/A'}
                       </p>
@@ -103,11 +103,11 @@ export default function CustomerPaymentsTab({ customerId, payments, invoices }) 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
-                    className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                    className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
                   >
                     <div>
-                      <p className="font-medium text-slate-900">{invoice.invoice_number}</p>
-                      <p className="text-sm text-slate-600">KES {invoice.total_amount?.toLocaleString()}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{invoice.invoice_number}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">KES {invoice.total_amount?.toLocaleString()}</p>
                       <p className="text-xs text-slate-500">
                         Due: {invoice.due_date ? format(new Date(invoice.due_date), 'MMM d, yyyy') : 'N/A'}
                       </p>

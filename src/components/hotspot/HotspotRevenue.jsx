@@ -94,7 +94,7 @@ export default function HotspotRevenue() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Revenue Analytics</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Revenue Analytics</h3>
           <p className="text-sm text-slate-500">Track hotspot earnings and trends</p>
         </div>
         <div className="flex gap-3">
@@ -134,7 +134,7 @@ export default function HotspotRevenue() {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 mb-1">Total Revenue</p>
-                  <p className="text-2xl font-bold text-slate-900">KES {totalRevenue.toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {totalRevenue.toLocaleString()}</p>
                 </div>
               </div>
             </CardContent>
@@ -150,7 +150,7 @@ export default function HotspotRevenue() {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 mb-1">Transactions</p>
-                  <p className="text-2xl font-bold text-slate-900">{filteredPayments.length}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{filteredPayments.length}</p>
                 </div>
               </div>
             </CardContent>
@@ -166,7 +166,7 @@ export default function HotspotRevenue() {
                 </div>
                 <div>
                   <p className="text-sm text-slate-500 mb-1">Avg Transaction</p>
-                  <p className="text-2xl font-bold text-slate-900">KES {averageTransaction.toFixed(0)}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {averageTransaction.toFixed(0)}</p>
                 </div>
               </div>
             </CardContent>

@@ -33,9 +33,9 @@ export default function SubscriptionPlanCard({ plan, isSelected, onSelect, isAnn
           </div>
 
           <div className="space-y-1">
-            <div className="text-3xl font-bold text-slate-900">
+            <div className="text-3xl font-bold text-slate-900 dark:text-slate-50">
               KES {monthlyRate.toLocaleString('en-KE')}
-              <span className="text-lg font-normal text-slate-600">/month</span>
+              <span className="text-lg font-normal text-slate-600 dark:text-slate-400">/month</span>
             </div>
             {isAnnual && price > 0 && (
               <p className="text-sm text-green-600">
@@ -48,42 +48,42 @@ export default function SubscriptionPlanCard({ plan, isSelected, onSelect, isAnn
         <CardContent className="space-y-6">
           {/* Features */}
           <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900 text-sm">Features included:</h4>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-50 text-sm">Features included:</h4>
             <ul className="space-y-2">
               <li className="flex items-start gap-3">
                 <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span className="text-sm text-slate-700">{plan.max_customers} customers</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{plan.max_customers} customers</span>
               </li>
               <li className="flex items-start gap-3">
                 <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span className="text-sm text-slate-700">{plan.max_staff} staff users</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{plan.max_staff} staff users</span>
               </li>
               <li className="flex items-start gap-3">
                 <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                <span className="text-sm text-slate-700">{plan.support_tier} support</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{plan.support_tier} support</span>
               </li>
               {plan.api_access && (
                 <li className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-slate-700">API access</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">API access</span>
                 </li>
               )}
               {plan.sso_enabled && (
                 <li className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-slate-700">Single sign-on</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">Single sign-on</span>
                 </li>
               )}
               {plan.custom_branding && (
                 <li className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-slate-700">Custom branding</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">Custom branding</span>
                 </li>
               )}
               {plan.features?.map((feature, idx) => (
                 <li key={idx} className="flex items-start gap-3">
                   <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <span className="text-sm text-slate-700">{feature}</span>
+                  <span className="text-sm text-slate-700 dark:text-slate-300">{feature}</span>
                 </li>
               ))}
             </ul>

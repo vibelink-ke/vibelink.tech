@@ -124,7 +124,7 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
         >
-          <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Dashboard</h1>
+          <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50 dark:text-white tracking-tight">Dashboard</h1>
           <p className="text-slate-500 dark:text-slate-400 mt-1">Overview of your ISP billing system</p>
         </motion.div>
 
@@ -169,7 +169,7 @@ export default function Dashboard() {
                  value={activeCustomers}
                  subtitle={`${customers.length} total`}
                  icon={Users}
-                 trend="+12%"
+                 trend="0%"
                  trendUp
                />
              </div>
@@ -181,7 +181,7 @@ export default function Dashboard() {
                  value={`KES ${totalRevenue.toLocaleString()}`}
                  subtitle="This period"
                  icon={CreditCard}
-                 trend="+8%"
+                 trend="0%"
                  trendUp
                />
              </div>
@@ -227,7 +227,7 @@ export default function Dashboard() {
                 <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
               </motion.div>
               <div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{pendingInvoices.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 dark:text-white">{pendingInvoices.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Pending Invoices</p>
               </div>
             </div>
@@ -253,7 +253,7 @@ export default function Dashboard() {
                 <AlertCircle className="w-5 h-5 text-rose-600 dark:text-rose-400" />
               </motion.div>
               <div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{overdueInvoices.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 dark:text-white">{overdueInvoices.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Overdue Invoices</p>
               </div>
             </div>
@@ -279,7 +279,7 @@ export default function Dashboard() {
                 <Shield className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
               </motion.div>
               <div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{customersWithSLA.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 dark:text-white">{customersWithSLA.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">SLA Customers</p>
               </div>
             </div>
@@ -305,7 +305,7 @@ export default function Dashboard() {
                 <Wifi className="w-5 h-5 text-purple-600 dark:text-purple-400" />
               </motion.div>
               <div>
-                <p className="text-2xl font-bold text-slate-900 dark:text-white">{plans.length}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50 dark:text-white">{plans.length}</p>
                 <p className="text-xs text-slate-500 dark:text-slate-400">Service Plans</p>
               </div>
             </div>
@@ -327,7 +327,7 @@ export default function Dashboard() {
           >
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h3 className="text-lg font-semibold text-slate-900">Revenue Overview</h3>
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Revenue Overview</h3>
                 <p className="text-sm text-slate-500">Last 6 months</p>
               </div>
               <div className="flex items-center gap-2 text-emerald-600">
@@ -377,7 +377,7 @@ export default function Dashboard() {
             transition={{ delay: 0.2 }}
             className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-100 dark:border-slate-700 p-6 shadow-sm hover:shadow-lg transition-shadow"
           >
-            <h3 className="text-lg font-semibold text-slate-900 mb-4">Quick Actions</h3>
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-4">Quick Actions</h3>
             <div className="space-y-3">
               {[
                 { label: 'Add Customer', href: 'Customers', icon: Users, color: 'bg-blue-50 text-blue-600' },
@@ -408,10 +408,10 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
-            className="bg-white rounded-2xl border border-slate-100 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-900">Recent Invoices</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Recent Invoices</h3>
               <Link 
                 to={createPageUrl('Invoices')} 
                 className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
@@ -423,16 +423,16 @@ export default function Dashboard() {
               {invoices.slice(0, 5).map((invoice, i) => (
                 <div key={invoice.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-slate-50">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center">
+                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
                       <FileText className="w-5 h-5 text-slate-500" />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900 text-sm">{invoice.customer_name}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50 text-sm">{invoice.customer_name}</p>
                       <p className="text-xs text-slate-500">{invoice.invoice_number}</p>
                     </div>
                   </div>
                   <div className="text-right">
-                    <p className="font-semibold text-slate-900 text-sm">KES {invoice.total_amount?.toLocaleString()}</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-50 text-sm">KES {invoice.total_amount?.toLocaleString()}</p>
                     <StatusBadge status={invoice.status} />
                   </div>
                 </div>
@@ -448,10 +448,10 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
-            className="bg-white rounded-2xl border border-slate-100 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-900">Support Tickets</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Support Tickets</h3>
               <Link 
                 to={createPageUrl('Tickets')} 
                 className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
@@ -465,7 +465,7 @@ export default function Dashboard() {
                   <div className="flex items-center gap-3">
                     <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                       ticket.priority === 'urgent' ? 'bg-rose-100' :
-                      ticket.priority === 'high' ? 'bg-amber-100' : 'bg-slate-100'
+                      ticket.priority === 'high' ? 'bg-amber-100' : 'bg-slate-100 dark:bg-slate-800'
                     }`}>
                       <Clock className={`w-5 h-5 ${
                         ticket.priority === 'urgent' ? 'text-rose-500' :
@@ -473,7 +473,7 @@ export default function Dashboard() {
                       }`} />
                     </div>
                     <div>
-                      <p className="font-medium text-slate-900 text-sm">{ticket.subject}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50 text-sm">{ticket.subject}</p>
                       <p className="text-xs text-slate-500">{ticket.customer_name}</p>
                     </div>
                   </div>
@@ -491,10 +491,10 @@ export default function Dashboard() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
-            className="bg-white rounded-2xl border border-slate-100 p-6"
+            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 p-6"
           >
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-slate-900">System Activity</h3>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">System Activity</h3>
               <Link 
                 to={createPageUrl('Logs')} 
                 className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
@@ -510,7 +510,7 @@ export default function Dashboard() {
                     log.level === 'warning' ? 'bg-amber-500' : 'bg-emerald-500'
                   }`} />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-slate-900 text-sm truncate">{log.action || log.message}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50 text-sm truncate">{log.action || log.message}</p>
                     <p className="text-xs text-slate-500">
                       {log.created_date ? format(new Date(log.created_date), 'MMM d, h:mm a') : 'Just now'}
                     </p>

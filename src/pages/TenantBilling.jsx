@@ -111,7 +111,7 @@ export default function TenantBilling() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-800/50 p-6">
       <div className="max-w-7xl mx-auto">
         <PageHeader
           title="Billing & Subscriptions"
@@ -124,10 +124,10 @@ export default function TenantBilling() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Current Plan</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Current Plan</p>
                   <CreditCard className="w-4 h-4 text-indigo-600" />
                 </div>
-                <p className="text-2xl font-bold text-slate-900">
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                   {subscription?.plan ? subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1) : 'None'}
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -141,10 +141,10 @@ export default function TenantBilling() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Total Paid</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Total Paid</p>
                   <TrendingUp className="w-4 h-4 text-green-600" />
                 </div>
-                <p className="text-2xl font-bold text-slate-900">
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                   KES {totalPaid.toLocaleString('en-KE')}
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -158,7 +158,7 @@ export default function TenantBilling() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Amount Due</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Amount Due</p>
                   <AlertCircle className={`w-4 h-4 ${totalDue > 0 ? 'text-red-600' : 'text-green-600'}`} />
                 </div>
                 <p className={`text-2xl font-bold ${totalDue > 0 ? 'text-red-600' : 'text-slate-900'}`}>
@@ -175,10 +175,10 @@ export default function TenantBilling() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Next Billing</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Next Billing</p>
                   <FileText className="w-4 h-4 text-indigo-600" />
                 </div>
-                <p className="text-2xl font-bold text-slate-900">
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                   {daysUntilBilling !== null ? `${daysUntilBilling}d` : 'N/A'}
                 </p>
                 <p className="text-xs text-slate-500 mt-2">

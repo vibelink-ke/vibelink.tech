@@ -102,7 +102,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
       {/* Company Information */}
       <Card>
         <CardContent className="pt-6 space-y-4">
-          <h3 className="font-semibold text-slate-900">Company Information</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Company Information</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -130,7 +130,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
                   required
                   className="rounded-r-none"
                 />
-                <div className="flex items-center px-3 bg-slate-100 border border-l-0 border-input rounded-r-md text-slate-600 text-sm font-mono">
+                <div className="flex items-center px-3 bg-slate-100 dark:bg-slate-800 border border-l-0 border-input rounded-r-md text-slate-600 dark:text-slate-400 text-sm font-mono">
                   .vibelink.tech
                 </div>
               </div>
@@ -180,7 +180,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
       {/* Admin Information */}
       <Card>
         <CardContent className="pt-6 space-y-4">
-          <h3 className="font-semibold text-slate-900">Admin Information</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Admin Information</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -209,7 +209,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
       {/* Subscription */}
       <Card>
         <CardContent className="pt-6 space-y-4">
-          <h3 className="font-semibold text-slate-900">Subscription</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Subscription</h3>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -282,13 +282,13 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
       {/* Payment Options */}
       <Card>
         <CardContent className="pt-6 space-y-6">
-          <h3 className="font-semibold text-slate-900">Payment Options</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Payment Options</h3>
 
           {/* Safaricom Paybill */}
           <div className="space-y-4 pb-4 border-b">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-medium text-slate-900">Safaricom Paybill</h4>
+                <h4 className="font-medium text-slate-900 dark:text-slate-50">Safaricom Paybill</h4>
                 <p className="text-xs text-slate-500 mt-1">Accept customer payments via Safaricom Paybill</p>
               </div>
               <Switch
@@ -354,7 +354,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <h4 className="font-medium text-slate-900">Kopo Kopo STK</h4>
+                <h4 className="font-medium text-slate-900 dark:text-slate-50">Kopo Kopo STK</h4>
                 <p className="text-xs text-slate-500 mt-1">STK push payments for customer convenience</p>
               </div>
               <Switch

@@ -58,10 +58,10 @@ export default function CustomerProfile() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-8 flex items-center justify-center">
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-slate-600">Loading customer profile...</p>
+          <p className="text-slate-600 dark:text-slate-400">Loading customer profile...</p>
         </div>
       </div>
     );
@@ -69,9 +69,9 @@ export default function CustomerProfile() {
 
   if (!customer) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-8 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-slate-600">Customer not found</p>
+          <p className="text-slate-600 dark:text-slate-400">Customer not found</p>
           <Button onClick={() => navigate('/customers')} className="mt-4">Go Back</Button>
         </div>
       </div>
@@ -82,7 +82,7 @@ export default function CustomerProfile() {
   const openTickets = tickets.filter(t => t.status === 'open' || t.status === 'in_progress').length;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center gap-4">
@@ -90,7 +90,7 @@ export default function CustomerProfile() {
             <ArrowLeft className="w-5 h-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-3xl font-bold text-slate-900">Customer Profile</h1>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">Customer Profile</h1>
             <p className="text-slate-500 mt-1">Manage customer information and activity</p>
           </div>
         </div>
@@ -109,7 +109,7 @@ export default function CustomerProfile() {
                 <div className="flex-1">
                   <div className="flex items-start justify-between mb-4">
                     <div>
-                      <h2 className="text-2xl font-bold text-slate-900">{customer.full_name}</h2>
+                      <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{customer.full_name}</h2>
                       <p className="text-slate-500">{customer.customer_id}</p>
                     </div>
                     <StatusBadge status={customer.status} />
@@ -122,7 +122,7 @@ export default function CustomerProfile() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Email</p>
-                        <p className="text-sm font-medium text-slate-900">{customer.email}</p>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{customer.email}</p>
                       </div>
                     </div>
                     
@@ -132,7 +132,7 @@ export default function CustomerProfile() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Phone</p>
-                        <p className="text-sm font-medium text-slate-900">{customer.phone}</p>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{customer.phone}</p>
                       </div>
                     </div>
                     
@@ -142,7 +142,7 @@ export default function CustomerProfile() {
                       </div>
                       <div>
                         <p className="text-xs text-slate-500">Total Paid</p>
-                        <p className="text-sm font-medium text-slate-900">KES {totalPaid.toLocaleString()}</p>
+                        <p className="text-sm font-medium text-slate-900 dark:text-slate-50">KES {totalPaid.toLocaleString()}</p>
                       </div>
                     </div>
                     
@@ -205,7 +205,7 @@ export default function CustomerProfile() {
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <div className="overflow-x-auto">
-            <TabsList className="bg-white border flex-nowrap h-auto p-1 w-max min-w-full">
+            <TabsList className="bg-white dark:bg-slate-900 border flex-nowrap h-auto p-1 w-max min-w-full">
               <TabsTrigger value="overview">Client Info</TabsTrigger>
               <TabsTrigger value="services">Services</TabsTrigger>
               <TabsTrigger value="payments">Billing</TabsTrigger>

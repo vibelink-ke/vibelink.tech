@@ -152,7 +152,7 @@ export default function RoleForm({ role, onSubmit, onCancel, isLoading }) {
                   />
                   <Label
                     htmlFor={`category-${category}`}
-                    className="font-semibold text-slate-900 cursor-pointer flex-1"
+                    className="font-semibold text-slate-900 dark:text-slate-50 cursor-pointer flex-1"
                   >
                     {category}
                   </Label>
@@ -185,7 +185,7 @@ export default function RoleForm({ role, onSubmit, onCancel, isLoading }) {
       </Card>
 
       {/* Selected Permissions Summary */}
-      <Card className="bg-slate-50">
+      <Card className="bg-slate-50 dark:bg-slate-800/50">
         <CardHeader>
           <CardTitle className="text-sm">Selected Permissions</CardTitle>
         </CardHeader>

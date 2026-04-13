@@ -109,7 +109,7 @@ export default function NotificationCenter({ user, onClose }) {
         <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-slate-800 dark:to-slate-700 border-b border-slate-200 dark:border-slate-700 p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50 dark:text-white">
                 Notifications
               </h2>
               {unreadCount > 0 && (
@@ -209,7 +209,7 @@ export default function NotificationCenter({ user, onClose }) {
                       {/* Content */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
-                          <h3 className="font-semibold text-slate-900 dark:text-white text-sm">
+                          <h3 className="font-semibold text-slate-900 dark:text-slate-50 dark:text-white text-sm">
                             {notif.title}
                           </h3>
                           <Badge className={PRIORITY_COLORS[notif.priority]}>

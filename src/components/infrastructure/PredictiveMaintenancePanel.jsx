@@ -125,7 +125,7 @@ export default function PredictiveMaintenancePanel() {
                 {predictions.length === 0 ? (
                   <div className="text-center py-8">
                     <CheckCircle className="w-12 h-12 text-emerald-500 mx-auto mb-2" />
-                    <p className="text-slate-600">All equipment healthy</p>
+                    <p className="text-slate-600 dark:text-slate-400">All equipment healthy</p>
                     <p className="text-xs text-slate-500 mt-1">No maintenance issues predicted</p>
                   </div>
                 ) : (

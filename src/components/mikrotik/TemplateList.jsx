@@ -87,12 +87,12 @@ export default function TemplateList({ onEdit, onApply }) {
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <CardTitle className="text-base">{template.template_name}</CardTitle>
-                  <p className="text-xs text-slate-600 mt-2 line-clamp-2">
+                  <p className="text-xs text-slate-600 dark:text-slate-400 mt-2 line-clamp-2">
                     {template.description}
                   </p>
                 </div>
                 {!template.is_active && (
-                  <Badge variant="outline" className="bg-slate-100">
+                  <Badge variant="outline" className="bg-slate-100 dark:bg-slate-800">
                     Inactive
                   </Badge>
                 )}
@@ -110,12 +110,12 @@ export default function TemplateList({ onEdit, onApply }) {
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="bg-slate-50 p-2 rounded">
-                  <p className="text-slate-600">Usage</p>
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-2 rounded">
+                  <p className="text-slate-600 dark:text-slate-400">Usage</p>
                   <p className="font-semibold">{getApplicationCount(template.id)}</p>
                 </div>
-                <div className="bg-slate-50 p-2 rounded">
-                  <p className="text-slate-600">Created</p>
+                <div className="bg-slate-50 dark:bg-slate-800/50 p-2 rounded">
+                  <p className="text-slate-600 dark:text-slate-400">Created</p>
                   <p className="font-semibold text-xs">
                     {format(new Date(template.created_date), 'MMM d')}
                   </p>

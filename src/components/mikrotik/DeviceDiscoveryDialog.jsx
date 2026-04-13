@@ -133,7 +133,7 @@ export default function DeviceDiscoveryDialog({ open, onOpenChange }) {
               <div className="flex items-center justify-between">
                 <Label>Found {discoveredDevices.length} Device(s)</Label>
                 {selectedDevices.length > 0 && (
-                  <span className="text-xs text-slate-600">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">
                     {selectedDevices.length} selected
                   </span>
                 )}
@@ -161,13 +161,13 @@ export default function DeviceDiscoveryDialog({ open, onOpenChange }) {
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <p className="font-medium text-sm">{device.router_name}</p>
-                            <div className="flex items-center gap-1 bg-slate-100 px-2 py-0.5 rounded-full">
-                              <span className="text-xs text-slate-600">
+                            <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">
+                              <span className="text-xs text-slate-600 dark:text-slate-400">
                                 {device.confidence}% confidence
                               </span>
                             </div>
                           </div>
-                          <p className="text-xs text-slate-600">{device.ip_address}</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">{device.ip_address}</p>
                           <p className="text-xs text-slate-500">{device.mac_address}</p>
                         </div>
                         {selectedDevices.includes(device.ip_address) ? (

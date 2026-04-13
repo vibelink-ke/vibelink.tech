@@ -26,7 +26,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
       header: 'Router Name',
       accessor: 'router_name',
       cell: (row) => (
-        <div className="font-medium text-slate-900 dark:text-white">{row.router_name}</div>
+        <div className="font-medium text-slate-900 dark:text-slate-50 dark:text-white">{row.router_name}</div>
       ),
     },
     {
@@ -82,7 +82,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
             size="sm"
             onClick={() => onEdit(row)}
             title="Edit router"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <Edit2 className="w-4 h-4" />
           </Button>
@@ -92,7 +92,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
             onClick={() => onSync(row)}
             disabled={isSyncing || row.status === 'offline'}
             title="Sync now"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
           </Button>
@@ -104,7 +104,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
               setScheduleDialogOpen(true);
             }}
             title="Schedule syncs"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <Clock className="w-4 h-4" />
           </Button>
@@ -116,7 +116,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
               setHistoryDialogOpen(true);
             }}
             title="View sync history"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <History className="w-4 h-4" />
           </Button>
@@ -128,7 +128,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
               setBackupDialogOpen(true);
             }}
             title="Backup configuration"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <HardDrive className="w-4 h-4" />
           </Button>
@@ -137,7 +137,7 @@ export default function MikrotikList({ routers, isLoading, onEdit, onSync, isSyn
             size="sm"
             onClick={() => onGetScript(row)}
             title="Get Onboarding Script"
-            className="text-slate-600 hover:text-slate-900"
+            className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
           >
             <FileCode className="w-4 h-4" />
           </Button>

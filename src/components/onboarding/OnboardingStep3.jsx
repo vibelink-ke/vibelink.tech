@@ -53,23 +53,23 @@ export default function OnboardingStep3({ data, tenantId, onBack, onComplete }) 
         <CardContent className="space-y-6">
           <div className="space-y-4">
             <div className="border-l-4 border-indigo-500 pl-4">
-              <p className="text-sm text-slate-600 mb-1">Company Name</p>
-              <p className="text-lg font-semibold text-slate-900">{data.company_name}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Company Name</p>
+              <p className="text-lg font-semibold text-slate-900 dark:text-slate-50">{data.company_name}</p>
             </div>
 
             <div className="border-l-4 border-indigo-500 pl-4">
-              <p className="text-sm text-slate-600 mb-1">Subdomain</p>
-              <p className="text-lg font-semibold text-slate-900">https://{data.subdomain}.vibelink.com</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Subdomain</p>
+              <p className="text-lg font-semibold text-slate-900 dark:text-slate-50">https://{data.subdomain}.vibelink.com</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="border-l-4 border-indigo-500 pl-4">
-                <p className="text-sm text-slate-600 mb-1">City</p>
-                <p className="font-semibold text-slate-900">{data.city || '-'}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">City</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50">{data.city || '-'}</p>
               </div>
               <div className="border-l-4 border-indigo-500 pl-4">
-                <p className="text-sm text-slate-600 mb-1">Country</p>
-                <p className="font-semibold text-slate-900">{data.country || '-'}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Country</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50">{data.country || '-'}</p>
               </div>
             </div>
 

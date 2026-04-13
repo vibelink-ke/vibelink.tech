@@ -212,7 +212,7 @@ export default function TemplateEditor({ open, onOpenChange, template, onSuccess
                   <button
                     key={tag}
                     onClick={() => handleRemoveTag(tag)}
-                    className="px-2 py-1 text-xs bg-slate-200 text-slate-700 rounded-full hover:bg-slate-300"
+                    className="px-2 py-1 text-xs bg-slate-200 text-slate-700 dark:text-slate-300 rounded-full hover:bg-slate-300"
                   >
                     {tag} ✕
                   </button>

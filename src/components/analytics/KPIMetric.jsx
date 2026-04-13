@@ -27,10 +27,10 @@ export default function KPIMetric({ label, value, unit = '', trend = null, Icon 
     >
       <div className="flex items-start justify-between">
         <div className="flex-1">
-          <p className="text-sm text-slate-600 mb-2">{label}</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">{label}</p>
           <div className="flex items-baseline gap-2">
-            <h3 className="text-3xl font-bold text-slate-900">{value}</h3>
-            {unit && <span className="text-sm text-slate-600">{unit}</span>}
+            <h3 className="text-3xl font-bold text-slate-900 dark:text-slate-50">{value}</h3>
+            {unit && <span className="text-sm text-slate-600 dark:text-slate-400">{unit}</span>}
           </div>
           {trend !== null && (
             <div className={`flex items-center gap-1 mt-2 text-sm font-medium ${trend >= 0 ? 'text-green-600' : 'text-red-600'}`}>

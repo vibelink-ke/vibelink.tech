@@ -133,7 +133,7 @@ export default function ServiceUsageReport({ customers = [], plans = [] }) {
                   <Users className="w-5 h-5 text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Total Customers</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Total Customers</p>
                   <p className="text-2xl font-bold text-indigo-600">{totalCustomers}</p>
                 </div>
               </div>
@@ -149,7 +149,7 @@ export default function ServiceUsageReport({ customers = [], plans = [] }) {
                   <TrendingUp className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Active Customers</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Active Customers</p>
                   <p className="text-2xl font-bold text-emerald-600">{activeCustomers}</p>
                 </div>
               </div>
@@ -165,7 +165,7 @@ export default function ServiceUsageReport({ customers = [], plans = [] }) {
                   <Wifi className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Monthly Recurring Revenue</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Monthly Recurring Revenue</p>
                   <p className="text-2xl font-bold text-blue-600">${totalMRR.toLocaleString()}</p>
                 </div>
               </div>
@@ -261,11 +261,11 @@ export default function ServiceUsageReport({ customers = [], plans = [] }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-2 px-3 font-medium text-slate-600">Plan</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Total</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Active</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Adoption %</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Monthly Revenue</th>
+                    <th className="text-left py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Plan</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Total</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Active</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Adoption %</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Monthly Revenue</th>
                   </tr>
                 </thead>
                 <tbody>

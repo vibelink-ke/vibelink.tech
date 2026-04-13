@@ -132,7 +132,7 @@ export default function PaymentHistoryReport({ payments = [] }) {
                   <CheckCircle className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Success Rate</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Success Rate</p>
                   <p className="text-2xl font-bold text-emerald-600">{successRate}%</p>
                 </div>
               </div>
@@ -148,7 +148,7 @@ export default function PaymentHistoryReport({ payments = [] }) {
                   <Clock className="w-5 h-5 text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Total Collected</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Total Collected</p>
                   <p className="text-2xl font-bold text-indigo-600">${totalAmount.toLocaleString()}</p>
                 </div>
               </div>
@@ -164,7 +164,7 @@ export default function PaymentHistoryReport({ payments = [] }) {
                   <XCircle className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
-                  <p className="text-sm text-slate-600">Total Payments</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">Total Payments</p>
                   <p className="text-2xl font-bold text-blue-600">{payments.length}</p>
                 </div>
               </div>
@@ -235,12 +235,12 @@ export default function PaymentHistoryReport({ payments = [] }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-2 px-3 font-medium text-slate-600">Method</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Total</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Completed</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Failed</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Amount</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Success Rate</th>
+                    <th className="text-left py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Method</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Total</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Completed</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Failed</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Success Rate</th>
                   </tr>
                 </thead>
                 <tbody>

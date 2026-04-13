@@ -81,17 +81,17 @@ export default function PlanChangeDialog({
 
         <div className="space-y-6 mt-4">
           {/* Plan Change Summary */}
-          <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl">
+          <div className="flex items-center gap-4 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
             <div className="flex-1">
               <p className="text-sm text-slate-500 mb-1">Current Plan</p>
-              <p className="font-semibold text-slate-900">{oldPlan?.name || 'None'}</p>
-              <p className="text-sm text-slate-600">KES {oldPlan?.monthly_price || 0}/month</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{oldPlan?.name || 'None'}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">KES {oldPlan?.monthly_price || 0}/month</p>
             </div>
             <ArrowRight className="w-5 h-5 text-slate-400" />
             <div className="flex-1">
               <p className="text-sm text-slate-500 mb-1">New Plan</p>
-              <p className="font-semibold text-slate-900">{newPlan.name}</p>
-              <p className="text-sm text-slate-600">KES {newPlan.monthly_price}/month</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{newPlan.name}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">KES {newPlan.monthly_price}/month</p>
             </div>
           </div>
 

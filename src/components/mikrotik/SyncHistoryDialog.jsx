@@ -99,7 +99,7 @@ export default function SyncHistoryDialog({ open, onOpenChange, routerId }) {
                       size="sm"
                       onClick={() => rollbackMutation.mutate(log.id)}
                       disabled={rollbackMutation.isPending}
-                      className="text-slate-600 hover:text-slate-900"
+                      className="text-slate-600 dark:text-slate-400 hover:text-slate-900"
                     >
                       {rollbackMutation.isPending ? (
                         <Loader2 className="w-4 h-4 animate-spin" />

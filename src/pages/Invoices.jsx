@@ -121,7 +121,7 @@ export default function Invoices() {
       header: 'Invoice',
       cell: (row) => (
         <div>
-          <p className="font-medium text-slate-900">{row.invoice_number || `INV-${row.id?.slice(0,6)}`}</p>
+          <p className="font-medium text-slate-900 dark:text-slate-50">{row.invoice_number || `INV-${row.id?.slice(0,6)}`}</p>
           <p className="text-sm text-slate-500">{row.customer_name}</p>
         </div>
       )
@@ -129,7 +129,7 @@ export default function Invoices() {
     {
       header: 'Period',
       cell: (row) => (
-        <div className="text-sm text-slate-600">
+        <div className="text-sm text-slate-600 dark:text-slate-400">
           {row.billing_period_start && row.billing_period_end ? (
             <>
               {format(new Date(row.billing_period_start), 'MMM d')} -{' '}
@@ -142,7 +142,7 @@ export default function Invoices() {
     {
       header: 'Due Date',
       cell: (row) => (
-        <span className="text-slate-700">
+        <span className="text-slate-700 dark:text-slate-300">
           {row.due_date ? format(new Date(row.due_date), 'MMM d, yyyy') : '-'}
         </span>
       )
@@ -150,7 +150,7 @@ export default function Invoices() {
     {
       header: 'Amount',
       cell: (row) => (
-        <span className="font-semibold text-slate-900">KES {row.total_amount?.toFixed(2)}</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-50">KES {row.total_amount?.toFixed(2)}</span>
       )
     },
     {
@@ -194,7 +194,7 @@ export default function Invoices() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Invoices & Billing"
@@ -204,7 +204,7 @@ export default function Invoices() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="list" className="gap-2">
               <FileText className="w-4 h-4" /> All Invoices
             </TabsTrigger>
@@ -224,7 +224,7 @@ export default function Invoices() {
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-40 bg-white">
+                <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -464,7 +464,7 @@ Your ISP Team
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Invoices & Billing"
@@ -474,7 +474,7 @@ Your ISP Team
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="list" className="gap-2">
               <FileText className="w-4 h-4" /> All Invoices
             </TabsTrigger>
@@ -494,7 +494,7 @@ Your ISP Team
                 />
               </div>
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-full sm:w-40 bg-white">
+                <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900">
                   <Filter className="w-4 h-4 mr-2" />
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -751,15 +751,15 @@ function GenerateInvoicesContent({
                       </TableCell>
                       <TableCell>
                         <div>
-                          <p className="font-medium text-slate-900">{customer.full_name}</p>
+                          <p className="font-medium text-slate-900 dark:text-slate-50">{customer.full_name}</p>
                           <p className="text-sm text-slate-500">{customer.email}</p>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="text-slate-700">{plan?.name || customer.plan_name || '-'}</span>
+                        <span className="text-slate-700 dark:text-slate-300">{plan?.name || customer.plan_name || '-'}</span>
                       </TableCell>
                       <TableCell>
-                        <span className="font-semibold text-slate-900">KES {monthlyRate.toFixed(2)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-50">KES {monthlyRate.toFixed(2)}</span>
                       </TableCell>
                       <TableCell>
                         <span className={`font-medium ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
@@ -770,7 +770,7 @@ function GenerateInvoicesContent({
                         <StatusBadge status={customer.status} />
                       </TableCell>
                       <TableCell>
-                        <span className="text-slate-600">Day {customer.billing_cycle_day || 1}</span>
+                        <span className="text-slate-600 dark:text-slate-400">Day {customer.billing_cycle_day || 1}</span>
                       </TableCell>
                     </TableRow>
                   );
@@ -808,7 +808,7 @@ function GenerateInvoicesContent({
 
               {results.failed.length > 0 && (
                 <div className="space-y-2">
-                  <p className="font-medium text-slate-700">Failed Invoices:</p>
+                  <p className="font-medium text-slate-700 dark:text-slate-300">Failed Invoices:</p>
                   <div className="max-h-32 overflow-y-auto space-y-1">
                     {results.failed.map((item, i) => (
                       <div key={i} className="text-sm p-2 bg-rose-50 rounded-lg">
@@ -1014,14 +1014,14 @@ function InvoiceFormDialog({ open, onOpenChange, customers, onSubmit, isLoading 
             ))}
           </div>
 
-          <div className="bg-slate-50 rounded-xl p-4 space-y-2">
+          <div className="bg-slate-50 dark:bg-slate-800/50 rounded-xl p-4 space-y-2">
             <div className="flex justify-between text-sm">
-              <span className="text-slate-600">Subtotal</span>
+              <span className="text-slate-600 dark:text-slate-400">Subtotal</span>
               <span className="font-medium">KES {subtotal.toFixed(2)}</span>
             </div>
             {formData.tax_rate > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Tax ({formData.tax_rate}%)</span>
+                <span className="text-slate-600 dark:text-slate-400">Tax ({formData.tax_rate}%)</span>
                 <span className="font-medium">KES {taxAmount.toFixed(2)}</span>
               </div>
             )}
@@ -1067,16 +1067,16 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
         <div className="mt-6 space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-2xl font-bold text-slate-900">{invoice.invoice_number || `INV-${invoice.id?.slice(0,6)}`}</h3>
+              <h3 className="text-2xl font-bold text-slate-900 dark:text-slate-50">{invoice.invoice_number || `INV-${invoice.id?.slice(0,6)}`}</h3>
               <p className="text-slate-500">{invoice.customer_name}</p>
             </div>
             <StatusBadge status={invoice.status} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-3 bg-slate-50 rounded-lg">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <p className="text-sm text-slate-500">Billing Period</p>
-              <p className="font-medium text-slate-900">
+              <p className="font-medium text-slate-900 dark:text-slate-50">
                 {invoice.billing_period_start && invoice.billing_period_end ? (
                   <>
                     {format(new Date(invoice.billing_period_start), 'MMM d')} -{' '}
@@ -1085,9 +1085,9 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
                 ) : '-'}
               </p>
             </div>
-            <div className="p-3 bg-slate-50 rounded-lg">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <p className="text-sm text-slate-500">Due Date</p>
-              <p className="font-medium text-slate-900">
+              <p className="font-medium text-slate-900 dark:text-slate-50">
                 {invoice.due_date ? format(new Date(invoice.due_date), 'MMM d, yyyy') : '-'}
               </p>
             </div>
@@ -1095,12 +1095,12 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
 
           {invoice.items?.length > 0 && (
             <div className="space-y-3">
-              <h4 className="font-semibold text-slate-900">Line Items</h4>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Line Items</h4>
               <div className="space-y-2">
                 {invoice.items.map((item, i) => (
-                  <div key={i} className="flex justify-between p-3 bg-slate-50 rounded-lg">
+                  <div key={i} className="flex justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <div>
-                      <p className="font-medium text-slate-900">{item.description}</p>
+                      <p className="font-medium text-slate-900 dark:text-slate-50">{item.description}</p>
                       <p className="text-sm text-slate-500">{item.quantity} × KES {item.unit_price?.toFixed(2)}</p>
                     </div>
                     <p className="font-semibold">KES {item.total?.toFixed(2)}</p>
@@ -1129,8 +1129,8 @@ function InvoiceDetailsSheet({ invoice, open, onOpenChange }) {
 
           {invoice.notes && (
             <div className="space-y-2">
-              <h4 className="font-semibold text-slate-900">Notes</h4>
-              <p className="p-3 bg-slate-50 rounded-lg text-slate-700">{invoice.notes}</p>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Notes</h4>
+              <p className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-slate-700 dark:text-slate-300">{invoice.notes}</p>
             </div>
           )}
         </div>

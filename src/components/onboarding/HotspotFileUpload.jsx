@@ -164,8 +164,8 @@ export default function HotspotFileUpload({ hotspotId, hotspots, mikrotiks, onCo
                 </p>
               </div>
 
-              <div className="bg-slate-50 rounded-lg p-4 max-h-48 overflow-y-auto">
-                <p className="text-xs font-mono text-slate-600 whitespace-pre-wrap">
+              <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 max-h-48 overflow-y-auto">
+                <p className="text-xs font-mono text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
                   {generatedFile.configPreview}...
                 </p>
               </div>
@@ -224,7 +224,7 @@ export default function HotspotFileUpload({ hotspotId, hotspots, mikrotiks, onCo
                   <CheckCircle className="w-6 h-6 text-emerald-600" />
                 </div>
               </div>
-              <h3 className="font-semibold text-slate-900 mb-2">Upload Complete</h3>
+              <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-2">Upload Complete</h3>
               <p className="text-sm text-slate-500 mb-4">
                 Hotspot configuration has been successfully uploaded to MikroTik
               </p>

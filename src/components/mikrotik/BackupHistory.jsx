@@ -73,7 +73,7 @@ export default function BackupHistory({ routerId, routerName }) {
       case 'in_progress':
         return 'bg-blue-50 text-blue-700 border-blue-200';
       default:
-        return 'bg-slate-50 text-slate-700 border-slate-200';
+        return 'bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
     }
   };
 
@@ -122,7 +122,7 @@ export default function BackupHistory({ routerId, routerName }) {
                     <div className="flex items-start gap-3 flex-1">
                       <div className="mt-1">{getStatusIcon(backup.status)}</div>
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium text-slate-900 dark:text-slate-50">
                           {backup.backup_name}
                         </p>
                         <div className="flex flex-wrap gap-2 mt-2">
@@ -139,7 +139,7 @@ export default function BackupHistory({ routerId, routerName }) {
                           {format(new Date(backup.created_date), 'MMM d, yyyy · h:mm a')}
                         </p>
                         {backup.notes && (
-                          <p className="text-sm mt-2 text-slate-700">{backup.notes}</p>
+                          <p className="text-sm mt-2 text-slate-700 dark:text-slate-300">{backup.notes}</p>
                         )}
                       </div>
                     </div>

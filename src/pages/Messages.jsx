@@ -55,7 +55,7 @@ const typeColors = {
   service_update: 'bg-blue-50 text-blue-700',
   alert: 'bg-rose-50 text-rose-700',
   billing_reminder: 'bg-amber-50 text-amber-700',
-  general: 'bg-slate-100 text-slate-700',
+  general: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300',
 };
 
 export default function Messages() {
@@ -174,7 +174,7 @@ export default function Messages() {
   const smsEnabled = settings.find(s => s.key === 'sms_enabled')?.value === 'true';
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Messaging & Notifications"
@@ -184,7 +184,7 @@ export default function Messages() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="bulk" className="gap-2">
               <Mail className="w-4 h-4" /> Bulk Messages
             </TabsTrigger>
@@ -202,7 +202,7 @@ export default function Messages() {
                     <Send className="w-6 h-6 text-indigo-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{totalSent}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{totalSent}</p>
                     <p className="text-sm text-slate-500">Messages Sent</p>
                   </div>
                 </CardContent>
@@ -213,7 +213,7 @@ export default function Messages() {
                     <Users className="w-6 h-6 text-emerald-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{totalRecipients}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{totalRecipients}</p>
                     <p className="text-sm text-slate-500">Total Recipients</p>
                   </div>
                 </CardContent>
@@ -224,7 +224,7 @@ export default function Messages() {
                     <Mail className="w-6 h-6 text-purple-600" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold text-slate-900">{customers.filter(c => c.status === 'active').length}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{customers.filter(c => c.status === 'active').length}</p>
                     <p className="text-sm text-slate-500">Active Subscribers</p>
                   </div>
                 </CardContent>
@@ -242,7 +242,7 @@ export default function Messages() {
             {loadingMessages ? (
               <div className="space-y-4">
                 {[1, 2, 3].map(i => (
-                  <div key={i} className="h-24 bg-white rounded-2xl animate-pulse" />
+                  <div key={i} className="h-24 bg-white dark:bg-slate-900 rounded-2xl animate-pulse" />
                 ))}
               </div>
             ) : filteredMessages.length === 0 ? (
@@ -267,12 +267,12 @@ export default function Messages() {
                         <div className="flex items-start justify-between">
                           <div className="space-y-2">
                             <div className="flex items-center gap-3">
-                              <h3 className="font-semibold text-slate-900">{message.title}</h3>
+                              <h3 className="font-semibold text-slate-900 dark:text-slate-50">{message.title}</h3>
                               <span className={`px-2 py-1 rounded-full text-xs font-medium capitalize ${typeColors[message.type]}`}>
                                 {message.type?.replace('_', ' ')}
                               </span>
                             </div>
-                            <p className="text-slate-600 line-clamp-2">{message.content}</p>
+                            <p className="text-slate-600 dark:text-slate-400 line-clamp-2">{message.content}</p>
                             <div className="flex items-center gap-4 text-sm text-slate-500">
                               <span className="flex items-center gap-1">
                                 <Users className="w-4 h-4" />
@@ -339,18 +339,18 @@ export default function Messages() {
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: i * 0.05 }}
-                          className="p-3 bg-slate-50 rounded-lg"
+                          className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
                         >
                           <div className="flex items-start justify-between">
                             <div>
-                              <p className="font-medium text-slate-900">{log.recipient}</p>
+                              <p className="font-medium text-slate-900 dark:text-slate-50">{log.recipient}</p>
                               {log.customer_name && (
                                 <p className="text-sm text-slate-500">{log.customer_name}</p>
                               )}
                             </div>
                             <StatusBadge status={log.status} />
                           </div>
-                          <p className="text-sm text-slate-600 mt-2 line-clamp-2">{log.message}</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 line-clamp-2">{log.message}</p>
                           <p className="text-xs text-slate-400 mt-2">
                             {log.created_date ? format(new Date(log.created_date), 'MMM d, HH:mm') : '-'}
                           </p>
@@ -459,9 +459,9 @@ function SMSForm({ customers, onSend, isLoading, smsEnabled }) {
               </Select>
             </div>
             {formData.recipient && (
-              <div className="flex items-center gap-2 p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <Phone className="w-4 h-4 text-slate-500" />
-                <span className="text-sm text-slate-700">{formData.recipient}</span>
+                <span className="text-sm text-slate-700 dark:text-slate-300">{formData.recipient}</span>
               </div>
             )}
           </TabsContent>

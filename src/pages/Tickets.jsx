@@ -177,7 +177,7 @@ export default function Tickets() {
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
               row.priority === 'urgent' ? 'bg-rose-50' :
-              row.priority === 'high' ? 'bg-amber-50' : 'bg-slate-100'
+              row.priority === 'high' ? 'bg-amber-50' : 'bg-slate-100 dark:bg-slate-800'
             }`}>
               <Icon className={`w-5 h-5 ${
                 row.priority === 'urgent' ? 'text-rose-500' :
@@ -186,7 +186,7 @@ export default function Tickets() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <p className="font-medium text-slate-900">{row.ticket_number || `TKT-${row.id?.slice(0,6)}`}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-50">{row.ticket_number || `TKT-${row.id?.slice(0,6)}`}</p>
                 {row.escalated && (
                   <Badge variant="outline" className="bg-rose-50 text-rose-700 border-rose-200 text-xs">
                     <TrendingUp className="w-3 h-3 mr-1" />
@@ -210,7 +210,7 @@ export default function Tickets() {
       header: 'Customer',
       cell: (row) => (
         <div>
-          <p className="text-slate-700 font-medium">{row.customer_name}</p>
+          <p className="text-slate-700 dark:text-slate-300 font-medium">{row.customer_name}</p>
           {row.customer_email && (
             <p className="text-xs text-slate-500">{row.customer_email}</p>
           )}
@@ -225,7 +225,7 @@ export default function Tickets() {
             <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center">
               <User className="w-3 h-3 text-indigo-600" />
             </div>
-            <span className="text-sm text-slate-700">{row.assigned_to_name || row.assigned_to}</span>
+            <span className="text-sm text-slate-700 dark:text-slate-300">{row.assigned_to_name || row.assigned_to}</span>
           </div>
         ) : (
           <span className="text-sm text-slate-400 italic">Unassigned</span>
@@ -235,7 +235,7 @@ export default function Tickets() {
     {
       header: 'Category',
       cell: (row) => (
-        <span className="text-slate-600 capitalize">{row.category?.replace('_', ' ')}</span>
+        <span className="text-slate-600 dark:text-slate-400 capitalize">{row.category?.replace('_', ' ')}</span>
       )
     },
     {
@@ -299,7 +299,7 @@ export default function Tickets() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Support Tickets"
@@ -313,14 +313,14 @@ export default function Tickets() {
           <motion.div 
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
-            className="bg-white rounded-xl p-4 border border-slate-200"
+            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center">
                 <MessageSquare className="w-5 h-5 text-blue-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-slate-900">{ticketStats.open}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{ticketStats.open}</p>
                 <p className="text-xs text-slate-500">Open</p>
               </div>
             </div>
@@ -329,14 +329,14 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 }}
-            className="bg-white rounded-xl p-4 border border-slate-200"
+            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center">
                 <Clock className="w-5 h-5 text-amber-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-slate-900">{ticketStats.in_progress}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{ticketStats.in_progress}</p>
                 <p className="text-xs text-slate-500">In Progress</p>
               </div>
             </div>
@@ -345,14 +345,14 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-white rounded-xl p-4 border border-slate-200"
+            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center">
                 <AlertTriangle className="w-5 h-5 text-rose-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-slate-900">{ticketStats.urgent}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{ticketStats.urgent}</p>
                 <p className="text-xs text-slate-500">Urgent</p>
               </div>
             </div>
@@ -361,14 +361,14 @@ export default function Tickets() {
             initial={{ opacity: 0, y: 10 }} 
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.15 }}
-            className="bg-white rounded-xl p-4 border border-slate-200"
+            className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-700"
           >
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-lg bg-purple-50 flex items-center justify-center">
                 <TrendingUp className="w-5 h-5 text-purple-500" />
               </div>
               <div>
-                <p className="text-2xl font-bold text-slate-900">{ticketStats.escalated}</p>
+                <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{ticketStats.escalated}</p>
                 <p className="text-xs text-slate-500">Escalated</p>
               </div>
             </div>
@@ -385,7 +385,7 @@ export default function Tickets() {
             />
           </div>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white">
+            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
@@ -398,7 +398,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
           <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-            <SelectTrigger className="w-full sm:w-36 bg-white">
+            <SelectTrigger className="w-full sm:w-36 bg-white dark:bg-slate-900">
               <SelectValue placeholder="Priority" />
             </SelectTrigger>
             <SelectContent>
@@ -410,7 +410,7 @@ export default function Tickets() {
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white">
+            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
             <SelectContent>
@@ -772,7 +772,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
           {/* Header */}
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-xl font-bold text-slate-900">{ticket.ticket_number}</h3>
+              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-50">{ticket.ticket_number}</h3>
               <p className="text-sm text-slate-500">
                 Created {ticket.created_date ? format(new Date(ticket.created_date), 'MMM d, yyyy HH:mm') : '-'}
               </p>
@@ -829,8 +829,8 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                   {ticket.customer_name?.charAt(0).toUpperCase()}
                 </div>
                 <div>
-                  <p className="font-semibold text-slate-900">{ticket.customer_name}</p>
-                  <div className="flex items-center gap-3 text-sm text-slate-600">
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{ticket.customer_name}</p>
+                  <div className="flex items-center gap-3 text-sm text-slate-600 dark:text-slate-400">
                     {ticket.customer_email && (
                       <span className="flex items-center gap-1">
                         <Mail className="w-3 h-3" /> {ticket.customer_email}
@@ -852,7 +852,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
               <div className="mt-3 pt-3 border-t border-indigo-100 grid grid-cols-3 gap-3 text-sm">
                 <div>
                   <p className="text-slate-500">Plan</p>
-                  <p className="font-medium text-slate-900">{customer.plan_name || 'No plan'}</p>
+                  <p className="font-medium text-slate-900 dark:text-slate-50">{customer.plan_name || 'No plan'}</p>
                 </div>
                 <div>
                   <p className="text-slate-500">Status</p>
@@ -871,7 +871,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                 <div className="flex items-center gap-2 text-sm">
                   <Shield className="w-4 h-4 text-indigo-600" />
                   <span className="font-medium text-indigo-900">SLA Policy:</span>
-                  <span className="text-slate-700">{sla.name}</span>
+                  <span className="text-slate-700 dark:text-slate-300">{sla.name}</span>
                 </div>
               </div>
             )}
@@ -897,19 +897,19 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
 
           {/* Subject & Description */}
           <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900">Subject</h4>
-            <p className="p-3 bg-slate-50 rounded-lg text-slate-700">{ticket.subject}</p>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-50">Subject</h4>
+            <p className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-slate-700 dark:text-slate-300">{ticket.subject}</p>
           </div>
 
           <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900">Description</h4>
-            <p className="p-3 bg-slate-50 rounded-lg text-slate-700 whitespace-pre-wrap">{ticket.description}</p>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-50">Description</h4>
+            <p className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{ticket.description}</p>
           </div>
 
           {/* Internal Notes */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <h4 className="font-semibold text-slate-900 flex items-center gap-2">
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50 flex items-center gap-2">
                 <MessageCircle className="w-4 h-4" />
                 Internal Notes ({notes.length})
               </h4>
@@ -925,7 +925,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                   className={`p-3 rounded-lg border ${
                     note.note_type === 'escalation' ? 'bg-rose-50 border-rose-200' :
                     note.note_type === 'assignment' ? 'bg-blue-50 border-blue-200' :
-                    'bg-slate-50 border-slate-200'
+                    'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
                   }`}
                 >
                   <div className="flex items-start gap-2">
@@ -936,7 +936,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                     </Avatar>
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium text-slate-900">{note.author_name || note.author_email}</span>
+                        <span className="text-sm font-medium text-slate-900 dark:text-slate-50">{note.author_name || note.author_email}</span>
                         <span className="text-xs text-slate-500">
                           {note.created_date && format(new Date(note.created_date), 'MMM d, HH:mm')}
                         </span>
@@ -946,7 +946,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                           </Badge>
                         )}
                       </div>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{note.note}</p>
+                      <p className="text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">{note.note}</p>
                     </div>
                   </div>
                 </motion.div>
@@ -1040,15 +1040,15 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
           {/* Resolution */}
           {ticket.resolution && (
             <div className="space-y-3">
-              <h4 className="font-semibold text-slate-900">Resolution</h4>
-              <p className="p-3 bg-emerald-50 rounded-lg text-slate-700 border border-emerald-100">{ticket.resolution}</p>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Resolution</h4>
+              <p className="p-3 bg-emerald-50 rounded-lg text-slate-700 dark:text-slate-300 border border-emerald-100">{ticket.resolution}</p>
             </div>
           )}
 
           {/* Resolve Form */}
           {ticket.status !== 'resolved' && ticket.status !== 'closed' && (
             <div className="space-y-3 pt-4 border-t">
-              <h4 className="font-semibold text-slate-900">Resolve Ticket</h4>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Resolve Ticket</h4>
               <Textarea
                 value={resolution}
                 onChange={(e) => setResolution(e.target.value)}
@@ -1067,7 +1067,7 @@ function TicketDetailsSheet({ ticket, open, onOpenChange, onUpdate, users, custo
                 <Button 
                   variant="outline"
                   onClick={() => handleStatusChange('closed')}
-                  className="text-slate-600"
+                  className="text-slate-600 dark:text-slate-400"
                 >
                   <XCircle className="w-4 h-4 mr-2" />
                   Close

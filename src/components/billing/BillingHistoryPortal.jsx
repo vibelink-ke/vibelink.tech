@@ -86,7 +86,7 @@ export default function BillingHistoryPortal({ customerEmail }) {
               </CardHeader>
               <CardContent>
                 <p className="font-medium">{subscription.plan_name}</p>
-                <p className="text-sm text-slate-600">KES {subscription.monthly_price.toLocaleString()}/month</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">KES {subscription.monthly_price.toLocaleString()}/month</p>
                 <Badge className="mt-2" variant={subscription.status === 'active' ? 'default' : 'secondary'}>
                   {subscription.status}
                 </Badge>
@@ -134,8 +134,8 @@ export default function BillingHistoryPortal({ customerEmail }) {
                 <CardContent className="py-4">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-4 flex-1">
-                      <div className="p-2 bg-slate-100 rounded-lg">
-                        <FileText className="w-5 h-5 text-slate-600" />
+                      <div className="p-2 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                        <FileText className="w-5 h-5 text-slate-600 dark:text-slate-400" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <p className="font-medium">{invoice.invoice_number}</p>
@@ -191,19 +191,19 @@ export default function BillingHistoryPortal({ customerEmail }) {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div>
-                  <p className="text-slate-600">Issue Date</p>
+                  <p className="text-slate-600 dark:text-slate-400">Issue Date</p>
                   <p className="font-medium">{new Date(selectedInvoice.created_date).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-slate-600">Due Date</p>
+                  <p className="text-slate-600 dark:text-slate-400">Due Date</p>
                   <p className="font-medium">{new Date(selectedInvoice.due_date).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-slate-600">Status</p>
+                  <p className="text-slate-600 dark:text-slate-400">Status</p>
                   <StatusBadge status={selectedInvoice.status} />
                 </div>
                 <div>
-                  <p className="text-slate-600">Amount</p>
+                  <p className="text-slate-600 dark:text-slate-400">Amount</p>
                   <p className="font-bold">KES {selectedInvoice.total_amount.toLocaleString()}</p>
                 </div>
               </div>
@@ -222,7 +222,7 @@ export default function BillingHistoryPortal({ customerEmail }) {
                 </div>
               )}
 
-              <div className="bg-slate-50 p-3 rounded-lg space-y-2">
+              <div className="bg-slate-50 dark:bg-slate-800/50 p-3 rounded-lg space-y-2">
                 <div className="flex justify-between text-sm">
                   <span>Subtotal</span>
                   <span>KES {selectedInvoice.subtotal.toLocaleString()}</span>

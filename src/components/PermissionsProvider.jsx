@@ -92,7 +92,7 @@ export function withPermission(WrappedComponent, requiredPermission) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m0 0v2m0-2h2m-2 0H10m4-6V5a2 2 0 00-2-2H6a2 2 0 00-2 2v14a2 2 0 002 2h8a2 2 0 002-2V9z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-slate-900 mb-1">Access Denied</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-1">Access Denied</h3>
           <p className="text-slate-500">You don't have permission to view this content.</p>
         </div>
       );

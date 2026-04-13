@@ -156,7 +156,7 @@ export default function OnboardingTour({ user, updateMe, onComplete }) {
           {/* Header */}
           <div className="flex items-start justify-between mb-3">
             <div>
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-slate-50 dark:text-white">
                 {step.title}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">

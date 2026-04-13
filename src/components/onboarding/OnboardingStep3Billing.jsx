@@ -30,20 +30,20 @@ export default function OnboardingStep3Billing({ formData, setFormData }) {
 
       <div className="space-y-4">
         {/* Monthly Rate */}
-        <Card className="bg-slate-50 border-slate-200">
+        <Card className="bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700">
           <CardContent className="pt-4">
             <div className="space-y-2">
               <Label>Monthly Service Rate</Label>
               <div className="relative">
-                <span className="absolute left-3 top-2.5 text-slate-600">KES</span>
+                <span className="absolute left-3 top-2.5 text-slate-600 dark:text-slate-400">KES</span>
                 <input
                   type="number"
                   value={formData.monthly_rate}
                   readOnly
-                  className="w-full pl-12 pr-4 py-2 border border-slate-300 rounded-md bg-white text-slate-900 font-semibold"
+                  className="w-full pl-12 pr-4 py-2 border border-slate-300 rounded-md bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 font-semibold"
                 />
               </div>
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 Based on the selected service plan
               </p>
             </div>
@@ -71,7 +71,7 @@ export default function OnboardingStep3Billing({ formData, setFormData }) {
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-slate-600">
+          <p className="text-xs text-slate-600 dark:text-slate-400">
             Invoice will be generated on the selected day each month
           </p>
         </div>
@@ -84,15 +84,15 @@ export default function OnboardingStep3Billing({ formData, setFormData }) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-600 mb-1">Monthly Charge</p>
-              <p className="text-2xl font-bold text-slate-900">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Monthly Charge</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                 KES {monthlyRate.toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </p>
             </div>
-            <div className="p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-600 mb-1">Daily Rate</p>
-              <p className="text-2xl font-bold text-slate-900">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Daily Rate</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
                 KES {dailyRate.toLocaleString('en-US', { maximumFractionDigits: 2 })}
               </p>
             </div>

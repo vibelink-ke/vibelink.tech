@@ -81,22 +81,22 @@ export default function OnboardingStep4Review({
             <>
               <div className="flex items-start justify-between">
                 <div>
-                  <p className="font-semibold text-slate-900">{selectedPlan.name}</p>
-                  <p className="text-sm text-slate-600">{selectedPlan.description}</p>
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">{selectedPlan.name}</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{selectedPlan.description}</p>
                 </div>
                 <Badge>{selectedPlan.tier}</Badge>
               </div>
               <div className="grid grid-cols-3 gap-3 pt-3 border-t">
                 <div>
-                  <p className="text-xs text-slate-600">Download</p>
-                  <p className="text-lg font-semibold text-slate-900">{selectedPlan.download_speed} Mbps</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Download</p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-slate-50">{selectedPlan.download_speed} Mbps</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Upload</p>
-                  <p className="text-lg font-semibold text-slate-900">{selectedPlan.upload_speed} Mbps</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Upload</p>
+                  <p className="text-lg font-semibold text-slate-900 dark:text-slate-50">{selectedPlan.upload_speed} Mbps</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Price</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Price</p>
                   <p className="text-lg font-semibold text-indigo-600">
                     KES {selectedPlan.monthly_price.toLocaleString()}
                   </p>
@@ -104,7 +104,7 @@ export default function OnboardingStep4Review({
               </div>
             </>
           ) : (
-            <p className="text-slate-600">No service plan selected</p>
+            <p className="text-slate-600 dark:text-slate-400">No service plan selected</p>
           )}
         </CardContent>
       </Card>
@@ -123,25 +123,25 @@ export default function OnboardingStep4Review({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid gap-3">
-            <div className="p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-600 mb-1">Router / MikroTik</p>
-              <p className="font-semibold text-slate-900">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Router / MikroTik</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">
                 {selectedMikrotik
                   ? `${selectedMikrotik.router_name || selectedMikrotik.name}`
                   : 'Not assigned'}
               </p>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-slate-50 rounded-lg">
-                <p className="text-xs text-slate-600 mb-1">IP Address</p>
-                <p className="font-semibold text-slate-900 font-mono">{formData.ip_address}</p>
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">IP Address</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50 font-mono">{formData.ip_address}</p>
                 {formData.ip_address && !isValid.ip && (
                   <p className="text-xs text-rose-600 mt-1">Invalid format</p>
                 )}
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
-                <p className="text-xs text-slate-600 mb-1">MAC Address</p>
-                <p className="font-semibold text-slate-900 font-mono text-sm">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+                <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">MAC Address</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50 font-mono text-sm">
                   {formData.mac_address || 'Auto-detect'}
                 </p>
               </div>
@@ -164,17 +164,17 @@ export default function OnboardingStep4Review({
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-600 mb-1">Monthly Charge</p>
-              <p className="text-xl font-semibold text-slate-900">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Monthly Charge</p>
+              <p className="text-xl font-semibold text-slate-900 dark:text-slate-50">
                 KES {parseFloat(formData.monthly_rate).toLocaleString('en-US', {
                   maximumFractionDigits: 2,
                 })}
               </p>
             </div>
-            <div className="p-3 bg-slate-50 rounded-lg">
-              <p className="text-xs text-slate-600 mb-1">Billing Date</p>
-              <p className="text-xl font-semibold text-slate-900">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
+              <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">Billing Date</p>
+              <p className="text-xl font-semibold text-slate-900 dark:text-slate-50">
                 Day {formData.billing_cycle_day}
               </p>
             </div>

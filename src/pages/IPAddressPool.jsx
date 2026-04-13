@@ -190,31 +190,31 @@ export default function IPAddressPool() {
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">ID</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Network</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Subnet</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Title</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Comment</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">NAS</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Total Addresses</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Clients Range</th>
-                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700">Netmask</th>
-                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700">Actions</th>
+                <tr className="border-b border-slate-200 dark:border-slate-700">
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">ID</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Network</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Subnet</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Title</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Comment</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">NAS</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Total Addresses</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Clients Range</th>
+                  <th className="text-left py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Netmask</th>
+                  <th className="text-center py-3 px-4 text-sm font-semibold text-slate-700 dark:text-slate-300">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredNetworks.map((network) => (
-                  <tr key={network.id} className="border-b border-slate-100 hover:bg-slate-50">
-                    <td className="py-3 px-4 text-sm text-slate-600">{network.id}</td>
-                    <td className="py-3 px-4 text-sm font-medium text-slate-900">{network.network}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{network.subnet}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{network.title}</td>
+                  <tr key={network.id} className="border-b border-slate-100 dark:border-slate-800 hover:bg-slate-50">
+                    <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{network.id}</td>
+                    <td className="py-3 px-4 text-sm font-medium text-slate-900 dark:text-slate-50">{network.network}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{network.subnet}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{network.title}</td>
                     <td className="py-3 px-4 text-sm text-slate-500">{network.comment || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{network.nas || '-'}</td>
-                    <td className="py-3 px-4 text-sm text-slate-600">{network.total_addresses || '-'}</td>
-                    <td className="py-3 px-4 text-sm font-mono text-slate-600">{network.clients_host_range || '-'}</td>
-                    <td className="py-3 px-4 text-sm font-mono text-slate-600">{network.netmask || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{network.nas || '-'}</td>
+                    <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">{network.total_addresses || '-'}</td>
+                    <td className="py-3 px-4 text-sm font-mono text-slate-600 dark:text-slate-400">{network.clients_host_range || '-'}</td>
+                    <td className="py-3 px-4 text-sm font-mono text-slate-600 dark:text-slate-400">{network.netmask || '-'}</td>
                     <td className="py-3 px-4 text-center">
                       <div className="flex justify-center gap-2">
                         <Button
@@ -309,7 +309,7 @@ export default function IPAddressPool() {
                   placeholder="e.g., 255.255.255.0"
                   value={formData.netmask}
                   readOnly
-                  className="bg-slate-50"
+                  className="bg-slate-50 dark:bg-slate-800/50"
                 />
               </div>
             </div>
@@ -338,7 +338,7 @@ export default function IPAddressPool() {
                   placeholder="e.g., 256"
                   value={formData.total_addresses}
                   readOnly
-                  className="bg-slate-50"
+                  className="bg-slate-50 dark:bg-slate-800/50"
                 />
               </div>
               <div className="space-y-2">
@@ -347,7 +347,7 @@ export default function IPAddressPool() {
                   placeholder="e.g., [10.100.0.1 - 10.100.255.254]"
                   value={formData.clients_host_range}
                   readOnly
-                  className="bg-slate-50"
+                  className="bg-slate-50 dark:bg-slate-800/50"
                 />
               </div>
             </div>

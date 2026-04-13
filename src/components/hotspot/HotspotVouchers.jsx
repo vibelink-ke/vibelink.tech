@@ -144,7 +144,7 @@ export default function HotspotVouchers() {
       header: 'Code',
       cell: (row) => (
         <div>
-          <span className="font-mono font-semibold text-slate-900 text-lg">{row.code}</span>
+          <span className="font-mono font-semibold text-slate-900 dark:text-slate-50 text-lg">{row.code}</span>
           {row.batch_id && <p className="text-xs text-slate-500 mt-0.5">Batch: {row.batch_id.slice(-8)}</p>}
         </div>
       )
@@ -153,14 +153,14 @@ export default function HotspotVouchers() {
       header: 'Plan',
       cell: (row) => (
         <div>
-          <p className="font-medium text-slate-900">{row.plan_name || '-'}</p>
+          <p className="font-medium text-slate-900 dark:text-slate-50">{row.plan_name || '-'}</p>
           <p className="text-xs text-slate-500">{row.duration_minutes} min • {row.bandwidth_limit} Mbps</p>
         </div>
       )
     },
     {
       header: 'Price',
-      cell: (row) => <span className="font-medium text-slate-900">KES {row.price}</span>
+      cell: (row) => <span className="font-medium text-slate-900 dark:text-slate-50">KES {row.price}</span>
     },
     {
       header: 'Status',
@@ -217,7 +217,7 @@ export default function HotspotVouchers() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Vouchers</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Vouchers</h3>
           <p className="text-sm text-slate-500">{filteredVouchers.length} of {vouchers.length} vouchers</p>
         </div>
         <div className="flex gap-2">

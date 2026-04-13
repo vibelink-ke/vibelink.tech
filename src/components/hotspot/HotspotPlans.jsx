@@ -56,7 +56,7 @@ export default function HotspotPlans() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Hotspot Plans</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Hotspot Plans</h3>
           <p className="text-sm text-slate-500">{plans.length} plans available</p>
         </div>
         <Button onClick={() => { setEditingPlan(null); setShowForm(true); }} className="bg-indigo-600 hover:bg-indigo-700">
@@ -67,7 +67,7 @@ export default function HotspotPlans() {
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1, 2, 3].map(i => <div key={i} className="h-48 bg-white rounded-2xl animate-pulse" />)}
+          {[1, 2, 3].map(i => <div key={i} className="h-48 bg-white dark:bg-slate-900 rounded-2xl animate-pulse" />)}
         </div>
       ) : plans.length === 0 ? (
         <EmptyState
@@ -107,7 +107,7 @@ export default function HotspotPlans() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2 text-slate-600">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                       <Clock className="w-4 h-4" />
                       {plan.duration_minutes} minutes
                     </div>
@@ -116,11 +116,11 @@ export default function HotspotPlans() {
                     </div>
                   </div>
                   <div className="space-y-2 text-sm">
-                    <div className="flex items-center gap-2 text-slate-600">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                       <Zap className="w-4 h-4" />
                       {plan.bandwidth_limit} Mbps
                     </div>
-                    <div className="flex items-center gap-2 text-slate-600">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                       <Database className="w-4 h-4" />
                       {plan.data_limit_mb > 0 ? `${plan.data_limit_mb} MB` : 'Unlimited'}
                     </div>
@@ -204,7 +204,7 @@ function PlanFormDialog({ open, onOpenChange, plan, onSubmit, isLoading }) {
             <Label>Description</Label>
             <Textarea value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} rows={2} />
           </div>
-          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <Label>Active</Label>
             <Switch checked={formData.is_active} onCheckedChange={(v) => setFormData({...formData, is_active: v})} />
           </div>

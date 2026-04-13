@@ -97,7 +97,7 @@ export default function TicketNotifications({ customerId }) {
       <DropdownMenuContent align="end" className="w-80">
         <div className="p-3 border-b">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900">Notifications</h3>
+            <h3 className="font-semibold text-slate-900 dark:text-slate-50">Notifications</h3>
             {notifications.length > 0 && (
               <Button
                 variant="ghost"
@@ -131,10 +131,10 @@ export default function TicketNotifications({ customerId }) {
                       {getIcon(notification.type, notification.ticket)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900 mb-0.5">
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-50 mb-0.5">
                         {notification.ticket.ticket_number}
                       </p>
-                      <p className="text-xs text-slate-600 line-clamp-2">
+                      <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2">
                         {getNotificationMessage(notification.type, notification.ticket)}
                       </p>
                       <p className="text-xs text-slate-400 mt-1">

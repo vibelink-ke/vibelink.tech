@@ -65,7 +65,7 @@ export default function OnboardingStep1({ data, onNext }) {
               <Globe className="w-4 h-4" />
               Subdomain *
             </Label>
-            <div className="flex items-center mt-2 bg-slate-50 rounded-lg border border-input px-3">
+            <div className="flex items-center mt-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-input px-3">
               <span className="text-slate-500 text-sm">https://</span>
               <Input
                 id="subdomain"

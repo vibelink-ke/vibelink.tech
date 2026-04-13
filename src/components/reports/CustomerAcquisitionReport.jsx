@@ -146,7 +146,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
                   <Users className="w-5 h-5 text-indigo-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Total Acquisitions</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Total Acquisitions</p>
                   <p className="text-2xl font-bold text-indigo-600">{totalNewCustomers}</p>
                 </div>
               </div>
@@ -162,7 +162,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
                   <DollarSign className="w-5 h-5 text-emerald-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Avg CAC</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Avg CAC</p>
                   <p className="text-2xl font-bold text-emerald-600">${avgCAC.toLocaleString()}</p>
                 </div>
               </div>
@@ -178,7 +178,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
                   <TrendingUp className="w-5 h-5 text-blue-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">Avg LTV</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">Avg LTV</p>
                   <p className="text-2xl font-bold text-blue-600">${totalLTV.toLocaleString()}</p>
                 </div>
               </div>
@@ -194,7 +194,7 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
                   <Calendar className="w-5 h-5 text-purple-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-slate-600">LTV/CAC Ratio</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400">LTV/CAC Ratio</p>
                   <p className="text-2xl font-bold text-purple-600">
                     {avgCAC > 0 ? (totalLTV / avgCAC).toFixed(1) : '0'}x
                   </p>
@@ -268,12 +268,12 @@ export default function CustomerAcquisitionReport({ customers = [], payments = [
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-2 px-3 font-medium text-slate-600">Plan</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Acquisitions</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Retention %</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">CAC</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">LTV</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">LTV/CAC</th>
+                    <th className="text-left py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Plan</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Acquisitions</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Retention %</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">CAC</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">LTV</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">LTV/CAC</th>
                   </tr>
                 </thead>
                 <tbody>

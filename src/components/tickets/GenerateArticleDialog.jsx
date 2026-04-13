@@ -136,8 +136,8 @@ Make it professional and helpful for future customers with similar issues.`,
               <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-4">
                 <FileText className="w-8 h-8 text-indigo-600" />
               </div>
-              <h3 className="font-semibold text-slate-900 mb-2">Ready to Generate</h3>
-              <p className="text-sm text-slate-600 mb-4 max-w-md mx-auto">
+              <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-2">Ready to Generate</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 max-w-md mx-auto">
                 Our AI will analyze the ticket resolution and create a comprehensive help article
               </p>
               <Button

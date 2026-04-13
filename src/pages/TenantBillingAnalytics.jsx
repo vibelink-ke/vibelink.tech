@@ -99,7 +99,7 @@ export default function TenantBillingAnalytics() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-800/50 p-6">
       <div className="max-w-7xl mx-auto">
         <PageHeader
           title="Billing Analytics"
@@ -112,10 +112,10 @@ export default function TenantBillingAnalytics() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Total Revenue</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Total Revenue</p>
                   <DollarSign className="w-4 h-4 text-green-600" />
                 </div>
-                <p className="text-3xl font-bold text-slate-900">
+                <p className="text-3xl font-bold text-slate-900 dark:text-slate-50">
                   KES {(totalRevenue / 1000).toFixed(1)}K
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -129,7 +129,7 @@ export default function TenantBillingAnalytics() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Amount Due</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Amount Due</p>
                   <AlertCircle className={`w-4 h-4 ${totalDue > 0 ? 'text-red-600' : 'text-green-600'}`} />
                 </div>
                 <p className={`text-3xl font-bold ${totalDue > 0 ? 'text-red-600' : 'text-slate-900'}`}>
@@ -146,10 +146,10 @@ export default function TenantBillingAnalytics() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Active Tenants</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Active Tenants</p>
                   <Users className="w-4 h-4 text-indigo-600" />
                 </div>
-                <p className="text-3xl font-bold text-slate-900">
+                <p className="text-3xl font-bold text-slate-900 dark:text-slate-50">
                   {activeTenants}
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -163,10 +163,10 @@ export default function TenantBillingAnalytics() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600">Collection Rate</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Collection Rate</p>
                   <TrendingUp className="w-4 h-4 text-blue-600" />
                 </div>
-                <p className="text-3xl font-bold text-slate-900">
+                <p className="text-3xl font-bold text-slate-900 dark:text-slate-50">
                   {allInvoices.length > 0 ? Math.round((invoiceStatus.paid / allInvoices.length) * 100) : 0}%
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
@@ -224,26 +224,26 @@ export default function TenantBillingAnalytics() {
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: idx * 0.05 }}
-                      className="flex items-center justify-between p-4 rounded-lg border border-slate-200 hover:bg-slate-50"
+                      className="flex items-center justify-between p-4 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50"
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <p className="font-semibold text-slate-900">{tenant.name}</p>
+                          <p className="font-semibold text-slate-900 dark:text-slate-50">{tenant.name}</p>
                           <Badge className={`bg-${tenant.status === 'active' ? 'green' : 'slate'}-100 text-${tenant.status === 'active' ? 'green' : 'slate'}-800`}>
                             {tenant.status}
                           </Badge>
-                          <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                          <span className="text-xs text-slate-500 bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded">
                             {tenant.plan}
                           </span>
                         </div>
-                        <div className="flex gap-4 text-sm text-slate-600">
+                        <div className="flex gap-4 text-sm text-slate-600 dark:text-slate-400">
                           <span>{tenant.paymentCount} payments</span>
                           <span>{tenant.invoiceCount} invoices</span>
                         </div>
                       </div>
 
                       <div className="text-right">
-                        <p className="font-semibold text-slate-900">
+                        <p className="font-semibold text-slate-900 dark:text-slate-50">
                           KES {tenant.revenue.toLocaleString('en-KE')}
                         </p>
                         {tenant.outstanding > 0 && (

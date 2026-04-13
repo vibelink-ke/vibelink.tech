@@ -87,7 +87,7 @@ export default function MonthlyRevenueReport({ payments = [], invoices = [] }) {
           <Card>
             <CardContent className="pt-6">
               <div className="text-center">
-                <p className="text-sm text-slate-600 mb-1">Total Revenue</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Total Revenue</p>
                 <p className="text-3xl font-bold text-indigo-600">${totalRevenue.toLocaleString()}</p>
                 <p className="text-xs text-slate-500 mt-2">{monthCount} months</p>
               </div>
@@ -99,7 +99,7 @@ export default function MonthlyRevenueReport({ payments = [], invoices = [] }) {
           <Card>
             <CardContent className="pt-6">
               <div className="text-center">
-                <p className="text-sm text-slate-600 mb-1">Avg Monthly Revenue</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Avg Monthly Revenue</p>
                 <p className="text-3xl font-bold text-emerald-600">${avgMonthlyRevenue.toLocaleString()}</p>
                 <p className="text-xs text-slate-500 mt-2">Per month</p>
               </div>
@@ -111,7 +111,7 @@ export default function MonthlyRevenueReport({ payments = [], invoices = [] }) {
           <Card>
             <CardContent className="pt-6">
               <div className="text-center">
-                <p className="text-sm text-slate-600 mb-1">Avg Collection Rate</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Avg Collection Rate</p>
                 <p className="text-3xl font-bold text-blue-600">
                   {(revenueData.reduce((sum, d) => sum + d.collectionRate, 0) / revenueData.length).toFixed(1)}%
                 </p>
@@ -166,11 +166,11 @@ export default function MonthlyRevenueReport({ payments = [], invoices = [] }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b">
-                    <th className="text-left py-2 px-3 font-medium text-slate-600">Month</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Invoiced</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Collected</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Collection %</th>
-                    <th className="text-right py-2 px-3 font-medium text-slate-600">Transactions</th>
+                    <th className="text-left py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Month</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Invoiced</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Collected</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Collection %</th>
+                    <th className="text-right py-2 px-3 font-medium text-slate-600 dark:text-slate-400">Transactions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -180,7 +180,7 @@ export default function MonthlyRevenueReport({ payments = [], invoices = [] }) {
                       <td className="py-2 px-3 text-right">${row.invoiced.toLocaleString()}</td>
                       <td className="py-2 px-3 text-right font-semibold text-indigo-600">${row.revenue.toLocaleString()}</td>
                       <td className="py-2 px-3 text-right">{row.collectionRate}%</td>
-                      <td className="py-2 px-3 text-right text-slate-600">{row.transactionCount}</td>
+                      <td className="py-2 px-3 text-right text-slate-600 dark:text-slate-400">{row.transactionCount}</td>
                     </tr>
                   ))}
                 </tbody>

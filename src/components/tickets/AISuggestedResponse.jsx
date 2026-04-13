@@ -121,7 +121,7 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
               <CardContent className="pt-4 space-y-4">
                 {/* Suggested Response */}
                 <div>
-                  <label className="text-sm font-semibold text-slate-900 dark:text-white block mb-2">
+                  <label className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white block mb-2">
                     Suggested Response
                   </label>
                   <div className="bg-slate-50 dark:bg-slate-700 p-4 rounded-lg text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
@@ -150,7 +150,7 @@ export default function AISuggestedResponse({ ticket, onApplyResponse, onAutoRes
                 {/* Recommended Actions */}
                 {aiResponse.recommended_actions && aiResponse.recommended_actions.length > 0 && (
                   <div>
-                    <label className="text-sm font-semibold text-slate-900 dark:text-white block mb-2">
+                    <label className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white block mb-2">
                       Recommended Actions
                     </label>
                     <ul className="space-y-2">

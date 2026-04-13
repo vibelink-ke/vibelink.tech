@@ -7,11 +7,11 @@ import { FileText, Download, Eye, AlertCircle } from 'lucide-react';
 import { format } from 'date-fns';
 
 const statusColors = {
-  draft: 'bg-slate-100 text-slate-800',
+  draft: 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200',
   sent: 'bg-blue-100 text-blue-800',
   paid: 'bg-green-100 text-green-800',
   overdue: 'bg-red-100 text-red-800',
-  cancelled: 'bg-slate-100 text-slate-600'
+  cancelled: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
 };
 
 export default function InvoiceTable({ invoices, isLoading, onViewInvoice, onDownloadInvoice }) {
@@ -31,7 +31,7 @@ export default function InvoiceTable({ invoices, isLoading, onViewInvoice, onDow
         <CardContent className="py-12">
           <div className="text-center">
             <FileText className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-            <p className="text-slate-600">No invoices yet. They will appear here once generated.</p>
+            <p className="text-slate-600 dark:text-slate-400">No invoices yet. They will appear here once generated.</p>
           </div>
         </CardContent>
       </Card>
@@ -47,13 +47,13 @@ export default function InvoiceTable({ invoices, isLoading, onViewInvoice, onDow
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-slate-200">
-                <th className="text-left py-3 px-4 font-semibold text-slate-700">Invoice</th>
-                <th className="text-left py-3 px-4 font-semibold text-slate-700">Period</th>
-                <th className="text-left py-3 px-4 font-semibold text-slate-700">Amount</th>
-                <th className="text-left py-3 px-4 font-semibold text-slate-700">Due Date</th>
-                <th className="text-left py-3 px-4 font-semibold text-slate-700">Status</th>
-                <th className="text-right py-3 px-4 font-semibold text-slate-700">Actions</th>
+              <tr className="border-b border-slate-200 dark:border-slate-700">
+                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Invoice</th>
+                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Period</th>
+                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Amount</th>
+                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Due Date</th>
+                <th className="text-left py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Status</th>
+                <th className="text-right py-3 px-4 font-semibold text-slate-700 dark:text-slate-300">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
@@ -75,19 +75,19 @@ export default function InvoiceTable({ invoices, isLoading, onViewInvoice, onDow
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2">
                           <FileText className="w-4 h-4 text-slate-400" />
-                          <span className="font-medium text-slate-900">
+                          <span className="font-medium text-slate-900 dark:text-slate-50">
                             {invoice.invoice_number}
                           </span>
                         </div>
                       </td>
-                      <td className="py-3 px-4 text-sm text-slate-600">
+                      <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">
                         {format(new Date(invoice.billing_period_start), 'MMM d, yyyy')} - {' '}
                         {format(new Date(invoice.billing_period_end), 'MMM d, yyyy')}
                       </td>
-                      <td className="py-3 px-4 font-semibold text-slate-900">
+                      <td className="py-3 px-4 font-semibold text-slate-900 dark:text-slate-50">
                         KES {invoice.total_amount.toLocaleString('en-KE')}
                       </td>
-                      <td className="py-3 px-4 text-sm text-slate-600">
+                      <td className="py-3 px-4 text-sm text-slate-600 dark:text-slate-400">
                         <div className="flex items-center gap-2">
                           {isOverdue && <AlertCircle className="w-4 h-4 text-red-500" />}
                           {format(new Date(invoice.due_date), 'MMM d, yyyy')}

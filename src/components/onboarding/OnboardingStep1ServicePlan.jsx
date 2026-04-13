@@ -59,30 +59,30 @@ export default function OnboardingStep1ServicePlan({ servicePlans = [], formData
                   <div className="flex items-center gap-3">
                     <Download className="w-4 h-4 text-blue-600" />
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">Download</p>
-                      <p className="text-lg font-bold text-slate-900">{plan.download_speed} Mbps</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Download</p>
+                      <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{plan.download_speed} Mbps</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     <Upload className="w-4 h-4 text-purple-600" />
                     <div>
-                      <p className="text-sm font-semibold text-slate-900">Upload</p>
-                      <p className="text-lg font-bold text-slate-900">{plan.upload_speed} Mbps</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Upload</p>
+                      <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{plan.upload_speed} Mbps</p>
                     </div>
                   </div>
                   {plan.data_cap > 0 && (
                     <div className="flex items-center gap-3">
                       <Zap className="w-4 h-4 text-amber-600" />
                       <div>
-                        <p className="text-sm font-semibold text-slate-900">Data Cap</p>
-                        <p className="text-lg font-bold text-slate-900">{plan.data_cap} GB</p>
+                        <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Data Cap</p>
+                        <p className="text-lg font-bold text-slate-900 dark:text-slate-50">{plan.data_cap} GB</p>
                       </div>
                     </div>
                   )}
                 </div>
 
-                <div className="bg-slate-50 rounded-lg p-3">
-                  <p className="text-sm text-slate-600 mb-1">Monthly Price</p>
+                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-3">
+                  <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">Monthly Price</p>
                   <p className="text-2xl font-bold text-indigo-600">KES {plan.monthly_price.toLocaleString()}</p>
                   {plan.setup_fee > 0 && (
                     <p className="text-xs text-slate-500 mt-2">Setup fee: KES {plan.setup_fee.toLocaleString()}</p>
@@ -91,10 +91,10 @@ export default function OnboardingStep1ServicePlan({ servicePlans = [], formData
 
                 {plan.features && plan.features.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-900">Features:</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Features:</p>
                     <ul className="space-y-1">
                       {plan.features.slice(0, 3).map((feature, idx) => (
-                        <li key={idx} className="text-xs text-slate-600 flex items-center gap-2">
+                        <li key={idx} className="text-xs text-slate-600 dark:text-slate-400 flex items-center gap-2">
                           <span className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
                           {feature.name}
                         </li>

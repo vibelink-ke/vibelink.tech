@@ -92,7 +92,7 @@ export default function CustomerMessaging({ customer }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h4 className="font-semibold text-slate-900 flex items-center gap-2">
+        <h4 className="font-semibold text-slate-900 dark:text-slate-50 flex items-center gap-2">
           <MessageCircle className="w-4 h-4" />
           Messages ({messages.length})
         </h4>
@@ -101,8 +101,8 @@ export default function CustomerMessaging({ customer }) {
         )}
       </div>
 
-      <div className="border rounded-lg bg-white">
-        <div className="h-80 overflow-y-auto p-4 space-y-3 bg-slate-50">
+      <div className="border rounded-lg bg-white dark:bg-slate-900">
+        <div className="h-80 overflow-y-auto p-4 space-y-3 bg-slate-50 dark:bg-slate-800/50">
           <AnimatePresence>
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center">
@@ -129,10 +129,10 @@ export default function CustomerMessaging({ customer }) {
                     <div className={`rounded-2xl px-4 py-2 ${
                       msg.sender_type === 'staff' 
                         ? 'bg-indigo-600 text-white' 
-                        : 'bg-white border border-slate-200'
+                        : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'
                     }`}>
                       {msg.sender_type === 'customer' && (
-                        <p className="text-xs font-medium text-slate-600 mb-1">
+                        <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
                           {msg.sender_name || customer.full_name}
                         </p>
                       )}
@@ -156,7 +156,7 @@ export default function CustomerMessaging({ customer }) {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-3 border-t bg-white">
+        <div className="p-3 border-t bg-white dark:bg-slate-900">
           <div className="flex gap-2">
             <Textarea
               value={message}

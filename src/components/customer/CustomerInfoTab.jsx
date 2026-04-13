@@ -98,7 +98,7 @@ export default function CustomerInfoTab({ customer }) {
                 {isEditing ? (
                   <Input value={formData.full_name} onChange={(e) => setFormData({...formData, full_name: e.target.value})} />
                 ) : (
-                  <p className="text-slate-900 font-medium">{customer.full_name}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.full_name}</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -106,7 +106,7 @@ export default function CustomerInfoTab({ customer }) {
                 {isEditing ? (
                   <Input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
                 ) : (
-                  <p className="text-slate-900 font-medium">{customer.email}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.email}</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -114,7 +114,7 @@ export default function CustomerInfoTab({ customer }) {
                 {isEditing ? (
                   <Input value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} />
                 ) : (
-                  <p className="text-slate-900 font-medium">{customer.phone}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.phone}</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -132,7 +132,7 @@ export default function CustomerInfoTab({ customer }) {
                     </SelectContent>
                   </Select>
                 ) : (
-                  <p className="text-slate-900 font-medium capitalize">{customer.status}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium capitalize">{customer.status}</p>
                 )}
               </div>
             </CardContent>
@@ -154,7 +154,7 @@ export default function CustomerInfoTab({ customer }) {
                 {isEditing ? (
                   <Textarea value={formData.address} onChange={(e) => setFormData({...formData, address: e.target.value})} rows={2} />
                 ) : (
-                  <p className="text-slate-900 font-medium">{customer.address}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.address}</p>
                 )}
               </div>
               <div className="space-y-2">
@@ -162,7 +162,7 @@ export default function CustomerInfoTab({ customer }) {
                 {isEditing ? (
                   <Input value={formData.city} onChange={(e) => setFormData({...formData, city: e.target.value})} />
                 ) : (
-                  <p className="text-slate-900 font-medium">{customer.city || 'N/A'}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.city || 'N/A'}</p>
                 )}
               </div>
               <div className="grid grid-cols-2 gap-4">
@@ -171,7 +171,7 @@ export default function CustomerInfoTab({ customer }) {
                   {isEditing ? (
                     <Input value={formData.mac_address} onChange={(e) => setFormData({...formData, mac_address: e.target.value})} />
                   ) : (
-                    <p className="text-slate-900 font-mono text-sm">{customer.mac_address || 'N/A'}</p>
+                    <p className="text-slate-900 dark:text-slate-50 font-mono text-sm">{customer.mac_address || 'N/A'}</p>
                   )}
                 </div>
                 <div className="space-y-2">
@@ -179,7 +179,7 @@ export default function CustomerInfoTab({ customer }) {
                   {isEditing ? (
                     <Input value={formData.ip_address} onChange={(e) => setFormData({...formData, ip_address: e.target.value})} />
                   ) : (
-                    <p className="text-slate-900 font-mono text-sm">{customer.ip_address || 'N/A'}</p>
+                    <p className="text-slate-900 dark:text-slate-50 font-mono text-sm">{customer.ip_address || 'N/A'}</p>
                   )}
                 </div>
               </div>
@@ -200,23 +200,23 @@ export default function CustomerInfoTab({ customer }) {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="text-xs text-slate-500">Customer ID</Label>
-                  <p className="text-slate-900 font-medium">{customer.customer_id}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.customer_id}</p>
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500">Installation Date</Label>
-                  <p className="text-slate-900 font-medium">
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">
                     {customer.installation_date ? format(new Date(customer.installation_date), 'MMM d, yyyy') : 'N/A'}
                   </p>
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500">Last Payment</Label>
-                  <p className="text-slate-900 font-medium">
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">
                     {customer.last_payment_date ? format(new Date(customer.last_payment_date), 'MMM d, yyyy') : 'N/A'}
                   </p>
                 </div>
                 <div>
                   <Label className="text-xs text-slate-500">Billing Cycle</Label>
-                  <p className="text-slate-900 font-medium">
+                  <p className="text-slate-900 dark:text-slate-50 font-medium">
                     {customer.billing_cycle_day ? `Day ${customer.billing_cycle_day}` : 'N/A'}
                   </p>
                 </div>
@@ -224,7 +224,7 @@ export default function CustomerInfoTab({ customer }) {
               {customer.referral_code && (
                 <div>
                   <Label className="text-xs text-slate-500">Referral Code</Label>
-                  <p className="text-slate-900 font-mono font-medium text-lg">{customer.referral_code}</p>
+                  <p className="text-slate-900 dark:text-slate-50 font-mono font-medium text-lg">{customer.referral_code}</p>
                 </div>
               )}
             </CardContent>
@@ -249,7 +249,7 @@ export default function CustomerInfoTab({ customer }) {
                   placeholder="Add internal notes about this customer..."
                 />
               ) : (
-                <p className="text-slate-600 whitespace-pre-wrap">{customer.notes || 'No notes available'}</p>
+                <p className="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{customer.notes || 'No notes available'}</p>
               )}
             </CardContent>
           </Card>
@@ -263,13 +263,13 @@ export default function CustomerInfoTab({ customer }) {
              <DialogTitle>Modify Service</DialogTitle>
            </DialogHeader>
            <div className="space-y-4">
-             <p className="text-sm text-slate-600">
+             <p className="text-sm text-slate-600 dark:text-slate-400">
                Change service plan or configuration for {customer.full_name}.
              </p>
              <div className="space-y-3">
                <div>
                  <Label className="text-xs text-slate-500">Current Plan</Label>
-                 <p className="text-slate-900 font-medium">{customer.plan_name || 'N/A'}</p>
+                 <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.plan_name || 'N/A'}</p>
                </div>
                <div>
                  <Label htmlFor="new-plan" className="text-sm">Select New Plan</Label>
@@ -307,21 +307,21 @@ export default function CustomerInfoTab({ customer }) {
              <DialogTitle>Provision Customer</DialogTitle>
            </DialogHeader>
            <div className="space-y-4">
-             <p className="text-sm text-slate-600">
+             <p className="text-sm text-slate-600 dark:text-slate-400">
                Provision network access for {customer.full_name}.
              </p>
              <div className="space-y-3">
                <div>
                  <Label>Customer Name</Label>
-                 <p className="text-slate-900 font-medium">{customer.full_name}</p>
+                 <p className="text-slate-900 dark:text-slate-50 font-medium">{customer.full_name}</p>
                </div>
                <div>
                  <Label>IP Address</Label>
-                 <p className="text-slate-900 font-mono text-sm">{customer.ip_address || 'Not assigned'}</p>
+                 <p className="text-slate-900 dark:text-slate-50 font-mono text-sm">{customer.ip_address || 'Not assigned'}</p>
                </div>
                <div>
                  <Label>MAC Address</Label>
-                 <p className="text-slate-900 font-mono text-sm">{customer.mac_address || 'Not assigned'}</p>
+                 <p className="text-slate-900 dark:text-slate-50 font-mono text-sm">{customer.mac_address || 'Not assigned'}</p>
                </div>
              </div>
              <div className="flex justify-end gap-3 pt-4">

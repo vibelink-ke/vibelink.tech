@@ -21,7 +21,7 @@ const levelColors = {
   info: 'bg-blue-100 text-blue-800',
   warning: 'bg-amber-100 text-amber-800',
   error: 'bg-rose-100 text-rose-800',
-  debug: 'bg-slate-100 text-slate-800',
+  debug: 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200',
 };
 
 export default function CustomerActivityLogsTab({ customerId, customer }) {
@@ -58,17 +58,17 @@ export default function CustomerActivityLogsTab({ customerId, customer }) {
             {logs.map((log) => {
               const Icon = categoryIcons[log.category] || Activity;
               return (
-                <div key={log.id} className="flex items-start gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors">
-                  <div className="w-8 h-8 rounded-lg bg-white border flex items-center justify-center shrink-0 mt-0.5">
+                <div key={log.id} className="flex items-start gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg hover:bg-slate-100 transition-colors">
+                  <div className="w-8 h-8 rounded-lg bg-white dark:bg-slate-900 border flex items-center justify-center shrink-0 mt-0.5">
                     <Icon className="w-4 h-4 text-slate-500" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">
-                      <span className="text-sm font-medium text-slate-900 capitalize">{log.action}</span>
+                      <span className="text-sm font-medium text-slate-900 dark:text-slate-50 capitalize">{log.action}</span>
                       <Badge className={`text-xs ${levelColors[log.level] || levelColors.info}`}>{log.level}</Badge>
                       <Badge variant="outline" className="text-xs capitalize">{log.category}</Badge>
                     </div>
-                    {log.details && <p className="text-xs text-slate-600 truncate">{log.details}</p>}
+                    {log.details && <p className="text-xs text-slate-600 dark:text-slate-400 truncate">{log.details}</p>}
                     <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
                       {log.user_name && <span>by {log.user_name}</span>}
                       {log.created_date && <span>{format(new Date(log.created_date), 'MMM d, yyyy HH:mm')}</span>}

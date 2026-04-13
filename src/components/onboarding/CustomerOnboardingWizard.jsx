@@ -163,8 +163,8 @@ export default function CustomerOnboardingWizard({
         <CardContent className="pt-6">
           <div className="flex items-start justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-slate-900">{selectedCustomer.full_name}</h3>
-              <p className="text-sm text-slate-600">{selectedCustomer.email}</p>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">{selectedCustomer.full_name}</h3>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{selectedCustomer.email}</p>
               <Badge className="mt-2">{selectedCustomer.status}</Badge>
             </div>
             <Button variant="outline" size="sm" onClick={handleReset}>
@@ -177,8 +177,8 @@ export default function CustomerOnboardingWizard({
       {/* Progress */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-slate-900">Setup Progress</h3>
-          <span className="text-sm text-slate-600">{currentStep + 1} of {steps.length}</span>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Setup Progress</h3>
+          <span className="text-sm text-slate-600 dark:text-slate-400">{currentStep + 1} of {steps.length}</span>
         </div>
         <Progress value={progressPercentage} />
         
@@ -192,7 +192,7 @@ export default function CustomerOnboardingWizard({
                   ? 'bg-indigo-600 text-white'
                   : idx < currentStep
                   ? 'bg-emerald-100 text-emerald-700'
-                  : 'bg-slate-100 text-slate-600'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
               }`}
             >
               <div className="font-semibold">{step.title}</div>

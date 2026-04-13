@@ -212,7 +212,7 @@ export default function AlertsPanel({ routerId, routerName }) {
                       key={alert.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="p-4 rounded-lg border border-slate-200 bg-slate-50"
+                      className="p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex gap-3">
@@ -247,13 +247,13 @@ export default function AlertsPanel({ routerId, routerName }) {
                       key={config.id}
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
-                      className="p-4 rounded-lg border border-slate-200 bg-white"
+                      className="p-4 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
                             <span className="text-lg">{getAlertIcon(config.alert_type)}</span>
-                            <p className="font-medium text-slate-900">
+                            <p className="font-medium text-slate-900 dark:text-slate-50">
                               {config.alert_type.replace(/_/g, ' ').toUpperCase()}
                             </p>
                             {config.enabled ? (
@@ -264,7 +264,7 @@ export default function AlertsPanel({ routerId, routerName }) {
                               <Badge variant="outline">Disabled</Badge>
                             )}
                           </div>
-                          <div className="mt-2 text-sm text-slate-600 space-y-1">
+                          <div className="mt-2 text-sm text-slate-600 dark:text-slate-400 space-y-1">
                             <p>
                               Threshold: {config.threshold_value}{config.threshold_unit === 'percent' ? '%' : ''}
                             </p>

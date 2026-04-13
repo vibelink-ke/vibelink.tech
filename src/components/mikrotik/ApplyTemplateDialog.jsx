@@ -78,7 +78,7 @@ export default function ApplyTemplateDialog({ open, onOpenChange, templates, rou
           <div className="space-y-3">
             <Label>Select Template *</Label>
             {templates.length === 0 ? (
-              <p className="text-sm text-slate-600">No templates available. Create one first.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">No templates available. Create one first.</p>
             ) : (
               <div className="grid grid-cols-1 gap-2">
                 {templates.map(template => (
@@ -87,18 +87,18 @@ export default function ApplyTemplateDialog({ open, onOpenChange, templates, rou
                       className={`p-4 cursor-pointer border-2 transition-all ${
                         selectedTemplate?.id === template.id
                           ? 'border-indigo-500 bg-indigo-50'
-                          : 'border-slate-200 hover:border-slate-300'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                       }`}
                       onClick={() => setSelectedTemplate(template)}
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <p className="font-medium">{template.template_name}</p>
-                          <p className="text-xs text-slate-600 mt-1">
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                             {template.description}
                           </p>
                           <div className="flex gap-2 mt-2">
-                            <span className="text-xs bg-slate-100 px-2 py-1 rounded capitalize">
+                            <span className="text-xs bg-slate-100 dark:bg-slate-800 px-2 py-1 rounded capitalize">
                               {template.category.replace(/_/g, ' ')}
                             </span>
                             <span className="text-xs text-slate-500">
@@ -127,7 +127,7 @@ export default function ApplyTemplateDialog({ open, onOpenChange, templates, rou
           <div className="space-y-3">
             <Label>Select Routers to Apply To *</Label>
             {routers.length === 0 ? (
-              <p className="text-sm text-slate-600">No routers available.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">No routers available.</p>
             ) : (
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {routers.map(router => (
@@ -142,12 +142,12 @@ export default function ApplyTemplateDialog({ open, onOpenChange, templates, rou
                     />
                     <div className="flex-1">
                       <p className="text-sm font-medium">{router.router_name}</p>
-                      <p className="text-xs text-slate-600">{router.ip_address}</p>
+                      <p className="text-xs text-slate-600 dark:text-slate-400">{router.ip_address}</p>
                     </div>
                     <span className={`text-xs px-2 py-1 rounded ${
                       router.status === 'online'
                         ? 'bg-emerald-100 text-emerald-700'
-                        : 'bg-slate-100 text-slate-600'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400'
                     }`}>
                       {router.status}
                     </span>
@@ -156,7 +156,7 @@ export default function ApplyTemplateDialog({ open, onOpenChange, templates, rou
               </div>
             )}
             {selectedRouters.length > 0 && (
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 {selectedRouters.length} router(s) selected
               </p>
             )}

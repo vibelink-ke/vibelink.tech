@@ -238,7 +238,7 @@ export default function SLA() {
   }, [customers, slas, plans, tickets, outages]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="SLA Management"
@@ -249,7 +249,7 @@ export default function SLA() {
         />
 
         <Tabs defaultValue="policies" className="space-y-6">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="policies" className="gap-2">
               <Shield className="w-4 h-4" /> Policies
             </TabsTrigger>
@@ -319,7 +319,7 @@ export default function SLA() {
 
             {loadingSLAs ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {[1, 2].map(i => <div key={i} className="h-64 bg-white rounded-2xl animate-pulse" />)}
+                {[1, 2].map(i => <div key={i} className="h-64 bg-white dark:bg-slate-900 rounded-2xl animate-pulse" />)}
               </div>
             ) : slas.length === 0 ? (
               <EmptyState
@@ -376,35 +376,35 @@ export default function SLA() {
                       </CardHeader>
                       <CardContent>
                         {sla.description && (
-                          <p className="text-sm text-slate-600 mb-4">{sla.description}</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">{sla.description}</p>
                         )}
                         
                         <div className="space-y-3">
-                          <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                          <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                             <div className="flex items-center gap-2">
                               <TrendingUp className="w-4 h-4 text-emerald-500" />
-                              <span className="text-sm text-slate-700">Uptime Guarantee</span>
+                              <span className="text-sm text-slate-700 dark:text-slate-300">Uptime Guarantee</span>
                             </div>
                             <span className="font-semibold text-emerald-600">{sla.uptime_percentage}%</span>
                           </div>
 
                           {sla.ticket_response_time_hours && (
-                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                               <div className="flex items-center gap-2">
                                 <Clock className="w-4 h-4 text-blue-500" />
-                                <span className="text-sm text-slate-700">Response Time</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-300">Response Time</span>
                               </div>
-                              <span className="font-semibold text-slate-900">{sla.ticket_response_time_hours}h</span>
+                              <span className="font-semibold text-slate-900 dark:text-slate-50">{sla.ticket_response_time_hours}h</span>
                             </div>
                           )}
 
                           {sla.ticket_resolution_time_hours && (
-                            <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                            <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                               <div className="flex items-center gap-2">
                                 <CheckCircle className="w-4 h-4 text-purple-500" />
-                                <span className="text-sm text-slate-700">Resolution Time</span>
+                                <span className="text-sm text-slate-700 dark:text-slate-300">Resolution Time</span>
                               </div>
-                              <span className="font-semibold text-slate-900">{sla.ticket_resolution_time_hours}h</span>
+                              <span className="font-semibold text-slate-900 dark:text-slate-50">{sla.ticket_resolution_time_hours}h</span>
                             </div>
                           )}
 
@@ -446,7 +446,7 @@ export default function SLA() {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-4">
                 <Select value={period} onValueChange={setPeriod}>
-                  <SelectTrigger className="w-40 bg-white">
+                  <SelectTrigger className="w-40 bg-white dark:bg-slate-900">
                     <Calendar className="w-4 h-4 mr-2" />
                     <SelectValue />
                   </SelectTrigger>
@@ -602,7 +602,7 @@ export default function SLA() {
                         <TableRow key={item.customer.id} className="hover:bg-slate-50">
                           <TableCell>
                             <div>
-                              <p className="font-medium text-slate-900">{item.customer.full_name}</p>
+                              <p className="font-medium text-slate-900 dark:text-slate-50">{item.customer.full_name}</p>
                               <p className="text-xs text-slate-500">{item.customer.customer_id}</p>
                             </div>
                           </TableCell>

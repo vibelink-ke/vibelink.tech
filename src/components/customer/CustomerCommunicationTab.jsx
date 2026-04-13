@@ -54,14 +54,14 @@ export default function CustomerCommunicationTab({ customer }) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSend} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-3 bg-slate-50 rounded-lg">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <div className="flex items-center gap-2 text-sm">
                 <Mail className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-600">{customer.email}</span>
+                <span className="text-slate-600 dark:text-slate-400">{customer.email}</span>
               </div>
               <div className="flex items-center gap-2 text-sm">
                 <Phone className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-600">{customer.phone}</span>
+                <span className="text-slate-600 dark:text-slate-400">{customer.phone}</span>
               </div>
               <div>
                 <Select value={channel} onValueChange={setChannel}>
@@ -114,14 +114,14 @@ export default function CustomerCommunicationTab({ customer }) {
                   className={`p-3 rounded-lg ${msg.sender_type === 'staff' ? 'bg-indigo-50 ml-8' : 'bg-slate-50 mr-8'}`}
                 >
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium text-slate-700">
+                    <span className="text-xs font-medium text-slate-700 dark:text-slate-300">
                       {msg.sender_type === 'staff' ? 'Staff' : customer.full_name}
                     </span>
                     <span className="text-xs text-slate-400">
                       {msg.created_date ? format(new Date(msg.created_date), 'MMM d, HH:mm') : ''}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-800">{msg.message}</p>
+                  <p className="text-sm text-slate-800 dark:text-slate-200">{msg.message}</p>
                 </div>
               ))}
             </div>

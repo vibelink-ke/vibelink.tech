@@ -25,7 +25,7 @@ export default function OnboardingProgress({ currentStep, totalSteps, steps }) {
                     ? 'bg-green-100 text-green-700'
                     : isCurrent
                     ? 'bg-indigo-100 text-indigo-700 ring-2 ring-indigo-300'
-                    : 'bg-slate-100 text-slate-400'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
                   }
                 `}>
                   {isCompleted ? (
@@ -36,7 +36,7 @@ export default function OnboardingProgress({ currentStep, totalSteps, steps }) {
                 </div>
                 <p className={`
                   text-xs font-medium mt-2 text-center max-w-20
-                  ${isCurrent || isCompleted ? 'text-slate-900' : 'text-slate-500'}
+                  ${isCurrent || isCompleted ? 'text-slate-900 dark:text-slate-50' : 'text-slate-500'}
                 `}>
                   {step.label}
                 </p>
@@ -59,7 +59,7 @@ export default function OnboardingProgress({ currentStep, totalSteps, steps }) {
         })}
       </div>
 
-      <div className="w-full bg-slate-100 rounded-full h-1">
+      <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1">
         <motion.div
           className="h-full bg-gradient-to-r from-indigo-500 to-purple-600 rounded-full"
           initial={{ width: '0%' }}

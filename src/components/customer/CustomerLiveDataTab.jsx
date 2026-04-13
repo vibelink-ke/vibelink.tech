@@ -65,11 +65,11 @@ export default function CustomerLiveDataTab({ customer }) {
         <CardHeader><CardTitle className="flex items-center gap-2"><Monitor className="w-5 h-5" />Device Information</CardTitle></CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-4">
-            <div className="p-3 bg-slate-50 rounded-lg">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <p className="text-xs text-slate-500 mb-1">MAC Address</p>
               <p className="font-mono font-medium">{customer.mac_address || 'N/A'}</p>
             </div>
-            <div className="p-3 bg-slate-50 rounded-lg">
+            <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <p className="text-xs text-slate-500 mb-1">IP Address</p>
               <p className="font-mono font-medium">{customer.ip_address || 'N/A'}</p>
             </div>
@@ -86,11 +86,11 @@ export default function CustomerLiveDataTab({ customer }) {
           ) : (
             <div className="space-y-2">
               {sessions.slice(0, 10).map((session) => (
-                <div key={session.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div key={session.id} className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                   <div className="flex items-center gap-3">
                     <div className={`w-2 h-2 rounded-full ${session.status === 'online' ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
                     <div>
-                      <p className="text-sm font-medium text-slate-900">{session.status === 'online' ? 'Active Session' : 'Ended Session'}</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{session.status === 'online' ? 'Active Session' : 'Ended Session'}</p>
                       <p className="text-xs text-slate-500">
                         {session.created_date ? format(new Date(session.created_date), 'MMM d, yyyy HH:mm') : 'N/A'}
                       </p>

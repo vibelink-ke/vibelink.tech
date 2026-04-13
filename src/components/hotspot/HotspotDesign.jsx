@@ -35,7 +35,7 @@ export default function HotspotDesign() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Hotspot Login Design</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Hotspot Login Design</h3>
           <p className="text-sm text-slate-500">Customize your WiFi login page</p>
         </div>
         <div className="flex gap-2">
@@ -65,7 +65,7 @@ export default function HotspotDesign() {
                 )}
                 <label className="cursor-pointer">
                   <input type="file" className="hidden" accept="image/*" onChange={handleLogoUpload} />
-                  <div className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <div className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 rounded-lg flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
                     <Upload className="w-4 h-4" />
                     Upload Logo
                   </div>
@@ -179,7 +179,7 @@ export default function HotspotDesign() {
                   >
                     {design.title}
                   </h1>
-                  <p className="text-slate-600 mb-8 text-center">{design.subtitle}</p>
+                  <p className="text-slate-600 dark:text-slate-400 mb-8 text-center">{design.subtitle}</p>
                   
                   <div className="w-full max-w-sm space-y-4">
                     <Input

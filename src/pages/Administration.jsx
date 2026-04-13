@@ -122,7 +122,7 @@ export default function Administration() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader 
           title="Administration" 
@@ -130,7 +130,7 @@ export default function Administration() {
         />
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="roles" className="gap-2">
               <Shield className="w-4 h-4" /> Roles & Permissions
             </TabsTrigger>
@@ -203,7 +203,7 @@ function RolesTab() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Roles & Permissions</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Roles & Permissions</h3>
           <p className="text-sm text-slate-500">Define roles to control staff access levels</p>
         </div>
         <Button onClick={() => { setEditingRole(null); setShowForm(true); }} className="bg-indigo-600 hover:bg-indigo-700">
@@ -249,7 +249,7 @@ function RolesTab() {
 
       {isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {[1, 2].map(i => <div key={i} className="h-48 bg-white rounded-2xl animate-pulse" />)}
+          {[1, 2].map(i => <div key={i} className="h-48 bg-white dark:bg-slate-900 rounded-2xl animate-pulse" />)}
         </div>
       ) : roles.length === 0 ? (
         <EmptyState
@@ -308,11 +308,11 @@ function RolesTab() {
                 </CardHeader>
                 <CardContent>
                   {role.description && (
-                    <p className="text-sm text-slate-600 mb-3">{role.description}</p>
+                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">{role.description}</p>
                   )}
                   <div className="flex flex-wrap gap-1">
                     {role.permissions?.slice(0, 6).map(p => (
-                      <span key={p} className="text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full">
+                      <span key={p} className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">
                         {p.split('.').pop()}
                       </span>
                     ))}
@@ -398,7 +398,7 @@ function StaffTab() {
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h3 className="text-lg font-semibold text-slate-900">Staff Management</h3>
+          <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Staff Management</h3>
           <p className="text-sm text-slate-500">{users.length} team members</p>
         </div>
         <Button onClick={() => setShowInviteDialog(true)} className="bg-indigo-600 hover:bg-indigo-700">
@@ -468,7 +468,7 @@ function StaffTab() {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search staff..."
-          className="pl-10 bg-white"
+          className="pl-10 bg-white dark:bg-slate-900"
         />
       </div>
 
@@ -510,7 +510,7 @@ function StaffTab() {
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="font-medium text-slate-900">{user.full_name || 'Unnamed'}</p>
+                            <p className="font-medium text-slate-900 dark:text-slate-50">{user.full_name || 'Unnamed'}</p>
                             <p className="text-sm text-slate-500">{user.email}</p>
                           </div>
                         </div>
@@ -524,7 +524,7 @@ function StaffTab() {
                         {staffRole ? (
                           <div className="flex items-center gap-2">
                             <Shield className="w-4 h-4 text-indigo-500" />
-                            <span className="text-sm font-medium text-slate-700">{staffRole.name}</span>
+                            <span className="text-sm font-medium text-slate-700 dark:text-slate-300">{staffRole.name}</span>
                           </div>
                         ) : (
                           <span className="text-sm text-slate-400 italic">No role assigned</span>
@@ -653,7 +653,7 @@ function RoleFormDialog({ open, onOpenChange, role, onSubmit, isLoading }) {
                       checked={group.permissions.every(p => formData.permissions.includes(p.code))}
                       onCheckedChange={() => toggleGroup(group)}
                     />
-                    <span className="font-semibold text-slate-900">{group.group}</span>
+                    <span className="font-semibold text-slate-900 dark:text-slate-50">{group.group}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2 ml-6">
                     {group.permissions.map(p => (
@@ -662,7 +662,7 @@ function RoleFormDialog({ open, onOpenChange, role, onSubmit, isLoading }) {
                           checked={formData.permissions.includes(p.code)}
                           onCheckedChange={() => togglePermission(p.code)}
                         />
-                        <span className="text-sm text-slate-600">{p.label}</span>
+                        <span className="text-sm text-slate-600 dark:text-slate-400">{p.label}</span>
                       </div>
                     ))}
                   </div>
@@ -804,14 +804,14 @@ function EditRoleDialog({ open, onOpenChange, user, roles, onSubmit, isLoading }
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 mt-4">
-          <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+          <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <Avatar>
               <AvatarFallback className="bg-gradient-to-br from-indigo-400 to-purple-500 text-white">
                 {user.full_name?.charAt(0).toUpperCase() || 'U'}
               </AvatarFallback>
             </Avatar>
             <div>
-              <p className="font-medium text-slate-900">{user.full_name || 'Unnamed'}</p>
+              <p className="font-medium text-slate-900 dark:text-slate-50">{user.full_name || 'Unnamed'}</p>
               <p className="text-sm text-slate-500">{user.email}</p>
             </div>
           </div>
@@ -838,12 +838,12 @@ function EditRoleDialog({ open, onOpenChange, user, roles, onSubmit, isLoading }
               <p className="text-sm font-medium text-indigo-900 mb-2">Permissions:</p>
               <div className="flex flex-wrap gap-1">
                 {selectedRole.permissions?.slice(0, 8).map(p => (
-                  <span key={p} className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
+                  <span key={p} className="text-xs px-2 py-1 bg-white dark:bg-slate-900 text-indigo-700 rounded-full">
                     {p}
                   </span>
                 ))}
                 {(selectedRole.permissions?.length || 0) > 8 && (
-                  <span className="text-xs px-2 py-1 bg-white text-indigo-700 rounded-full">
+                  <span className="text-xs px-2 py-1 bg-white dark:bg-slate-900 text-indigo-700 rounded-full">
                     +{selectedRole.permissions.length - 8} more
                   </span>
                 )}

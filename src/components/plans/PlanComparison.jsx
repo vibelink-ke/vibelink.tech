@@ -9,7 +9,7 @@ const tierInfo = {
   basic: {
     icon: Zap,
     gradient: 'from-slate-500 to-slate-600',
-    bgGradient: 'from-slate-50 to-slate-100',
+    bgGradient: 'from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800',
     badge: null
   },
   standard: {
@@ -93,7 +93,7 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
                       <Icon className="w-6 h-6 text-white" />
                     </div>
                     <div>
-                      <h3 className="font-bold text-lg text-slate-900">{plan.name}</h3>
+                      <h3 className="font-bold text-lg text-slate-900 dark:text-slate-50">{plan.name}</h3>
                       <p className="text-sm text-slate-500 capitalize">{plan.tier} Tier</p>
                     </div>
                   </div>
@@ -101,7 +101,7 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
                   {/* Price */}
                   <div>
                     <div className="flex items-baseline gap-1">
-                      <span className="text-4xl font-bold text-slate-900">KES {plan.monthly_price}</span>
+                      <span className="text-4xl font-bold text-slate-900 dark:text-slate-50">KES {plan.monthly_price}</span>
                       <span className="text-slate-500">/mo</span>
                     </div>
                     {plan.setup_fee > 0 && (
@@ -113,16 +113,16 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
                   <div className={`p-4 rounded-xl bg-gradient-to-br ${info.bgGradient}`}>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-slate-700">Download</span>
-                        <span className="text-lg font-bold text-slate-900">{plan.download_speed} Mbps</span>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Download</span>
+                        <span className="text-lg font-bold text-slate-900 dark:text-slate-50">{plan.download_speed} Mbps</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium text-slate-700">Upload</span>
-                        <span className="text-lg font-bold text-slate-900">{plan.upload_speed} Mbps</span>
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Upload</span>
+                        <span className="text-lg font-bold text-slate-900 dark:text-slate-50">{plan.upload_speed} Mbps</span>
                       </div>
                       <div className="flex justify-between items-center pt-2 border-t border-slate-200/50">
-                        <span className="text-sm font-medium text-slate-700">Data</span>
-                        <span className="text-sm font-bold text-slate-900">
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Data</span>
+                        <span className="text-sm font-bold text-slate-900 dark:text-slate-50">
                           {plan.data_cap === 0 ? 'Unlimited' : `${plan.data_cap} GB`}
                         </span>
                       </div>
@@ -152,7 +152,7 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
 
                   {/* Limits Info */}
                   {plan.limits && (
-                    <div className="pt-4 border-t border-slate-100 space-y-1 text-xs text-slate-500">
+                    <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-1 text-xs text-slate-500">
                       {plan.limits.max_devices && (
                         <div>Up to {plan.limits.max_devices} devices</div>
                       )}
@@ -169,7 +169,7 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
                   <Button 
                     className={`w-full ${
                       isCurrentPlan 
-                        ? 'bg-slate-100 text-slate-600 hover:bg-slate-200' 
+                        ? 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200' 
                         : `bg-gradient-to-r ${info.gradient} hover:opacity-90`
                     }`}
                     onClick={() => !isCurrentPlan && onSelectPlan?.(plan)}
@@ -187,17 +187,17 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
       {/* Detailed Feature Comparison Table */}
       {allFeatures.length > 0 && (
         <Card className="overflow-hidden">
-          <div className="p-6 bg-slate-50 border-b border-slate-100">
-            <h3 className="text-lg font-semibold text-slate-900">Feature Comparison</h3>
+          <div className="p-6 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800">
+            <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Feature Comparison</h3>
             <p className="text-sm text-slate-500 mt-1">Compare all features across plans</p>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-50 dark:bg-slate-800/50">
                 <tr>
-                  <th className="text-left p-4 font-semibold text-slate-700 min-w-[200px]">Feature</th>
+                  <th className="text-left p-4 font-semibold text-slate-700 dark:text-slate-300 min-w-[200px]">Feature</th>
                   {sortedPlans.map(plan => (
-                    <th key={plan.id} className="text-center p-4 font-semibold text-slate-700 min-w-[120px]">
+                    <th key={plan.id} className="text-center p-4 font-semibold text-slate-700 dark:text-slate-300 min-w-[120px]">
                       {plan.name}
                     </th>
                   ))}
@@ -205,8 +205,8 @@ export default function PlanComparison({ plans, onSelectPlan, currentPlanId }) {
               </thead>
               <tbody>
                 {allFeatures.map((featureName, idx) => (
-                  <tr key={idx} className="border-t border-slate-100 hover:bg-slate-50/50">
-                    <td className="p-4 text-sm text-slate-700">{featureName}</td>
+                  <tr key={idx} className="border-t border-slate-100 dark:border-slate-800 hover:bg-slate-50/50">
+                    <td className="p-4 text-sm text-slate-700 dark:text-slate-300">{featureName}</td>
                     {sortedPlans.map(plan => {
                       const feature = (plan.features || []).find(f => 
                         (typeof f === 'string' ? f : f.name) === featureName

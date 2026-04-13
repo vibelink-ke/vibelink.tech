@@ -259,19 +259,19 @@ export default function Analytics() {
         <ChartContainer title="Key Metrics Summary">
           <div className="space-y-4">
             <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Collection Rate</span>
+              <span className="text-slate-600 dark:text-slate-400">Collection Rate</span>
               <span className="font-semibold">{kpis.collectionRate.toFixed(1)}%</span>
             </div>
             <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Avg Ticket Resolution</span>
+              <span className="text-slate-600 dark:text-slate-400">Avg Ticket Resolution</span>
               <span className="font-semibold">{kpis.avgResolutionTime.toFixed(1)} hrs</span>
             </div>
             <div className="flex justify-between items-center pb-3 border-b">
-              <span className="text-slate-600">Network Uptime</span>
+              <span className="text-slate-600 dark:text-slate-400">Network Uptime</span>
               <span className="font-semibold">{kpis.uptime.toFixed(2)}%</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-600">Total Invoiced</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Invoiced</span>
               <span className="font-semibold">KES {(kpis.totalInvoiced / 1000).toFixed(0)}K</span>
             </div>
           </div>

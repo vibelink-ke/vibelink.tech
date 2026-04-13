@@ -100,20 +100,20 @@ export default function TwoFactorSetup({ onComplete }) {
                                     </Alert>
                                 )}
 
-                                <div className="bg-slate-50 rounded-lg p-6">
+                                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-6">
                                     <h3 className="font-semibold mb-4">Step 1: Scan QR Code</h3>
-                                    <p className="text-sm text-slate-600 mb-4">
+                                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
                                         Use an authenticator app like Google Authenticator, Authy, or Microsoft Authenticator
                                     </p>
                                     {otpAuthUrl && (
                                         <div className="flex flex-col items-center gap-4">
-                                            <div className="bg-white p-4 rounded-lg">
+                                            <div className="bg-white dark:bg-slate-900 p-4 rounded-lg">
                                                 <QRCodeSVG value={otpAuthUrl} size={200} />
                                             </div>
                                             <div className="w-full">
                                                 <p className="text-xs text-slate-500 mb-2">Or enter this code manually:</p>
                                                 <div className="flex items-center gap-2">
-                                                    <code className="flex-1 bg-white px-3 py-2 rounded border text-sm font-mono">
+                                                    <code className="flex-1 bg-white dark:bg-slate-900 px-3 py-2 rounded border text-sm font-mono">
                                                         {secret}
                                                     </code>
                                                     <Button
@@ -129,9 +129,9 @@ export default function TwoFactorSetup({ onComplete }) {
                                     )}
                                 </div>
 
-                                <div className="bg-slate-50 rounded-lg p-6">
+                                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-6">
                                     <h3 className="font-semibold mb-4">Step 2: Enter Verification Code</h3>
-                                    <p className="text-sm text-slate-600 mb-4">
+                                    <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
                                         Enter the 6-digit code from your authenticator app
                                     </p>
                                     <Input
@@ -183,7 +183,7 @@ export default function TwoFactorSetup({ onComplete }) {
                                     </AlertDescription>
                                 </Alert>
 
-                                <div className="bg-slate-50 rounded-lg p-6">
+                                <div className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <h3 className="font-semibold">Backup Codes</h3>
                                         <Button
@@ -199,7 +199,7 @@ export default function TwoFactorSetup({ onComplete }) {
                                         {backupCodes.map((code, idx) => (
                                             <div
                                                 key={idx}
-                                                className="bg-white px-4 py-3 rounded border font-mono text-sm flex items-center justify-between"
+                                                className="bg-white dark:bg-slate-900 px-4 py-3 rounded border font-mono text-sm flex items-center justify-between"
                                             >
                                                 <span>{code}</span>
                                                 <Button

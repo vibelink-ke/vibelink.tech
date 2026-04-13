@@ -96,7 +96,7 @@ Identify the top 3 most relevant articles that could help resolve this ticket. R
     technical: 'bg-blue-50 text-blue-700 border-blue-200',
     account: 'bg-emerald-50 text-emerald-700 border-emerald-200',
     network: 'bg-amber-50 text-amber-700 border-amber-200',
-    general: 'bg-slate-100 text-slate-700 border-slate-200',
+    general: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
   };
 
   return (
@@ -116,14 +116,14 @@ Identify the top 3 most relevant articles that could help resolve this ticket. R
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.1 }}
-              className="p-3 bg-white border border-indigo-100 rounded-lg hover:shadow-md transition-all cursor-pointer group"
+              className="p-3 bg-white dark:bg-slate-900 border border-indigo-100 rounded-lg hover:shadow-md transition-all cursor-pointer group"
             >
               <div className="flex items-start gap-3">
                 <div className="p-1.5 rounded-md bg-indigo-50 flex-shrink-0">
                   <BookOpen className="w-4 h-4 text-indigo-600" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 text-sm group-hover:text-indigo-600 transition-colors">
+                  <p className="font-medium text-slate-900 dark:text-slate-50 text-sm group-hover:text-indigo-600 transition-colors">
                     {article.title}
                   </p>
                   <div className="flex items-center gap-2 mt-1">

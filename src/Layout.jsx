@@ -192,7 +192,7 @@ function ThemeToggleButton() {
       {theme === 'dark' ? (
         <Sun className="w-5 h-5 text-yellow-500" />
       ) : (
-        <Moon className="w-5 h-5 text-slate-700" />
+        <Moon className="w-5 h-5 text-slate-700 dark:text-slate-300" />
       )}
     </Button>
   );
@@ -250,7 +250,7 @@ function LayoutContent({
                 <Zap className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h1 className="font-bold text-slate-900 dark:text-white">VIBELINK</h1>
+                <h1 className="font-bold text-slate-900 dark:text-slate-50 dark:text-white">VIBELINK</h1>
                 <p className="text-xs text-slate-500 dark:text-slate-400">ISP Management</p>
               </div>
             </div>
@@ -279,7 +279,7 @@ function LayoutContent({
                         w-full flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all relative overflow-hidden group
                         ${hasActiveChild
                           ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 shadow-sm' 
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                          : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 hover:text-slate-900'
                         }
                       `}
                     >
@@ -335,7 +335,7 @@ function LayoutContent({
                                       flex items-center gap-3 px-4 py-2 rounded-lg text-sm font-medium transition-all relative group
                                       ${isActive 
                                         ? 'bg-gradient-to-r from-indigo-50 to-purple-50 text-indigo-600 shadow-sm' 
-                                        : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                                        : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 hover:text-slate-900'
                                       }
                                     `}
                                   >
@@ -371,7 +371,7 @@ function LayoutContent({
                     flex items-center gap-3 px-4 py-3 rounded-xl font-medium transition-all
                     ${isActive 
                       ? 'bg-indigo-50 text-indigo-600' 
-                      : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                      : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 hover:text-slate-900'
                     }
                   `}
                 >
@@ -399,7 +399,7 @@ function LayoutContent({
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 text-left">
-                    <p className="font-medium text-slate-900 dark:text-white text-sm">{user?.full_name || 'User'}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50 dark:text-white text-sm">{user?.full_name || 'User'}</p>
                     <p className="text-xs text-slate-500 dark:text-slate-400 truncate">{user?.email || ''}</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
@@ -441,7 +441,7 @@ function LayoutContent({
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <Zap className="w-4 h-4 text-white" />
             </div>
-            <span className="font-bold text-slate-900 dark:text-white">VIBELINK</span>
+            <span className="font-bold text-slate-900 dark:text-slate-50 dark:text-white">VIBELINK</span>
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell user={user} />

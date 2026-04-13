@@ -70,7 +70,7 @@ export default function HotspotFileManager() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Hotspot File Manager"
@@ -83,7 +83,7 @@ export default function HotspotFileManager() {
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
           <Card>
             <CardContent className="p-6">
-              <p className="text-2xl font-bold text-slate-900">{stats.total}</p>
+              <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{stats.total}</p>
               <p className="text-sm text-slate-500">Total Files</p>
             </CardContent>
           </Card>
@@ -111,7 +111,7 @@ export default function HotspotFileManager() {
         {loadingFiles ? (
           <div className="space-y-4">
             {[1, 2, 3].map(i => (
-              <div key={i} className="h-20 bg-white rounded-xl animate-pulse" />
+              <div key={i} className="h-20 bg-white dark:bg-slate-900 rounded-xl animate-pulse" />
             ))}
           </div>
         ) : hotspotFiles.length === 0 ? (
@@ -136,13 +136,13 @@ export default function HotspotFileManager() {
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-2">
-                          <h3 className="font-semibold text-slate-900">{file.file_name}</h3>
+                          <h3 className="font-semibold text-slate-900 dark:text-slate-50">{file.file_name}</h3>
                           <Badge variant="outline" className="text-xs">
                             {file.file_type.toUpperCase()}
                           </Badge>
                           <StatusBadge status={file.upload_status} />
                         </div>
-                        <p className="text-sm text-slate-600 mb-3">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3">
                           Hotspot: {file.hotspot_name}
                         </p>
                         <div className="flex flex-wrap gap-4 text-xs text-slate-500">

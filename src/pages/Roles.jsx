@@ -82,7 +82,7 @@ export default function Roles() {
       />
 
       {showForm ? (
-        <div className="bg-white rounded-lg p-6 border border-slate-200">
+        <div className="bg-white dark:bg-slate-900 rounded-lg p-6 border border-slate-200 dark:border-slate-700">
           <h2 className="text-lg font-semibold mb-6">
             {editingRole ? `Edit Role: ${editingRole.name}` : 'Create New Role'}
           </h2>

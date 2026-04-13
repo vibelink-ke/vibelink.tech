@@ -140,7 +140,7 @@ export default function MikrotikManagement() {
                   <CardTitle className="text-sm font-medium">Offline</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-slate-600">
+                  <div className="text-2xl font-bold text-slate-600 dark:text-slate-400">
                     {routers.filter(r => r.status === 'offline').length}
                   </div>
                 </CardContent>

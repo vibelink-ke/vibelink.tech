@@ -90,8 +90,8 @@ export default function CustomerStatisticsTab({ customerId, payments = [], invoi
                 <CardContent className="pt-6">
                   <div className="flex items-start justify-between">
                     <div>
-                      <p className="text-sm text-slate-600 mb-1">{card.title}</p>
-                      <p className="text-2xl font-bold text-slate-900">{card.value}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400 mb-1">{card.title}</p>
+                      <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{card.value}</p>
                     </div>
                     <div className={`w-10 h-10 rounded-lg ${colorMap[card.color]} flex items-center justify-center`}>
                       <Icon className="w-5 h-5" />
@@ -106,7 +106,7 @@ export default function CustomerStatisticsTab({ customerId, payments = [], invoi
 
       {/* Data Usage Charts */}
       <Tabs defaultValue="daily" className="space-y-4">
-        <TabsList className="bg-white border">
+        <TabsList className="bg-white dark:bg-slate-900 border">
           <TabsTrigger value="daily">Daily Usage</TabsTrigger>
           <TabsTrigger value="weekly">Weekly Usage</TabsTrigger>
           <TabsTrigger value="monthly">Monthly Usage</TabsTrigger>
@@ -241,16 +241,16 @@ export default function CustomerStatisticsTab({ customerId, payments = [], invoi
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between items-center pb-2 border-b">
-              <span className="text-slate-600">Total Download</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Download</span>
               <span className="text-lg font-bold text-blue-600">{totalDownload.toFixed(1)} GB</span>
             </div>
             <div className="flex justify-between items-center pb-2 border-b">
-              <span className="text-slate-600">Total Upload</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Upload</span>
               <span className="text-lg font-bold text-purple-600">{totalUpload.toFixed(1)} GB</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-600">Total Data Used</span>
-              <span className="text-lg font-bold text-slate-900">{(totalDownload + totalUpload).toFixed(1)} GB</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Data Used</span>
+              <span className="text-lg font-bold text-slate-900 dark:text-slate-50">{(totalDownload + totalUpload).toFixed(1)} GB</span>
             </div>
           </CardContent>
         </Card>
@@ -261,15 +261,15 @@ export default function CustomerStatisticsTab({ customerId, payments = [], invoi
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex justify-between items-center pb-2 border-b">
-              <span className="text-slate-600">Total Payments</span>
+              <span className="text-slate-600 dark:text-slate-400">Total Payments</span>
               <span className="text-lg font-bold">{payments.length}</span>
             </div>
             <div className="flex justify-between items-center pb-2 border-b">
-              <span className="text-slate-600">Pending Invoices</span>
+              <span className="text-slate-600 dark:text-slate-400">Pending Invoices</span>
               <span className="text-lg font-bold text-amber-600">{invoices.filter(i => i.status !== 'paid').length}</span>
             </div>
             <div className="flex justify-between items-center">
-              <span className="text-slate-600">Open Tickets</span>
+              <span className="text-slate-600 dark:text-slate-400">Open Tickets</span>
               <span className="text-lg font-bold text-rose-600">{tickets.filter(t => t.status === 'open' || t.status === 'in_progress').length}</span>
             </div>
           </CardContent>

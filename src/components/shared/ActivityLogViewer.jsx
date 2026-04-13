@@ -22,7 +22,7 @@ const levelIcons = {
   info: { icon: Info, color: 'text-blue-500 bg-blue-50' },
   warning: { icon: AlertTriangle, color: 'text-yellow-500 bg-yellow-50' },
   error: { icon: AlertCircle, color: 'text-red-500 bg-red-50' },
-  debug: { icon: Bug, color: 'text-gray-500 bg-gray-50' }
+  debug: { icon: Bug, color: 'text-gray-500 bg-gray-50 dark:bg-slate-800/50' }
 };
 
 const categoryColors = {
@@ -32,8 +32,8 @@ const categoryColors = {
   payment: 'bg-emerald-100 text-emerald-800',
   invoice: 'bg-indigo-100 text-indigo-800',
   ticket: 'bg-orange-100 text-orange-800',
-  system: 'bg-gray-100 text-gray-800',
-  settings: 'bg-slate-100 text-slate-800',
+  system: 'bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200',
+  settings: 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200',
   user_management: 'bg-pink-100 text-pink-800'
 };
 
@@ -146,8 +146,8 @@ export default function ActivityLogViewer({ entityId = null, entityType = null }
                       <div className="flex items-start justify-between gap-2 mb-2">
                         <div>
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-semibold text-slate-900">{log.action}</span>
-                            <Badge className={categoryColors[log.category] || 'bg-gray-100 text-gray-800'}>
+                            <span className="font-semibold text-slate-900 dark:text-slate-50">{log.action}</span>
+                            <Badge className={categoryColors[log.category] || 'bg-gray-100 dark:bg-slate-800 text-gray-800 dark:text-slate-200'}>
                               {log.category}
                             </Badge>
                             {log.entity_type && (
@@ -156,7 +156,7 @@ export default function ActivityLogViewer({ entityId = null, entityType = null }
                               </Badge>
                             )}
                           </div>
-                          <p className="text-sm text-slate-600 mt-1">{log.details}</p>
+                          <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{log.details}</p>
                         </div>
                         <div className="flex items-center gap-1 text-xs text-slate-500 flex-shrink-0">
                           <Clock className="w-3 h-3" />
@@ -176,7 +176,7 @@ export default function ActivityLogViewer({ entityId = null, entityType = null }
                         )}
                       </div>
                       {log.entity_name && (
-                        <div className="mt-2 text-sm text-slate-600">
+                        <div className="mt-2 text-sm text-slate-600 dark:text-slate-400">
                           <span className="font-medium">Entity:</span> {log.entity_name}
                         </div>
                       )}
@@ -185,17 +185,17 @@ export default function ActivityLogViewer({ entityId = null, entityType = null }
                           <summary className="text-sm text-indigo-600 cursor-pointer hover:text-indigo-700">
                             View changes
                           </summary>
-                          <div className="mt-2 p-3 bg-slate-50 rounded-lg text-xs">
+                          <div className="mt-2 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-xs">
                             <div className="grid grid-cols-2 gap-4">
                               <div>
-                                <div className="font-semibold text-slate-700 mb-1">Before:</div>
-                                <pre className="text-slate-600 whitespace-pre-wrap">
+                                <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">Before:</div>
+                                <pre className="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
                                   {JSON.stringify(log.changes.before, null, 2)}
                                 </pre>
                               </div>
                               <div>
-                                <div className="font-semibold text-slate-700 mb-1">After:</div>
-                                <pre className="text-slate-600 whitespace-pre-wrap">
+                                <div className="font-semibold text-slate-700 dark:text-slate-300 mb-1">After:</div>
+                                <pre className="text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
                                   {JSON.stringify(log.changes.after, null, 2)}
                                 </pre>
                               </div>

@@ -23,7 +23,7 @@ function DataTable({ columns, data, isLoading, onRowClick, emptyState }) {
           <TableHeader>
             <TableRow className="bg-slate-50/50">
               {columns.map((col, i) => (
-                <TableHead key={i} className="text-slate-600 font-semibold">
+                <TableHead key={i} className="text-slate-600 dark:text-slate-400 font-semibold">
                   {col.header}
                 </TableHead>
               ))}

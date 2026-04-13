@@ -187,19 +187,19 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
           <div className="flex flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-emerald-500" />
-              <span className="text-xs text-slate-600">Online</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Online</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-slate-400" />
-              <span className="text-xs text-slate-600">Offline</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Offline</span>
             </div>
             <div className="flex items-center gap-2">
               <div className="w-4 h-4 rounded-full bg-red-400" />
-              <span className="text-xs text-slate-600">Alert</span>
+              <span className="text-xs text-slate-600 dark:text-slate-400">Alert</span>
             </div>
           </div>
 
-          <div className="border rounded-lg overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100">
+          <div className="border rounded-lg overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
             <canvas
               ref={canvasRef}
               width={800}
@@ -213,7 +213,7 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
           {/* Device List */}
           {routers.length > 0 && (
             <div className="space-y-2">
-              <h4 className="text-sm font-semibold text-slate-900">Devices ({routers.length})</h4>
+              <h4 className="text-sm font-semibold text-slate-900 dark:text-slate-50">Devices ({routers.length})</h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {routers.map(router => {
                   const isSelected = router.id === selectedRouter;
@@ -234,8 +234,8 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
                         isSelected
                           ? 'border-indigo-500 bg-indigo-50'
                           : isHovered
-                          ? 'border-slate-300 bg-slate-50'
-                          : 'border-slate-200 hover:border-slate-300'
+                          ? 'border-slate-300 bg-slate-50 dark:bg-slate-800/50'
+                          : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
                       )}
                     >
                       <div className="flex items-start gap-2">
@@ -247,8 +247,8 @@ export default function NetworkTopology({ routers, onSelectRouter }) {
                           )}
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-slate-900">{router.router_name}</p>
-                          <p className="text-xs text-slate-600">{router.ip_address}</p>
+                          <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{router.router_name}</p>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">{router.ip_address}</p>
                           <div className="flex gap-1 mt-1">
                             <Badge variant="outline" className="text-xs">
                               {router.status}

@@ -17,7 +17,8 @@ import {
   MapPin,
   RefreshCw,
   Copy,
-  Lock
+  Lock,
+  Wifi
 } from 'lucide-react';
 import StatusBadge from '@/components/shared/StatusBadge';
 import DataTable from '@/components/shared/DataTable';
@@ -152,7 +153,7 @@ export default function Customers() {
             {row.full_name?.charAt(0).toUpperCase()}
           </motion.div>
           <div>
-            <p className="font-medium text-slate-900 dark:text-white">{row.full_name}</p>
+            <p className="font-medium text-slate-900 dark:text-slate-50 dark:text-white">{row.full_name}</p>
             <p className="text-sm text-slate-500 dark:text-slate-400">{row.customer_id || 'No ID'}</p>
           </div>
         </div>
@@ -195,21 +196,22 @@ export default function Customers() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => navigate(createPageUrl('CustomerProfile') + '?id=' + row.id)}>
+            <DropdownMenuItem onSelect={() => navigate(createPageUrl('CustomerProfile') + '?id=' + row.id)}>
               <Eye className="w-4 h-4 mr-2" />
               View Profile
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => setViewCustomer(row)}>
+            <DropdownMenuItem onSelect={() => setViewCustomer(row)}>
               <Eye className="w-4 h-4 mr-2" />
               Quick View
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => { setEditingCustomer(row); setShowForm(true); }}>
+            <DropdownMenuItem onSelect={() => { setEditingCustomer(row); setShowForm(true); }}>
               <Edit2 className="w-4 h-4 mr-2" />
               Edit
             </DropdownMenuItem>
             <DropdownMenuItem 
               className="text-rose-600"
-              onClick={() => {
+              onSelect={(e) => {
+                e.preventDefault();
                 if (confirm('Delete this customer?')) deleteMutation.mutate(row.id);
               }}
             >
@@ -230,7 +232,7 @@ export default function Customers() {
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
           >
-            <h1 className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight">Customers</h1>
+            <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50 dark:text-white tracking-tight">Customers</h1>
             <div className="flex items-center gap-2 mt-2">
               <p className="text-slate-500 dark:text-slate-400">{customers.length} total customers</p>
               <motion.div
@@ -354,9 +356,13 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
     mikrotik_name: '',
     portal_username: '',
     portal_password: '',
+    connection_type: 'pppoe',
+    pppoe_username: '',
+    pppoe_password: '',
     notes: '',
   });
   const [showPassword, setShowPassword] = useState(false);
+  const [showPppoePassword, setShowPppoePassword] = useState(false);
 
   React.useEffect(() => {
     if (customer) {
@@ -378,6 +384,9 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
         mikrotik_name: customer.mikrotik_name || '',
         portal_username: customer.portal_username || '',
         portal_password: customer.portal_password || '',
+        connection_type: customer.connection_type || 'pppoe',
+        pppoe_username: customer.pppoe_username || '',
+        pppoe_password: customer.pppoe_password || '',
         notes: customer.notes || '',
       });
     } else {
@@ -399,6 +408,9 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
         mikrotik_name: '',
         portal_username: '',
         portal_password: '',
+        connection_type: 'pppoe',
+        pppoe_username: '',
+        pppoe_password: '',
         notes: '',
       });
     }
@@ -419,6 +431,18 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
       ...prev,
       portal_username: username,
       portal_password: password,
+    }));
+  };
+
+  const generatePPPoECredentials = () => {
+    const baseName = formData.full_name ? formData.full_name.toLowerCase().replace(/[^a-z0-9]/g, '') : 'user';
+    const randomNum = Math.floor(1000 + Math.random() * 9000);
+    const username = `${baseName}${randomNum}`;
+    const password = Math.floor(10000000 + Math.random() * 90000000).toString();
+    setFormData(prev => ({
+      ...prev,
+      pppoe_username: username,
+      pppoe_password: password,
     }));
   };
 
@@ -554,6 +578,88 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
               </Select>
             </div>
             <div className="space-y-2">
+              <Label>Connection Type</Label>
+              <Select value={formData.connection_type} onValueChange={(v) => setFormData({...formData, connection_type: v})}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pppoe">PPPoE</SelectItem>
+                  <SelectItem value="hotspot">Hotspot</SelectItem>
+                  <SelectItem value="static">Static IP</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {formData.connection_type === 'pppoe' && (
+              <div className="sm:col-span-2 space-y-3 border-t pt-4 border-b pb-4">
+                <div className="flex items-center justify-between">
+                  <Label className="flex items-center gap-2 font-semibold">
+                    <Wifi className="w-4 h-4" />
+                    PPPoE Credentials
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={generatePPPoECredentials}
+                    className="gap-2"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Generate
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>PPPoE Username</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        value={formData.pppoe_username}
+                        onChange={(e) => setFormData({...formData, pppoe_username: e.target.value})}
+                        placeholder="e.g., john.doe"
+                      />
+                      {formData.pppoe_username && (
+                        <Button type="button" variant="ghost" size="icon" onClick={() => copyToClipboard(formData.pppoe_username, 'PPPoE Username')}>
+                          <Copy className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>PPPoE Password</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        type={showPppoePassword ? 'text' : 'password'}
+                        value={formData.pppoe_password}
+                        onChange={(e) => setFormData({...formData, pppoe_password: e.target.value})}
+                        placeholder="Auto-generated password"
+                      />
+                      {formData.pppoe_password && (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setShowPppoePassword(!showPppoePassword)}
+                            title={showPppoePassword ? 'Hide password' : 'Show password'}
+                          >
+                            {showPppoePassword ? '👁️' : '👁️‍🗨️'}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => copyToClipboard(formData.pppoe_password, 'PPPoE Password')}
+                          >
+                            <Copy className="w-4 h-4" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div className="space-y-2">
               <Label>Billing Day</Label>
               <Select 
                 value={formData.billing_cycle_day.toString()} 
@@ -605,7 +711,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
                 MAC Address
-                <span className="text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
+                <span className="text-xs font-normal text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
               </Label>
               <Input
                 value={formData.mac_address}
@@ -614,6 +720,7 @@ function CustomerFormDialog({ open, onOpenChange, customer, plans, onSubmit, isL
                 className="text-slate-500"
               />
             </div>
+
             <div className="sm:col-span-2 space-y-3 border-t pt-4">
               <div className="flex items-center justify-between">
                 <Label className="flex items-center gap-2 font-semibold">
@@ -726,7 +833,7 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
               {customer.full_name?.charAt(0).toUpperCase()}
             </div>
             <div>
-              <h3 className="text-xl font-semibold text-slate-900">{customer.full_name}</h3>
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-50">{customer.full_name}</h3>
               <p className="text-slate-500">{customer.customer_id || 'No ID assigned'}</p>
               <StatusBadge status={customer.status} className="mt-2" />
             </div>
@@ -734,44 +841,44 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
 
           {/* Contact Info */}
           <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900">Contact Information</h4>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-50">Contact Information</h4>
             <div className="space-y-2">
-              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <Mail className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-700">{customer.email}</span>
+                <span className="text-slate-700 dark:text-slate-300">{customer.email}</span>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <Phone className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-700">{customer.phone}</span>
+                <span className="text-slate-700 dark:text-slate-300">{customer.phone}</span>
               </div>
-              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center gap-3 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <MapPin className="w-4 h-4 text-slate-500" />
-                <span className="text-slate-700">{customer.address}, {customer.city}</span>
+                <span className="text-slate-700 dark:text-slate-300">{customer.address}, {customer.city}</span>
               </div>
             </div>
           </div>
 
           {/* Service Info */}
           <div className="space-y-3">
-            <h4 className="font-semibold text-slate-900">Service Information</h4>
+            <h4 className="font-semibold text-slate-900 dark:text-slate-50">Service Information</h4>
             <div className="grid grid-cols-2 gap-3">
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-500">Plan</p>
-                <p className="font-medium text-slate-900">{customer.plan_name || 'No plan'}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-50">{customer.plan_name || 'No plan'}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-500">Monthly Rate</p>
-                <p className="font-medium text-slate-900">KES {customer.monthly_rate || 0}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-50">KES {customer.monthly_rate || 0}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-500">Balance</p>
                 <p className={`font-medium ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                   KES {(customer.balance || 0).toFixed(2)}
                 </p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-sm text-slate-500">Billing Day</p>
-                <p className="font-medium text-slate-900">Day {customer.billing_cycle_day || 1}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-50">Day {customer.billing_cycle_day || 1}</p>
               </div>
             </div>
           </div>
@@ -779,18 +886,18 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
           {/* Technical Info */}
           {(customer.mac_address || customer.ip_address) && (
             <div className="space-y-3">
-              <h4 className="font-semibold text-slate-900">Technical Details</h4>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Technical Details</h4>
               <div className="grid grid-cols-2 gap-3">
                 {customer.mac_address && (
-                  <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <p className="text-sm text-slate-500">MAC Address</p>
-                    <p className="font-mono text-slate-900">{customer.mac_address}</p>
+                    <p className="font-mono text-slate-900 dark:text-slate-50">{customer.mac_address}</p>
                   </div>
                 )}
                 {customer.ip_address && (
-                  <div className="p-3 bg-slate-50 rounded-lg">
+                  <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                     <p className="text-sm text-slate-500">IP Address</p>
-                    <p className="font-mono text-slate-900">{customer.ip_address}</p>
+                    <p className="font-mono text-slate-900 dark:text-slate-50">{customer.ip_address}</p>
                   </div>
                 )}
               </div>
@@ -800,8 +907,8 @@ function CustomerDetailsSheet({ customer, open, onOpenChange, onEdit }) {
           {/* Notes */}
           {customer.notes && (
             <div className="space-y-3">
-              <h4 className="font-semibold text-slate-900">Notes</h4>
-              <p className="p-3 bg-slate-50 rounded-lg text-slate-700">{customer.notes}</p>
+              <h4 className="font-semibold text-slate-900 dark:text-slate-50">Notes</h4>
+              <p className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-slate-700 dark:text-slate-300">{customer.notes}</p>
             </div>
           )}
 

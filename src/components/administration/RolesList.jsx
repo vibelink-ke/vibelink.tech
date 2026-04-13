@@ -26,7 +26,7 @@ export default function RolesList({ roles, onEdit, onDelete, onAdd, isLoading })
   return (
     <div className="space-y-4">
       <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold text-slate-900">Roles</h2>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-50">Roles</h2>
         <Button
           onClick={onAdd}
           className="bg-indigo-600 hover:bg-indigo-700"
@@ -67,7 +67,7 @@ export default function RolesList({ roles, onEdit, onDelete, onAdd, isLoading })
                         )}
                       </div>
                       {role.description && (
-                        <p className="text-sm text-slate-600 mt-1">{role.description}</p>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{role.description}</p>
                       )}
                     </div>
                     <div className="flex gap-2">

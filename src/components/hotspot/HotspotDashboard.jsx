@@ -140,7 +140,7 @@ export default function HotspotDashboard() {
               <CreditCard className="w-5 h-5 text-indigo-600" />
             </div>
             <div className="flex-1">
-              <Label className="text-sm font-medium text-slate-900">Hotspot Payment Gateway</Label>
+              <Label className="text-sm font-medium text-slate-900 dark:text-slate-50">Hotspot Payment Gateway</Label>
               <p className="text-xs text-slate-500 mt-0.5">Select how customers pay for vouchers</p>
             </div>
             <Select value={hotspotPaymentGateway} onValueChange={(v) => updateGatewayMutation.mutate(v)}>
@@ -172,7 +172,7 @@ export default function HotspotDashboard() {
                   </div>
                   <div className="flex-1">
                     <p className="text-sm text-slate-500 mb-1">{stat.title}</p>
-                    <p className="text-2xl font-bold text-slate-900">{stat.value}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{stat.value}</p>
                     <p className="text-xs text-slate-400 mt-1">{stat.subtitle}</p>
                   </div>
                 </div>
@@ -195,17 +195,17 @@ export default function HotspotDashboard() {
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: idx * 0.05 }}
-                className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
               >
                 <div className="flex items-center gap-3">
                   <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   <div>
-                    <p className="font-medium text-slate-900">{session.username || 'Guest'}</p>
+                    <p className="font-medium text-slate-900 dark:text-slate-50">{session.username || 'Guest'}</p>
                     <p className="text-xs text-slate-500 font-mono">{session.mac_address}</p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-slate-900">{session.hotspot_name}</p>
+                  <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{session.hotspot_name}</p>
                   <p className="text-xs text-slate-500">
                     {((session.data_uploaded + session.data_downloaded) / (1024 * 1024)).toFixed(2)} MB
                   </p>

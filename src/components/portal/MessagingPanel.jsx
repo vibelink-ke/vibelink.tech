@@ -85,7 +85,7 @@ export default function MessagingPanel({ customer, user }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+        <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
           <MessageCircle className="w-5 h-5" />
           Messages
         </h2>
@@ -97,7 +97,7 @@ export default function MessagingPanel({ customer, user }) {
       <Card>
         <CardContent className="p-0">
           {/* Messages Area */}
-          <div className="h-96 overflow-y-auto p-4 space-y-3 bg-slate-50">
+          <div className="h-96 overflow-y-auto p-4 space-y-3 bg-slate-50 dark:bg-slate-800/50">
             <AnimatePresence>
               {messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center">
@@ -125,10 +125,10 @@ export default function MessagingPanel({ customer, user }) {
                       <div className={`rounded-2xl px-4 py-2 ${
                         msg.sender_type === 'customer' 
                           ? 'bg-indigo-600 text-white' 
-                          : 'bg-white border border-slate-200'
+                          : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700'
                       }`}>
                         {msg.sender_type === 'staff' && (
-                          <p className="text-xs font-medium text-slate-600 mb-1">
+                          <p className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
                             {msg.sender_name || 'Support Staff'}
                           </p>
                         )}
@@ -153,7 +153,7 @@ export default function MessagingPanel({ customer, user }) {
           </div>
 
           {/* Input Area */}
-          <div className="p-4 border-t bg-white">
+          <div className="p-4 border-t bg-white dark:bg-slate-900">
             <div className="flex gap-2">
               <Textarea
                 value={message}

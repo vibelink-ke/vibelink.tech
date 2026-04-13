@@ -70,7 +70,7 @@ export default function FeedbackForm({ customer, ticket, onSubmit, onCancel }) {
           ))}
         </div>
         {formData.csat_score && (
-          <p className="text-center text-sm text-slate-600">
+          <p className="text-center text-sm text-slate-600 dark:text-slate-400">
             {CSATLabels[formData.csat_score - 1]}
           </p>
         )}
@@ -96,7 +96,7 @@ export default function FeedbackForm({ customer, ticket, onSubmit, onCancel }) {
                     : score <= 8
                     ? 'bg-amber-500 text-white'
                     : 'bg-emerald-500 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
               }`}
             >
               {score}

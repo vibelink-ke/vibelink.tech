@@ -91,26 +91,26 @@ export default function CustomerServicesTab({ customer, onCustomerUpdated }) {
           <CardHeader><CardTitle>Account Details</CardTitle></CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-xs text-slate-500 mb-1">MikroTik Router</p>
-                <p className="font-medium text-slate-900">{customer.mikrotik_name || 'Not assigned'}</p>
+                <p className="font-medium text-slate-900 dark:text-slate-50">{customer.mikrotik_name || 'Not assigned'}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-xs text-slate-500 mb-1">IP Address</p>
-                <p className="font-mono text-sm font-medium text-slate-900">{customer.ip_address || 'Not assigned'}</p>
+                <p className="font-mono text-sm font-medium text-slate-900 dark:text-slate-50">{customer.ip_address || 'Not assigned'}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-xs text-slate-500 mb-1 flex items-center gap-1">
                   MAC Address
                   <span className="text-slate-300 font-normal">(auto)</span>
                 </p>
-                <p className="font-mono text-sm font-medium text-slate-900">{customer.mac_address || <span className="text-slate-400 italic text-xs">Awaiting first connection</span>}</p>
+                <p className="font-mono text-sm font-medium text-slate-900 dark:text-slate-50">{customer.mac_address || <span className="text-slate-400 italic text-xs">Awaiting first connection</span>}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <p className="text-xs text-slate-500 mb-1">Monthly Rate</p>
-                <p className="font-semibold text-slate-900">KES {customer.monthly_rate?.toLocaleString() || '0'}</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-50">KES {customer.monthly_rate?.toLocaleString() || '0'}</p>
               </div>
-              <div className="p-3 bg-slate-50 rounded-lg col-span-2">
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg col-span-2">
                 <p className="text-xs text-slate-500 mb-1">Account Balance</p>
                 <p className={`font-semibold ${(customer.balance || 0) > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                   KES {Math.abs(customer.balance || 0).toLocaleString()}
@@ -316,7 +316,7 @@ function AddServiceDialog({ open, onOpenChange, customer, service, plans, mikrot
             <div className="space-y-2 col-span-2">
               <Label className="flex items-center gap-2">
                 MAC Address
-                <span className="text-xs font-normal text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
+                <span className="text-xs font-normal text-slate-400 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-full">Auto-detected on connect</span>
               </Label>
               <Input value={formData.mac_address} onChange={(e) => setFormData({ ...formData, mac_address: e.target.value })} placeholder="Will be populated automatically" className="text-slate-500" />
             </div>
@@ -422,19 +422,19 @@ function ServiceCard({ service, allPlans, onEdit, onDelete, getExpiryStatus, del
                 <Separator />
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
                   {service.mikrotik_name && (
-                    <div className="p-2 bg-slate-50 rounded">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
                       <p className="text-xs text-slate-500 mb-1">Router</p>
                       <p className="font-mono text-xs">{service.mikrotik_name}</p>
                     </div>
                   )}
                   {service.ip_address && (
-                    <div className="p-2 bg-slate-50 rounded">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
                       <p className="text-xs text-slate-500 mb-1">IP Address</p>
                       <p className="font-mono text-xs">{service.ip_address}</p>
                     </div>
                   )}
                   {service.mac_address && (
-                    <div className="p-2 bg-slate-50 rounded">
+                    <div className="p-2 bg-slate-50 dark:bg-slate-800/50 rounded">
                       <p className="text-xs text-slate-500 mb-1">MAC</p>
                       <p className="font-mono text-xs">{service.mac_address}</p>
                     </div>

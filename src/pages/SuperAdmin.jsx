@@ -87,8 +87,8 @@ export default function SuperAdmin() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-3xl font-bold text-slate-900">Super Admin Dashboard</h1>
-        <p className="text-slate-600">Manage all tenant accounts and subscriptions</p>
+        <h1 className="text-3xl font-bold text-slate-900 dark:text-slate-50">Super Admin Dashboard</h1>
+        <p className="text-slate-600 dark:text-slate-400">Manage all tenant accounts and subscriptions</p>
       </div>
 
       {/* Stats */}
@@ -97,8 +97,8 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600">Total Tenants</p>
-                <p className="text-3xl font-bold text-slate-900">{stats.total}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Total Tenants</p>
+                <p className="text-3xl font-bold text-slate-900 dark:text-slate-50">{stats.total}</p>
               </div>
               <Building2 className="w-8 h-8 text-slate-400" />
             </div>
@@ -108,7 +108,7 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600">Active</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Active</p>
                 <p className="text-3xl font-bold text-emerald-600">{stats.active}</p>
               </div>
               <CheckCircle className="w-8 h-8 text-emerald-500" />
@@ -119,7 +119,7 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600">Trial</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Trial</p>
                 <p className="text-3xl font-bold text-amber-600">{stats.trial}</p>
               </div>
               <AlertCircle className="w-8 h-8 text-amber-500" />
@@ -130,7 +130,7 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600">Suspended</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Suspended</p>
                 <p className="text-3xl font-bold text-rose-600">{stats.suspended}</p>
               </div>
               <XCircle className="w-8 h-8 text-rose-500" />
@@ -141,7 +141,7 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600">MRR</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">MRR</p>
                 <p className="text-2xl font-bold text-indigo-600">KES {stats.mrr.toLocaleString()}</p>
               </div>
               <DollarSign className="w-8 h-8 text-indigo-500" />
@@ -176,7 +176,7 @@ export default function SuperAdmin() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="p-4 border border-slate-200 rounded-lg hover:shadow-md transition-shadow"
+                className="p-4 border border-slate-200 dark:border-slate-700 rounded-lg hover:shadow-md transition-shadow"
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-4 flex-1">
@@ -185,10 +185,10 @@ export default function SuperAdmin() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <h3 className="font-semibold text-slate-900">{tenant.company_name}</h3>
+                        <h3 className="font-semibold text-slate-900 dark:text-slate-50">{tenant.company_name}</h3>
                         <StatusBadge status={tenant.status} />
                       </div>
-                      <p className="text-sm text-slate-600">{tenant.admin_email}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">{tenant.admin_email}</p>
                       <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
                         <span>{tenant.subdomain}.vibelink.app</span>
                         <span>•</span>

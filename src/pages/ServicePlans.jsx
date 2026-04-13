@@ -158,7 +158,7 @@ export default function ServicePlans() {
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between">
                       <div>
-                        <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
+                        <h3 className="text-xl font-bold text-slate-900 dark:text-slate-50">{plan.name}</h3>
                         <StatusBadge status={plan.status} className="mt-2" />
                       </div>
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
@@ -183,12 +183,12 @@ export default function ServicePlans() {
                   <CardContent className="space-y-4">
                     {/* Price */}
                     <div>
-                      <span className="text-4xl font-bold text-slate-900">KES {plan.monthly_price}</span>
+                      <span className="text-4xl font-bold text-slate-900 dark:text-slate-50">KES {plan.monthly_price}</span>
                       <span className="text-slate-500">/month</span>
                     </div>
 
                     {/* Speed */}
-                    <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl">
+                    <div className="flex items-center gap-4 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                       <div className="flex items-center gap-2">
                         <ArrowDown className="w-4 h-4 text-emerald-500" />
                         <span className="font-semibold">{plan.download_speed} Mbps</span>
@@ -200,7 +200,7 @@ export default function ServicePlans() {
                     </div>
 
                     {/* Data Cap */}
-                    <div className="flex items-center gap-2 text-slate-600">
+                    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
                       <Zap className="w-4 h-4" />
                       <span>{plan.data_cap === 0 ? 'Unlimited Data' : `${plan.data_cap} GB/month`}</span>
                     </div>
@@ -209,7 +209,7 @@ export default function ServicePlans() {
                     {plan.features?.length > 0 && (
                       <div className="space-y-2">
                         {plan.features.slice(0, 3).map((feature, i) => (
-                          <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                          <div key={i} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                             <Check className="w-4 h-4 text-emerald-500" />
                             <span>{feature}</span>
                           </div>
@@ -221,15 +221,15 @@ export default function ServicePlans() {
                     )}
 
                     {/* Stats */}
-                    <div className="pt-4 border-t border-slate-100">
+                    <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-slate-500">Subscribers</span>
-                        <span className="font-semibold text-slate-900">{getSubscriberCount(plan.id)}</span>
+                        <span className="font-semibold text-slate-900 dark:text-slate-50">{getSubscriberCount(plan.id)}</span>
                       </div>
                       {plan.setup_fee > 0 && (
                         <div className="flex items-center justify-between text-sm mt-1">
                           <span className="text-slate-500">Setup Fee</span>
-                          <span className="font-semibold text-slate-900">KES {plan.setup_fee}</span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-50">KES {plan.setup_fee}</span>
                         </div>
                       )}
                     </div>
@@ -453,7 +453,7 @@ function PlanFormDialog({ open, onOpenChange, plan, onSubmit, isLoading }) {
               </div>
             </div>
 
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+              <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                 <Label className="cursor-pointer">Active Plan</Label>
                 <Switch
                   checked={formData.status === 'active'}
@@ -497,7 +497,7 @@ function PlanFormDialog({ open, onOpenChange, plan, onSubmit, isLoading }) {
                       return (
                         <div 
                           key={i}
-                          className="flex items-center justify-between p-3 bg-slate-50 rounded-lg"
+                          className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg"
                         >
                           <div className="flex items-center gap-2">
                             <Check className="w-4 h-4 text-emerald-500" />
@@ -555,7 +555,7 @@ function PlanFormDialog({ open, onOpenChange, plan, onSubmit, isLoading }) {
                   </Select>
                 </div>
 
-                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center justify-between p-3 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
                   <div>
                     <Label className="cursor-pointer">Pro-Rata Billing</Label>
                     <p className="text-xs text-slate-500 mt-1">Enable for mid-cycle plan changes</p>

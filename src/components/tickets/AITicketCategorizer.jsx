@@ -129,7 +129,7 @@ export default function AITicketCategorizer({ subject, description, customerId, 
             </div>
             <div className="text-right">
               <div className="text-2xl font-bold text-indigo-600">{analysis.confidence}%</div>
-              <div className="text-xs text-slate-600">Confidence</div>
+              <div className="text-xs text-slate-600 dark:text-slate-400">Confidence</div>
             </div>
           </div>
         </CardHeader>
@@ -147,8 +147,8 @@ export default function AITicketCategorizer({ subject, description, customerId, 
                 <div className="flex items-start gap-3">
                   <div className="text-2xl mt-1">{getCategoryIcon(analysis.category)}</div>
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-slate-700">Category</p>
-                    <p className="text-base font-bold text-slate-900 capitalize">
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Category</p>
+                    <p className="text-base font-bold text-slate-900 dark:text-slate-50 capitalize">
                       {analysis.category?.replace('_', ' ')}
                     </p>
                   </div>
@@ -156,15 +156,15 @@ export default function AITicketCategorizer({ subject, description, customerId, 
 
                 {/* Recommended Agent */}
                 {analysis.recommended_agent && (
-                  <div className="p-3 bg-white rounded-lg border border-emerald-200">
+                  <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-emerald-200">
                     <div className="flex items-center gap-2 mb-1">
                       <User className="w-4 h-4 text-emerald-600" />
-                      <p className="text-sm font-semibold text-slate-700">Recommended Assignment</p>
+                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Recommended Assignment</p>
                     </div>
                     <p className="text-base font-bold text-emerald-700">
                       {analysis.recommended_agent_name || analysis.recommended_agent}
                     </p>
-                    <p className="text-xs text-slate-600 mt-1">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       Auto-assignment ready based on expertise match
                     </p>
                   </div>
@@ -184,10 +184,10 @@ export default function AITicketCategorizer({ subject, description, customerId, 
                 {/* Key Issues */}
                 {analysis.key_issues && analysis.key_issues.length > 0 && (
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold text-slate-700">Identified Issues</p>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">Identified Issues</p>
                     <ul className="space-y-1">
                       {analysis.key_issues.map((issue, idx) => (
-                        <li key={idx} className="text-sm text-slate-600 flex items-start gap-2">
+                        <li key={idx} className="text-sm text-slate-600 dark:text-slate-400 flex items-start gap-2">
                           <span className="text-indigo-600 mt-0.5">•</span>
                           <span>{issue}</span>
                         </li>
@@ -197,9 +197,9 @@ export default function AITicketCategorizer({ subject, description, customerId, 
                 )}
 
                 {/* Reasoning */}
-                <div className="p-3 bg-white rounded-lg border border-slate-200">
-                  <p className="text-xs font-semibold text-slate-700 mb-1">AI Reasoning</p>
-                  <p className="text-sm text-slate-600">{analysis.reasoning}</p>
+                <div className="p-3 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700">
+                  <p className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">AI Reasoning</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">{analysis.reasoning}</p>
                 </div>
 
                 {/* Re-analyze Button */}

@@ -403,14 +403,14 @@ export default function Reports() {
   }, 0);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Reports & Analytics"
           subtitle="Comprehensive business insights and performance metrics"
         >
           <Select value={activeReport} onValueChange={setActiveReport}>
-            <SelectTrigger className="w-56 bg-white">
+            <SelectTrigger className="w-56 bg-white dark:bg-slate-900">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -442,7 +442,7 @@ export default function Reports() {
             value={`${revenueAnalytics.totalInvoiced > 0 ? ((revenueAnalytics.totalRevenue / revenueAnalytics.totalInvoiced) * 100).toFixed(1) : 100}%`}
             subtitle="Of invoiced amount"
             icon={CreditCard}
-            trend={revenueAnalytics.totalRevenue >= revenueAnalytics.totalInvoiced * 0.9 ? "+5%" : "-3%"}
+            trend="0%"
             trendUp={revenueAnalytics.totalRevenue >= revenueAnalytics.totalInvoiced * 0.9}
           />
           <StatCard
@@ -461,7 +461,7 @@ export default function Reports() {
 
         {/* Tabs for different reports */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="bg-white border p-1 flex-wrap h-auto">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1 flex-wrap h-auto">
             <TabsTrigger value="revenue" className="gap-2">
               <DollarSign className="w-4 h-4" /> Revenue
             </TabsTrigger>
@@ -558,10 +558,10 @@ export default function Reports() {
                         <span className="text-sm font-medium text-slate-400 w-6">{i + 1}</span>
                         <div className="flex-1">
                           <div className="flex items-center justify-between">
-                            <span className="font-medium text-slate-900">{customer.name}</span>
-                            <span className="font-semibold text-slate-900">${customer.revenue.toLocaleString()}</span>
+                            <span className="font-medium text-slate-900 dark:text-slate-50">{customer.name}</span>
+                            <span className="font-semibold text-slate-900 dark:text-slate-50">${customer.revenue.toLocaleString()}</span>
                           </div>
-                          <div className="h-2 bg-slate-100 rounded-full mt-1">
+                          <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full mt-1">
                             <div 
                               className="h-2 bg-indigo-500 rounded-full"
                               style={{ width: `${(customer.revenue / revenueAnalytics.topCustomers[0]?.revenue) * 100}%` }}
@@ -583,10 +583,10 @@ export default function Reports() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left py-2 font-medium text-slate-600">Plan</th>
-                          <th className="text-right py-2 font-medium text-slate-600">Customers</th>
-                          <th className="text-right py-2 font-medium text-slate-600">Revenue</th>
-                          <th className="text-right py-2 font-medium text-slate-600">MRR</th>
+                          <th className="text-left py-2 font-medium text-slate-600 dark:text-slate-400">Plan</th>
+                          <th className="text-right py-2 font-medium text-slate-600 dark:text-slate-400">Customers</th>
+                          <th className="text-right py-2 font-medium text-slate-600 dark:text-slate-400">Revenue</th>
+                          <th className="text-right py-2 font-medium text-slate-600 dark:text-slate-400">MRR</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -892,7 +892,7 @@ export default function Reports() {
                           <span className="font-medium">{cat.name}</span>
                           <span className="text-slate-500">{cat.resolved}/{cat.total} resolved</span>
                         </div>
-                        <div className="h-2 bg-slate-100 rounded-full">
+                        <div className="h-2 bg-slate-100 dark:bg-slate-800 rounded-full">
                           <div 
                             className="h-2 bg-indigo-500 rounded-full"
                             style={{ width: `${cat.total > 0 ? (cat.resolved / cat.total) * 100 : 0}%` }}
@@ -1027,10 +1027,10 @@ export default function Reports() {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-medium text-slate-600">Method</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Transactions</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Amount</th>
-                        <th className="text-right py-3 px-4 font-medium text-slate-600">Success Rate</th>
+                        <th className="text-left py-3 px-4 font-medium text-slate-600 dark:text-slate-400">Method</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-600 dark:text-slate-400">Transactions</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-600 dark:text-slate-400">Amount</th>
+                        <th className="text-right py-3 px-4 font-medium text-slate-600 dark:text-slate-400">Success Rate</th>
                       </tr>
                     </thead>
                     <tbody>

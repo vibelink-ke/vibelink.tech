@@ -109,7 +109,7 @@ export default function Finance() {
               <Icon className="w-5 h-5 text-emerald-600" />
             </div>
             <div>
-              <p className="font-medium text-slate-900">{row.payment_id || `PAY-${row.id?.slice(0,6)}`}</p>
+              <p className="font-medium text-slate-900 dark:text-slate-50">{row.payment_id || `PAY-${row.id?.slice(0,6)}`}</p>
               <p className="text-sm text-slate-500 capitalize">{row.payment_method?.replace('_', ' ')}</p>
             </div>
           </div>
@@ -119,13 +119,13 @@ export default function Finance() {
     {
       header: 'Customer',
       cell: (row) => (
-        <span className="text-slate-700">{row.customer_name}</span>
+        <span className="text-slate-700 dark:text-slate-300">{row.customer_name}</span>
       )
     },
     {
       header: 'Date',
       cell: (row) => (
-        <span className="text-slate-600">
+        <span className="text-slate-600 dark:text-slate-400">
           {row.created_date ? format(new Date(row.created_date), 'MMM d, yyyy') : '-'}
         </span>
       )
@@ -143,7 +143,7 @@ export default function Finance() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Finance"
@@ -162,7 +162,7 @@ export default function Finance() {
             />
           </div>
           <Select value={methodFilter} onValueChange={setMethodFilter}>
-            <SelectTrigger className="w-full sm:w-48 bg-white">
+            <SelectTrigger className="w-full sm:w-48 bg-white dark:bg-slate-900">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue placeholder="Payment Method" />
             </SelectTrigger>

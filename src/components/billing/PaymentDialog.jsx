@@ -64,15 +64,15 @@ export default function PaymentDialog({ invoice, tenant, open, onOpenChange, onP
         </DialogHeader>
 
         {/* Invoice Summary */}
-        <Card className="bg-slate-50">
+        <Card className="bg-slate-50 dark:bg-slate-800/50">
           <CardContent className="pt-6">
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Invoice:</span>
+                <span className="text-slate-600 dark:text-slate-400">Invoice:</span>
                 <span className="font-semibold">{invoice.invoice_number}</span>
               </div>
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Amount:</span>
+                <span className="text-slate-600 dark:text-slate-400">Amount:</span>
                 <span className="font-semibold text-lg">
                   KES {invoice.total_amount.toLocaleString('en-KE')}
                 </span>
@@ -83,7 +83,7 @@ export default function PaymentDialog({ invoice, tenant, open, onOpenChange, onP
 
         {/* Payment Methods */}
         <div className="space-y-3">
-          <p className="text-sm font-semibold text-slate-900">Select Payment Method:</p>
+          <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Select Payment Method:</p>
           
           {paymentMethods.length > 0 ? (
             <div className="space-y-2">
@@ -94,14 +94,14 @@ export default function PaymentDialog({ invoice, tenant, open, onOpenChange, onP
                   className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
                     selectedMethod === method.id
                       ? 'border-indigo-600 bg-indigo-50'
-                      : 'border-slate-200 hover:border-slate-300 bg-white'
+                      : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 bg-white dark:bg-slate-900'
                   }`}
                 >
                   <div className="flex items-start gap-3">
                     <span className="text-2xl">{method.icon}</span>
                     <div className="flex-1">
-                      <p className="font-semibold text-slate-900">{method.name}</p>
-                      <p className="text-sm text-slate-600">{method.description}</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-50">{method.name}</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">{method.description}</p>
                     </div>
                   </div>
                 </button>

@@ -62,7 +62,7 @@ export default function TenantsList({ tenants = [], isLoading, onEdit, onDelete 
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-3">
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50 dark:text-white">
                       {tenant.company_name}
                     </h3>
                     <StatusBadge status={tenant.status} />
@@ -85,30 +85,30 @@ export default function TenantsList({ tenants = [], isLoading, onEdit, onDelete 
                     </div>
                     <div>
                       <p className="text-sm text-slate-600 dark:text-slate-400">Monthly Price</p>
-                      <p className="text-slate-900 dark:text-white font-semibold">
+                      <p className="text-slate-900 dark:text-slate-50 dark:text-white font-semibold">
                         KES {tenant.monthly_price?.toLocaleString() || '0'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-200">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Max Customers</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{tenant.max_customers}</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">{tenant.max_customers}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Max Staff</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">{tenant.max_staff}</p>
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">{tenant.max_staff}</p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Onboarded</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">
                         {tenant.onboarded ? 'Yes' : 'No'}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Trial Ends</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">
                         {tenant.trial_ends_at
                           ? new Date(tenant.trial_ends_at).toLocaleDateString()
                           : 'N/A'}

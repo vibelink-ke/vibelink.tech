@@ -20,7 +20,7 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, tr
         <div className="space-y-1 flex-1">
           <p className="text-sm font-medium text-slate-500 dark:text-slate-300">{title}</p>
           <motion.p 
-            className="text-3xl font-bold text-slate-900 dark:text-white tracking-tight"
+            className="text-3xl font-bold text-slate-900 dark:text-slate-50 dark:text-white tracking-tight"
             initial={{ scale: 0.8, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
             transition={{ delay: 0.1 }}

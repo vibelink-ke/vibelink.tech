@@ -41,7 +41,7 @@ const levelConfig = {
   info: { icon: Info, color: 'bg-blue-50 text-blue-700 border-blue-200' },
   warning: { icon: AlertTriangle, color: 'bg-amber-50 text-amber-700 border-amber-200' },
   error: { icon: AlertCircle, color: 'bg-rose-50 text-rose-700 border-rose-200' },
-  debug: { icon: Bug, color: 'bg-slate-100 text-slate-600 border-slate-200' },
+  debug: { icon: Bug, color: 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-700' },
 };
 
 const categoryColors = {
@@ -52,13 +52,13 @@ const categoryColors = {
   sms: 'bg-pink-100 text-pink-700',
   email: 'bg-indigo-100 text-indigo-700',
   hotspot: 'bg-cyan-100 text-cyan-700',
-  system: 'bg-slate-100 text-slate-700',
+  system: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300',
   api: 'bg-orange-100 text-orange-700',
   tenant: 'bg-violet-100 text-violet-700',
   service_plan: 'bg-teal-100 text-teal-700',
   invoice: 'bg-lime-100 text-lime-700',
   ticket: 'bg-yellow-100 text-yellow-700',
-  settings: 'bg-gray-100 text-gray-700',
+  settings: 'bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-300',
   user_management: 'bg-rose-100 text-rose-700',
 };
 
@@ -73,12 +73,12 @@ const DATE_RANGES = [
 
 export default function Logs() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader title="Logs & Audit Trail" subtitle="Monitor system activity and track user actions" />
 
         <Tabs defaultValue="audit">
-          <TabsList className="bg-white border p-1">
+          <TabsList className="bg-white dark:bg-slate-900 border p-1">
             <TabsTrigger value="audit" className="gap-2">
               <Shield className="w-4 h-4" /> Audit Trail
             </TabsTrigger>
@@ -167,7 +167,7 @@ function AuditTrail() {
     <div className="space-y-6">
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-slate-800">{stats.total}</p><p className="text-xs text-slate-500">Total Events</p></CardContent></Card>
+        <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-slate-800 dark:text-slate-200">{stats.total}</p><p className="text-xs text-slate-500">Total Events</p></CardContent></Card>
         <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-amber-600">{stats.warnings}</p><p className="text-xs text-slate-500">Warnings</p></CardContent></Card>
         <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-rose-600">{stats.errors}</p><p className="text-xs text-slate-500">Errors</p></CardContent></Card>
         <Card><CardContent className="pt-4 text-center"><p className="text-2xl font-bold text-indigo-600">{stats.users}</p><p className="text-xs text-slate-500">Active Users</p></CardContent></Card>
@@ -179,20 +179,20 @@ function AuditTrail() {
           <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search audit events..." />
         </div>
         <Select value={dateRange} onValueChange={setDateRange}>
-          <SelectTrigger className="w-36 bg-white"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-36 bg-white dark:bg-slate-900"><SelectValue /></SelectTrigger>
           <SelectContent>
             {DATE_RANGES.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-40 bg-white"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectTrigger className="w-40 bg-white dark:bg-slate-900"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
             {AUDIT_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c.replace('_', ' ')}</SelectItem>)}
           </SelectContent>
         </Select>
         <Select value={levelFilter} onValueChange={setLevelFilter}>
-          <SelectTrigger className="w-32 bg-white"><SelectValue placeholder="Level" /></SelectTrigger>
+          <SelectTrigger className="w-32 bg-white dark:bg-slate-900"><SelectValue placeholder="Level" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Levels</SelectItem>
             <SelectItem value="info">Info</SelectItem>
@@ -201,7 +201,7 @@ function AuditTrail() {
           </SelectContent>
         </Select>
         <Select value={userFilter} onValueChange={setUserFilter}>
-          <SelectTrigger className="w-44 bg-white"><SelectValue placeholder="User" /></SelectTrigger>
+          <SelectTrigger className="w-44 bg-white dark:bg-slate-900"><SelectValue placeholder="User" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Users</SelectItem>
             {uniqueUsers.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
@@ -212,7 +212,7 @@ function AuditTrail() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
         {isLoading ? (
           <div className="p-8 text-center text-slate-500">Loading audit trail...</div>
         ) : filteredLogs.length === 0 ? (
@@ -223,7 +223,7 @@ function AuditTrail() {
         ) : (
           <Table>
             <TableHeader>
-              <TableRow className="bg-slate-50">
+              <TableRow className="bg-slate-50 dark:bg-slate-800/50">
                 <TableHead className="w-8"></TableHead>
                 <TableHead>Timestamp</TableHead>
                 <TableHead>Action</TableHead>
@@ -249,13 +249,13 @@ function AuditTrail() {
                       <TableCell className="text-xs text-slate-500 whitespace-nowrap">
                         {log.created_date ? format(new Date(log.created_date), 'MMM d, yyyy HH:mm:ss') : '-'}
                       </TableCell>
-                      <TableCell className="font-medium text-slate-900">{log.action}</TableCell>
+                      <TableCell className="font-medium text-slate-900 dark:text-slate-50">{log.action}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">
                           <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-xs font-bold text-indigo-700">
                             {(log.user_name || log.user_email || 'S').charAt(0).toUpperCase()}
                           </div>
-                          <span className="text-sm text-slate-600">{log.user_email || 'System'}</span>
+                          <span className="text-sm text-slate-600 dark:text-slate-400">{log.user_email || 'System'}</span>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -278,14 +278,14 @@ function AuditTrail() {
                             {log.details && (
                               <div>
                                 <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Details</p>
-                                <p className="text-sm text-slate-700">{log.details}</p>
+                                <p className="text-sm text-slate-700 dark:text-slate-300">{log.details}</p>
                               </div>
                             )}
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                              {log.user_name && <div><span className="font-semibold text-slate-500">User:</span> <span className="text-slate-700">{log.user_name}</span></div>}
-                              {log.user_role && <div><span className="font-semibold text-slate-500">Role:</span> <span className="text-slate-700">{log.user_role}</span></div>}
-                              {log.entity_type && <div><span className="font-semibold text-slate-500">Entity Type:</span> <span className="text-slate-700">{log.entity_type}</span></div>}
-                              {log.ip_address && <div><span className="font-semibold text-slate-500">IP:</span> <span className="text-slate-700">{log.ip_address}</span></div>}
+                              {log.user_name && <div><span className="font-semibold text-slate-500">User:</span> <span className="text-slate-700 dark:text-slate-300">{log.user_name}</span></div>}
+                              {log.user_role && <div><span className="font-semibold text-slate-500">Role:</span> <span className="text-slate-700 dark:text-slate-300">{log.user_role}</span></div>}
+                              {log.entity_type && <div><span className="font-semibold text-slate-500">Entity Type:</span> <span className="text-slate-700 dark:text-slate-300">{log.entity_type}</span></div>}
+                              {log.ip_address && <div><span className="font-semibold text-slate-500">IP:</span> <span className="text-slate-700 dark:text-slate-300">{log.ip_address}</span></div>}
                             </div>
                             {log.changes && (
                               <div>
@@ -294,13 +294,13 @@ function AuditTrail() {
                                   {log.changes.before && (
                                     <div className="bg-rose-50 border border-rose-100 rounded-lg p-3">
                                       <p className="text-xs font-semibold text-rose-600 mb-1">Before</p>
-                                      <pre className="text-xs text-slate-600 whitespace-pre-wrap">{JSON.stringify(log.changes.before, null, 2)}</pre>
+                                      <pre className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{JSON.stringify(log.changes.before, null, 2)}</pre>
                                     </div>
                                   )}
                                   {log.changes.after && (
                                     <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
                                       <p className="text-xs font-semibold text-emerald-600 mb-1">After</p>
-                                      <pre className="text-xs text-slate-600 whitespace-pre-wrap">{JSON.stringify(log.changes.after, null, 2)}</pre>
+                                      <pre className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap">{JSON.stringify(log.changes.after, null, 2)}</pre>
                                     </div>
                                   )}
                                 </div>
@@ -348,7 +348,7 @@ function SystemLogs() {
           <SearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search logs..." />
         </div>
         <Select value={levelFilter} onValueChange={setLevelFilter}>
-          <SelectTrigger className="w-full sm:w-36 bg-white"><SelectValue placeholder="Level" /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-36 bg-white dark:bg-slate-900"><SelectValue placeholder="Level" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Levels</SelectItem>
             <SelectItem value="info">Info</SelectItem>
@@ -358,7 +358,7 @@ function SystemLogs() {
           </SelectContent>
         </Select>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-          <SelectTrigger className="w-full sm:w-44 bg-white"><SelectValue placeholder="Category" /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-44 bg-white dark:bg-slate-900"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Categories</SelectItem>
             <SelectItem value="auth">Auth</SelectItem>
@@ -376,7 +376,7 @@ function SystemLogs() {
         <Button variant="outline" onClick={() => refetch()}><RefreshCw className="w-4 h-4 mr-2" />Refresh</Button>
       </div>
 
-      <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-100 dark:border-slate-800 overflow-hidden">
         {isLoading ? (
           <div className="p-8 text-center text-slate-500">Loading logs...</div>
         ) : filteredLogs.length === 0 ? (
@@ -402,12 +402,12 @@ function SystemLogs() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium text-slate-900">{log.action}</span>
+                        <span className="font-medium text-slate-900 dark:text-slate-50">{log.action}</span>
                         <Badge className={`text-xs ${categoryColors[log.category] || 'bg-slate-100'}`}>
                           {log.category}
                         </Badge>
                       </div>
-                      {log.details && <p className="text-sm text-slate-600 mt-1 truncate">{log.details}</p>}
+                      {log.details && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 truncate">{log.details}</p>}
                       <div className="flex items-center gap-4 mt-2 text-xs text-slate-500">
                         <span>{log.user_email || 'System'}</span>
                         {log.ip_address && <span>{log.ip_address}</span>}

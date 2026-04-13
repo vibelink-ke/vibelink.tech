@@ -76,21 +76,21 @@ export default function TenantOnboarding() {
 
   if (!tenant) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center">
         <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-600" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 py-12 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 py-12 px-4">
       <div className="max-w-3xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-4xl font-bold text-slate-900 mb-3">
+          <h1 className="text-4xl font-bold text-slate-900 dark:text-slate-50 mb-3">
             Welcome to VIBELINK
           </h1>
-          <p className="text-lg text-slate-600">
+          <p className="text-lg text-slate-600 dark:text-slate-400">
             Let's get your ISP management platform set up in just a few minutes
           </p>
         </div>
@@ -133,7 +133,7 @@ export default function TenantOnboarding() {
         </AnimatePresence>
 
         {/* Footer */}
-        <div className="text-center mt-12 text-sm text-slate-600">
+        <div className="text-center mt-12 text-sm text-slate-600 dark:text-slate-400">
           <p>Questions? Email us at <a href="mailto:support@vibelink.com" className="text-indigo-600 hover:underline">support@vibelink.com</a></p>
         </div>
       </div>

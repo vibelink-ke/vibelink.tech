@@ -39,18 +39,18 @@ export default function InvoicePreview({ invoice, open, onOpenChange }) {
         </DialogHeader>
 
         {/* Invoice Preview */}
-        <div id="invoice-preview" className="bg-white p-8 space-y-6">
+        <div id="invoice-preview" className="bg-white dark:bg-slate-900 p-8 space-y-6">
           {/* Header */}
           <div className="flex justify-between items-start border-b pb-6">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">INVOICE</h1>
-              <p className="text-slate-600 mt-1">{invoice.invoice_number}</p>
+              <h1 className="text-2xl font-bold text-slate-900 dark:text-slate-50">INVOICE</h1>
+              <p className="text-slate-600 dark:text-slate-400 mt-1">{invoice.invoice_number}</p>
             </div>
             <div className="text-right">
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 <span className="font-semibold">Issued:</span> {format(new Date(invoice.created_date), 'MMM d, yyyy')}
               </p>
-              <p className="text-sm text-slate-600">
+              <p className="text-sm text-slate-600 dark:text-slate-400">
                 <span className="font-semibold">Due:</span> {format(new Date(invoice.due_date), 'MMM d, yyyy')}
               </p>
             </div>
@@ -59,14 +59,14 @@ export default function InvoicePreview({ invoice, open, onOpenChange }) {
           {/* Bill To */}
           <div className="grid grid-cols-2 gap-8">
             <div>
-              <p className="text-sm font-semibold text-slate-900 mb-2">BILL TO:</p>
-              <p className="font-semibold text-slate-900">{invoice.customer_name}</p>
-              <p className="text-sm text-slate-600">{invoice.customer_email}</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-2">BILL TO:</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{invoice.customer_name}</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">{invoice.customer_email}</p>
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-900 mb-2">FROM:</p>
-              <p className="font-semibold text-slate-900">VIBELINK</p>
-              <p className="text-sm text-slate-600">ISP Management Platform</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 mb-2">FROM:</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">VIBELINK</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">ISP Management Platform</p>
             </div>
           </div>
 
@@ -75,21 +75,21 @@ export default function InvoicePreview({ invoice, open, onOpenChange }) {
             <table className="w-full">
               <thead>
                 <tr className="border-b-2 border-slate-300">
-                  <th className="text-left text-sm font-semibold text-slate-900 py-3">Description</th>
-                  <th className="text-right text-sm font-semibold text-slate-900 py-3">Qty</th>
-                  <th className="text-right text-sm font-semibold text-slate-900 py-3">Unit Price</th>
-                  <th className="text-right text-sm font-semibold text-slate-900 py-3">Amount</th>
+                  <th className="text-left text-sm font-semibold text-slate-900 dark:text-slate-50 py-3">Description</th>
+                  <th className="text-right text-sm font-semibold text-slate-900 dark:text-slate-50 py-3">Qty</th>
+                  <th className="text-right text-sm font-semibold text-slate-900 dark:text-slate-50 py-3">Unit Price</th>
+                  <th className="text-right text-sm font-semibold text-slate-900 dark:text-slate-50 py-3">Amount</th>
                 </tr>
               </thead>
               <tbody>
                 {invoice.items?.map((item, idx) => (
-                  <tr key={idx} className="border-b border-slate-200">
-                    <td className="text-sm text-slate-700 py-3">{item.description}</td>
-                    <td className="text-right text-sm text-slate-700 py-3">{item.quantity}</td>
-                    <td className="text-right text-sm text-slate-700 py-3">
+                  <tr key={idx} className="border-b border-slate-200 dark:border-slate-700">
+                    <td className="text-sm text-slate-700 dark:text-slate-300 py-3">{item.description}</td>
+                    <td className="text-right text-sm text-slate-700 dark:text-slate-300 py-3">{item.quantity}</td>
+                    <td className="text-right text-sm text-slate-700 dark:text-slate-300 py-3">
                       KES {item.unit_price.toLocaleString('en-KE')}
                     </td>
-                    <td className="text-right text-sm text-slate-700 py-3">
+                    <td className="text-right text-sm text-slate-700 dark:text-slate-300 py-3">
                       KES {item.total.toLocaleString('en-KE')}
                     </td>
                   </tr>
@@ -101,20 +101,20 @@ export default function InvoicePreview({ invoice, open, onOpenChange }) {
           {/* Totals */}
           <div className="flex justify-end">
             <div className="w-80 space-y-2">
-              <div className="flex justify-between py-2 border-b border-slate-200">
-                <span className="text-slate-700">Subtotal:</span>
-                <span className="text-slate-900 font-semibold">
+              <div className="flex justify-between py-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-slate-700 dark:text-slate-300">Subtotal:</span>
+                <span className="text-slate-900 dark:text-slate-50 font-semibold">
                   KES {invoice.subtotal.toLocaleString('en-KE')}
                 </span>
               </div>
-              <div className="flex justify-between py-2 border-b border-slate-200">
-                <span className="text-slate-700">Tax ({invoice.tax_rate}%):</span>
-                <span className="text-slate-900 font-semibold">
+              <div className="flex justify-between py-2 border-b border-slate-200 dark:border-slate-700">
+                <span className="text-slate-700 dark:text-slate-300">Tax ({invoice.tax_rate}%):</span>
+                <span className="text-slate-900 dark:text-slate-50 font-semibold">
                   KES {invoice.tax_amount.toLocaleString('en-KE')}
                 </span>
               </div>
               <div className="flex justify-between py-3 bg-indigo-50 px-3 rounded-lg">
-                <span className="text-slate-900 font-bold">Total:</span>
+                <span className="text-slate-900 dark:text-slate-50 font-bold">Total:</span>
                 <span className="text-indigo-600 font-bold text-lg">
                   KES {invoice.total_amount.toLocaleString('en-KE')}
                 </span>

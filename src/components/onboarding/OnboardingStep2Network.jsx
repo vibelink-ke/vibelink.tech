@@ -163,26 +163,26 @@ export default function OnboardingStep2Network({ mikrotiks = [], formData, setFo
       </div>
 
       {/* Validation Status */}
-      <Card className="bg-slate-50 border-slate-200">
+      <Card className="bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700">
         <CardContent className="pt-4">
           <div className="grid grid-cols-3 gap-4">
             <div className="text-center">
               <div className={`text-2xl ${formData.mikrotik_id ? '✓ text-emerald-600' : 'text-slate-400'}`}>
                 {formData.mikrotik_id ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">Router</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">Router</p>
             </div>
             <div className="text-center">
               <div className={`text-2xl ${formData.ip_address && validateIPAddress(formData.ip_address) ? '✓ text-emerald-600' : 'text-slate-400'}`}>
                 {formData.ip_address && validateIPAddress(formData.ip_address) ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">IP Address</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">IP Address</p>
             </div>
             <div className="text-center">
               <div className={`text-2xl ${!formData.mac_address || validateMAC(formData.mac_address) ? '✓ text-emerald-600' : 'text-slate-400'}`}>
                 {!formData.mac_address || validateMAC(formData.mac_address) ? '✓' : '○'}
               </div>
-              <p className="text-xs text-slate-600 mt-1">MAC Address</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">MAC Address</p>
             </div>
           </div>
         </CardContent>

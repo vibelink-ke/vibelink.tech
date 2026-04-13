@@ -76,22 +76,22 @@ export default function RestoreBackupDialog({
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="bg-slate-50 rounded-lg p-4 space-y-2"
+            className="bg-slate-50 dark:bg-slate-800/50 rounded-lg p-4 space-y-2"
           >
             <div>
               <p className="text-xs text-slate-500">Backup Name</p>
-              <p className="font-medium text-slate-900">{backup.backup_name}</p>
+              <p className="font-medium text-slate-900 dark:text-slate-50">{backup.backup_name}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500">Created</p>
-              <p className="text-sm text-slate-700">
+              <p className="text-sm text-slate-700 dark:text-slate-300">
                 {format(new Date(backup.created_date), 'MMM d, yyyy · h:mm a')}
               </p>
             </div>
             {backup.file_size && (
               <div>
                 <p className="text-xs text-slate-500">Size</p>
-                <p className="text-sm text-slate-700">
+                <p className="text-sm text-slate-700 dark:text-slate-300">
                   {(backup.file_size / 1024).toFixed(2)} KB
                 </p>
               </div>
@@ -99,7 +99,7 @@ export default function RestoreBackupDialog({
             {backup.backup_metadata && (
               <div>
                 <p className="text-xs text-slate-500">Configuration Version</p>
-                <p className="text-sm text-slate-700">
+                <p className="text-sm text-slate-700 dark:text-slate-300">
                   {backup.backup_metadata.config_version || 'Unknown'}
                 </p>
               </div>
@@ -107,14 +107,14 @@ export default function RestoreBackupDialog({
           </motion.div>
 
           {/* Confirmation Checkbox */}
-          <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer">
+          <label className="flex items-start gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 cursor-pointer">
             <input
               type="checkbox"
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
               className="mt-1 w-4 h-4"
             />
-            <span className="text-sm text-slate-700">
+            <span className="text-sm text-slate-700 dark:text-slate-300">
               I understand this will overwrite the current configuration and cannot be undone
             </span>
           </label>

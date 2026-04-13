@@ -183,7 +183,7 @@ export default function Outages() {
   const resolvedOutages = outages.filter(o => o.status === 'resolved');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Service Outages"
@@ -256,7 +256,7 @@ export default function Outages() {
         {/* Active Outages */}
         {activeOutages.length > 0 && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-slate-900">Active Outages</h2>
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-50">Active Outages</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {activeOutages.map((outage, index) => {
                 const config = SEVERITY_CONFIG[outage.severity] || SEVERITY_CONFIG.medium;
@@ -296,7 +296,7 @@ export default function Outages() {
                         </div>
                       </CardHeader>
                       <CardContent>
-                        <p className="text-sm text-slate-600 mb-3 line-clamp-2">{outage.description}</p>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 line-clamp-2">{outage.description}</p>
                         <div className="flex items-center justify-between text-xs text-slate-500">
                           <span>
                             {outage.customers_notified || 0} customers notified
@@ -371,7 +371,7 @@ export default function Outages() {
                     >
                       <TableCell>
                         <div>
-                          <p className="font-medium text-slate-900">{outage.title}</p>
+                          <p className="font-medium text-slate-900 dark:text-slate-50">{outage.title}</p>
                           <p className="text-xs text-slate-500 line-clamp-1">{outage.description}</p>
                         </div>
                       </TableCell>
@@ -720,7 +720,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
           <div className={`flex items-start gap-3 p-4 rounded-lg ${config.bg}`}>
             <Icon className={`w-6 h-6 ${config.color} mt-1`} />
             <div className="flex-1">
-              <h3 className="font-semibold text-slate-900 mb-1">{outage.title}</h3>
+              <h3 className="font-semibold text-slate-900 dark:text-slate-50 mb-1">{outage.title}</h3>
               <div className="flex flex-wrap gap-2">
                 <Badge className={STATUS_CONFIG[outage.status].color}>
                   {STATUS_CONFIG[outage.status].label}
@@ -733,7 +733,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
 
           <div>
             <Label className="text-sm text-slate-500">Description</Label>
-            <p className="mt-1 text-slate-700">{outage.description}</p>
+            <p className="mt-1 text-slate-700 dark:text-slate-300">{outage.description}</p>
           </div>
 
           {outage.affected_areas?.length > 0 && (
@@ -764,7 +764,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <Label className="text-sm text-slate-500">Reported</Label>
-              <p className="text-sm font-medium text-slate-900">
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-50">
                 {format(new Date(outage.created_date), 'MMM d, yyyy HH:mm')}
               </p>
             </div>
@@ -772,7 +772,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
             {outage.estimated_resolution && (
               <div>
                 <Label className="text-sm text-slate-500">Est. Resolution</Label>
-                <p className="text-sm font-medium text-slate-900">
+                <p className="text-sm font-medium text-slate-900 dark:text-slate-50">
                   {format(new Date(outage.estimated_resolution), 'MMM d, yyyy HH:mm')}
                 </p>
               </div>
@@ -789,7 +789,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
 
             <div>
               <Label className="text-sm text-slate-500">Customers Notified</Label>
-              <p className="text-sm font-medium text-slate-900">{outage.customers_notified || 0}</p>
+              <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{outage.customers_notified || 0}</p>
             </div>
           </div>
 
@@ -798,7 +798,7 @@ function OutageDetailsSheet({ open, onOpenChange, outage, onEdit }) {
               {outage.show_on_portal ? (
                 <>
                   <Eye className="w-4 h-4 text-indigo-500" />
-                  <span className="text-slate-700">Visible on customer portal</span>
+                  <span className="text-slate-700 dark:text-slate-300">Visible on customer portal</span>
                 </>
               ) : (
                 <>

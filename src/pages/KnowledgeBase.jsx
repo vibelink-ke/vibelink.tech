@@ -49,7 +49,7 @@ const categoryColors = {
   technical: 'bg-blue-50 text-blue-700 border-blue-200',
   account: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   network: 'bg-amber-50 text-amber-700 border-amber-200',
-  general: 'bg-slate-100 text-slate-700 border-slate-200',
+  general: 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
 };
 
 export default function KnowledgeBase() {
@@ -174,7 +174,7 @@ Identify articles that semantically match the user's intent, even if exact keywo
   const draftArticles = filteredArticles.filter(a => a.status === 'draft');
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-4 sm:p-8">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 p-4 sm:p-8">
       <div className="max-w-7xl mx-auto space-y-6">
         <PageHeader
           title="Knowledge Base"
@@ -252,7 +252,7 @@ Identify articles that semantically match the user's intent, even if exact keywo
             )}
           </div>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-40 bg-white">
+            <SelectTrigger className="w-full sm:w-40 bg-white dark:bg-slate-900">
               <Filter className="w-4 h-4 mr-2" />
               <SelectValue />
             </SelectTrigger>
@@ -269,7 +269,7 @@ Identify articles that semantically match the user's intent, even if exact keywo
 
         {isLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {[1, 2, 3, 4].map(i => <div key={i} className="h-48 bg-white rounded-2xl animate-pulse" />)}
+            {[1, 2, 3, 4].map(i => <div key={i} className="h-48 bg-white dark:bg-slate-900 rounded-2xl animate-pulse" />)}
           </div>
         ) : filteredArticles.length === 0 ? (
           <EmptyState
@@ -332,14 +332,14 @@ Identify articles that semantically match the user's intent, even if exact keywo
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <p className="text-sm text-slate-600 line-clamp-3 mb-3">
+                    <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-3 mb-3">
                       {article.content?.substring(0, 150)}...
                     </p>
                     
                     {article.tags?.length > 0 && (
                       <div className="flex flex-wrap gap-1 mb-3">
                         {article.tags.slice(0, 3).map((tag, i) => (
-                          <span key={i} className="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 rounded-full">
+                          <span key={i} className="text-xs px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">
                             {tag}
                           </span>
                         ))}
@@ -563,7 +563,7 @@ function ArticleViewDialog({ article, open, onOpenChange, onEdit }) {
           {article.tags?.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {article.tags.map((tag, i) => (
-                <span key={i} className="flex items-center gap-1 text-xs px-2 py-1 bg-slate-100 text-slate-600 rounded-full">
+                <span key={i} className="flex items-center gap-1 text-xs px-2 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-full">
                   <Tag className="w-3 h-3" />
                   {tag}
                 </span>

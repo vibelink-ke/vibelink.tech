@@ -91,7 +91,7 @@ export default function CustomerPortal() {
             <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-amber-600" />
             </div>
-            <h2 className="text-xl font-bold text-slate-900 mb-2">Account Not Found</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-slate-50 mb-2">Account Not Found</h2>
             <p className="text-slate-500 mb-6 text-sm">
               No customer account is linked to <strong>{user?.email}</strong>. Please contact support.
             </p>
@@ -111,7 +111,7 @@ export default function CustomerPortal() {
   const totalPaid = payments.filter(p => p.status === 'completed').reduce((sum, p) => sum + (p.amount || 0), 0);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-800/50">
       {/* Outage Alerts */}
       {activeOutages.map(outage => (
         <div key={outage.id} className={`px-4 py-3 flex items-center gap-3 text-sm font-medium
@@ -123,20 +123,20 @@ export default function CustomerPortal() {
       ))}
 
       {/* Header */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 sticky top-0 z-40 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
               <Zap className="w-5 h-5 text-white" />
             </div>
             <div>
-              <h1 className="font-bold text-slate-900 leading-none">VIBELINK</h1>
+              <h1 className="font-bold text-slate-900 dark:text-slate-50 leading-none">VIBELINK</h1>
               <p className="text-xs text-slate-500">Customer Portal</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             <div className="hidden sm:block text-right">
-              <p className="text-sm font-semibold text-slate-900">{customer.full_name}</p>
+              <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">{customer.full_name}</p>
               <p className="text-xs text-slate-500">{customer.customer_id}</p>
             </div>
             <Button variant="ghost" size="icon" onClick={() => vibelink.auth.logout()} title="Sign Out">
@@ -149,7 +149,7 @@ export default function CustomerPortal() {
       {/* Main Content */}
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList className="bg-white border border-slate-200 p-1 mb-6 flex-wrap h-auto gap-1">
+          <TabsList className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 p-1 mb-6 flex-wrap h-auto gap-1">
             <TabsTrigger value="overview" className="gap-2 text-sm">
               <User className="w-4 h-4" /> Overview
             </TabsTrigger>
@@ -201,7 +201,7 @@ export default function CustomerPortal() {
                 <Card>
                   <CardContent className="pt-5 pb-5">
                     <p className="text-xs text-slate-500 mb-1">Unpaid Invoices</p>
-                    <p className="text-2xl font-bold text-slate-900">{unpaidInvoices.length}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">{unpaidInvoices.length}</p>
                     <p className="text-xs text-slate-500 mt-1">Pending payment</p>
                   </CardContent>
                 </Card>
@@ -210,7 +210,7 @@ export default function CustomerPortal() {
                 <Card>
                   <CardContent className="pt-5 pb-5">
                     <p className="text-xs text-slate-500 mb-1">Total Paid</p>
-                    <p className="text-2xl font-bold text-slate-900">KES {totalPaid.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {totalPaid.toLocaleString()}</p>
                     <p className="text-xs text-slate-500 mt-1">All time</p>
                   </CardContent>
                 </Card>
@@ -219,7 +219,7 @@ export default function CustomerPortal() {
                 <Card>
                   <CardContent className="pt-5 pb-5">
                     <p className="text-xs text-slate-500 mb-1">Current Plan</p>
-                    <p className="text-lg font-bold text-slate-900 truncate">{plan?.name || customer.plan_name || 'N/A'}</p>
+                    <p className="text-lg font-bold text-slate-900 dark:text-slate-50 truncate">{plan?.name || customer.plan_name || 'N/A'}</p>
                     <p className="text-xs text-slate-500 mt-1">KES {customer.monthly_rate || plan?.monthly_price || 0}/mo</p>
                   </CardContent>
                 </Card>
@@ -243,7 +243,7 @@ export default function CustomerPortal() {
                       <item.icon className="w-5 h-5" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-slate-900 text-sm">{item.label}</p>
+                      <p className="font-semibold text-slate-900 dark:text-slate-50 text-sm">{item.label}</p>
                       <p className="text-xs text-slate-500">{item.desc}</p>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -264,7 +264,7 @@ export default function CustomerPortal() {
                   {unpaidInvoices.slice(0, 3).map(inv => (
                     <div key={inv.id} className="flex items-center justify-between p-3 bg-rose-50 rounded-lg">
                       <div>
-                        <p className="font-medium text-slate-900 text-sm">{inv.invoice_number}</p>
+                        <p className="font-medium text-slate-900 dark:text-slate-50 text-sm">{inv.invoice_number}</p>
                         <p className="text-xs text-slate-500">Due: {inv.due_date ? format(new Date(inv.due_date), 'MMM d, yyyy') : 'N/A'}</p>
                       </div>
                       <div className="text-right">
@@ -289,35 +289,35 @@ export default function CustomerPortal() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="p-4 bg-slate-50 rounded-xl">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <p className="text-xs text-slate-500 mb-1">Account Status</p>
                     <StatusBadge status={customer.status} />
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-xl">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <p className="text-xs text-slate-500 mb-1">Customer ID</p>
-                    <p className="font-mono font-semibold text-slate-900">{customer.customer_id}</p>
+                    <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{customer.customer_id}</p>
                   </div>
                   {customer.ip_address && (
-                    <div className="p-4 bg-slate-50 rounded-xl">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                       <p className="text-xs text-slate-500 mb-1">IP Address</p>
-                      <p className="font-mono font-semibold text-slate-900">{customer.ip_address}</p>
+                      <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{customer.ip_address}</p>
                     </div>
                   )}
                   {customer.mac_address && (
-                    <div className="p-4 bg-slate-50 rounded-xl">
+                    <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                       <p className="text-xs text-slate-500 mb-1">MAC Address</p>
-                      <p className="font-mono font-semibold text-slate-900">{customer.mac_address}</p>
+                      <p className="font-mono font-semibold text-slate-900 dark:text-slate-50">{customer.mac_address}</p>
                     </div>
                   )}
-                  <div className="p-4 bg-slate-50 rounded-xl">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <p className="text-xs text-slate-500 mb-1">Installation Date</p>
-                    <p className="font-semibold text-slate-900">
+                    <p className="font-semibold text-slate-900 dark:text-slate-50">
                       {customer.installation_date ? format(new Date(customer.installation_date), 'MMM d, yyyy') : 'N/A'}
                     </p>
                   </div>
-                  <div className="p-4 bg-slate-50 rounded-xl">
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <p className="text-xs text-slate-500 mb-1">Billing Day</p>
-                    <p className="font-semibold text-slate-900">Day {customer.billing_cycle_day || 1} of each month</p>
+                    <p className="font-semibold text-slate-900 dark:text-slate-50">Day {customer.billing_cycle_day || 1} of each month</p>
                   </div>
                 </CardContent>
               </Card>
@@ -338,7 +338,7 @@ export default function CustomerPortal() {
                   </CardHeader>
                   <CardContent className="space-y-4">
                     <div>
-                      <h3 className="text-xl font-bold text-slate-900">{plan.name}</h3>
+                      <h3 className="text-xl font-bold text-slate-900 dark:text-slate-50">{plan.name}</h3>
                       {plan.description && <p className="text-slate-500 text-sm mt-1">{plan.description}</p>}
                     </div>
                     <div className="grid grid-cols-3 gap-3">
@@ -360,10 +360,10 @@ export default function CustomerPortal() {
                     </div>
                     {plan.features?.length > 0 && (
                       <div className="pt-2">
-                        <p className="text-sm font-medium text-slate-700 mb-2">Included Features</p>
+                        <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Included Features</p>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           {plan.features.map((f, i) => (
-                            <div key={i} className="flex items-center gap-2 text-sm text-slate-600">
+                            <div key={i} className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                               <CheckCircle className="w-4 h-4 text-emerald-500 flex-shrink-0" />
                               {typeof f === 'object' ? f.name : f}
                             </div>
@@ -393,7 +393,7 @@ export default function CustomerPortal() {
                   <Card>
                     <CardContent className="pt-5 pb-5">
                       <p className="text-xs text-slate-500 mb-1">Total Invoiced</p>
-                      <p className="text-2xl font-bold text-slate-900">KES {invoices.reduce((sum, i) => sum + (i.total_amount || 0), 0).toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {invoices.reduce((sum, i) => sum + (i.total_amount || 0), 0).toLocaleString()}</p>
                       <p className="text-xs text-slate-500 mt-1">{invoices.length} invoices</p>
                     </CardContent>
                   </Card>
@@ -422,10 +422,10 @@ export default function CustomerPortal() {
             {/* Billing History Header */}
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-lg font-bold text-slate-900">Billing History</h2>
+                <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50">Billing History</h2>
                 <p className="text-sm text-slate-500 mt-0.5">Complete chronological list of all invoices</p>
               </div>
-              <span className="text-sm font-medium text-slate-600">{invoices.length} invoices</span>
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">{invoices.length} invoices</span>
             </div>
 
             {invoices.length === 0 ? (
@@ -453,7 +453,7 @@ export default function CustomerPortal() {
                             <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0
                               ${invoice.status === 'paid' ? 'bg-emerald-100' :
                                 invoice.status === 'overdue' ? 'bg-rose-100' :
-                                invoice.status === 'sent' ? 'bg-amber-100' : 'bg-slate-100'}`}>
+                                invoice.status === 'sent' ? 'bg-amber-100' : 'bg-slate-100 dark:bg-slate-800'}`}>
                               <FileText className={`w-6 h-6
                                 ${invoice.status === 'paid' ? 'text-emerald-600' :
                                   invoice.status === 'overdue' ? 'text-rose-600' :
@@ -461,7 +461,7 @@ export default function CustomerPortal() {
                             </div>
                             <div className="flex-1">
                               <div className="flex items-center gap-2 mb-1">
-                                <p className="font-semibold text-slate-900">{invoice.invoice_number}</p>
+                                <p className="font-semibold text-slate-900 dark:text-slate-50">{invoice.invoice_number}</p>
                                 <StatusBadge status={invoice.status} />
                               </div>
                               <div className="flex flex-wrap gap-x-4 text-xs text-slate-500">
@@ -484,7 +484,7 @@ export default function CustomerPortal() {
                           {/* Amount & Actions */}
                           <div className="flex items-center justify-between sm:justify-end gap-4 sm:flex-none">
                             <div className="text-right">
-                              <p className="text-lg font-bold text-slate-900">KES {invoice.total_amount?.toLocaleString()}</p>
+                              <p className="text-lg font-bold text-slate-900 dark:text-slate-50">KES {invoice.total_amount?.toLocaleString()}</p>
                               {invoice.tax_amount > 0 && (
                                 <p className="text-xs text-slate-500">+Tax: KES {invoice.tax_amount?.toLocaleString()}</p>
                               )}
@@ -506,7 +506,7 @@ export default function CustomerPortal() {
 
                         {/* Invoice Items Preview */}
                         {invoice.items?.length > 0 && (
-                          <div className="mt-3 pt-3 border-t border-slate-100">
+                          <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
                             <div className="text-xs text-slate-500 space-y-1">
                               {invoice.items.slice(0, 2).map((item, j) => (
                                 <div key={j} className="flex justify-between">
@@ -531,7 +531,7 @@ export default function CustomerPortal() {
           {/* PAYMENTS */}
           <TabsContent value="payments" className="space-y-4">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="text-lg font-bold text-slate-900">Payment History</h2>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50">Payment History</h2>
               <span className="text-sm text-slate-500">{payments.length} transactions</span>
             </div>
 
@@ -547,13 +547,13 @@ export default function CustomerPortal() {
                 <Card>
                   <CardContent className="pt-4 pb-4 text-center">
                     <p className="text-xs text-slate-500 mb-1">Transactions</p>
-                    <p className="text-xl font-bold text-slate-900">{payments.filter(p => p.status === 'completed').length}</p>
+                    <p className="text-xl font-bold text-slate-900 dark:text-slate-50">{payments.filter(p => p.status === 'completed').length}</p>
                   </CardContent>
                 </Card>
                 <Card>
                   <CardContent className="pt-4 pb-4 text-center">
                     <p className="text-xs text-slate-500 mb-1">Last Payment</p>
-                    <p className="text-sm font-semibold text-slate-900">
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">
                       {payments[0]?.created_date ? format(new Date(payments[0].created_date), 'MMM d, yyyy') : 'N/A'}
                     </p>
                   </CardContent>
@@ -583,13 +583,13 @@ export default function CustomerPortal() {
                           <div className="flex items-center gap-4">
                             <div className={`w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0
                               ${payment.status === 'completed' ? 'bg-emerald-100' :
-                                payment.status === 'failed' ? 'bg-rose-100' : 'bg-slate-100'}`}>
+                                payment.status === 'failed' ? 'bg-rose-100' : 'bg-slate-100 dark:bg-slate-800'}`}>
                               <DollarSign className={`w-5 h-5
                                 ${payment.status === 'completed' ? 'text-emerald-600' :
                                   payment.status === 'failed' ? 'text-rose-600' : 'text-slate-500'}`} />
                             </div>
                             <div>
-                              <p className="font-semibold text-slate-900">
+                              <p className="font-semibold text-slate-900 dark:text-slate-50">
                                 {payment.payment_id || `PAY-${payment.id?.slice(0, 8).toUpperCase()}`}
                               </p>
                               <div className="flex flex-wrap gap-x-3 text-xs text-slate-500 mt-0.5">
@@ -629,30 +629,30 @@ export default function CustomerPortal() {
                     {customer.full_name?.charAt(0)?.toUpperCase()}
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-900">{customer.full_name}</h3>
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-slate-50">{customer.full_name}</h3>
                     <p className="text-slate-500 text-sm">{customer.customer_id}</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <Mail className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <div>
                       <p className="text-xs text-slate-400">Email</p>
-                      <p className="font-medium text-slate-800 text-sm">{customer.email}</p>
+                      <p className="font-medium text-slate-800 dark:text-slate-200 text-sm">{customer.email}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl">
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                     <Phone className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <div>
                       <p className="text-xs text-slate-400">Phone</p>
-                      <p className="font-medium text-slate-800 text-sm">{customer.phone}</p>
+                      <p className="font-medium text-slate-800 dark:text-slate-200 text-sm">{customer.phone}</p>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3 p-4 bg-slate-50 rounded-xl sm:col-span-2">
+                  <div className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl sm:col-span-2">
                     <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0" />
                     <div>
                       <p className="text-xs text-slate-400">Address</p>
-                      <p className="font-medium text-slate-800 text-sm">{customer.address}{customer.city ? `, ${customer.city}` : ''}</p>
+                      <p className="font-medium text-slate-800 dark:text-slate-200 text-sm">{customer.address}{customer.city ? `, ${customer.city}` : ''}</p>
                     </div>
                   </div>
                 </div>
@@ -662,27 +662,27 @@ export default function CustomerPortal() {
             <Card>
               <CardHeader><CardTitle>Billing Summary</CardTitle></CardHeader>
               <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                   <p className="text-xs text-slate-400 mb-1">Account Balance</p>
                   <p className={`text-2xl font-bold ${balance > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
                     KES {Math.abs(balance).toLocaleString()}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">{balance > 0 ? 'Due' : balance < 0 ? 'Credit' : 'Settled'}</p>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                   <p className="text-xs text-slate-400 mb-1">Monthly Rate</p>
-                  <p className="text-2xl font-bold text-slate-900">KES {(customer.monthly_rate || plan?.monthly_price || 0).toLocaleString()}</p>
+                  <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">KES {(customer.monthly_rate || plan?.monthly_price || 0).toLocaleString()}</p>
                   <p className="text-xs text-slate-500 mt-1">Billed day {customer.billing_cycle_day || 1} monthly</p>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                   <p className="text-xs text-slate-400 mb-1">Last Payment</p>
-                  <p className="font-semibold text-slate-900">
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">
                     {customer.last_payment_date ? format(new Date(customer.last_payment_date), 'MMM d, yyyy') : 'N/A'}
                   </p>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-xl">
+                <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-xl">
                   <p className="text-xs text-slate-400 mb-1">Installation Date</p>
-                  <p className="font-semibold text-slate-900">
+                  <p className="font-semibold text-slate-900 dark:text-slate-50">
                     {customer.installation_date ? format(new Date(customer.installation_date), 'MMM d, yyyy') : 'N/A'}
                   </p>
                 </div>
@@ -795,7 +795,7 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-xs text-slate-500 mb-1">Invoice Number</p>
-              <p className="font-semibold text-slate-900">{invoice.invoice_number}</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{invoice.invoice_number}</p>
             </div>
             <div>
               <p className="text-xs text-slate-500 mb-1">Status</p>
@@ -803,7 +803,7 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
             </div>
             <div>
               <p className="text-xs text-slate-500 mb-1">Invoice Date</p>
-              <p className="font-semibold text-slate-900">
+              <p className="font-semibold text-slate-900 dark:text-slate-50">
                 {invoice.created_date ? format(new Date(invoice.created_date), 'MMM d, yyyy') : 'N/A'}
               </p>
             </div>
@@ -816,14 +816,14 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
           </div>
 
           {/* Billing Period */}
-          <div className="p-4 bg-slate-50 rounded-lg">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <p className="text-xs text-slate-500 mb-2 font-medium">Billing Period</p>
             <div className="flex items-center justify-between">
-              <span className="text-slate-900 font-medium">
+              <span className="text-slate-900 dark:text-slate-50 font-medium">
                 {invoice.billing_period_start ? format(new Date(invoice.billing_period_start), 'MMM d, yyyy') : 'N/A'}
               </span>
               <span className="text-slate-400">to</span>
-              <span className="text-slate-900 font-medium">
+              <span className="text-slate-900 dark:text-slate-50 font-medium">
                 {invoice.billing_period_end ? format(new Date(invoice.billing_period_end), 'MMM d, yyyy') : 'N/A'}
               </span>
             </div>
@@ -832,19 +832,19 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
           {/* Invoice Items */}
           {invoice.items?.length > 0 && (
             <div className="border rounded-lg overflow-hidden">
-              <div className="bg-slate-50 px-4 py-3 border-b">
-                <p className="text-sm font-semibold text-slate-900">Items</p>
+              <div className="bg-slate-50 dark:bg-slate-800/50 px-4 py-3 border-b">
+                <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">Items</p>
               </div>
               <div className="divide-y">
                 {invoice.items.map((item, i) => (
                   <div key={i} className="px-4 py-3 flex justify-between items-center">
                     <div>
-                      <p className="text-sm font-medium text-slate-900">{item.description}</p>
+                      <p className="text-sm font-medium text-slate-900 dark:text-slate-50">{item.description}</p>
                       {item.quantity && (
                         <p className="text-xs text-slate-500">Qty: {item.quantity}</p>
                       )}
                     </div>
-                    <p className="text-sm font-semibold text-slate-900">KES {item.total?.toLocaleString()}</p>
+                    <p className="text-sm font-semibold text-slate-900 dark:text-slate-50">KES {item.total?.toLocaleString()}</p>
                   </div>
                 ))}
               </div>
@@ -855,18 +855,18 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
           <div className="space-y-2 p-4 bg-indigo-50 rounded-lg">
             {invoice.subtotal > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Subtotal</span>
-                <span className="font-medium text-slate-900">KES {invoice.subtotal?.toLocaleString()}</span>
+                <span className="text-slate-600 dark:text-slate-400">Subtotal</span>
+                <span className="font-medium text-slate-900 dark:text-slate-50">KES {invoice.subtotal?.toLocaleString()}</span>
               </div>
             )}
             {invoice.tax_amount > 0 && (
               <div className="flex justify-between text-sm">
-                <span className="text-slate-600">Tax ({invoice.tax_rate || 0}%)</span>
-                <span className="font-medium text-slate-900">KES {invoice.tax_amount?.toLocaleString()}</span>
+                <span className="text-slate-600 dark:text-slate-400">Tax ({invoice.tax_rate || 0}%)</span>
+                <span className="font-medium text-slate-900 dark:text-slate-50">KES {invoice.tax_amount?.toLocaleString()}</span>
               </div>
             )}
             <div className="border-t border-indigo-200 pt-2 flex justify-between">
-              <span className="font-semibold text-slate-900">Total Amount</span>
+              <span className="font-semibold text-slate-900 dark:text-slate-50">Total Amount</span>
               <span className="text-lg font-bold text-indigo-600">KES {invoice.total_amount?.toLocaleString()}</span>
             </div>
           </div>
@@ -909,20 +909,20 @@ function InvoiceDetailsModal({ open, onOpenChange, invoice, customer, payments }
 
           {/* Notes */}
           {invoice.notes && (
-            <div className="p-4 bg-slate-50 rounded-lg">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
               <p className="text-xs text-slate-500 mb-2 font-medium">Notes</p>
-              <p className="text-sm text-slate-700">{invoice.notes}</p>
+              <p className="text-sm text-slate-700 dark:text-slate-300">{invoice.notes}</p>
             </div>
           )}
 
           {/* Customer Info */}
-          <div className="p-4 bg-slate-50 rounded-lg">
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-lg">
             <p className="text-xs text-slate-500 mb-3 font-medium">Billed To</p>
             <div className="space-y-1 text-sm">
-              <p className="font-semibold text-slate-900">{customer?.full_name || invoice.customer_name}</p>
-              <p className="text-slate-600">{customer?.email || invoice.customer_email}</p>
-              <p className="text-slate-600">{customer?.phone}</p>
-              <p className="text-slate-600">{customer?.address}</p>
+              <p className="font-semibold text-slate-900 dark:text-slate-50">{customer?.full_name || invoice.customer_name}</p>
+              <p className="text-slate-600 dark:text-slate-400">{customer?.email || invoice.customer_email}</p>
+              <p className="text-slate-600 dark:text-slate-400">{customer?.phone}</p>
+              <p className="text-slate-600 dark:text-slate-400">{customer?.address}</p>
             </div>
           </div>
         </div>

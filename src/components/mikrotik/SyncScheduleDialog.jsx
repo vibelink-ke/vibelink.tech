@@ -100,7 +100,7 @@ export default function SyncScheduleDialog({ open, onOpenChange, routers }) {
               ))}
             </div>
             {selectedRouters.length > 0 && (
-              <p className="text-xs text-slate-600">
+              <p className="text-xs text-slate-600 dark:text-slate-400">
                 {selectedRouters.length} router(s) selected
               </p>
             )}

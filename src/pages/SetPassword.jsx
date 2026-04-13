@@ -79,14 +79,14 @@ export default function SetPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800 flex items-center justify-center p-4">
       {/* Header */}
-      <div className="absolute top-0 left-0 right-0 h-16 border-b border-slate-200 bg-white flex items-center px-6">
+      <div className="absolute top-0 left-0 right-0 h-16 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 flex items-center px-6">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
             <Zap className="w-4 h-4 text-white" />
           </div>
-          <span className="font-bold text-slate-900">VIBELINK</span>
+          <span className="font-bold text-slate-900 dark:text-slate-50">VIBELINK</span>
         </div>
       </div>
 
@@ -124,14 +124,14 @@ export default function SetPassword() {
               >
                 <CheckCircle className="w-8 h-8 text-white" />
               </motion.div>
-              <h3 className="text-lg font-semibold text-slate-900 mb-2">Password Set Successfully!</h3>
-              <p className="text-slate-600 mb-4">Redirecting to login...</p>
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-50 mb-2">Password Set Successfully!</h3>
+              <p className="text-slate-600 dark:text-slate-400 mb-4">Redirecting to login...</p>
             </motion.div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
                 <Label>Email</Label>
-                <Input value={email || ''} disabled className="bg-slate-50" />
+                <Input value={email || ''} disabled className="bg-slate-50 dark:bg-slate-800/50" />
               </div>
 
               <div className="space-y-2">
