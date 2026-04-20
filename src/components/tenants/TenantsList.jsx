@@ -36,17 +36,7 @@ export default function TenantsList({ tenants = [], isLoading, onEdit, onDelete 
     );
   }
 
-  const planColors = {
-    starter: 'bg-blue-50 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/50',
-    professional: 'bg-purple-50 dark:bg-purple-900/10 border-purple-200 dark:border-purple-800/50',
-    enterprise: 'bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/50',
-  };
 
-  const planBadgeVariants = {
-    starter: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
-    professional: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200',
-    enterprise: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200',
-  };
 
   return (
     <div className="grid gap-4">
@@ -57,7 +47,7 @@ export default function TenantsList({ tenants = [], isLoading, onEdit, onDelete 
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: index * 0.05 }}
         >
-          <Card className={`border-2 ${planColors[tenant.subscription_plan] || 'bg-white'}`}>
+          <Card className={`border-2 bg-white dark:bg-slate-900`}>
             <CardContent className="p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1">
@@ -78,28 +68,20 @@ export default function TenantsList({ tenants = [], isLoading, onEdit, onDelete 
                       <p className="text-slate-900 dark:text-slate-300">{tenant.admin_email}</p>
                     </div>
                     <div>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Subscription Plan</p>
-                      <Badge className={planBadgeVariants[tenant.subscription_plan]}>
-                        {tenant.subscription_plan}
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Hotspot Share</p>
+                      <Badge className="bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200">
+                        {tenant.hotspot_revenue_share || 0}%
                       </Badge>
                     </div>
                     <div>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Monthly Price</p>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">PPPoE Rate</p>
                       <p className="text-slate-900 dark:text-slate-50 dark:text-white font-semibold">
-                        KES {tenant.monthly_price?.toLocaleString() || '0'}
+                        KES {tenant.pppoe_rate?.toLocaleString() || '0'}
                       </p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
-                    <div>
-                      <p className="text-xs text-slate-600 dark:text-slate-400">Max Customers</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">{tenant.max_customers}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-600 dark:text-slate-400">Max Staff</p>
-                      <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">{tenant.max_staff}</p>
-                    </div>
+                  <div className="grid grid-cols-2 md:grid-cols-2 gap-4 pt-4 border-t border-slate-200 dark:border-slate-700">
                     <div>
                       <p className="text-xs text-slate-600 dark:text-slate-400">Onboarded</p>
                       <p className="text-sm font-semibold text-slate-900 dark:text-slate-50 dark:text-white">

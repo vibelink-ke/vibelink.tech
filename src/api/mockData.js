@@ -162,7 +162,12 @@ export const mockApi = {
       return JSON.parse(user);
     },
     login: async (email, password) => {
-      const user = { id: 'u1', name: 'Admin User', email: email, role: 'admin', onboarding_completed: false };
+      let user;
+      if (email.toLowerCase() === 'info@skybridge.co.ke' && password === 'Redlinks411#') {
+        user = { id: 'super1', name: 'Skybridge Master', email: 'info@skybridge.co.ke', role: 'super_admin', onboarding_completed: true };
+      } else {
+        user = { id: 'u1', name: 'Admin User', email: email, role: 'admin', onboarding_completed: false };
+      }
       saveData(STORAGE_KEYS.USER, user);
       return user;
     },

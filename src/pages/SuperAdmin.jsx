@@ -74,7 +74,7 @@ export default function SuperAdmin() {
     active: tenants.filter(t => t.status === 'active').length,
     trial: tenants.filter(t => t.status === 'trial').length,
     suspended: tenants.filter(t => t.status === 'suspended').length,
-    mrr: subscriptions.reduce((sum, s) => sum + (s.status === 'active' ? s.amount : 0), 0),
+    totalRevenue: payments.filter(p => p.status === 'completed').reduce((sum, p) => sum + p.amount, 0),
   };
 
   const handleStatusChange = (tenant, newStatus) => {
@@ -141,8 +141,8 @@ export default function SuperAdmin() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-slate-600 dark:text-slate-400">MRR</p>
-                <p className="text-2xl font-bold text-indigo-600">KES {stats.mrr.toLocaleString()}</p>
+                <p className="text-sm text-slate-600 dark:text-slate-400">Total Collected</p>
+                <p className="text-2xl font-bold text-indigo-600">KES {stats.totalRevenue.toLocaleString()}</p>
               </div>
               <DollarSign className="w-8 h-8 text-indigo-500" />
             </div>
@@ -190,11 +190,11 @@ export default function SuperAdmin() {
                       </div>
                       <p className="text-sm text-slate-600 dark:text-slate-400">{tenant.admin_email}</p>
                       <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
-                        <span>{tenant.subdomain}.vibelink.app</span>
+                        <span>{tenant.subdomain}.skybridge.co.ke</span>
                         <span>•</span>
-                        <span>{tenant.subscription_plan}</span>
+                        <span>Hotspot: {tenant.hotspot_revenue_share || 0}%</span>
                         <span>•</span>
-                        <span>KES {tenant.monthly_price?.toLocaleString()}/mo</span>
+                        <span>PPPoE: KES {tenant.pppoe_rate?.toLocaleString() || '0'}</span>
                         {tenant.trial_ends_at && tenant.status === 'trial' && (
                           <>
                             <span>•</span>
@@ -282,7 +282,7 @@ export default function SuperAdmin() {
                   </div>
                   <div>
                     <p className="text-sm text-slate-500">Subdomain</p>
-                    <p className="font-medium">{selectedTenant.subdomain}.vibelink.app</p>
+                    <p className="font-medium">{selectedTenant.subdomain}.skybridge.co.ke</p>
                   </div>
                   <div>
                     <p className="text-sm text-slate-500">Phone</p>
@@ -297,20 +297,12 @@ export default function SuperAdmin() {
               <TabsContent value="subscription" className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <p className="text-sm text-slate-500">Plan</p>
-                    <p className="font-medium capitalize">{selectedTenant.subscription_plan}</p>
+                    <p className="text-sm text-slate-500">Hotspot Share</p>
+                    <p className="font-medium">{selectedTenant.hotspot_revenue_share || 0}%</p>
                   </div>
                   <div>
-                    <p className="text-sm text-slate-500">Monthly Price</p>
-                    <p className="font-medium">KES {selectedTenant.monthly_price?.toLocaleString()}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">Max Customers</p>
-                    <p className="font-medium">{selectedTenant.max_customers || 'Unlimited'}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">Max Staff</p>
-                    <p className="font-medium">{selectedTenant.max_staff || 'Unlimited'}</p>
+                    <p className="text-sm text-slate-500">PPPoE Rate</p>
+                    <p className="font-medium">KES {selectedTenant.pppoe_rate?.toLocaleString()}</p>
                   </div>
                   {selectedTenant.trial_ends_at && (
                     <div className="col-span-2">

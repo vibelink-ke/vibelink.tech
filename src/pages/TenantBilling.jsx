@@ -9,7 +9,6 @@ import { CreditCard, FileText, TrendingUp, AlertCircle } from 'lucide-react';
 import PageHeader from '@/components/shared/PageHeader';
 import InvoiceTable from '@/components/billing/InvoiceTable';
 import PaymentHistory from '@/components/billing/PaymentHistory';
-import SubscriptionPlanCard from '@/components/billing/SubscriptionPlanCard';
 import InvoicePreview from '@/components/billing/InvoicePreview';
 import PaymentDialog from '@/components/billing/PaymentDialog';
 import { format } from 'date-fns';
@@ -20,10 +19,7 @@ export default function TenantBilling() {
   const [paymentInvoice, setPaymentInvoice] = useState(null);
   const queryClient = useQueryClient();
 
-  const { data: plans = [] } = useQuery({
-    queryKey: ['subscription-plans'],
-    queryFn: () => vibelink.entities.SubscriptionPlan.filter({ status: 'active' })
-  });
+
 
   const { data: invoices = [], isLoading: invoicesLoading } = useQuery({
     queryKey: ['invoices'],
@@ -51,38 +47,7 @@ export default function TenantBilling() {
     }
   });
 
-  const upgradeMutation = useMutation({
-    mutationFn: async (planCode) => {
-      const selectedPlan = plans.find(p => p.code === planCode);
-      if (!selectedPlan) throw new Error('Plan not found');
 
-      // Update tenant subscription
-      await vibelink.entities.Tenant.update(tenant.id, {
-        subscription_plan: planCode,
-        monthly_price: selectedPlan.monthly_price
-      });
-
-      // Create new subscription record
-      const today = new Date();
-      const nextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1);
-
-      return vibelink.entities.TenantSubscription.create({
-        tenant_id: tenant.id,
-        tenant_name: tenant.company_name,
-        plan: planCode,
-        amount: selectedPlan.monthly_price,
-        billing_period_start: today.toISOString().split('T')[0],
-        billing_period_end: nextMonth.toISOString().split('T')[0],
-        status: 'active',
-        next_billing_date: nextMonth.toISOString().split('T')[0],
-        payment_method: 'invoice',
-        auto_renew: true
-      });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['current-subscription', 'current-tenant'] });
-    }
-  });
 
   // Calculate billing stats
   const totalPaid = payments
@@ -106,9 +71,7 @@ export default function TenantBilling() {
     setPreviewInvoice(invoice);
   };
 
-  const handleSelectPlan = (plan) => {
-    upgradeMutation.mutate(plan.code);
-  };
+
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-800/50 p-6">
@@ -124,14 +87,14 @@ export default function TenantBilling() {
             <Card>
               <CardContent className="pt-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Current Plan</p>
+                  <p className="text-sm font-medium text-slate-600 dark:text-slate-400">Current Rates</p>
                   <CreditCard className="w-4 h-4 text-indigo-600" />
                 </div>
                 <p className="text-2xl font-bold text-slate-900 dark:text-slate-50">
-                  {subscription?.plan ? subscription.plan.charAt(0).toUpperCase() + subscription.plan.slice(1) : 'None'}
+                   {tenant?.hotspot_revenue_share || 0}% Hotspot
                 </p>
                 <p className="text-xs text-slate-500 mt-2">
-                  {subscription?.plan ? `KES ${subscription.amount.toLocaleString('en-KE')}/month` : 'No active plan'}
+                  KES {tenant?.pppoe_rate?.toLocaleString() || 0} per PPPoE
                 </p>
               </CardContent>
             </Card>
@@ -194,7 +157,6 @@ export default function TenantBilling() {
           <TabsList>
             <TabsTrigger value="invoices">Invoices</TabsTrigger>
             <TabsTrigger value="payments">Payments</TabsTrigger>
-            <TabsTrigger value="plans">Upgrade Plan</TabsTrigger>
           </TabsList>
 
           <TabsContent value="invoices">
@@ -215,38 +177,7 @@ export default function TenantBilling() {
             />
           </TabsContent>
 
-          <TabsContent value="plans">
-            <div className="space-y-6">
-              <div className="flex justify-center gap-4">
-                <Button
-                  variant={!isAnnual ? 'default' : 'outline'}
-                  onClick={() => setIsAnnual(false)}
-                  className={!isAnnual ? 'bg-indigo-600 hover:bg-indigo-700' : ''}
-                >
-                  Monthly Billing
-                </Button>
-                <Button
-                  variant={isAnnual ? 'default' : 'outline'}
-                  onClick={() => setIsAnnual(true)}
-                  className={isAnnual ? 'bg-indigo-600 hover:bg-indigo-700' : ''}
-                >
-                  Annual Billing
-                </Button>
-              </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {plans.sort((a, b) => a.display_order - b.display_order).map((plan) => (
-                  <SubscriptionPlanCard
-                    key={plan.id}
-                    plan={plan}
-                    isSelected={subscription?.plan === plan.code}
-                    onSelect={handleSelectPlan}
-                    isAnnual={isAnnual}
-                  />
-                ))}
-              </div>
-            </div>
-          </TabsContent>
         </Tabs>
 
         {/* Invoice Preview Dialog */}

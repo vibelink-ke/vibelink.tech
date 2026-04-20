@@ -17,9 +17,21 @@ model User {
 }
 
 model Tenant {
-  id           String   @id @default(uuid())
-  name         String
-  created_date DateTime @default(now())
+  id                    String    @id @default(uuid())
+  company_name          String
+  admin_name            String?
+  admin_email           String?
+  phone                 String?
+  address               String?
+  city                  String?
+  country               String?
+  subdomain             String?
+  status                String    @default("trial")
+  trial_ends_at         DateTime?
+  hotspot_revenue_share Float?
+  pppoe_rate            Float?
+  onboarded             Boolean   @default(false)
+  created_date          DateTime  @default(now())
 }
 
 model Customer {

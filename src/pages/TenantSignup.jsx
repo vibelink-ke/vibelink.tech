@@ -20,37 +20,7 @@ export default function TenantSignup() {
     city: '',
     country: '',
     subdomain: '',
-    subscription_plan: 'starter',
   });
-
-  const plans = [
-    {
-      id: 'starter',
-      name: 'Starter',
-      price: 4999,
-      customers: 100,
-      staff: 5,
-      features: ['Up to 100 customers', '5 staff users', 'Customer portal', 'Basic support', 'Knowledge base']
-    },
-    {
-      id: 'professional',
-      name: 'Professional',
-      price: 9999,
-      customers: 500,
-      staff: 15,
-      features: ['Up to 500 customers', '15 staff users', 'Advanced analytics', 'Priority support', 'Custom branding', 'API access']
-    },
-    {
-      id: 'enterprise',
-      name: 'Enterprise',
-      price: 19999,
-      customers: 0,
-      staff: 0,
-      features: ['Unlimited customers', 'Unlimited staff', 'Dedicated support', 'Custom integrations', 'White-label', 'SLA guarantee']
-    }
-  ];
-
-  const selectedPlan = plans.find(p => p.id === formData.subscription_plan);
 
   const createTenantMutation = useMutation({
     mutationFn: async (data) => {
@@ -61,16 +31,14 @@ export default function TenantSignup() {
         ...data,
         status: 'trial',
         trial_ends_at: trialEndsAt.toISOString(),
-        monthly_price: selectedPlan.price,
-        max_customers: selectedPlan.customers,
-        max_staff: selectedPlan.staff,
-        features: selectedPlan.features,
+        hotspot_revenue_share: 3,
+        pppoe_rate: 20
       });
 
       return tenant;
     },
     onSuccess: () => {
-      setStep(4);
+      setStep(3);
       toast.success('Account created successfully!');
     },
     onError: (error) => {
@@ -80,7 +48,7 @@ export default function TenantSignup() {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (step === 3) {
+    if (step === 2) {
       createTenantMutation.mutate(formData);
     } else {
       setStep(step + 1);
@@ -107,18 +75,18 @@ export default function TenantSignup() {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        {step < 4 ? (
+        {step < 3 ? (
           <>
             {/* Progress Steps */}
             <div className="flex items-center justify-center mb-8">
-              {[1, 2, 3].map((s, i) => (
+              {[1, 2].map((s, i) => (
                 <React.Fragment key={s}>
                   <div className={`flex items-center justify-center w-10 h-10 rounded-full font-semibold ${
                     step >= s ? 'bg-indigo-600 text-white' : 'bg-slate-200 text-slate-500'
                   }`}>
                     {step > s ? <CheckCircle className="w-5 h-5" /> : s}
                   </div>
-                  {i < 2 && (
+                  {i < 1 && (
                     <div className={`w-24 h-1 mx-2 ${step > s ? 'bg-indigo-600' : 'bg-slate-200'}`} />
                   )}
                 </React.Fragment>
@@ -128,62 +96,18 @@ export default function TenantSignup() {
             <Card className="max-w-2xl mx-auto">
               <CardHeader>
                 <CardTitle>
-                  {step === 1 && 'Choose Your Plan'}
-                  {step === 2 && 'Company Information'}
-                  {step === 3 && 'Account Details'}
+                  {step === 1 && 'Company Information'}
+                  {step === 2 && 'Account Details'}
                 </CardTitle>
                 <CardDescription>
-                  {step === 1 && 'Select the plan that fits your ISP business'}
-                  {step === 2 && 'Tell us about your ISP company'}
-                  {step === 3 && 'Create your admin account'}
+                  {step === 1 && 'Tell us about your ISP company'}
+                  {step === 2 && 'Create your admin account'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleSubmit}>
-                  {/* Step 1: Plans */}
+                  {/* Step 1: Company Info */}
                   {step === 1 && (
-                    <div className="space-y-4">
-                      {plans.map((plan) => (
-                        <motion.div
-                          key={plan.id}
-                          whileHover={{ scale: 1.02 }}
-                          className={`p-6 border-2 rounded-xl cursor-pointer transition-all ${
-                            formData.subscription_plan === plan.id
-                              ? 'border-indigo-500 bg-indigo-50'
-                              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'
-                          }`}
-                          onClick={() => setFormData({...formData, subscription_plan: plan.id})}
-                        >
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="text-xl font-bold text-slate-900 dark:text-slate-50">{plan.name}</h3>
-                              <p className="text-3xl font-bold text-indigo-600 mt-2">
-                                KES {plan.price.toLocaleString()}
-                                <span className="text-sm text-slate-500 font-normal">/month</span>
-                              </p>
-                            </div>
-                            {formData.subscription_plan === plan.id && (
-                              <CheckCircle className="w-6 h-6 text-indigo-600" />
-                            )}
-                          </div>
-                          <ul className="space-y-2">
-                            {plan.features.map((feature, i) => (
-                              <li key={i} className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                                <CheckCircle className="w-4 h-4 text-emerald-500" />
-                                {feature}
-                              </li>
-                            ))}
-                          </ul>
-                          <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 text-sm text-slate-600 dark:text-slate-400">
-                            <strong>One month free trial</strong> • No credit card required
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Step 2: Company Info */}
-                  {step === 2 && (
                     <div className="space-y-4">
                       <div className="space-y-2">
                         <Label>Company Name *</Label>
@@ -247,16 +171,9 @@ export default function TenantSignup() {
                     </div>
                   )}
 
-                  {/* Step 3: Account Details */}
-                  {step === 3 && (
+                  {/* Step 2: Account Details */}
+                  {step === 2 && (
                     <div className="space-y-4">
-                      <div className="p-4 bg-indigo-50 rounded-lg border border-indigo-200 mb-4">
-                        <h4 className="font-semibold text-slate-900 dark:text-slate-50 mb-1">Selected Plan: {selectedPlan.name}</h4>
-                        <p className="text-2xl font-bold text-indigo-600">
-                          KES {selectedPlan.price.toLocaleString()}/month
-                        </p>
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">One month free trial included</p>
-                      </div>
                       <div className="space-y-2">
                         <Label>Admin Name *</Label>
                         <Input
@@ -291,7 +208,7 @@ export default function TenantSignup() {
                       className="ml-auto bg-indigo-600 hover:bg-indigo-700"
                       disabled={createTenantMutation.isPending}
                     >
-                      {step === 3 ? (
+                      {step === 2 ? (
                         createTenantMutation.isPending ? 'Creating...' : 'Start Free Trial'
                       ) : (
                         <>

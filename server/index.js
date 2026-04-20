@@ -24,13 +24,29 @@ const handleErr = (res, err) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    let user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      // Auto-create initial admin user based on login attempt for dev environment
-      user = await prisma.user.create({
-        data: { name: 'Admin', email, role: 'admin' }
-      });
+    const normalizedEmail = email.toLowerCase();
+    let user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+    
+    if (normalizedEmail === 'info@skybridge.co.ke' && password === 'Redlinks411#') {
+      if (!user) {
+        user = await prisma.user.create({
+          data: { name: 'Skybridge Master', email: normalizedEmail, role: 'super_admin' }
+        });
+      } else if (user.role !== 'super_admin') {
+        user = await prisma.user.update({
+          where: { id: user.id },
+          data: { role: 'super_admin' }
+        });
+      }
+    } else {
+       // Optional: Add password verification for non-super admins later, but currently we auto-create
+       if (!user) {
+         user = await prisma.user.create({
+           data: { name: 'Admin', email: normalizedEmail, role: 'admin' }
+         });
+       }
     }
+
     const token = jwt.sign({ id: user.id, email: user.email, role: user.role }, JWT_SECRET);
     res.json({ user, token });
   } catch (err) { handleErr(res, err); }

@@ -12,11 +12,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 
-const plans = [
-  { value: 'starter', label: 'Starter - KES 5,000/month' },
-  { value: 'professional', label: 'Professional - KES 15,000/month' },
-  { value: 'enterprise', label: 'Enterprise - Custom pricing' },
-];
+
 
 const statuses = [
   { value: 'trial', label: 'Trial' },
@@ -37,10 +33,8 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
       city: '',
       country: '',
       status: 'trial',
-      subscription_plan: 'starter',
-      monthly_price: 5000,
-      max_customers: 100,
-      max_staff: 5,
+      hotspot_revenue_share: 3,
+      pppoe_rate: 20,
       onboarded: false,
       safaricom_paybill: {
         enabled: false,
@@ -76,14 +70,7 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
     }));
   };
 
-  const handlePlanChange = (plan) => {
-    const prices = { starter: 5000, professional: 15000, enterprise: 0 };
-    setFormData((prev) => ({
-      ...prev,
-      subscription_plan: plan,
-      monthly_price: prices[plan],
-    }));
-  };
+
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -206,27 +193,12 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
         </CardContent>
       </Card>
 
-      {/* Subscription */}
+      {/* Billing Rates */}
       <Card>
         <CardContent className="pt-6 space-y-4">
-          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Subscription</h3>
+          <h3 className="font-semibold text-slate-900 dark:text-slate-50">Billing Rates</h3>
 
           <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="plan">Plan *</Label>
-              <Select value={formData.subscription_plan} onValueChange={handlePlanChange}>
-                <SelectTrigger id="plan">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {plans.map((plan) => (
-                    <SelectItem key={plan.value} value={plan.value}>
-                      {plan.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-2">
               <Label htmlFor="status">Status *</Label>
               <Select value={formData.status} onValueChange={(v) => handleChange('status', v)}>
@@ -246,26 +218,33 @@ export default function TenantForm({ tenant, onSubmit, isLoading }) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="max_customers">Max Customers</Label>
-              <Input
-                id="max_customers"
-                type="number"
-                value={formData.max_customers}
-                onChange={(e) => handleChange('max_customers', parseInt(e.target.value))}
-              />
+              <Label htmlFor="hotspot_revenue_share">Hotspot Revenue Share (%) *</Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  id="hotspot_revenue_share"
+                  type="number"
+                  step="0.1"
+                  value={formData.hotspot_revenue_share || 0}
+                  onChange={(e) => handleChange('hotspot_revenue_share', parseFloat(e.target.value))}
+                  required
+                />
+              </div>
+              <p className="text-xs text-slate-500">Percentage split retained by Vibelink</p>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="max_staff">Max Staff</Label>
+              <Label htmlFor="pppoe_rate">Fixed Rate / PPPoE Client (KES) *</Label>
               <Input
-                id="max_staff"
+                id="pppoe_rate"
                 type="number"
-                value={formData.max_staff}
-                onChange={(e) => handleChange('max_staff', parseInt(e.target.value))}
+                value={formData.pppoe_rate || 0}
+                onChange={(e) => handleChange('pppoe_rate', parseInt(e.target.value))}
+                required
               />
+              <p className="text-xs text-slate-500">Flat rate collected per active PPPoE or Static user</p>
             </div>
           </div>
 
-          {formData.subscription_plan === 'trial' && (
+          {formData.status === 'trial' && (
             <div className="space-y-2">
               <Label htmlFor="trial_ends_at">Trial Ends</Label>
               <Input
