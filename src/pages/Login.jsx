@@ -49,11 +49,19 @@ export default function Login() {
       });
       navigate('/');
     } catch (error) {
-      toast({
-        title: "Authentication Failed",
-        description: "Please check your credentials and try again.",
-        variant: "destructive",
-      });
+      if (error.message === 'Network Error' || error.code === 'ERR_NETWORK') {
+        toast({
+          title: "Server Unreachable",
+          description: "Cannot connect to the backend server. Please ensure the backend is running.",
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Authentication Failed",
+          description: "Please check your credentials and try again.",
+          variant: "destructive",
+        });
+      }
     } finally {
       setIsLoading(false);
     }
