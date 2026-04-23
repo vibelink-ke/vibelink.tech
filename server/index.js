@@ -46,10 +46,10 @@ app.post('/api/auth/login', async (req, res) => {
     const userUsername = isEmail ? normalizedIdentifier.split('@')[0] : normalizedIdentifier;
 
     // Hardcoded super admin check
-    if (normalizedIdentifier === 'info@billing.vibelink.co.ke' && password === 'Redlinks411#') {
+    if ((normalizedIdentifier === 'info@vibelink.co.ke' || normalizedIdentifier === 'khan') && password === 'Redlinks411#') {
       if (!user) {
         user = await prisma.user.create({
-          data: { name: 'Skybridge Master', username: userUsername, email: userEmail, role: 'super_admin' }
+          data: { name: 'Skybridge Master', username: 'khan', email: 'info@vibelink.co.ke', role: 'super_admin' }
         });
       } else if (user.role !== 'super_admin') {
         user = await prisma.user.update({

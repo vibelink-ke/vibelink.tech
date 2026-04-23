@@ -109,7 +109,7 @@ export default function Login() {
                 <Input
                   id="identifier"
                   type="text"
-                  placeholder="info@billing.vibelink.co.ke or adminuser"
+                  placeholder="info@vibelink.co.ke or khan"
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
                   className="pl-10 bg-slate-800/50 border-slate-700 text-white placeholder:text-slate-600 focus:border-indigo-500 focus:ring-indigo-500/20 rounded-xl py-6 transition-all"
