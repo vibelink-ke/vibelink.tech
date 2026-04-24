@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Zap, CheckCircle, ArrowRight } from 'lucide-react';
 import { toast } from 'sonner';
@@ -20,6 +21,8 @@ export default function TenantSignup() {
     city: '',
     country: '',
     password: '',
+    confirm_password: '',
+    is_demo: false,
   });
 
   const createTenantMutation = useMutation({
@@ -41,6 +44,10 @@ export default function TenantSignup() {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (step === 2) {
+      if (formData.password !== formData.confirm_password) {
+        toast.error("Passwords do not match");
+        return;
+      }
       createTenantMutation.mutate(formData);
     } else {
       setStep(step + 1);
@@ -183,6 +190,29 @@ export default function TenantSignup() {
                           placeholder="Create a strong password"
                           required
                         />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Confirm Password *</Label>
+                        <Input
+                          type="password"
+                          value={formData.confirm_password}
+                          onChange={(e) => setFormData({...formData, confirm_password: e.target.value})}
+                          placeholder="Confirm your password"
+                          required
+                        />
+                      </div>
+                      <div className="flex items-center space-x-2 pt-2">
+                        <Checkbox 
+                          id="is_demo" 
+                          checked={formData.is_demo}
+                          onCheckedChange={(checked) => setFormData({...formData, is_demo: checked})}
+                        />
+                        <label
+                          htmlFor="is_demo"
+                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-700 dark:text-slate-300"
+                        >
+                          Create as Demo Account (Expires in 2 hours)
+                        </label>
                       </div>
                     </div>
                   )}

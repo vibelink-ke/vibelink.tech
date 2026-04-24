@@ -64,6 +64,9 @@ app.post('/api/auth/login', async (req, res) => {
        if (!user.password) {
          return res.status(401).json({ message: 'Account has no password set. Please reset your password.' });
        }
+       if (user.expires_at && new Date(user.expires_at) < new Date()) {
+         return res.status(403).json({ message: 'This demo account has expired.' });
+       }
        const isMatch = await bcrypt.compare(password, user.password);
        if (!isMatch) {
          return res.status(401).json({ message: 'Invalid credentials' });
@@ -107,11 +110,15 @@ app.put('/api/auth/me', async (req, res) => {
 
 app.post('/api/auth/register-tenant', async (req, res) => {
   try {
-    const { company_name, admin_name, admin_email, phone, address, city, country, password } = req.body;
+    const { company_name, admin_name, admin_email, phone, address, city, country, password, is_demo } = req.body;
     
     // 1. Create Tenant
     const trialEndsAt = new Date();
-    trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
+    if (is_demo) {
+      trialEndsAt.setHours(trialEndsAt.getHours() + 2);
+    } else {
+      trialEndsAt.setMonth(trialEndsAt.getMonth() + 1);
+    }
     
     const tenant = await prisma.tenant.create({
       data: {
@@ -137,7 +144,8 @@ app.post('/api/auth/register-tenant', async (req, res) => {
             username: userUsername,
             email: admin_email.toLowerCase(),
             password: hashedPassword,
-            role: 'admin'
+            role: 'admin',
+            expires_at: is_demo ? trialEndsAt.toISOString() : null
           }
         });
       }

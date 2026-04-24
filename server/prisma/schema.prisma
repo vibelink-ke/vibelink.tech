@@ -15,6 +15,7 @@ model User {
   password             String?
   role                 String   @default("admin")
   onboarding_completed Boolean  @default(false)
+  expires_at           DateTime?
   created_at           DateTime @default(now())
 }
 
