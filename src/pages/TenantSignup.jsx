@@ -211,7 +211,7 @@ export default function TenantSignup() {
                           htmlFor="is_demo"
                           className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-slate-700 dark:text-slate-300"
                         >
-                          Create as Demo Account (Expires in 2 hours)
+                          Create as Demo Account
                         </label>
                       </div>
                     </div>

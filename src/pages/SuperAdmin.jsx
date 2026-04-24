@@ -19,6 +19,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +38,8 @@ import StatusBadge from '@/components/shared/StatusBadge';
 export default function SuperAdmin() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTenant, setSelectedTenant] = useState(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFormData, setEditFormData] = useState({});
   const queryClient = useQueryClient();
 
   const { data: tenants = [] } = useQuery({
@@ -60,6 +63,7 @@ export default function SuperAdmin() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries(['tenants']);
+      setIsEditing(false);
     },
   });
 
@@ -208,9 +212,13 @@ export default function SuperAdmin() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setSelectedTenant(tenant)}>
+                      <DropdownMenuItem onClick={() => {
+                        setSelectedTenant(tenant);
+                        setIsEditing(false);
+                        setEditFormData(tenant);
+                      }}>
                         <Eye className="w-4 h-4 mr-2" />
-                        View Details
+                        View / Edit Details
                       </DropdownMenuItem>
                       {tenant.status === 'active' && (
                         <DropdownMenuItem onClick={() => handleStatusChange(tenant, 'suspended')}>
@@ -260,51 +268,175 @@ export default function SuperAdmin() {
                 <TabsTrigger value="payments">Payments</TabsTrigger>
               </TabsList>
               <TabsContent value="details" className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-slate-500">Company Name</p>
-                    <p className="font-medium">{selectedTenant.company_name}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">Status</p>
-                    <StatusBadge status={selectedTenant.status} />
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">Admin Email</p>
-                    <p className="font-medium">{selectedTenant.admin_email}</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">Admin Name</p>
-                    <p className="font-medium">{selectedTenant.admin_name}</p>
-                  </div>
+                {isEditing ? (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      updateTenantMutation.mutate({ id: selectedTenant.id, data: editFormData });
+                      // Update the selectedTenant view optimistically or rely on re-open
+                      setSelectedTenant({ ...selectedTenant, ...editFormData });
+                    }}
+                    className="grid grid-cols-2 gap-4"
+                  >
+                    <div className="space-y-2">
+                      <Label>Company Name</Label>
+                      <Input 
+                        value={editFormData.company_name || ''} 
+                        onChange={e => setEditFormData({...editFormData, company_name: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Admin Name</Label>
+                      <Input 
+                        value={editFormData.admin_name || ''} 
+                        onChange={e => setEditFormData({...editFormData, admin_name: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Admin Email</Label>
+                      <Input 
+                        value={editFormData.admin_email || ''} 
+                        onChange={e => setEditFormData({...editFormData, admin_email: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Phone</Label>
+                      <Input 
+                        value={editFormData.phone || ''} 
+                        onChange={e => setEditFormData({...editFormData, phone: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label>Address</Label>
+                      <Input 
+                        value={editFormData.address || ''} 
+                        onChange={e => setEditFormData({...editFormData, address: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>City</Label>
+                      <Input 
+                        value={editFormData.city || ''} 
+                        onChange={e => setEditFormData({...editFormData, city: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Country</Label>
+                      <Input 
+                        value={editFormData.country || ''} 
+                        onChange={e => setEditFormData({...editFormData, country: e.target.value})} 
+                      />
+                    </div>
+                    <div className="col-span-2 flex justify-end gap-2 mt-4">
+                      <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>
+                      <Button type="submit" disabled={updateTenantMutation.isPending}>Save Changes</Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-slate-500">Company Name</p>
+                      <p className="font-medium">{selectedTenant.company_name}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Status</p>
+                      <StatusBadge status={selectedTenant.status} />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Admin Email</p>
+                      <p className="font-medium">{selectedTenant.admin_email}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Admin Name</p>
+                      <p className="font-medium">{selectedTenant.admin_name}</p>
+                    </div>
 
-                  <div>
-                    <p className="text-sm text-slate-500">Phone</p>
-                    <p className="font-medium">{selectedTenant.phone}</p>
+                    <div>
+                      <p className="text-sm text-slate-500">Phone</p>
+                      <p className="font-medium">{selectedTenant.phone}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-sm text-slate-500">Address</p>
+                      <p className="font-medium">{selectedTenant.address}, {selectedTenant.city}, {selectedTenant.country}</p>
+                    </div>
+                    <div className="col-span-2 mt-4">
+                      <Button onClick={() => setIsEditing(true)}>Edit Details</Button>
+                    </div>
                   </div>
-                  <div className="col-span-2">
-                    <p className="text-sm text-slate-500">Address</p>
-                    <p className="font-medium">{selectedTenant.address}, {selectedTenant.city}, {selectedTenant.country}</p>
-                  </div>
-                </div>
+                )}
               </TabsContent>
               <TabsContent value="subscription" className="space-y-4">
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm text-slate-500">Hotspot Share</p>
-                    <p className="font-medium">{selectedTenant.hotspot_revenue_share || 0}%</p>
-                  </div>
-                  <div>
-                    <p className="text-sm text-slate-500">PPPoE Rate</p>
-                    <p className="font-medium">KES {selectedTenant.pppoe_rate?.toLocaleString()}</p>
-                  </div>
-                  {selectedTenant.trial_ends_at && (
-                    <div className="col-span-2">
-                      <p className="text-sm text-slate-500">Trial Ends</p>
-                      <p className="font-medium">{format(new Date(selectedTenant.trial_ends_at), 'PPP')}</p>
+                {isEditing ? (
+                  <form 
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      updateTenantMutation.mutate({ 
+                        id: selectedTenant.id, 
+                        data: {
+                          hotspot_revenue_share: parseFloat(editFormData.hotspot_revenue_share) || 0,
+                          pppoe_rate: parseFloat(editFormData.pppoe_rate) || 0,
+                          trial_ends_at: editFormData.trial_ends_at ? new Date(editFormData.trial_ends_at).toISOString() : null
+                        } 
+                      });
+                      setSelectedTenant({ 
+                        ...selectedTenant, 
+                        hotspot_revenue_share: parseFloat(editFormData.hotspot_revenue_share) || 0,
+                        pppoe_rate: parseFloat(editFormData.pppoe_rate) || 0,
+                        trial_ends_at: editFormData.trial_ends_at ? new Date(editFormData.trial_ends_at).toISOString() : null
+                      });
+                    }}
+                    className="grid grid-cols-2 gap-4"
+                  >
+                    <div className="space-y-2">
+                      <Label>Hotspot Share (%)</Label>
+                      <Input 
+                        type="number"
+                        value={editFormData.hotspot_revenue_share || 0} 
+                        onChange={e => setEditFormData({...editFormData, hotspot_revenue_share: e.target.value})} 
+                      />
                     </div>
-                  )}
-                </div>
+                    <div className="space-y-2">
+                      <Label>PPPoE Rate (KES)</Label>
+                      <Input 
+                        type="number"
+                        value={editFormData.pppoe_rate || 0} 
+                        onChange={e => setEditFormData({...editFormData, pppoe_rate: e.target.value})} 
+                      />
+                    </div>
+                    <div className="space-y-2 col-span-2">
+                      <Label>Trial / Expiration End Date</Label>
+                      <Input 
+                        type="datetime-local"
+                        value={editFormData.trial_ends_at ? new Date(editFormData.trial_ends_at).toISOString().slice(0, 16) : ''} 
+                        onChange={e => setEditFormData({...editFormData, trial_ends_at: e.target.value})} 
+                      />
+                    </div>
+                    <div className="col-span-2 flex justify-end gap-2 mt-4">
+                      <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>Cancel</Button>
+                      <Button type="submit" disabled={updateTenantMutation.isPending}>Save Changes</Button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-slate-500">Hotspot Share</p>
+                      <p className="font-medium">{selectedTenant.hotspot_revenue_share || 0}%</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">PPPoE Rate</p>
+                      <p className="font-medium">KES {selectedTenant.pppoe_rate?.toLocaleString()}</p>
+                    </div>
+                    {selectedTenant.trial_ends_at && (
+                      <div className="col-span-2">
+                        <p className="text-sm text-slate-500">Trial / Expiration Ends</p>
+                        <p className="font-medium">{format(new Date(selectedTenant.trial_ends_at), 'PPP pp')}</p>
+                      </div>
+                    )}
+                    <div className="col-span-2 mt-4">
+                      <Button onClick={() => setIsEditing(true)}>Edit Subscription</Button>
+                    </div>
+                  </div>
+                )}
               </TabsContent>
               <TabsContent value="payments">
                 <div className="space-y-2">
