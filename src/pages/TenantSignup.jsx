@@ -235,7 +235,7 @@ export default function TenantSignup() {
                       disabled={createTenantMutation.isPending}
                     >
                       {step === 2 ? (
-                        createTenantMutation.isPending ? 'Creating...' : 'Start Free Trial'
+                        createTenantMutation.isPending ? 'Creating...' : 'Create Account'
                       ) : (
                         <>
                           Continue <ArrowRight className="w-4 h-4 ml-2" />
