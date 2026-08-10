@@ -59,8 +59,10 @@ export default function Topbar() {
   const results = useSearchResults(searchQuery, store);
   const hasQuery = searchQuery.trim().length > 0;
 
-  const credits = store.smsCredits?.credits ?? 0;
-  const smsConfigured = store.smsCredits?.configured;
+  const sms = store.smsCredits;             // null until the first read comes back
+  const known = sms != null;
+  const credits = sms?.credits ?? 0;
+  const smsConfigured = sms?.configured;
 
   return (
     <header
@@ -183,13 +185,20 @@ export default function Topbar() {
       <div
         style={chip}
         onClick={() => navigate('/settings?tab=sms')}
-        title={smsConfigured ? 'SMS gateway connected' : 'No SMS gateway configured'}
+        title={!known ? 'Checking SMS balance…' : smsConfigured ? 'SMS gateway connected' : 'No SMS gateway configured'}
       >
         <span style={{ color: color.neutralInk }}>SMS</span>
-        <span style={{ fontFamily: font.mono, fontSize: 12.5, fontWeight: 500, color: credits > 0 ? color.green : color.rust }}>
-          {credits.toLocaleString()}
+        <span
+          style={{
+            fontFamily: font.mono,
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: !known ? color.muted : credits > 0 ? color.green : color.rust,
+          }}
+        >
+          {known ? credits.toLocaleString() : '—'}
         </span>
-        <span style={{ fontSize: 10.5, color: color.muted }}>{store.smsCredits?.provider ?? 'not set'}</span>
+        <span style={{ fontSize: 10.5, color: color.muted }}>{sms?.provider ?? (known ? 'not set' : 'checking…')}</span>
       </div>
 
       <div

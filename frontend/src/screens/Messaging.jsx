@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -23,6 +23,30 @@ export default function Messaging() {
 
   const clients = store.clients ?? [];
   const set = (k) => (e) => setSms((s) => ({ ...s, [k]: e.target.value }));
+
+  /** History refreshes on the same 3s beat, but only while this tab is open. */
+  useEffect(() => {
+    if (tab !== 'history') return undefined;
+    let stop = false;
+
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const rows = await api.smsHistory();
+        if (!stop) store.setCollection('smsHistory', rows);
+      } catch {
+        /* transient — the next tick will retry */
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const recipients = useMemo(() => {
     switch (sms.audience) {
@@ -163,7 +187,8 @@ export default function Messaging() {
           </span>
         </div>
 
-        {!store.smsCredits?.configured && (
+        {/* Only warn once we actually know — null means the check is still in flight. */}
+        {store.smsCredits != null && !store.smsCredits.configured && (
           <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: radius.md, padding: '10px 13px' }}>
             No SMS gateway is configured yet. Add credentials under Settings → SMS before sending.
           </div>

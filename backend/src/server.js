@@ -277,24 +277,54 @@ app.get('/api/payment-methods', async (req, res) => {
 });
 
 // ── SMS gateways ──────────────────────────────────
-app.get('/api/sms/gateways', async (req, res) => {
+app.get('/api/sms/gateways', wrap(async (req, res) => {
+  const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
   const { rows } = await pool.query(
-    'select provider, priority, enabled from tenant_sms_config where tenant_id=$1 order by priority',
+    'select provider, priority, enabled, credentials from tenant_sms_config where tenant_id=$1 order by priority',
     [req.tenant.id]);
-  res.json({ available: providerNames, configured: rows });
-});
+  res.json({
+    available: providerNames,
+    // The form renders from this, so it cannot ask for a different set of fields
+    // than credentialsComplete() checks.
+    fields: PROVIDER_FIELDS,
+    configured: rows.map(({ credentials, ...g }) => ({
+      ...g,
+      // Report which secrets exist by name only — never the values.
+      credentialKeys: Object.entries(credentials ?? {})
+        .filter(([, v]) => String(v ?? '').trim())
+        .map(([k]) => k),
+      missing: missingCredentials(g.provider, credentials ?? {}),
+    })),
+  });
+}));
 
-app.put('/api/sms/gateways/:provider', async (req, res) => {
-  const { credentials, priority = 1, enabled = true, templates = {} } = req.body;
-  await pool.query(`
+app.put('/api/sms/gateways/:provider', wrap(async (req, res) => {
+  const { credentials = {}, priority = 1, enabled = true, templates = {} } = req.body;
+  const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
+  if (!PROVIDER_FIELDS[req.params.provider])
+    return res.status(400).json({ error: 'unknown gateway' });
+
+  // Blank fields must not wipe stored secrets — the form shows "leave blank to
+  // keep it", so merge rather than replace. Empty strings are dropped first.
+  const incoming = Object.fromEntries(
+    Object.entries(credentials).filter(([, v]) => String(v ?? '').trim() !== '')
+  );
+
+  const { rows: [saved] } = await pool.query(`
     insert into tenant_sms_config (tenant_id, provider, credentials, templates, priority, enabled)
     values ($1,$2,$3,$4,$5,$6)
     on conflict (tenant_id, provider) do update set
-      credentials=excluded.credentials, templates=excluded.templates,
-      priority=excluded.priority, enabled=excluded.enabled`,
-    [req.tenant.id, req.params.provider, credentials, templates, priority, enabled]);
-  res.json({ ok: true });
-});
+      credentials = tenant_sms_config.credentials || excluded.credentials,
+      templates = excluded.templates,
+      priority = excluded.priority, enabled = excluded.enabled
+    returning credentials`,
+    [req.tenant.id, req.params.provider, JSON.stringify(incoming), templates, priority, enabled]);
+
+  // Report rather than refuse: a partly-filled gateway is a legitimate work in
+  // progress, and send() skips it until it is complete.
+  const missing = missingCredentials(req.params.provider, saved.credentials ?? {});
+  res.json({ ok: true, complete: missing.length === 0, missing });
+}));
 
 app.delete('/api/sms/gateways/:provider', wrap(async (req, res) => {
   await pool.query('delete from tenant_sms_config where tenant_id=$1 and provider=$2',

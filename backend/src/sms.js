@@ -112,7 +112,8 @@ export async function send(tenantId, phone, template, vars = {}) {
     // A half-filled gateway would fail on every message and, being first in
     // priority order, would shadow a working one behind it.
     if (!credentialsComplete(g.provider, g.credentials)) {
-      await log(tenantId, g.provider, to, body, 'skipped', 'credentials incomplete');
+      await log(tenantId, g.provider, to, body, 'skipped',
+        `missing ${missingCredentials(g.provider, g.credentials).join(', ')}`);
       continue;
     }
     tried++;
@@ -204,19 +205,68 @@ const BALANCE = {
   }
 };
 
-/** True only when the tenant has a provider selected AND its required secrets filled. */
+/**
+ * What each gateway needs, and how to label it in the UI.
+ *
+ * Single source of truth: `credentialsComplete()` derives from this and the
+ * Settings screen renders from it, so the form and the validation cannot drift.
+ * Every field the PROVIDERS function above actually reads must appear here —
+ * a missing entry means a half-configured gateway passes as complete, gets tried
+ * first, and silently shadows a working one.
+ */
+export const PROVIDER_FIELDS = {
+  hostpinnacle: [
+    { key: 'userid', label: 'Username', required: true },
+    { key: 'password', label: 'Password', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+  ],
+  africastalking: [
+    { key: 'username', label: 'Username', required: true },
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  textsms: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'partner_id', label: 'Partner ID', required: true },
+    { key: 'sender_id', label: 'Sender ID / shortcode', required: true },
+  ],
+  ujumbe: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'email', label: 'Account email', required: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  mobitech: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender name', required: true },
+  ],
+  twilio: [
+    { key: 'account_sid', label: 'Account SID', required: true },
+    { key: 'auth_token', label: 'Auth token', required: true, secret: true },
+    { key: 'from', label: 'From number', required: true },
+  ],
+  custom: [
+    { key: 'url', label: 'Send URL', required: true },
+    { key: 'body_template', label: 'Body template', required: false },
+    { key: 'balance_url', label: 'Balance URL', required: false },
+  ],
+};
+
+/** True only when the tenant has a provider selected AND its required fields filled. */
 export function credentialsComplete(provider, c = {}) {
-  const need = {
-    hostpinnacle: ['userid', 'password', 'api_key'],
-    africastalking: ['username', 'api_key'],
-    textsms: ['api_key', 'partner_id'],
-    ujumbe: ['api_key', 'email'],
-    mobitech: ['api_key'],
-    twilio: ['account_sid', 'auth_token'],
-    custom: ['url']
-  }[provider];
-  if (!need) return false;
-  return need.every(k => String(c[k] ?? '').trim().length > 0);
+  const fields = PROVIDER_FIELDS[provider];
+  if (!fields) return false;
+  return fields
+    .filter((f) => f.required)
+    .every((f) => String(c[f.key] ?? '').trim().length > 0);
+}
+
+/** Which required fields are still blank — drives the "missing X, Y" message. */
+export function missingCredentials(provider, c = {}) {
+  const fields = PROVIDER_FIELDS[provider] ?? [];
+  return fields
+    .filter((f) => f.required && !String(c[f.key] ?? '').trim())
+    .map((f) => f.label);
 }
 
 /**
