@@ -1,0 +1,28 @@
+# Postgres for local development.
+#
+#   docker compose up -d
+#   cd backend && npm install && npm run migrate
+#
+# schema.sql needs the pgcrypto and pg_trgm extensions, both of which ship with
+# the official postgres image.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: billing-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: billing
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: billing
+    ports:
+      - '5432:5432'
+    volumes:
+      - billing-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U billing -d billing']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  billing-pgdata:
