@@ -1,0 +1,59 @@
+/* Mirrors the <helmet> block of BILLING.SYSTEM.dc.html. */
+
+body {
+  margin: 0;
+  background: #f5f6f3;
+  -webkit-font-smoothing: antialiased;
+  font-family: 'Instrument Sans', system-ui, sans-serif;
+  color: #161a17;
+}
+
+a {
+  color: #0f7a5f;
+  text-decoration: none;
+}
+a:hover {
+  color: #0b5c47;
+  text-decoration: underline;
+}
+
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+@keyframes spinRing {
+  to { transform: rotate(360deg); }
+}
+
+/*
+ * Dark mode, as the mockup does it: the palette is authored light-only and the
+ * whole tree is inverted, then media is inverted back so photos stay correct.
+ * Keeping this rather than authoring a second palette preserves the design 1:1.
+ */
+html.om-dark-root,
+html.om-dark-root body {
+  background: #0e1412;
+}
+
+.om-dark {
+  filter: invert(1) hue-rotate(180deg);
+}
+.om-dark img,
+.om-dark video,
+.om-dark canvas,
+.om-dark .no-invert {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* Inputs inherit the app font rather than the UA default. */
+input,
+select,
+textarea,
+button {
+  font-family: 'Instrument Sans', system-ui, sans-serif;
+}
+
+/* Wide tables scroll inside their own container, never the page. */
+.scroll-x {
+  overflow-x: auto;
+}

@@ -1,0 +1,20 @@
+{
+  "name": "wifi-billing-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "migrate": "node scripts/migrate.mjs",
+    "account": "node scripts/create-account.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "pg": "^8.12.0",
+    "node-cron": "^3.0.3",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "pino": "^9.2.0",
+    "routeros-client": "^0.9.0"
+  }
+}

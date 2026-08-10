@@ -1,0 +1,162 @@
+import React from 'react';
+import { NavLink } from 'react-router-dom';
+import { color, font, radius, SIDEBAR_W } from '../theme/tokens';
+import { useStore } from '../state/store';
+import { NAV_SECTIONS } from './nav';
+
+const heading = {
+  padding: '16px 8px 6px',
+  fontSize: 10,
+  fontWeight: 600,
+  letterSpacing: '.1em',
+  color: color.sideHeading,
+};
+
+function Row({ item, store }) {
+  const count = item.count?.(store);
+  const badge = item.badge?.(store);
+  return (
+    <NavLink to={item.to} end={item.end} style={{ textDecoration: 'none' }}>
+      {({ isActive }) => (
+        <div
+          style={{
+            position: 'relative',
+            padding: '9px 10px',
+            borderRadius: radius.md,
+            cursor: 'pointer',
+            fontSize: 13.5,
+            fontWeight: 500,
+            color: color.sideFg,
+            background: isActive ? color.sideActive : 'transparent',
+            borderLeft: `2px solid ${isActive ? color.mint : 'transparent'}`,
+          }}
+        >
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span>{item.label}</span>
+            {item.dot && <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: color.mint }} />}
+            {count !== undefined && (
+              <span style={{ fontFamily: font.mono, fontSize: 10.5, color: color.sideMuted }}>{count}</span>
+            )}
+            {badge !== undefined && (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 18,
+                  height: 18,
+                  padding: '0 5px',
+                  borderRadius: radius.pill,
+                  background: badge > 0 ? color.rustBg : '#e4e8e3',
+                  color: badge > 0 ? color.rust : color.sideMuted,
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                }}
+              >
+                {badge}
+              </span>
+            )}
+          </span>
+        </div>
+      )}
+    </NavLink>
+  );
+}
+
+export default function Sidebar({ brandName = 'Mtandao Bill' }) {
+  const store = useStore();
+  const s = store.session;
+
+  const name = s?.name || 'Set up your profile';
+  const sub = s ? `${s.role || 'Owner'} · ${s.subdomain}.vibelink.tech` : 'Owner';
+  const initials = s?.name
+    ? s.name.trim().split(/\s+/).slice(0, 2).map((x) => x[0].toUpperCase()).join('')
+    : '—';
+
+  return (
+    <aside
+      style={{
+        width: SIDEBAR_W,
+        flex: `0 0 ${SIDEBAR_W}px`,
+        display: 'flex',
+        flexDirection: 'column',
+        position: 'sticky',
+        top: 0,
+        height: '100vh',
+        background: color.sideBg,
+      }}
+    >
+      <div style={{ padding: '20px 18px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${color.sideLine}` }}>
+        <div
+          style={{
+            width: 30,
+            height: 30,
+            flex: '0 0 30px',
+            borderRadius: radius.md,
+            background: color.green,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            fontWeight: 700,
+            fontSize: 14,
+          }}
+        >
+          {brandName.charAt(0).toUpperCase()}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-.01em', color: color.sideFooterName }}>{brandName}</span>
+          <span style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted }}>v2.4</span>
+        </div>
+      </div>
+
+      <nav style={{ padding: '14px 12px', display: 'flex', flexDirection: 'column', gap: 2, overflowY: 'auto', overflowX: 'hidden', flex: 1 }}>
+        {NAV_SECTIONS.filter((s) => !s.ownerOnly || store.isPlatformOwner).map((section, si) => (
+          <React.Fragment key={section.heading}>
+            <div style={{ ...heading, paddingTop: si === 0 ? 10 : 16 }}>{section.heading}</div>
+            {section.items.map((item) => (
+              <Row key={item.to} item={item} store={store} />
+            ))}
+          </React.Fragment>
+        ))}
+      </nav>
+
+      <div style={{ padding: 12, borderTop: `1px solid ${color.sideLine}`, display: 'flex', alignItems: 'center', gap: 9 }}>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            flex: '0 0 28px',
+            borderRadius: radius.pill,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: 11,
+            fontWeight: 600,
+            background: color.sideActive,
+            color: color.sideFg,
+          }}
+        >
+          {initials}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.25, minWidth: 0, flex: 1 }}>
+          <span style={{ fontSize: 12.5, fontWeight: 500, color: color.sideFooterName, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {name}
+          </span>
+          <span style={{ fontSize: 11, color: color.sideMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {sub}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={store.signOut}
+          title="Sign out"
+          aria-label="Sign out"
+          style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: color.sideMuted, fontSize: 14, padding: 4, lineHeight: 1 }}
+        >
+          ⏻
+        </button>
+      </div>
+    </aside>
+  );
+}
