@@ -46,7 +46,9 @@ export function StoreProvider({ children }) {
   const [unmatched, setUnmatched] = useState([]);
   const [hotspotSettings, setHotspotSettings] = useState({});
   const [smsGateways, setSmsGateways] = useState({ available: [], configured: [] });
-  const [smsCredits, setSmsCredits] = useState({ configured: false, credits: 0 });
+  // null = not read yet. Distinct from a real zero balance, which is worth alarming
+  // about — the chip shows "—" until we actually know.
+  const [smsCredits, setSmsCredits] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [settings, setSettings] = useState({ org: {}, smtp: {}, prefs: {} });
 
@@ -101,7 +103,7 @@ export function StoreProvider({ children }) {
     setUnmatched(val(0, []));
     setHotspotSettings(val(1, {}));
     setSmsGateways(val(2, { available: [], configured: [] }));
-    setSmsCredits(val(3, { configured: false, credits: 0 }));
+    setSmsCredits(val(3, null));
     setPaymentMethods(val(4, []));
     setSettings(val(5, { org: {}, smtp: {}, prefs: {} }));
     setErrors(errs);
@@ -143,6 +145,41 @@ export function StoreProvider({ children }) {
       toast('Signed out');
     }
   }, [toast]);
+
+  /**
+   * Live SMS credits. Polls our own API every 3s; the server answers from a cache
+   * that `send()` invalidates, so the number moves the moment a message goes out
+   * without asking the provider on every tick. Paused while the tab is hidden.
+   */
+  useEffect(() => {
+    if (!session) return undefined;
+    let stop = false;
+
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const next = await api.smsBalance();
+        if (stop) return;
+        setSmsCredits((prev) =>
+          prev?.credits === next?.credits &&
+          prev?.configured === next?.configured &&
+          prev?.provider === next?.provider
+            ? prev            // unchanged: keep the same object so consumers do not re-render
+            : next
+        );
+      } catch {
+        /* transient — the next tick will retry */
+      }
+    };
+
+    const id = setInterval(tick, 3000);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      stop = true;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [session]);
 
   // Dark mode uses the mockup's invert-filter approach; the root class is what
   // paints the page background behind the inverted tree.
