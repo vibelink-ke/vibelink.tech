@@ -105,10 +105,19 @@ export default function Messaging() {
     }
   };
 
+  /**
+   * Test number is entered rather than hardcoded — the point of a test send is
+   * that it reaches a handset you are holding. Remembered across reloads.
+   */
+  const [testPhone, setTestPhone] = useState(() => localStorage.getItem('smsTestPhone') ?? '');
+
   const testSms = async () => {
+    const phone = testPhone.trim();
+    if (!phone) return store.toast('Enter the number to send the test to');
+    localStorage.setItem('smsTestPhone', phone);
     try {
-      await api.sendTestSms('254712000000');
-      store.toast('Test SMS sent to +254 712 000 000');
+      await api.sendTestSms(phone);
+      store.toast(`Test SMS sent to ${phone} — check History for the gateway result`);
     } catch (e) {
       store.toast(`Test failed: ${e.message}`);
     }
@@ -194,11 +203,20 @@ export default function Messaging() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button variant="primary" onClick={send} disabled={busy}>
             {busy ? 'Sending…' : tab === 'single' ? 'Send message' : `Send to ${recipients.toLocaleString()}`}
           </Button>
-          <Button onClick={testSms}>Send test</Button>
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Input
+              value={testPhone}
+              onChange={(e) => setTestPhone(e.target.value)}
+              placeholder="07xx xxx xxx"
+              aria-label="Test number"
+              style={{ width: 150, fontFamily: font.mono }}
+            />
+            <Button onClick={testSms}>Send test</Button>
+          </span>
         </div>
       </div>
     </Card>

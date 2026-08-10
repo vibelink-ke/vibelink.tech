@@ -83,6 +83,7 @@ export default function Settings() {
   const configured = store.smsGateways?.configured ?? [];
   const [provider, setProvider] = useState(configured[0]?.provider ?? 'hostpinnacle');
   const [creds, setCreds] = useState({});
+  const [priority, setPriority] = useState('1');
   const [busy, setBusy] = useState(false);
 
   const fieldsByProvider = store.smsGateways?.fields ?? FALLBACK_FIELDS;
@@ -97,7 +98,12 @@ export default function Settings() {
   const saveGateway = async () => {
     setBusy(true);
     try {
-      const r = await api.saveSmsGateway(provider, { credentials: creds, priority: 1, enabled: true, templates: {} });
+      const r = await api.saveSmsGateway(provider, {
+        credentials: creds,
+        priority: Number(priority) || 1,
+        enabled: true,
+        templates: {},
+      });
       store.toast(
         r.complete
           ? `${provider} saved — all required fields present`
@@ -191,6 +197,13 @@ export default function Settings() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Field label="Gateway">
                 <Select value={provider} onChange={(e) => { setProvider(e.target.value); setCreds({}); }} options={available} />
+              </Field>
+
+              <Field
+                label="Priority"
+                hint="Lowest number is tried first; the rest are failover in order"
+              >
+                <Input type="number" min="0" value={priority} onChange={(e) => setPriority(e.target.value)} />
               </Field>
               {providerFields.map((f) => (
                 <Field
