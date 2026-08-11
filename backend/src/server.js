@@ -552,6 +552,80 @@ app.post('/api/payments/manual', wrap(async (req, res) => {
   res.json(out);
 }));
 
+/**
+ * Push an STK prompt to a handset from the admin side.
+ *
+ * The outbound push works with nothing but credentials — the phone rings. The
+ * *result* arrives on a webhook, so unless BASE_URL is publicly reachable the
+ * request stays 'pending' forever and no payment is applied. We say so in the
+ * response rather than letting that look like a failure.
+ */
+app.post('/api/payments/stk', wrap(async (req, res) => {
+  const { provider = 'daraja', subscriberId, phone, amount, planId } = req.body;
+  if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Enter an amount' });
+
+  let msisdn = phone;
+  let accountRef = req.body.accountRef;
+  if (subscriberId) {
+    const { rows: [s] } = await pool.query(
+      'select phone, account_code from subscribers where tenant_id=$1 and id=$2',
+      [req.tenant.id, subscriberId]);
+    if (!s) return res.status(404).json({ error: 'subscriber not found' });
+    msisdn = msisdn || s.phone;
+    accountRef = accountRef || s.account_code;
+  }
+  if (!msisdn) return res.status(400).json({ error: 'No phone number to push to' });
+  msisdn = String(msisdn).replace(/^\+?(?:254)?0?/, '254');
+
+  const cfg = await import('./db.js').then((m) => m.config(req.tenant.id, provider));
+  if (!cfg) return res.status(400).json({ error: `No ${provider} gateway configured. Add one under Settings → Payment gateways.` });
+
+  const base = process.env.BASE_URL ?? '';
+  const callbackReachable = /^https?:\/\//.test(base) && !/localhost|127\.0\.0\.1/.test(base);
+
+  try {
+    let checkoutId;
+    if (provider === 'kopokopo') {
+      if (!planId) return res.status(400).json({ error: 'KopoKopo is hotspot-only — pick a hotspot bundle' });
+      const kk = await import('./payments/kopokopo.js');
+      checkoutId = await kk.stkPush(req.tenant.id, { phone: msisdn, amount: Number(amount), planId, mac: null, service: 'hotspot' });
+    } else {
+      const mpesa = await import('./payments/daraja.js');
+      const r = await mpesa.stkPush(req.tenant.id, {
+        phone: msisdn, amount: Number(amount),
+        accountRef: accountRef || 'TOPUP', description: 'Account top-up',
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'Gateway did not return a checkout id' });
+      // Daraja only writes stk_requests from the portal path; record it here too so
+      // the callback can find the row and status polling works.
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [req.tenant.id, checkoutId, msisdn, Number(amount), { subscriber_id: subscriberId ?? null }]);
+    }
+    res.json({
+      checkoutId,
+      phone: msisdn,
+      callbackReachable,
+      note: callbackReachable
+        ? 'Prompt sent. The result will arrive on the webhook.'
+        : `Prompt sent, but BASE_URL is "${base || 'unset'}" so ${provider} cannot reach this server. The handset will show the prompt; the confirmation will not come back and the request stays pending.`,
+    });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/** Poll an STK request the admin fired. */
+app.get('/api/payments/stk/:checkoutId', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select checkout_id, provider, phone, amount, status, result_code, result_desc, created_at from stk_requests where tenant_id=$1 and checkout_id=$2',
+    [req.tenant.id, req.params.checkoutId]);
+  res.json(r ?? { status: 'unknown' });
+}));
+
 /** Paste a block of forwarded M-Pesa SMS; each parseable line is applied. */
 app.post('/api/payments/reconcile', wrap(async (req, res) => {
   const { text } = req.body;

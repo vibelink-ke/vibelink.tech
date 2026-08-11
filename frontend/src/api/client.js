@@ -63,6 +63,8 @@ export const api = {
   invoices: () => get('/api/invoices'),
   createInvoice: (i) => post('/api/invoices', i),
   recordPayment: (p) => post('/api/payments/manual', p),
+  pushStk: (p) => post('/api/payments/stk', p),
+  stkStatus: (checkoutId) => get(`/api/payments/stk/${checkoutId}`),
   reconcileStatement: (text) => post('/api/payments/reconcile', { text }),
   settlements: () => get('/api/settlements'),
 
