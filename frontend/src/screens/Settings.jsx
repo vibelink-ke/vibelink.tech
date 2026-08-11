@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -22,6 +22,35 @@ const FALLBACK_FIELDS = {
     { key: 'password', label: 'Password', required: true, secret: true },
     { key: 'sender_id', label: 'Sender ID', required: true },
     { key: 'api_key', label: 'API key', required: true, secret: true },
+  ],
+  africastalking: [
+    { key: 'username', label: 'Username', required: true },
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  textsms: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'partner_id', label: 'Partner ID', required: true },
+    { key: 'sender_id', label: 'Sender ID / shortcode', required: true },
+  ],
+  ujumbe: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'email', label: 'Account email', required: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  mobitech: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender name', required: true },
+  ],
+  twilio: [
+    { key: 'account_sid', label: 'Account SID', required: true },
+    { key: 'auth_token', label: 'Auth token', required: true, secret: true },
+    { key: 'from', label: 'From number', required: true },
+  ],
+  custom: [
+    { key: 'url', label: 'Send URL', required: true },
+    { key: 'body_template', label: 'Body template', required: false },
+    { key: 'balance_url', label: 'Balance URL', required: false },
   ],
 };
 
@@ -79,14 +108,36 @@ export default function Settings() {
       'Organisation'
     );
 
-  const available = store.smsGateways?.available ?? Object.keys(SMS_FIELDS);
-  const configured = store.smsGateways?.configured ?? [];
-  const [provider, setProvider] = useState(configured[0]?.provider ?? 'hostpinnacle');
   const [creds, setCreds] = useState({});
   const [priority, setPriority] = useState('1');
   const [busy, setBusy] = useState(false);
 
-  const fieldsByProvider = store.smsGateways?.fields ?? FALLBACK_FIELDS;
+  /**
+   * Load the gateway list here rather than leaning on the store's one-shot fetch.
+   * The store loads once at sign-in; if that request failed — backend restarting,
+   * say — nothing ever retried it and the provider dropdown stayed empty for the
+   * rest of the session. Fetching on mount means opening the tab is the retry.
+   */
+  const [gw, setGw] = useState(store.smsGateways ?? null);
+  const loadGateways = useCallback(async () => {
+    try {
+      setGw(await api.smsGateways());
+    } catch {
+      /* leave whatever we had; the tab can be reopened to retry */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'sms') loadGateways();
+  }, [tab, loadGateways]);
+
+  const fieldsByProvider = gw?.fields ?? FALLBACK_FIELDS;
+  // `?? ` is wrong here: the initial value is an empty array, which is not nullish,
+  // so the fallback would never fire. Check for content instead.
+  const available = gw?.available?.length ? gw.available : Object.keys(fieldsByProvider);
+  const configured = gw?.configured ?? [];
+
+  const [provider, setProvider] = useState('hostpinnacle');
   const providerFields = fieldsByProvider[provider] ?? [];
   const savedKeys = configured.find((g) => g.provider === provider)?.credentialKeys ?? [];
 
@@ -110,7 +161,7 @@ export default function Settings() {
           : `${provider} saved, but still missing ${r.missing.join(', ')} — it will be skipped until complete`
       );
       setCreds({});                       // secrets are stored; do not keep them in memory
-      await store.reload();               // refresh the configured list and its missing flags
+      await loadGateways();               // refresh the configured list and its missing flags
       store.setSmsCredits(await api.smsBalance(true));
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
@@ -279,7 +330,8 @@ export default function Settings() {
                           try {
                             await api.deleteSmsGateway(g.provider);
                             store.toast(`${g.provider} removed`);
-                            await store.reload();
+                            await loadGateways();
+                            store.setSmsCredits(await api.smsBalance(true));
                           } catch (e) {
                             store.toast(`Could not remove: ${e.message}`);
                           }
