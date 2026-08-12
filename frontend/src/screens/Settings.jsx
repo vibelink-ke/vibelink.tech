@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -10,17 +10,49 @@ const CURRENCIES = ['KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS 
 const TIMEZONES = ['Africa/Nairobi (EAT)', 'Africa/Kampala (EAT)', 'Africa/Dar_es_Salaam (EAT)', 'UTC'];
 const SECURITY = ['TLS (587)', 'SSL (465)', 'None (25)'];
 
-/** Required credential keys per gateway — mirrors credentialsComplete() in backend/src/sms.js. */
-const SMS_FIELDS = {
-  hostpinnacle: ['userid', 'password', 'api_key', 'sender_id'],
-  africastalking: ['username', 'api_key', 'sender_id'],
-  textsms: ['api_key', 'partner_id', 'sender_id'],
-  ujumbe: ['api_key', 'email', 'sender_id'],
-  mobitech: ['api_key', 'sender_id'],
-  twilio: ['account_sid', 'auth_token', 'from'],
-  custom: ['url', 'body_template', 'balance_url'],
+/**
+ * Fallback field definitions, used only if the API has not answered yet.
+ * The real list comes from GET /api/sms/gateways → `fields`, which is generated
+ * from PROVIDER_FIELDS in backend/src/sms.js — the same object credentialsComplete()
+ * validates against, so the form cannot ask for a different set than the server checks.
+ */
+const FALLBACK_FIELDS = {
+  hostpinnacle: [
+    { key: 'userid', label: 'Username', required: true },
+    { key: 'password', label: 'Password', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+  ],
+  africastalking: [
+    { key: 'username', label: 'Username', required: true },
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  textsms: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'partner_id', label: 'Partner ID', required: true },
+    { key: 'sender_id', label: 'Sender ID / shortcode', required: true },
+  ],
+  ujumbe: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'email', label: 'Account email', required: true },
+    { key: 'sender_id', label: 'Sender ID', required: true },
+  ],
+  mobitech: [
+    { key: 'api_key', label: 'API key', required: true, secret: true },
+    { key: 'sender_id', label: 'Sender name', required: true },
+  ],
+  twilio: [
+    { key: 'account_sid', label: 'Account SID', required: true },
+    { key: 'auth_token', label: 'Auth token', required: true, secret: true },
+    { key: 'from', label: 'From number', required: true },
+  ],
+  custom: [
+    { key: 'url', label: 'Send URL', required: true },
+    { key: 'body_template', label: 'Body template', required: false },
+    { key: 'balance_url', label: 'Balance URL', required: false },
+  ],
 };
-const SECRET_KEYS = new Set(['password', 'api_key', 'auth_token', 'client_secret']);
 
 export default function Settings() {
   const store = useStore();
@@ -76,11 +108,38 @@ export default function Settings() {
       'Organisation'
     );
 
-  const available = store.smsGateways?.available ?? Object.keys(SMS_FIELDS);
-  const configured = store.smsGateways?.configured ?? [];
-  const [provider, setProvider] = useState(configured[0]?.provider ?? 'hostpinnacle');
   const [creds, setCreds] = useState({});
+  const [priority, setPriority] = useState('1');
   const [busy, setBusy] = useState(false);
+
+  /**
+   * Load the gateway list here rather than leaning on the store's one-shot fetch.
+   * The store loads once at sign-in; if that request failed — backend restarting,
+   * say — nothing ever retried it and the provider dropdown stayed empty for the
+   * rest of the session. Fetching on mount means opening the tab is the retry.
+   */
+  const [gw, setGw] = useState(store.smsGateways ?? null);
+  const loadGateways = useCallback(async () => {
+    try {
+      setGw(await api.smsGateways());
+    } catch {
+      /* leave whatever we had; the tab can be reopened to retry */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === 'sms') loadGateways();
+  }, [tab, loadGateways]);
+
+  const fieldsByProvider = gw?.fields ?? FALLBACK_FIELDS;
+  // `?? ` is wrong here: the initial value is an empty array, which is not nullish,
+  // so the fallback would never fire. Check for content instead.
+  const available = gw?.available?.length ? gw.available : Object.keys(fieldsByProvider);
+  const configured = gw?.configured ?? [];
+
+  const [provider, setProvider] = useState('hostpinnacle');
+  const providerFields = fieldsByProvider[provider] ?? [];
+  const savedKeys = configured.find((g) => g.provider === provider)?.credentialKeys ?? [];
 
   const setO = (k) => (e) => setOrg((s) => ({ ...s, [k]: e.target.value }));
   const setS = (k) => (e) => setSmtp((s) => ({ ...s, [k]: e.target.value }));
@@ -90,10 +149,20 @@ export default function Settings() {
   const saveGateway = async () => {
     setBusy(true);
     try {
-      await api.saveSmsGateway(provider, { credentials: creds, priority: 1, enabled: true, templates: {} });
-      store.toast(`${provider} saved as the primary gateway`);
-      const bal = await api.smsBalance(true);
-      store.setSmsCredits(bal);
+      const r = await api.saveSmsGateway(provider, {
+        credentials: creds,
+        priority: Number(priority) || 1,
+        enabled: true,
+        templates: {},
+      });
+      store.toast(
+        r.complete
+          ? `${provider} saved — all required fields present`
+          : `${provider} saved, but still missing ${r.missing.join(', ')} — it will be skipped until complete`
+      );
+      setCreds({});                       // secrets are stored; do not keep them in memory
+      await loadGateways();               // refresh the configured list and its missing flags
+      store.setSmsCredits(await api.smsBalance(true));
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
@@ -170,15 +239,36 @@ export default function Settings() {
           <Card
             title="Primary gateway"
             subtitle="Others act as failover, in priority order"
-            actions={<Badge tone={store.smsCredits?.configured ? 'active' : 'unused'}>{store.smsCredits?.configured ? 'Connected' : 'Not set'}</Badge>}
+            actions={
+              <Badge tone={store.smsCredits == null ? 'default' : store.smsCredits.configured ? 'active' : 'unused'}>
+                {store.smsCredits == null ? 'Checking…' : store.smsCredits.configured ? 'Connected' : 'Not set'}
+              </Badge>
+            }
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Field label="Gateway">
                 <Select value={provider} onChange={(e) => { setProvider(e.target.value); setCreds({}); }} options={available} />
               </Field>
-              {(SMS_FIELDS[provider] ?? []).map((k) => (
-                <Field key={k} label={k.replace(/_/g, ' ')}>
-                  <Input type={SECRET_KEYS.has(k) ? 'password' : 'text'} autoComplete="off" value={creds[k] ?? ''} onChange={setC(k)} />
+
+              <Field
+                label="Priority"
+                hint="Lowest number is tried first; the rest are failover in order"
+              >
+                <Input type="number" min="0" value={priority} onChange={(e) => setPriority(e.target.value)} />
+              </Field>
+              {providerFields.map((f) => (
+                <Field
+                  key={f.key}
+                  label={f.required ? f.label : `${f.label} (optional)`}
+                  hint={savedKeys.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
+                >
+                  <Input
+                    type={f.secret ? 'password' : 'text'}
+                    autoComplete="off"
+                    value={creds[f.key] ?? ''}
+                    onChange={setC(f.key)}
+                    placeholder={savedKeys.includes(f.key) ? '••••••••' : ''}
+                  />
                 </Field>
               ))}
               <div style={{ display: 'flex', gap: 8 }}>
@@ -222,16 +312,26 @@ export default function Settings() {
                       fontSize: 13,
                     }}
                   >
-                    <span style={{ fontWeight: 500 }}>{g.provider}</span>
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                      <span style={{ fontWeight: 500 }}>{g.provider}</span>
+                      {g.missing?.length > 0 && (
+                        <span style={{ fontSize: 11.5, color: color.rust }}>
+                          missing {g.missing.join(', ')} — skipped when sending
+                        </span>
+                      )}
+                    </span>
                     <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                       <span style={{ fontFamily: font.mono, fontSize: 12, color: color.muted }}>priority {g.priority}</span>
-                      <Badge tone={g.enabled ? 'active' : 'unused'}>{g.enabled ? 'on' : 'off'}</Badge>
+                      <Badge tone={g.missing?.length ? 'expired' : g.enabled ? 'active' : 'unused'}>
+                        {g.missing?.length ? 'incomplete' : g.enabled ? 'on' : 'off'}
+                      </Badge>
                       <span
                         onClick={async () => {
                           try {
                             await api.deleteSmsGateway(g.provider);
                             store.toast(`${g.provider} removed`);
-                            await store.reload();
+                            await loadGateways();
+                            store.setSmsCredits(await api.smsBalance(true));
                           } catch (e) {
                             store.toast(`Could not remove: ${e.message}`);
                           }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
@@ -34,6 +34,12 @@ import Settings from './screens/Settings';
 
 export default function App() {
   const { dark, session, signIn } = useStore();
+
+  // Browser tab shows the tenant's own company, so someone running two ISPs in
+  // two tabs can tell them apart.
+  useEffect(() => {
+    document.title = session?.company ? `${session.company} · Vibelink` : 'Vibelink';
+  }, [session?.company]);
 
   // undefined = the session check has not come back yet. Rendering nothing for
   // that tick avoids flashing the sign-in card at an already-authenticated user.

@@ -91,7 +91,9 @@ const cta = {
   width: '100%',
 };
 
-export default function AuthGate({ onSignedIn, brandName = 'Mtandao Bill' }) {
+// Before sign-in there is no tenant, so this is the platform's own brand. Once
+// signed in the sidebar switches to the tenant's company name.
+export default function AuthGate({ onSignedIn, brandName = 'Vibelink' }) {
   const [mode, setMode] = useState('login');
   const [f, setF] = useState(BLANK);
   const [error, setError] = useState('');

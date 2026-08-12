@@ -188,6 +188,35 @@ Daraja also has a sandbox — `DARAJA_ENV=sandbox` switches the base URL — but
 callbacks need a publicly reachable `BASE_URL`, so it wants a tunnel. The manual
 entry and reconcile paths exercise the same `applyPayment` funnel with no callbacks.
 
+### Live SMS refresh
+
+The credit chip and Messaging → History both refresh on a 3-second beat.
+
+Polling the *provider* every 3 seconds would burn rate limits and, on some gateways,
+money — so the poll hits our own `/api/sms/balance`, which answers from the cache in
+`sms.js`. `send()` calls `invalidateBalance(tenantId)` after a successful send, so the
+number moves the instant a message goes out while an idle dashboard still only asks
+the provider every five minutes.
+
+Both pollers pause when the tab is hidden, and the balance poller keeps the previous
+state object when nothing changed so consumers do not re-render on every tick.
+`smsCredits` starts as `null` rather than `{credits: 0}`: zero credits is itself worth
+alarming about, so the chip shows `—` / "checking…" until the first real read lands.
+
+### Gateway credential requirements
+
+`PROVIDER_FIELDS` in `sms.js` is the single source of truth: it lists every field a
+gateway needs, its label and whether it is required. `credentialsComplete()` derives
+from it, and the Settings form renders from it via `GET /api/sms/gateways → fields`,
+so the form cannot ask for a different set than the server validates.
+
+HostPinnacle requires **Username, Password, Sender ID and API key** — all four.
+
+`PUT /api/sms/gateways/:provider` **merges** credentials (`credentials || excluded`)
+and drops empty strings, so a blank field keeps the stored secret rather than wiping
+it. The response reports `{complete, missing}` instead of refusing: a partly-filled
+gateway is a legitimate work in progress and `send()` skips it until it is complete.
+
 ### Bugs found while testing SMS
 
 - **A rejected message was logged as "sent".** Most of these gateways answer HTTP 200

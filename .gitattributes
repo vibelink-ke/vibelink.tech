@@ -1,0 +1,6 @@
+# These are copied into Linux containers and run as scripts. Checked out with
+# CRLF on Windows they fail with "no such file or directory" — the shell reads
+# the \r as part of the interpreter path.
+*.sh            text eol=lf
+infra/**/*.conf text eol=lf
+infra/openvpn/Dockerfile text eol=lf

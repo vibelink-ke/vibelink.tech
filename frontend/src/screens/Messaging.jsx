@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -23,6 +23,30 @@ export default function Messaging() {
 
   const clients = store.clients ?? [];
   const set = (k) => (e) => setSms((s) => ({ ...s, [k]: e.target.value }));
+
+  /** History refreshes on the same 3s beat, but only while this tab is open. */
+  useEffect(() => {
+    if (tab !== 'history') return undefined;
+    let stop = false;
+
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const rows = await api.smsHistory();
+        if (!stop) store.setCollection('smsHistory', rows);
+      } catch {
+        /* transient — the next tick will retry */
+      }
+    };
+
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => {
+      stop = true;
+      clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const recipients = useMemo(() => {
     switch (sms.audience) {
@@ -81,10 +105,19 @@ export default function Messaging() {
     }
   };
 
+  /**
+   * Test number is entered rather than hardcoded — the point of a test send is
+   * that it reaches a handset you are holding. Remembered across reloads.
+   */
+  const [testPhone, setTestPhone] = useState(() => localStorage.getItem('smsTestPhone') ?? '');
+
   const testSms = async () => {
+    const phone = testPhone.trim();
+    if (!phone) return store.toast('Enter the number to send the test to');
+    localStorage.setItem('smsTestPhone', phone);
     try {
-      await api.sendTestSms('254712000000');
-      store.toast('Test SMS sent to +254 712 000 000');
+      await api.sendTestSms(phone);
+      store.toast(`Test SMS sent to ${phone} — check History for the gateway result`);
     } catch (e) {
       store.toast(`Test failed: ${e.message}`);
     }
@@ -163,17 +196,27 @@ export default function Messaging() {
           </span>
         </div>
 
-        {!store.smsCredits?.configured && (
+        {/* Only warn once we actually know — null means the check is still in flight. */}
+        {store.smsCredits != null && !store.smsCredits.configured && (
           <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: radius.md, padding: '10px 13px' }}>
             No SMS gateway is configured yet. Add credentials under Settings → SMS before sending.
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button variant="primary" onClick={send} disabled={busy}>
             {busy ? 'Sending…' : tab === 'single' ? 'Send message' : `Send to ${recipients.toLocaleString()}`}
           </Button>
-          <Button onClick={testSms}>Send test</Button>
+          <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Input
+              value={testPhone}
+              onChange={(e) => setTestPhone(e.target.value)}
+              placeholder="07xx xxx xxx"
+              aria-label="Test number"
+              style={{ width: 150, fontFamily: font.mono }}
+            />
+            <Button onClick={testSms}>Send test</Button>
+          </span>
         </div>
       </div>
     </Card>

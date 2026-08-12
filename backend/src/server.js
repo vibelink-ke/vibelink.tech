@@ -277,24 +277,54 @@ app.get('/api/payment-methods', async (req, res) => {
 });
 
 // ── SMS gateways ──────────────────────────────────
-app.get('/api/sms/gateways', async (req, res) => {
+app.get('/api/sms/gateways', wrap(async (req, res) => {
+  const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
   const { rows } = await pool.query(
-    'select provider, priority, enabled from tenant_sms_config where tenant_id=$1 order by priority',
+    'select provider, priority, enabled, credentials from tenant_sms_config where tenant_id=$1 order by priority',
     [req.tenant.id]);
-  res.json({ available: providerNames, configured: rows });
-});
+  res.json({
+    available: providerNames,
+    // The form renders from this, so it cannot ask for a different set of fields
+    // than credentialsComplete() checks.
+    fields: PROVIDER_FIELDS,
+    configured: rows.map(({ credentials, ...g }) => ({
+      ...g,
+      // Report which secrets exist by name only — never the values.
+      credentialKeys: Object.entries(credentials ?? {})
+        .filter(([, v]) => String(v ?? '').trim())
+        .map(([k]) => k),
+      missing: missingCredentials(g.provider, credentials ?? {}),
+    })),
+  });
+}));
 
-app.put('/api/sms/gateways/:provider', async (req, res) => {
-  const { credentials, priority = 1, enabled = true, templates = {} } = req.body;
-  await pool.query(`
+app.put('/api/sms/gateways/:provider', wrap(async (req, res) => {
+  const { credentials = {}, priority = 1, enabled = true, templates = {} } = req.body;
+  const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
+  if (!PROVIDER_FIELDS[req.params.provider])
+    return res.status(400).json({ error: 'unknown gateway' });
+
+  // Blank fields must not wipe stored secrets — the form shows "leave blank to
+  // keep it", so merge rather than replace. Empty strings are dropped first.
+  const incoming = Object.fromEntries(
+    Object.entries(credentials).filter(([, v]) => String(v ?? '').trim() !== '')
+  );
+
+  const { rows: [saved] } = await pool.query(`
     insert into tenant_sms_config (tenant_id, provider, credentials, templates, priority, enabled)
     values ($1,$2,$3,$4,$5,$6)
     on conflict (tenant_id, provider) do update set
-      credentials=excluded.credentials, templates=excluded.templates,
-      priority=excluded.priority, enabled=excluded.enabled`,
-    [req.tenant.id, req.params.provider, credentials, templates, priority, enabled]);
-  res.json({ ok: true });
-});
+      credentials = tenant_sms_config.credentials || excluded.credentials,
+      templates = excluded.templates,
+      priority = excluded.priority, enabled = excluded.enabled
+    returning credentials`,
+    [req.tenant.id, req.params.provider, JSON.stringify(incoming), templates, priority, enabled]);
+
+  // Report rather than refuse: a partly-filled gateway is a legitimate work in
+  // progress, and send() skips it until it is complete.
+  const missing = missingCredentials(req.params.provider, saved.credentials ?? {});
+  res.json({ ok: true, complete: missing.length === 0, missing });
+}));
 
 app.delete('/api/sms/gateways/:provider', wrap(async (req, res) => {
   await pool.query('delete from tenant_sms_config where tenant_id=$1 and provider=$2',
@@ -390,27 +420,86 @@ app.post('/api/tariffs', async (req, res) => {
 });
 
 // ── router onboarding via OVPN ────────────────────
-// The OVPN server (ovpn.<tenant>.billing.co.ke) assigns each connecting MikroTik a stable
-// IP from 10.50.0.0/24 keyed by its client cert CN — no port-forwarding or static public IP
-// needed on the ISP side. This just mints the client script + credentials.
-app.post('/api/routers/ovpn-script', async (req, res) => {
-  const { rows: [{ count }] } = await pool.query('select count(*) from routers where tenant_id=$1', [req.tenant.id]);
-  const n = Number(count) + 1;
+// Each tenant owns a /24 out of 10.50.0.0/16 and the router is given the next free
+// address inside it. Addresses used to come from a single shared 10.50.0.0/24 and
+// were derived from a row count, so tenants collided with each other and a deleted
+// router's address was immediately handed to the next one.
+app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
+  const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
   const crypto = await import('node:crypto');
+
+  const subnet = await ensureSubnet(req.tenant.id);
+  const nasIp = await nextHostIp(req.tenant.id);
   const token = crypto.randomBytes(6).toString('hex');
-  const nasIp = `10.50.0.${n}`;
+  // Name from the address, so it stays unique and stays put if rows are removed.
+  const username = `router-${nasIp.split('.').pop()}`;
+
+  // Stored hashed; the plaintext below is shown once, in the script, and then gone.
   await pool.query(
-    `insert into ovpn_clients (tenant_id, username, password, assigned_ip) values ($1,$2,$3,$4)`,
-    [req.tenant.id, `router-${n}`, token, nasIp]
+    `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip)
+     values ($1,$2,crypt($3, gen_salt('bf')),$4)`,
+    [req.tenant.id, username, token, nasIp]
   );
+
   const script = [
-    `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.billing.co.ke port=1194 \\`,
-    `  user=router-${n} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
-    `/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"`,
-    `:log info "Billing OVPN client added — waiting for tunnel IP"`
+    `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.vibelink.tech port=1194 \\`,
+    `  user=${username} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
+    '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"',
+    ':log info "Billing OVPN client added — waiting for tunnel IP"',
   ].join('\n');
-  res.json({ script, nasIp, username: `router-${n}`, defaultApiPort: 8728 });
-});
+
+  res.json({
+    script,
+    nasIp,
+    username,
+    subnet,
+    serverIp: SERVER_IP,
+    defaultApiPort: 8728,
+  });
+}));
+
+// ── router onboarding via WireGuard ───────────────
+// Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
+// single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.
+app.post('/api/routers/wg-peer', wrap(async (req, res) => {
+  const wg = await import('./wireguard.js');
+  const { name, routerId } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name the router' });
+
+  const endpoint = process.env.WG_ENDPOINT;
+  const serverPublicKey = process.env.WG_SERVER_PUBLIC_KEY;
+  if (!endpoint || !serverPublicKey)
+    return res.status(400).json({
+      error: 'WG_ENDPOINT and WG_SERVER_PUBLIC_KEY are not set. See docs/NETWORK-SETUP.md.',
+    });
+
+  const { peer, privateKey, presharedKey, assignedIp } =
+    await wg.createPeer(req.tenant.id, { name, routerId: routerId ?? null });
+
+  res.json({
+    peerId: peer.id,
+    assignedIp,
+    publicKey: peer.public_key,
+    // Shown once. The server keeps only the public key; if this is lost the peer
+    // must be recreated rather than recovered.
+    script: wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey }),
+    note: 'The private key is shown once and is not stored. Apply it before closing this.',
+  });
+}));
+
+app.get('/api/routers/wg-peers', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select p.id, p.name, p.assigned_ip, p.enabled, p.last_handshake, p.rx_bytes, p.tx_bytes,
+            r.name as router_name
+     from wg_peers p left join routers r on r.id = p.router_id
+     where p.tenant_id=$1 order by p.assigned_ip`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.delete('/api/routers/wg-peers/:id', wrap(async (req, res) => {
+  await pool.query('delete from wg_peers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  res.json({ ok: true, note: 'Run scripts/wg-sync.mjs to drop it from the running server.' });
+}));
 
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
@@ -426,6 +515,48 @@ app.post('/api/routers', async (req, res) => {
     [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, secret]);
   res.json(r);
 });
+
+/**
+ * Prove the CoA path works before trusting it with a paying customer.
+ *
+ * CoA is the one link in the chain that fails silently: auth and accounting both
+ * show up in logs, but a CoA that never arrives just means speed changes wait for
+ * the next reconnect. This sends a real CoA for a username you choose and reports
+ * exactly what came back.
+ */
+app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  // Default to a name that cannot exist. A NAK then still proves the round trip:
+  // the router received the packet, agreed on the secret, and answered.
+  const username = req.body?.username?.trim() || `vibelink-coa-probe-${Date.now()}`;
+  const rate = req.body?.rate?.trim() || '1024k/1024k';
+
+  const coaClient = await import('./coa.js');
+  const result = await coaClient.send({
+    host: r.host, secret: r.secret, username, rate, timeoutMs: 2000, retries: 1,
+  });
+
+  // A NAK is a *good* result for a probe username — it means the router is
+  // listening and the shared secret matches. Say so, rather than showing a red X.
+  const reachable = result.ok || result.code === coaClient.codes.COA_NAK;
+
+  await pool.query(
+    `update routers set coa_last_at = now(), coa_last_ok = $2, coa_last_error = $3 where id = $1`,
+    [r.id, reachable, reachable ? null : String(result.error ?? '').slice(0, 300)]);
+  res.json({
+    ok: result.ok,
+    reachable,
+    username,
+    detail: result.ok
+      ? 'Router accepted the change (CoA-ACK).'
+      : reachable
+        ? 'Router answered and the shared secret matches. It rejected this username, which is expected for a probe — the CoA path works.'
+        : result.error,
+  });
+}));
 
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
@@ -520,6 +651,80 @@ app.post('/api/payments/manual', wrap(async (req, res) => {
     payload: { source: 'manual', by: req.session?.email ?? 'unknown' },
   });
   res.json(out);
+}));
+
+/**
+ * Push an STK prompt to a handset from the admin side.
+ *
+ * The outbound push works with nothing but credentials — the phone rings. The
+ * *result* arrives on a webhook, so unless BASE_URL is publicly reachable the
+ * request stays 'pending' forever and no payment is applied. We say so in the
+ * response rather than letting that look like a failure.
+ */
+app.post('/api/payments/stk', wrap(async (req, res) => {
+  const { provider = 'daraja', subscriberId, phone, amount, planId } = req.body;
+  if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Enter an amount' });
+
+  let msisdn = phone;
+  let accountRef = req.body.accountRef;
+  if (subscriberId) {
+    const { rows: [s] } = await pool.query(
+      'select phone, account_code from subscribers where tenant_id=$1 and id=$2',
+      [req.tenant.id, subscriberId]);
+    if (!s) return res.status(404).json({ error: 'subscriber not found' });
+    msisdn = msisdn || s.phone;
+    accountRef = accountRef || s.account_code;
+  }
+  if (!msisdn) return res.status(400).json({ error: 'No phone number to push to' });
+  msisdn = String(msisdn).replace(/^\+?(?:254)?0?/, '254');
+
+  const cfg = await import('./db.js').then((m) => m.config(req.tenant.id, provider));
+  if (!cfg) return res.status(400).json({ error: `No ${provider} gateway configured. Add one under Settings → Payment gateways.` });
+
+  const base = process.env.BASE_URL ?? '';
+  const callbackReachable = /^https?:\/\//.test(base) && !/localhost|127\.0\.0\.1/.test(base);
+
+  try {
+    let checkoutId;
+    if (provider === 'kopokopo') {
+      if (!planId) return res.status(400).json({ error: 'KopoKopo is hotspot-only — pick a hotspot bundle' });
+      const kk = await import('./payments/kopokopo.js');
+      checkoutId = await kk.stkPush(req.tenant.id, { phone: msisdn, amount: Number(amount), planId, mac: null, service: 'hotspot' });
+    } else {
+      const mpesa = await import('./payments/daraja.js');
+      const r = await mpesa.stkPush(req.tenant.id, {
+        phone: msisdn, amount: Number(amount),
+        accountRef: accountRef || 'TOPUP', description: 'Account top-up',
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'Gateway did not return a checkout id' });
+      // Daraja only writes stk_requests from the portal path; record it here too so
+      // the callback can find the row and status polling works.
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [req.tenant.id, checkoutId, msisdn, Number(amount), { subscriber_id: subscriberId ?? null }]);
+    }
+    res.json({
+      checkoutId,
+      phone: msisdn,
+      callbackReachable,
+      note: callbackReachable
+        ? 'Prompt sent. The result will arrive on the webhook.'
+        : `Prompt sent, but BASE_URL is "${base || 'unset'}" so ${provider} cannot reach this server. The handset will show the prompt; the confirmation will not come back and the request stays pending.`,
+    });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/** Poll an STK request the admin fired. */
+app.get('/api/payments/stk/:checkoutId', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select checkout_id, provider, phone, amount, status, result_code, result_desc, created_at from stk_requests where tenant_id=$1 and checkout_id=$2',
+    [req.tenant.id, req.params.checkoutId]);
+  res.json(r ?? { status: 'unknown' });
 }));
 
 /** Paste a block of forwarded M-Pesa SMS; each parseable line is applied. */

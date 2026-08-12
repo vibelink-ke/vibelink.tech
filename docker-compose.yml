@@ -1,10 +1,11 @@
-# Postgres for local development.
+# Local stack: Postgres, FreeRADIUS, WireGuard.
 #
-#   docker compose up -d
-#   cd backend && npm install && npm run migrate
+#   docker compose up -d db                 # database only (what you had before)
+#   docker compose --profile network up -d  # add FreeRADIUS + WireGuard
 #
-# schema.sql needs the pgcrypto and pg_trgm extensions, both of which ship with
-# the official postgres image.
+# The network services are behind a profile because they need host networking and
+# elevated capabilities, and you do not want them running while you are only
+# poking at the UI.
 services:
   db:
     image: postgres:16-alpine
@@ -24,5 +25,88 @@ services:
       timeout: 5s
       retries: 10
 
+  # Authenticates PPPoE and hotspot users against the radcheck/radreply rows the
+  # billing app writes. Reads its NAS list from the `nas` view over routers, so a
+  # router added in the UI is authorised immediately.
+  freeradius:
+    build: ./infra/freeradius   # stock image + libpq, which it links against but omits
+    container_name: billing-radius
+    profiles: ['network']
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: billing
+      PGPASSWORD: secret
+      PGDATABASE: billing
+    ports:
+      - '1812:1812/udp'   # authentication
+      - '1813:1813/udp'   # accounting
+    volumes:
+      # Staged, not mounted into the config tree directly. Two reasons: this image
+      # is built with --prefix=/opt so the tree is /opt/etc/raddb, and a bind mount
+      # from Windows arrives world-writable, which FreeRADIUS refuses to load.
+      # The entrypoint copies these in and fixes the mode.
+      - ./infra/freeradius:/config:ro
+    entrypoint: ['/bin/sh', '/config/entrypoint.sh']
+    # -X is single-process debug mode: every decision is printed, which is what
+    # you want while bringing this up. Drop to `radiusd -f` once it works.
+    command: ['radiusd', '-X']
+
+  # Management tunnel for RouterOS 6, which has no WireGuard. Routers authenticate
+  # with the credentials the app minted into ovpn_clients — no per-router
+  # certificates to issue by hand — and each is pinned to its allocated address.
+  openvpn:
+    build: ./infra/openvpn
+    container_name: billing-ovpn
+    profiles: ['network']
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: billing
+      PGPASSWORD: secret
+      PGDATABASE: billing
+    ports:
+      - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
+    volumes:
+      - billing-ovpn-pki:/etc/openvpn/pki
+
+  # Management tunnel for RouterOS 7. Each MikroTik gets a stable address in its
+  # tenant's /24 so the server can reach it for CoA even behind CGNAT.
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: billing-wg
+    profiles: ['network']
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      TZ: Africa/Nairobi
+    ports:
+      - '51820:51820/udp'
+    volumes:
+      - ./infra/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+
 volumes:
   billing-pgdata:
+  billing-ovpn-pki:   # generated on first run; keep it or every router must re-trust the CA

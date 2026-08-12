@@ -204,7 +204,7 @@ export default function Tenants() {
           <Field label="ISP name" span={2}>
             <Input value={f.name} onChange={set('name')} placeholder="Zurinet" />
           </Field>
-          <Field label="Subdomain" hint="Becomes zurinet.billing.co.ke">
+          <Field label="Subdomain" hint="Becomes zurinet.vibelink.tech">
             <Input value={f.subdomain} onChange={set('subdomain')} placeholder="zurinet" />
           </Field>
           <Field label="Support phone">
