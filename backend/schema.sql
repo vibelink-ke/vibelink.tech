@@ -649,6 +649,48 @@ create trigger radacct_to_sessions after insert or update on radacct
 alter table ovpn_clients add column if not exists password_hash text;
 alter table ovpn_clients alter column password drop not null;
 
+-- ─────────────── the rest of the standard FreeRADIUS schema ───────────────
+-- The app only ever writes radcheck and radreply, so these looked unnecessary.
+-- They are not: the stock queries.conf reads the group tables on every single
+-- authorisation, and a missing table makes the whole sql module return `fail`,
+-- which rejects the user. Every login failed with "relation radusergroup does
+-- not exist" buried in the FreeRADIUS log while radcheck matched perfectly.
+create table if not exists radusergroup (
+  id        serial primary key,
+  username  text not null default '',
+  groupname text not null default '',
+  priority  int  not null default 0
+);
+create index if not exists radusergroup_username on radusergroup (username);
+
+create table if not exists radgroupcheck (
+  id        serial primary key,
+  groupname text not null default '',
+  attribute text not null default '',
+  op        varchar(2) not null default '==',
+  value     text not null default ''
+);
+create index if not exists radgroupcheck_groupname on radgroupcheck (groupname);
+
+create table if not exists radgroupreply (
+  id        serial primary key,
+  groupname text not null default '',
+  attribute text not null default '',
+  op        varchar(2) not null default '=',
+  value     text not null default ''
+);
+create index if not exists radgroupreply_groupname on radgroupreply (groupname);
+
+-- Written by the post-auth section on every accept and reject.
+create table if not exists radpostauth (
+  id       bigserial primary key,
+  username text not null default '',
+  pass     text,
+  reply    text,
+  authdate timestamptz not null default now()
+);
+create index if not exists radpostauth_username on radpostauth (username, authdate desc);
+
 -- ─────────────── CoA result ───────────────
 -- CoA is best-effort — radreply is already correct, so a failure only delays the
 -- new speed until the subscriber reconnects. That makes a permanently broken CoA

@@ -29,7 +29,7 @@ services:
   # billing app writes. Reads its NAS list from the `nas` view over routers, so a
   # router added in the UI is authorised immediately.
   freeradius:
-    image: freeradius/freeradius-server:3.2.5-alpine
+    build: ./infra/freeradius   # stock image + libpq, which it links against but omits
     container_name: billing-radius
     profiles: ['network']
     restart: unless-stopped
@@ -46,10 +46,12 @@ services:
       - '1812:1812/udp'   # authentication
       - '1813:1813/udp'   # accounting
     volumes:
-      - ./infra/freeradius/mods-available/sql:/etc/raddb/mods-available/sql:ro
-      - ./infra/freeradius/sites-available/billing:/etc/raddb/sites-available/billing:ro
-      - ./infra/freeradius/entrypoint.sh:/entrypoint.sh:ro
-    entrypoint: ['/bin/sh', '/entrypoint.sh']
+      # Staged, not mounted into the config tree directly. Two reasons: this image
+      # is built with --prefix=/opt so the tree is /opt/etc/raddb, and a bind mount
+      # from Windows arrives world-writable, which FreeRADIUS refuses to load.
+      # The entrypoint copies these in and fixes the mode.
+      - ./infra/freeradius:/config:ro
+    entrypoint: ['/bin/sh', '/config/entrypoint.sh']
     # -X is single-process debug mode: every decision is printed, which is what
     # you want while bringing this up. Drop to `radiusd -f` once it works.
     command: ['radiusd', '-X']

@@ -6,11 +6,11 @@ sql {
     dialect = "postgresql"
     driver  = "rlm_sql_${dialect}"
 
-    server   = "${env:PGHOST}"
-    port     = "${env:PGPORT}"
-    login    = "${env:PGUSER}"
-    password = "${env:PGPASSWORD}"
-    radius_db = "${env:PGDATABASE}"
+    server   = "$ENV{PGHOST}"
+    port     = "$ENV{PGPORT}"
+    login    = "$ENV{PGUSER}"
+    password = "$ENV{PGPASSWORD}"
+    radius_db = "$ENV{PGDATABASE}"
 
     # Standard table names — they match schema.sql.
     acct_table1   = "radacct"
@@ -21,6 +21,10 @@ sql {
     groupcheck_table = "radgroupcheck"
     groupreply_table = "radgroupreply"
     usergroup_table = "radusergroup"
+
+    # queries.conf interpolates this, so leaving it out is a parse error rather
+    # than a default.
+    group_attribute = "SQL-Group"
 
     # Read the NAS list from the `nas` view over the routers table, so adding a
     # router in the UI authorises it without touching clients.conf or restarting.

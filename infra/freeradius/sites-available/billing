@@ -24,14 +24,20 @@ server billing {
         # attribute is what makes a voucher stop working on its own.
         sql
 
-        expiration
-        logintime
-
         # No match in SQL means no account — reject rather than fall through to
         # any default that might let someone on.
-        if (!ok && !updated) {
+        #
+        # This has to sit immediately after `sql` and test `notfound`. A bare
+        # rcode in an unlang condition refers to the *previous module*, so the
+        # obvious-looking `if (!ok && !updated)` placed after expiration and
+        # logintime actually tested those instead — they return noop for a user
+        # with no expiry set, which rejected every login including correct ones.
+        if (notfound) {
             reject
         }
+
+        expiration
+        logintime
 
         pap
     }
