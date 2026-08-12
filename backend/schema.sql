@@ -642,6 +642,14 @@ drop trigger if exists radacct_to_sessions on radacct;
 create trigger radacct_to_sessions after insert or update on radacct
   for each row execute function sync_session_from_radacct();
 
+-- ─────────────── per-tenant tunnel subnet ───────────────
+-- Every tenant gets its own /24 carved out of 10.50.0.0/16, so router addresses
+-- cannot collide across tenants. They used to: onboarding handed every tenant's
+-- first router 10.50.0.1, which puts duplicate nasname rows in the `nas` view and
+-- leaves FreeRADIUS unable to tell two routers apart.
+alter table tenants add column if not exists tunnel_subnet cidr;
+create unique index if not exists tenants_tunnel_subnet on tenants (tunnel_subnet);
+
 -- ─────────────── WireGuard peers ───────────────
 -- One peer per router. Keys are minted by the app (node:crypto does X25519), so
 -- nothing shells out to `wg` and the private key can be shown once at onboarding

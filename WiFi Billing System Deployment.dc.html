@@ -1633,7 +1633,7 @@
             <div style="display:flex;flex-direction:column;gap:16px">
               <div style="display:flex;flex-direction:column;gap:3px"><span style="font-size:15.5px;font-weight:600">OVPN &amp; routers</span><span style="font-size:12.5px;color:#6b7269">Defaults used every time you onboard a MikroTik. Manage the router list on its own page.</span></div>
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
-                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:#4a524c">Server hostname</span><div style="border:1px solid #e4e6e1;border-radius:9px;padding:10px 13px;font-size:13px;font-family:'JetBrains Mono',monospace">ovpn.zuri.billing.co.ke</div></div>
+                <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:#4a524c">Server hostname</span><div style="border:1px solid #e4e6e1;border-radius:9px;padding:10px 13px;font-size:13px;font-family:'JetBrains Mono',monospace">ovpn.zuri.vibelink.tech</div></div>
                 <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:#4a524c">Port</span><div style="border:1px solid #e4e6e1;border-radius:9px;padding:10px 13px;font-size:13px;font-family:'JetBrains Mono',monospace">1194</div></div>
                 <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:#4a524c">Cipher</span><div style="border:1px solid #e4e6e1;border-radius:9px;padding:10px 13px;font-size:13px;font-family:'JetBrains Mono',monospace">aes256-cbc</div></div>
                 <div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:12.5px;font-weight:600;color:#4a524c">Auth digest</span><div style="border:1px solid #e4e6e1;border-radius:9px;padding:10px 13px;font-size:13px;font-family:'JetBrains Mono',monospace">sha256</div></div>
@@ -2491,7 +2491,7 @@ class Component extends DCLogic {
         ] }), () => this.toast('IP pool saved — ' + total.toLocaleString() + ' usable addresses'));
       }
     } else if (kind === 'isp') {
-      this.toast(`ISP "${f.title || 'New ISP'}" onboarding started — ${f.subdomain || 'subdomain'}.billing.co.ke`);
+      this.toast(`ISP "${f.title || 'New ISP'}" onboarding started — ${f.subdomain || 'subdomain'}.vibelink.tech`);
     }
     this.closeForm();
     if (kind !== 'ticket' && kind !== 'lead' && kind !== 'tariff' && kind !== 'pool') return;
