@@ -17,8 +17,9 @@ import { pool } from './db.js';
  * Keys are X25519. node:crypto can generate them, so nothing shells out to `wg`.
  */
 
-const SUBNET_PREFIX = process.env.WG_SUBNET_PREFIX ?? '10.51.0';
-const SERVER_IP = `${SUBNET_PREFIX}.1`;
+// Addresses come from the tenant's own /24 (see tunnel.js) rather than one shared
+// block, so two ISPs' routers can never be handed the same address.
+import { ensureSubnet, nextHostIp, SERVER_IP, SUPERNET } from './tunnel.js';
 
 /** A WireGuard keypair, base64 of the raw 32 bytes — the format `wg` prints. */
 export function keypair() {
@@ -33,17 +34,6 @@ export function keypair() {
 
 export const presharedKey = () => crypto.randomBytes(32).toString('base64');
 
-/** Lowest free address in the subnet. .1 is the server. */
-async function nextIp(tenantId) {
-  const { rows } = await pool.query('select assigned_ip from wg_peers order by assigned_ip');
-  const taken = new Set(rows.map((r) => String(r.assigned_ip).split('/')[0]));
-  for (let i = 2; i < 255; i++) {
-    const ip = `${SUBNET_PREFIX}.${i}`;
-    if (!taken.has(ip)) return ip;
-  }
-  throw new Error(`WireGuard subnet ${SUBNET_PREFIX}.0/24 is full`);
-}
-
 /**
  * Mint a peer. The private key is returned once, for the router's config, and
  * never stored — only the public key is kept, which is all the server needs.
@@ -51,7 +41,8 @@ async function nextIp(tenantId) {
 export async function createPeer(tenantId, { name, routerId = null }) {
   const { privateKey, publicKey } = keypair();
   const psk = presharedKey();
-  const ip = await nextIp(tenantId);
+  const subnet = await ensureSubnet(tenantId);
+  const ip = await nextHostIp(tenantId);
 
   const { rows: [peer] } = await pool.query(
     `insert into wg_peers (tenant_id, router_id, name, public_key, preshared_key, assigned_ip)
@@ -59,7 +50,7 @@ export async function createPeer(tenantId, { name, routerId = null }) {
     [tenantId, routerId, name, publicKey, psk, ip]
   );
 
-  return { peer, privateKey, presharedKey: psk, assignedIp: ip };
+  return { peer, privateKey, presharedKey: psk, assignedIp: ip, subnet, serverIp: SERVER_IP };
 }
 
 /**
@@ -97,7 +88,8 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
   const head = [
     '# Generated from wg_peers — edit the database, not this file.',
     '[Interface]',
-    `Address = ${SERVER_IP}/24`,
+    // /16, not /24: one address has to cover every tenant's block.
+    `Address = ${SERVER_IP}/16`,
     `ListenPort = ${port}`,
     `PrivateKey = ${serverPrivateKey}`,
     '',
@@ -117,4 +109,4 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
   return head.concat(peers).join('\n');
 }
 
-export { SERVER_IP, SUBNET_PREFIX };
+export { SERVER_IP, SUPERNET };

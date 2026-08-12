@@ -63,9 +63,13 @@ function Row({ item, store }) {
   );
 }
 
-export default function Sidebar({ brandName = 'Mtandao Bill' }) {
+export default function Sidebar() {
   const store = useStore();
   const s = store.session;
+
+  // The tenant's own company name, not a platform-wide brand. Settings →
+  // Organisation edits tenants.name, so renaming there renames it here.
+  const brandName = s?.company || 'Vibelink';
 
   const name = s?.name || 'Set up your profile';
   const sub = s ? `${s.role || 'Owner'} · ${s.subdomain}.vibelink.tech` : 'Owner';
@@ -104,9 +108,19 @@ export default function Sidebar({ brandName = 'Mtandao Bill' }) {
         >
           {brandName.charAt(0).toUpperCase()}
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-.01em', color: color.sideFooterName }}>{brandName}</span>
-          <span style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted }}>v2.4</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+          <span
+            title={brandName}
+            style={{
+              fontSize: 14, fontWeight: 600, letterSpacing: '-.01em', color: color.sideFooterName,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
+            {brandName}
+          </span>
+          <span style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted }}>
+            {s?.subdomain ? `${s.subdomain}.vibelink.tech` : 'v2.4'}
+          </span>
         </div>
       </div>
 

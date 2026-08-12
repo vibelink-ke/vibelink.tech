@@ -420,27 +420,41 @@ app.post('/api/tariffs', async (req, res) => {
 });
 
 // ── router onboarding via OVPN ────────────────────
-// The OVPN server (ovpn.<tenant>.vibelink.tech) assigns each connecting MikroTik a stable
-// IP from 10.50.0.0/24 keyed by its client cert CN — no port-forwarding or static public IP
-// needed on the ISP side. This just mints the client script + credentials.
-app.post('/api/routers/ovpn-script', async (req, res) => {
-  const { rows: [{ count }] } = await pool.query('select count(*) from routers where tenant_id=$1', [req.tenant.id]);
-  const n = Number(count) + 1;
+// Each tenant owns a /24 out of 10.50.0.0/16 and the router is given the next free
+// address inside it. Addresses used to come from a single shared 10.50.0.0/24 and
+// were derived from a row count, so tenants collided with each other and a deleted
+// router's address was immediately handed to the next one.
+app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
+  const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
   const crypto = await import('node:crypto');
+
+  const subnet = await ensureSubnet(req.tenant.id);
+  const nasIp = await nextHostIp(req.tenant.id);
   const token = crypto.randomBytes(6).toString('hex');
-  const nasIp = `10.50.0.${n}`;
+  // Name from the address, so it stays unique and stays put if rows are removed.
+  const username = `router-${nasIp.split('.').pop()}`;
+
   await pool.query(
-    `insert into ovpn_clients (tenant_id, username, password, assigned_ip) values ($1,$2,$3,$4)`,
-    [req.tenant.id, `router-${n}`, token, nasIp]
+    'insert into ovpn_clients (tenant_id, username, password, assigned_ip) values ($1,$2,$3,$4)',
+    [req.tenant.id, username, token, nasIp]
   );
+
   const script = [
     `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.vibelink.tech port=1194 \\`,
-    `  user=router-${n} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
-    `/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"`,
-    `:log info "Billing OVPN client added — waiting for tunnel IP"`
+    `  user=${username} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
+    '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"',
+    ':log info "Billing OVPN client added — waiting for tunnel IP"',
   ].join('\n');
-  res.json({ script, nasIp, username: `router-${n}`, defaultApiPort: 8728 });
-});
+
+  res.json({
+    script,
+    nasIp,
+    username,
+    subnet,
+    serverIp: SERVER_IP,
+    defaultApiPort: 8728,
+  });
+}));
 
 // ── router onboarding via WireGuard ───────────────
 // Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
