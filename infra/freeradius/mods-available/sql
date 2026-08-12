@@ -1,0 +1,45 @@
+# FreeRADIUS -> the same Postgres the billing app uses.
+#
+# This is what makes the app's writes take effect: activateSubscriber() inserts
+# into radcheck/radreply, and this module reads those rows on the next auth.
+sql {
+    dialect = "postgresql"
+    driver  = "rlm_sql_${dialect}"
+
+    server   = "${env:PGHOST}"
+    port     = "${env:PGPORT}"
+    login    = "${env:PGUSER}"
+    password = "${env:PGPASSWORD}"
+    radius_db = "${env:PGDATABASE}"
+
+    # Standard table names — they match schema.sql.
+    acct_table1   = "radacct"
+    acct_table2   = "radacct"
+    postauth_table = "radpostauth"
+    authcheck_table = "radcheck"
+    authreply_table = "radreply"
+    groupcheck_table = "radgroupcheck"
+    groupreply_table = "radgroupreply"
+    usergroup_table = "radusergroup"
+
+    # Read the NAS list from the `nas` view over the routers table, so adding a
+    # router in the UI authorises it without touching clients.conf or restarting.
+    read_clients = yes
+    client_table = "nas"
+
+    # Do not let a SQL outage reject everyone; fail through to the next module.
+    safe_characters = "@abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_: /"
+
+    $INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
+
+    pool {
+        start    = 1
+        min      = 1
+        max      = 10
+        spare    = 3
+        uses     = 0
+        lifetime = 0
+        idle_timeout = 60
+        retry_delay  = 5
+    }
+}

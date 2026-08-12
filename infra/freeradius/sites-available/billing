@@ -1,0 +1,76 @@
+# Minimal PPPoE / hotspot virtual server for the billing system.
+#
+# Deliberately small: it authenticates against radcheck, replies with the
+# attributes in radreply (Mikrotik-Rate-Limit, Session-Timeout, Expiration) and
+# writes accounting into radacct. Everything else FreeRADIUS ships with is
+# switched off so there is less to reason about.
+
+server billing {
+    listen {
+        type = auth
+        ipaddr = *
+        port = 1812
+    }
+    listen {
+        type = acct
+        ipaddr = *
+        port = 1813
+    }
+
+    authorize {
+        preprocess
+
+        # Vouchers and PPPoE users both live in radcheck; the Expiration
+        # attribute is what makes a voucher stop working on its own.
+        sql
+
+        expiration
+        logintime
+
+        # No match in SQL means no account — reject rather than fall through to
+        # any default that might let someone on.
+        if (!ok && !updated) {
+            reject
+        }
+
+        pap
+    }
+
+    authenticate {
+        pap
+        chap
+        mschap
+    }
+
+    preacct {
+        preprocess
+        acct_unique
+        suffix
+    }
+
+    accounting {
+        # radacct rows drive fair-use usage via the sync trigger in schema.sql.
+        sql
+        exec
+        attr_filter.accounting_response
+    }
+
+    session {
+        sql
+    }
+
+    post-auth {
+        sql
+
+        # Tell the app a voucher has been used, so voucher_expiry='login' can
+        # start its clock. Fire-and-forget; a failure here must not block auth.
+        update control {
+            &Tmp-String-0 := "%{User-Name}"
+        }
+
+        Post-Auth-Type REJECT {
+            sql
+            attr_filter.access_reject
+        }
+    }
+}
