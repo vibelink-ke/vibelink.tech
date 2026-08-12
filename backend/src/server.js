@@ -420,7 +420,7 @@ app.post('/api/tariffs', async (req, res) => {
 });
 
 // ── router onboarding via OVPN ────────────────────
-// The OVPN server (ovpn.<tenant>.billing.co.ke) assigns each connecting MikroTik a stable
+// The OVPN server (ovpn.<tenant>.vibelink.tech) assigns each connecting MikroTik a stable
 // IP from 10.50.0.0/24 keyed by its client cert CN — no port-forwarding or static public IP
 // needed on the ISP side. This just mints the client script + credentials.
 app.post('/api/routers/ovpn-script', async (req, res) => {
@@ -434,7 +434,7 @@ app.post('/api/routers/ovpn-script', async (req, res) => {
     [req.tenant.id, `router-${n}`, token, nasIp]
   );
   const script = [
-    `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.billing.co.ke port=1194 \\`,
+    `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.vibelink.tech port=1194 \\`,
     `  user=router-${n} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
     `/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"`,
     `:log info "Billing OVPN client added — waiting for tunnel IP"`
