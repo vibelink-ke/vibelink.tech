@@ -54,8 +54,36 @@ services:
     # you want while bringing this up. Drop to `radiusd -f` once it works.
     command: ['radiusd', '-X']
 
-  # Management tunnel. Each MikroTik gets a stable 10.51.0.x address so the
-  # server can reach it for CoA even behind CGNAT.
+  # Management tunnel for RouterOS 6, which has no WireGuard. Routers authenticate
+  # with the credentials the app minted into ovpn_clients — no per-router
+  # certificates to issue by hand — and each is pinned to its allocated address.
+  openvpn:
+    build: ./infra/openvpn
+    container_name: billing-ovpn
+    profiles: ['network']
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: billing
+      PGPASSWORD: secret
+      PGDATABASE: billing
+    ports:
+      - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
+    volumes:
+      - billing-ovpn-pki:/etc/openvpn/pki
+
+  # Management tunnel for RouterOS 7. Each MikroTik gets a stable address in its
+  # tenant's /24 so the server can reach it for CoA even behind CGNAT.
   wireguard:
     image: linuxserver/wireguard:latest
     container_name: billing-wg
@@ -79,3 +107,4 @@ services:
 
 volumes:
   billing-pgdata:
+  billing-ovpn-pki:   # generated on first run; keep it or every router must re-trust the CA

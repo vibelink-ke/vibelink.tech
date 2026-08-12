@@ -434,8 +434,10 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   // Name from the address, so it stays unique and stays put if rows are removed.
   const username = `router-${nasIp.split('.').pop()}`;
 
+  // Stored hashed; the plaintext below is shown once, in the script, and then gone.
   await pool.query(
-    'insert into ovpn_clients (tenant_id, username, password, assigned_ip) values ($1,$2,$3,$4)',
+    `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip)
+     values ($1,$2,crypt($3, gen_salt('bf')),$4)`,
     [req.tenant.id, username, token, nasIp]
   );
 

@@ -1,4 +1,4 @@
-# RADIUS and WireGuard, from scratch
+# RADIUS and the management tunnel, from scratch
 
 This is the half of the system that actually controls internet access. Without
 it the billing app is bookkeeping: it records who paid, but nothing stops a
@@ -94,7 +94,8 @@ Check before choosing:
 
 - A server with a **public IP** (a $5 VPS is plenty — this is control traffic,
   not customer traffic)
-- **UDP 51820** open for WireGuard
+- **UDP 51820** open for WireGuard, or **TCP 1194** for OpenVPN — whichever
+  tunnel your routers can speak
 - **UDP 1812 and 1813** reachable *from your routers* — over the tunnel, so they
   do not need to be open to the world
 - At least one MikroTik you can log into. No hardware? Install **CHR** (Cloud
@@ -112,10 +113,14 @@ Check before choosing:
 docker compose --profile network up -d
 ```
 
-That adds two containers to the Postgres you already run:
+That adds three containers to the Postgres you already run:
 
 - **`billing-radius`** — FreeRADIUS 3.2, reading the same Postgres
-- **`billing-wg`** — WireGuard
+- **`billing-wg`** — WireGuard, for RouterOS 7
+- **`billing-ovpn`** — OpenVPN, for RouterOS 6
+
+You do not need both tunnels. Run whichever matches your routers; the two can
+coexist, and routers on either one get an address from the same tenant `/24`.
 
 FreeRADIUS starts in `-X` (debug) mode on purpose: every decision it makes is
 printed. Watch it while you are bringing this up.
@@ -195,7 +200,8 @@ In the UI: **Routers → Onboard via WireGuard**. That calls
 `POST /api/routers/wg-peer`, which:
 
 1. mints an X25519 keypair (`node:crypto`, no `wg` binary needed)
-2. allocates the next free `10.51.0.x`
+2. allocates the next free address in **this tenant's own `/24`** (see
+   "Per-tenant subnets" below)
 3. stores **only the public key**
 4. returns RouterOS 7 commands to paste
 
@@ -219,8 +225,63 @@ Paste the generated block, then check:
 
 ```bash
 docker compose exec wireguard wg show
-ping 10.51.0.2
 ```
+
+Then ping the address the UI showed you.
+
+### Per-tenant subnets
+
+Every tenant gets its own `/24` out of `10.50.0.0/16`, recorded in
+`tenants.tunnel_subnet` and handed out by `backend/src/tunnel.js`. The first
+tenant gets `10.50.1.0/24`, the next `10.50.2.0/24`, and so on; the server itself
+is `10.50.0.1`. Allocation takes a row lock and scans the addresses actually in
+use, so two tenants onboarding at the same moment cannot collide, and an address
+freed by a deleted router is reused.
+
+This matters beyond tidiness: a router's tunnel address is its `nasname` in the
+`nas` view and the destination RADIUS uses for CoA. Overlapping tenants would
+mean sending one operator's disconnect to another operator's router.
+
+### RouterOS 6: onboard over OpenVPN instead
+
+RouterOS 6 has no WireGuard. Use **Routers → Onboard via OVPN**, which calls
+`POST /api/routers/ovpn-script` and:
+
+1. allocates the next free address in the tenant's `/24`
+2. mints a random password, stores it **hashed** (pgcrypto `crypt`/`bf`), and
+   returns the plaintext once, inside the script
+3. returns RouterOS 6 commands to paste
+
+The server side is the `billing-ovpn` container. It authenticates each router
+against `ovpn_clients` and pins it to its allocated address — the same address
+the `nas` view advertises — rather than letting OpenVPN hand out a pool address
+that would change on reconnect and silently break CoA.
+
+Three settings are dictated by the RouterOS 6 client, not by preference:
+
+| Setting | Why |
+|---|---|
+| `proto tcp-server` | The RouterOS 6 OpenVPN client cannot do UDP |
+| `data-ciphers AES-256-CBC` | OpenVPN 2.6 negotiates GCM by default; RouterOS offers only CBC. Without this a router authenticates and is *then* dropped with "no shared cipher" |
+| `verify-client-cert none` | Routers use the minted username/password, so there are no per-router certificates to issue by hand |
+
+There is deliberately no `redirect-gateway` and no pushed routes: this is a
+management tunnel, and customer traffic must never enter it.
+
+On first start the container generates its own CA, server certificate and DH
+parameters into the `billing-ovpn-pki` volume. **Keep that volume.** Deleting it
+mints a new CA, and every router then has to be re-onboarded.
+
+Check it from the server:
+
+```bash
+docker logs billing-ovpn | grep openvpn-
+```
+
+`openvpn-auth: accepted router-2` followed by `openvpn-connect: router-2 ->
+10.50.1.2` means the router authenticated and landed on its allocated address. A
+rejection logs `openvpn-auth: rejected <name>` and nothing else — the password
+never reaches the log.
 
 ### Point the router at RADIUS
 
@@ -317,6 +378,9 @@ Worth fixing before you rely on instant throttling.
 | Handshake fine, no ping | Missing `/ip/address` on the router, or the firewall rule was not added |
 | Fair use always reads 0 | No `interim-update`, so nothing is written until a session ends |
 | Speed changes only on reconnect | The CoA gap above |
+| OVPN: `AUTH_FAILED` for a good password | The row is there but the script cannot reach Postgres. OpenVPN gives its scripts a bare environment, so they read `/etc/openvpn/db.env`, which the entrypoint writes at start |
+| OVPN: auth OK, then "no shared cipher" | `data-ciphers` does not include `AES-256-CBC` |
+| OVPN: router connects on the wrong address | `client-connect.sh` found no `ovpn_clients` row for that username |
 
 WireGuard's silence is the thing that catches people out: a misconfigured peer
 produces **no error anywhere**. If there is no handshake, the two ends disagree
@@ -330,5 +394,7 @@ about a key or the endpoint, and neither will tell you which.
 - Give each router a **different** RADIUS secret; the UI already allows it
 - Drop FreeRADIUS out of `-X` debug mode (`radiusd -f`), it logs full credentials
 - Put Postgres on a private network, not a published port
-- Firewall 1812/1813 to the WireGuard subnet only
+- Firewall 1812/1813 to the tunnel supernet (`10.50.0.0/16`) only
+- Back up the `billing-ovpn-pki` volume; losing the CA means re-onboarding every
+  RouterOS 6 router
 - Set up `radacct` retention — it grows quickly and nothing prunes it yet
