@@ -547,6 +547,121 @@ create table if not exists radreply (
 );
 create index if not exists radreply_username on radreply (username);
 
+-- ─────────────── FreeRADIUS accounting and clients ───────────────
+-- rlm_sql writes sessions here. The app's own `sessions` table is kept in step by
+-- the trigger below, so fair-use usage counts real traffic.
+create table if not exists radacct (
+  radacctid           bigserial primary key,
+  acctsessionid       text not null,
+  acctuniqueid        text not null unique,
+  username            text,
+  realm               text,
+  nasipaddress        inet not null,
+  nasportid           text,
+  nasporttype         text,
+  acctstarttime       timestamptz,
+  acctupdatetime      timestamptz,
+  acctstoptime        timestamptz,
+  acctinterval        bigint,
+  acctsessiontime     bigint,
+  acctauthentic       text,
+  connectinfo_start   text,
+  connectinfo_stop    text,
+  acctinputoctets     bigint,
+  acctoutputoctets    bigint,
+  calledstationid     text,
+  callingstationid    text,
+  acctterminatecause  text,
+  servicetype         text,
+  framedprotocol      text,
+  framedipaddress     inet,
+  framedipv6address   inet,
+  framedipv6prefix    inet,
+  framedinterfaceid   text,
+  delegatedipv6prefix inet
+);
+create index if not exists radacct_active_session on radacct (acctuniqueid) where acctstoptime is null;
+create index if not exists radacct_start_user on radacct (acctstarttime, username);
+
+-- FreeRADIUS reads its NAS list from here. A view over `routers` means adding a
+-- router in the UI authorises it immediately — no config file, no restart.
+create or replace view nas as
+  select
+    ('x' || substr(md5(r.id::text), 1, 8))::bit(32)::int as id,
+    host(r.host)        as nasname,
+    r.name              as shortname,
+    'mikrotik'          as type,
+    0                   as ports,
+    r.secret            as secret,
+    ''                  as server,
+    ''                  as community,
+    r.nas_identifier    as description
+  from routers r;
+
+/**
+ * Mirror accounting into the app's `sessions` table.
+ * FUP enforcement sums sessions.bytes_in/out; without this it would always read
+ * zero no matter how much traffic flowed.
+ */
+create or replace function sync_session_from_radacct() returns trigger as $$
+declare
+  v_tenant uuid;
+  v_sub    uuid;
+  v_router uuid;
+begin
+  select id, tenant_id into v_router, v_tenant from routers where host = new.nasipaddress limit 1;
+  if v_tenant is null then return new; end if;
+
+  select id into v_sub from subscribers
+   where tenant_id = v_tenant and pppoe_user = new.username limit 1;
+
+  insert into sessions (tenant_id, service, subscriber_id, router_id, username,
+                        ip, started_at, stopped_at, bytes_in, bytes_out, radius_unique_id)
+  values (v_tenant, 'pppoe', v_sub, v_router, new.username,
+          new.framedipaddress, coalesce(new.acctstarttime, now()), new.acctstoptime,
+          coalesce(new.acctinputoctets, 0), coalesce(new.acctoutputoctets, 0),
+          new.acctuniqueid)
+  on conflict (radius_unique_id) do update
+    set stopped_at = excluded.stopped_at,
+        bytes_in   = excluded.bytes_in,
+        bytes_out  = excluded.bytes_out;
+  return new;
+end;
+$$ language plpgsql;
+
+-- Correlation key so the interim-updates FreeRADIUS sends every few minutes
+-- update one row instead of piling up duplicates.
+alter table sessions add column if not exists radius_unique_id text;
+-- Deliberately NOT a partial index: ON CONFLICT cannot infer a partial one
+-- without repeating its predicate, and Postgres already treats NULLs as distinct,
+-- so pre-existing rows with no RADIUS id coexist fine.
+drop index if exists sessions_radius_unique;
+create unique index if not exists sessions_radius_unique on sessions (radius_unique_id);
+
+drop trigger if exists radacct_to_sessions on radacct;
+create trigger radacct_to_sessions after insert or update on radacct
+  for each row execute function sync_session_from_radacct();
+
+-- ─────────────── WireGuard peers ───────────────
+-- One peer per router. Keys are minted by the app (node:crypto does X25519), so
+-- nothing shells out to `wg` and the private key can be shown once at onboarding
+-- and never stored in the clear on the router side.
+create table if not exists wg_peers (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  router_id     uuid references routers on delete cascade,
+  name          text not null,
+  public_key    text not null unique,
+  preshared_key text,
+  assigned_ip   inet not null unique,
+  last_handshake timestamptz,
+  rx_bytes      bigint not null default 0,
+  tx_bytes      bigint not null default 0,
+  enabled       boolean not null default true,
+  created_at    timestamptz not null default now()
+);
+create index if not exists wg_peers_tenant on wg_peers (tenant_id);
+
 -- ─────────────── admin portal authentication ───────────────
 -- The design's sign-in screen keeps accounts in component state and compares
 -- passwords in plain text. That is fine for a mockup and unacceptable here, so

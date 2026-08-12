@@ -442,6 +442,49 @@ app.post('/api/routers/ovpn-script', async (req, res) => {
   res.json({ script, nasIp, username: `router-${n}`, defaultApiPort: 8728 });
 });
 
+// ── router onboarding via WireGuard ───────────────
+// Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
+// single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.
+app.post('/api/routers/wg-peer', wrap(async (req, res) => {
+  const wg = await import('./wireguard.js');
+  const { name, routerId } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name the router' });
+
+  const endpoint = process.env.WG_ENDPOINT;
+  const serverPublicKey = process.env.WG_SERVER_PUBLIC_KEY;
+  if (!endpoint || !serverPublicKey)
+    return res.status(400).json({
+      error: 'WG_ENDPOINT and WG_SERVER_PUBLIC_KEY are not set. See docs/NETWORK-SETUP.md.',
+    });
+
+  const { peer, privateKey, presharedKey, assignedIp } =
+    await wg.createPeer(req.tenant.id, { name, routerId: routerId ?? null });
+
+  res.json({
+    peerId: peer.id,
+    assignedIp,
+    publicKey: peer.public_key,
+    // Shown once. The server keeps only the public key; if this is lost the peer
+    // must be recreated rather than recovered.
+    script: wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey }),
+    note: 'The private key is shown once and is not stored. Apply it before closing this.',
+  });
+}));
+
+app.get('/api/routers/wg-peers', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select p.id, p.name, p.assigned_ip, p.enabled, p.last_handshake, p.rx_bytes, p.tx_bytes,
+            r.name as router_name
+     from wg_peers p left join routers r on r.id = p.router_id
+     where p.tenant_id=$1 order by p.assigned_ip`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.delete('/api/routers/wg-peers/:id', wrap(async (req, res) => {
+  await pool.query('delete from wg_peers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  res.json({ ok: true, note: 'Run scripts/wg-sync.mjs to drop it from the running server.' });
+}));
+
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
   res.json(rows);
