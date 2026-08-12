@@ -642,6 +642,13 @@ drop trigger if exists radacct_to_sessions on radacct;
 create trigger radacct_to_sessions after insert or update on radacct
   for each row execute function sync_session_from_radacct();
 
+-- ─────────────── OVPN credentials ───────────────
+-- The tunnel password is shown once in the generated MikroTik script and stored
+-- only as a pgcrypto hash, the same way the WireGuard private key is handled. A
+-- database dump should not hand someone every router's tunnel password.
+alter table ovpn_clients add column if not exists password_hash text;
+alter table ovpn_clients alter column password drop not null;
+
 -- ─────────────── per-tenant tunnel subnet ───────────────
 -- Every tenant gets its own /24 carved out of 10.50.0.0/16, so router addresses
 -- cannot collide across tenants. They used to: onboarding handed every tenant's
