@@ -12,6 +12,9 @@ export default function Routers() {
   const [form, setForm] = useState(null); // BLANK_ROUTER when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);   // router id currently being probed
+  // Asked before minting: RouterOS 6 and 7 need different cipher names, and the
+  // address the router dials is not knowable from here.
+  const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
 
   const routers = store.routers ?? [];
   const up = routers.filter((r) => r.status === 'up').length;
@@ -20,10 +23,13 @@ export default function Routers() {
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
   const mintScript = async () => {
+    if (!dial.serverHost.trim())
+      return store.toast('Enter the address this router should dial');
     setBusy(true);
     try {
-      const res = await api.ovpnScript();
+      const res = await api.ovpnScript(dial);
       setOvpn(res);
+      setDial((d) => ({ ...d, open: false }));
     } catch (e) {
       store.toast(`Could not mint the OVPN script: ${e.message}`);
     } finally {
@@ -97,8 +103,8 @@ export default function Routers() {
       actions={
         <>
           <Button onClick={() => setForm(BLANK_ROUTER)}>Add manually</Button>
-          <Button variant="primary" onClick={mintScript} disabled={busy}>
-            {busy ? 'Working…' : '+ Onboard via OVPN'}
+          <Button variant="primary" onClick={() => setDial((d) => ({ ...d, open: true }))}>
+            + Onboard via OVPN
           </Button>
         </>
       }
@@ -155,6 +161,53 @@ export default function Routers() {
           ]}
         />
       </Card>
+
+      {/* Step 0 — the two things the script cannot guess */}
+      <Modal
+        open={dial.open}
+        title="Onboard over OVPN"
+        onClose={() => setDial((d) => ({ ...d, open: false }))}
+        footer={
+          <>
+            <Button onClick={() => setDial((d) => ({ ...d, open: false }))}>Cancel</Button>
+            <Button variant="primary" onClick={mintScript} disabled={busy}>
+              {busy ? 'Working…' : 'Generate script'}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Field label="RouterOS version">
+            <select
+              value={dial.routerosVersion}
+              onChange={(e) => setDial((d) => ({ ...d, routerosVersion: e.target.value }))}
+              style={{
+                padding: '7px 10px', border: `1px solid ${color.line}`, borderRadius: radius.md,
+                background: color.subtleBg, fontSize: 13, width: '100%',
+              }}
+            >
+              <option value="7">RouterOS 7</option>
+              <option value="6">RouterOS 6</option>
+            </select>
+          </Field>
+          <span style={{ fontSize: 12, color: color.muted }}>
+            Check with <code style={{ fontFamily: font.mono }}>/system resource print</code>. The two
+            versions spell the cipher differently, and the wrong one fails with a bare “syntax error”.
+          </span>
+
+          <Field label="Address the router should dial">
+            <Input
+              value={dial.serverHost}
+              onChange={(e) => setDial((d) => ({ ...d, serverHost: e.target.value }))}
+              placeholder="vpn.yourdomain.com or 192.168.88.254"
+            />
+          </Field>
+          <span style={{ fontSize: 12, color: color.muted }}>
+            Whatever this router can actually reach on port 1194 — your server’s public hostname in
+            production, or its LAN address while testing on a bench.
+          </span>
+        </div>
+      </Modal>
 
       {/* Step 1 — the generated RouterOS script */}
       <Modal

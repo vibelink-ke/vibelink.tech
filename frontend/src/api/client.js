@@ -158,7 +158,7 @@ export const api = {
   // ── network ──
   routers: () => get('/api/routers'),
   createRouter: (r) => post('/api/routers', r),
-  ovpnScript: () => post('/api/routers/ovpn-script', {}),
+  ovpnScript: (opts = {}) => post('/api/routers/ovpn-script', opts),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
   ovpnClients: () => get('/api/ovpn-clients'),
   ipPools: () => get('/api/ip-pools'),

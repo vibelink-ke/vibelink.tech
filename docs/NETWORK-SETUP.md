@@ -244,8 +244,18 @@ mean sending one operator's disconnect to another operator's router.
 
 ### RouterOS 6: onboard over OpenVPN instead
 
-RouterOS 6 has no WireGuard. Use **Routers → Onboard via OVPN**, which calls
-`POST /api/routers/ovpn-script` and:
+RouterOS 6 has no WireGuard. Use **Routers → Onboard via OVPN**. It asks two
+things first, because neither can be guessed:
+
+- **RouterOS version.** Check with `/system resource print`. The two versions
+  spell the cipher differently — v6 wants `cipher=aes256`, v7 wants
+  `cipher=aes256-cbc`, and both mean AES-256-CBC. Paste the wrong one and
+  RouterOS answers with a bare `syntax error (line N column M)` that names no
+  parameter at all.
+- **The address the router should dial.** Its public hostname in production, or
+  the server's LAN address on a bench. Port 1194/TCP has to be open to it.
+
+It then calls `POST /api/routers/ovpn-script`, which:
 
 1. allocates the next free address in the tenant's `/24`
 2. mints a random password, stores it **hashed** (pgcrypto `crypt`/`bf`), and
@@ -405,6 +415,8 @@ speed within seconds.
 | OVPN: `AUTH_FAILED` for a good password | The row is there but the script cannot reach Postgres. OpenVPN gives its scripts a bare environment, so they read `/etc/openvpn/db.env`, which the entrypoint writes at start |
 | OVPN: auth OK, then "no shared cipher" | `data-ciphers` does not include `AES-256-CBC` |
 | OVPN: router connects on the wrong address | `client-connect.sh` found no `ovpn_clients` row for that username |
+| OVPN: pasted script gives `syntax error (line N column M)` | Wrong RouterOS version chosen — the column points into `cipher=`. v6 takes `aes256`, v7 takes `aes256-cbc` |
+| OVPN: `input does not match any value of interface` | A follow-up command referenced `billing-ovpn` before the interface existed, i.e. the `add` above it failed. Fix that one first |
 
 WireGuard's silence is the thing that catches people out: a misconfigured peer
 produces **no error anywhere**. If there is no handshake, the two ends disagree

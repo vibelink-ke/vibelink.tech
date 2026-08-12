@@ -441,11 +441,31 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
     [req.tenant.id, username, token, nasIp]
   );
 
+  // Where the router should dial. The per-tenant hostname is only right once DNS
+  // exists for it; on a bench the server is just an address on the same LAN, so
+  // this is overridable and the caller's value wins.
+  const host = String(req.body?.serverHost ?? '').trim()
+    || process.env.OVPN_PUBLIC_HOST
+    || `ovpn.${req.tenant.subdomain}.vibelink.tech`;
+
+  // RouterOS 6 and 7 spell the cipher differently, and pasting the wrong one
+  // fails with a bare "syntax error" pointing at the column, which tells you
+  // nothing. v6: aes256. v7: aes256-cbc. Both mean AES-256-CBC, which is what
+  // the server offers.
+  const v6 = String(req.body?.routerosVersion ?? '7').startsWith('6');
+  const cipher = v6 ? 'aes256' : 'aes256-cbc';
+
   const script = [
-    `/interface ovpn-client add name=billing-ovpn connect-to=ovpn.${req.tenant.subdomain}.vibelink.tech port=1194 \\`,
-    `  user=${username} password=${token} certificate=none cipher=aes256-cbc auth=sha256`,
-    '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade comment="billing OVPN"',
-    ':log info "Billing OVPN client added — waiting for tunnel IP"',
+    // One line per command: the backslash continuation this used to emit is
+    // fragile when pasted, and it hid which parameter the parser rejected.
+    `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `
+      + `user=${username} password=${token} certificate=none cipher=${cipher} auth=sha256 `
+      // Explicit, because a management tunnel must never carry customer traffic
+      // even if the server one day pushes a route.
+      + 'add-default-route=no mode=ip',
+    // No srcnat rule here. This tunnel exists so the server can reach the router;
+    // masquerading out of it would hide everything behind the router instead.
+    ':log info "Billing OVPN client added - waiting for tunnel IP"',
   ].join('\n');
 
   res.json({
@@ -454,6 +474,8 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
     username,
     subnet,
     serverIp: SERVER_IP,
+    serverHost: host,
+    routerosVersion: v6 ? '6' : '7',
     defaultApiPort: 8728,
   });
 }));
