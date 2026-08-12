@@ -163,6 +163,28 @@ app.post('/api/auth/logout', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/**
+ * Caddy's on-demand TLS gate. Must sit above the tenant resolver, which 404s
+ * anything it cannot place — including this request, which carries no tenant of
+ * its own.
+ *
+ * Tenants are subdomains, so the set of hostnames needing a certificate is not
+ * known ahead of time and grows every time someone signs up. Caddy asks here
+ * before issuing: 200 to proceed, anything else to refuse. Without the check an
+ * attacker could point any DNS name at the server and burn through Let's
+ * Encrypt's rate limit for the domain.
+ */
+app.get('/internal/tls-check', wrap(async (req, res) => {
+  const domain = String(req.query.domain ?? '').toLowerCase().trim();
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+
+  // Only ever our own zone; a stray CNAME from elsewhere must not earn a cert.
+  if (domain !== root && !domain.endsWith(`.${root}`)) return res.status(404).end();
+
+  const tenant = await tenantByHost(domain);
+  return tenant ? res.status(200).end() : res.status(404).end();
+}));
+
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
 // portal and webhooks, which have no session. DEV_TENANT lets the Vite dev server

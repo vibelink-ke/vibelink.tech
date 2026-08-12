@@ -1,0 +1,139 @@
+# Production stack for a single VPS.
+#
+#   cp .env.production.example .env   # then fill it in
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Differences from docker-compose.yml, which is a laptop convenience:
+#   - Postgres publishes no port. It is reachable only on the compose network.
+#   - Everything is on by default; there is no `network` profile to remember.
+#   - Caddy terminates TLS and is the only thing listening on 80/443.
+#   - FreeRADIUS runs without -X, which logs full credentials.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: billing-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # No `ports`. Publishing 5432 on a public VPS is how databases get found.
+    volumes:
+      - billing-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: ./backend
+    container_name: billing-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PORT: '8080'
+      # Daraja and KopoKopo POST payment confirmations here. If this is wrong the
+      # STK prompt still reaches the handset and the payment never completes.
+      BASE_URL: https://${ROOT_DOMAIN}
+      ROOT_DOMAIN: ${ROOT_DOMAIN}
+      RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
+      # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
+      # through to one tenant's data.
+    expose:
+      - '8080'
+
+  web:
+    build:
+      context: .
+      dockerfile: infra/caddy/Dockerfile
+    container_name: billing-web
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      ROOT_DOMAIN: ${ROOT_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - '80:80'     # required: Let's Encrypt HTTP-01 validation
+      - '443:443'
+    volumes:
+      - caddy-data:/data      # certificates; losing this re-issues them
+      - caddy-config:/config
+
+  freeradius:
+    build: ./infra/freeradius
+    container_name: billing-radius
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    ports:
+      # Only routers should reach these. Close them at the VPS firewall to
+      # everything except the tunnel supernet — see docs/DEPLOY.md.
+      - '1812:1812/udp'
+      - '1813:1813/udp'
+    volumes:
+      - ./infra/freeradius:/config:ro
+    entrypoint: ['/bin/sh', '/config/entrypoint.sh']
+    # Not -X. Debug mode prints every credential it handles.
+    command: ['radiusd', '-f']
+
+  openvpn:
+    build: ./infra/openvpn
+    container_name: billing-ovpn
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.ip_forward=1
+    environment:
+      PGHOST: db
+      PGPORT: '5432'
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+    ports:
+      - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
+    volumes:
+      - billing-ovpn-pki:/etc/openvpn/pki
+
+  wireguard:
+    image: linuxserver/wireguard:latest
+    container_name: billing-wg
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    environment:
+      PUID: '1000'
+      PGID: '1000'
+      TZ: ${TZ:-Africa/Nairobi}
+    ports:
+      - '51820:51820/udp'
+    volumes:
+      - ./infra/wireguard:/config
+      - /lib/modules:/lib/modules:ro
+
+volumes:
+  billing-pgdata:
+  billing-ovpn-pki:   # the tunnel CA; losing it means re-onboarding every router
+  caddy-data:
+  caddy-config:

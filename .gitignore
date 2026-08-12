@@ -12,13 +12,23 @@ npm-debug.log*
 .DS_Store
 .env
 .env.*
-!.env.example
+# Any *.example is a committed template with no real values in it. The bare
+# `!.env.example` used to be the only exception, which silently swallowed
+# .env.production.example — a file the deploy guide tells you to copy.
+!.env*.example
 .vite/
 .cache/
 .tmp/
 uploads/*
 # Keep uploads folder structure but ignore transient payloads
 !uploads/.gitkeep
+
+# Runtime state written by the WireGuard container, including the server private
+# key and every peer's. Generated on the host that runs it, never committed.
+infra/wireguard/
+
+# Source tarballs and other downloaded artifacts
+*.tar.gz
 
 # OS/editor artifacts
 Thumbs.db
