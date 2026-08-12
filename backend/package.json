@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "migrate": "node scripts/migrate.mjs",
-    "account": "node scripts/create-account.mjs"
+    "account": "node scripts/create-account.mjs",
+    "test": "node test/coa.test.mjs"
   },
   "dependencies": {
     "express": "^4.19.2",

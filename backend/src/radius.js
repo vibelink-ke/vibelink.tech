@@ -1,6 +1,4 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-const run = promisify(execFile);
+import * as coaClient from './coa.js';
 
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */
 export async function activateSubscriber(c, tenantId, subId) {
@@ -27,7 +25,7 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`]);
 
-  if (s.host) await coa(s.host, s.secret, s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`);
+  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`);
 }
 
 /**
@@ -45,7 +43,7 @@ export async function applyFupThrottle(c, tenantId, subId, downKbps, upKbps) {
     `insert into radreply (username, attribute, op, value) values ($1,'Mikrotik-Rate-Limit',':=',$2)
      on conflict (username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate]);
-  if (s.host) await coa(s.host, s.secret, s.pppoe_user, rate);
+  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
   return true;
 }
 
@@ -61,7 +59,7 @@ export async function clearFupThrottle(c, tenantId, subId) {
     `insert into radreply (username, attribute, op, value) values ($1,'Mikrotik-Rate-Limit',':=',$2)
      on conflict (username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate]);
-  if (s.host) await coa(s.host, s.secret, s.pppoe_user, rate);
+  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
   return true;
 }
 
@@ -73,7 +71,7 @@ export async function walledGarden(c, tenantId, subId) {
   if (!s?.pppoe_user) return;   // nothing provisioned in RADIUS to walled-garden
   await c.query("update radreply set value='2048k/2048k' where username=$1 and attribute='Mikrotik-Rate-Limit'",
     [s.pppoe_user]);
-  if (s.host) await coa(s.host, s.secret, s.pppoe_user, '2048k/2048k', 'walled');
+  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, '2048k/2048k', 'walled');
 }
 
 export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
@@ -140,10 +138,48 @@ export async function startVoucherClock(c, tenantId, code) {
     [tenantId, code]);
 }
 
-async function coa(host, secret, user, rate, mode) {
-  const attrs = [`User-Name=${user}`, `Mikrotik-Rate-Limit=${rate}`];
-  if (mode === 'walled') attrs.push('Mikrotik-Address-List=walled');
-  await run('radclient', ['-x', `${host}:${process.env.RADIUS_COA_PORT}`, 'coa', secret], {
-    input: attrs.join('\n') + '\n'
-  }).catch(() => {});   // CoA best-effort; next auth picks up the new profile anyway
+/**
+ * Push a live speed change to the router.
+ *
+ * Best-effort by design: the caller is applying a payment or running the fair-use
+ * sweep, and radreply is already correct, so the worst case is that the new speed
+ * waits for the subscriber to reconnect. But the result is recorded rather than
+ * thrown away — a CoA that never works is invisible otherwise, which is exactly
+ * how it stayed broken before.
+ */
+async function coa(c, host, secret, user, rate, mode) {
+  // Target the live session if there is one. Without a session id the NAS has to
+  // guess which login to change when a subscriber is connected more than once.
+  let sessionId;
+  try {
+    const { rows: [row] } = await c.query(
+      `select acctsessionid from radacct
+        where username = $1 and acctstoptime is null
+        order by acctstarttime desc limit 1`, [user]);
+    sessionId = row?.acctsessionid;
+  } catch { /* radacct may be empty; CoA on username alone still works */ }
+
+  const result = await coaClient.send({
+    host, secret, username: user, rate,
+    addressList: mode === 'walled' ? 'walled' : undefined,
+    sessionId,
+  });
+
+  if (!result.ok) {
+    console.warn(`coa: ${user} -> ${rate} failed on ${String(host).split('/')[0]}: ${result.error}`);
+  }
+
+  // Kept for the Routers screen, so a silently dead CoA path is visible. The
+  // column records whether the router *answered*, which is the thing that breaks
+  // wholesale — a NAK means it is listening and the secret matches, and is worth
+  // distinguishing from silence even though the change did not apply.
+  const answered = result.ok || result.code === 45 /* CoA-NAK */;
+  try {
+    await c.query(
+      `update routers set coa_last_at = now(), coa_last_ok = $2, coa_last_error = $3
+        where host = $1`,
+      [host, answered, result.ok ? null : String(result.error ?? '').slice(0, 300)]);
+  } catch { /* never let bookkeeping break the payment that triggered this */ }
+
+  return result;
 }
