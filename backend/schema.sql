@@ -649,6 +649,15 @@ create trigger radacct_to_sessions after insert or update on radacct
 alter table ovpn_clients add column if not exists password_hash text;
 alter table ovpn_clients alter column password drop not null;
 
+-- ─────────────── CoA result ───────────────
+-- CoA is best-effort — radreply is already correct, so a failure only delays the
+-- new speed until the subscriber reconnects. That makes a permanently broken CoA
+-- path invisible, which is how it went unnoticed that the old code shelled out to
+-- a `radclient` binary that was never installed. Record every attempt instead.
+alter table routers add column if not exists coa_last_at    timestamptz;
+alter table routers add column if not exists coa_last_ok    boolean;
+alter table routers add column if not exists coa_last_error text;
+
 -- ─────────────── per-tenant tunnel subnet ───────────────
 -- Every tenant gets its own /24 carved out of 10.50.0.0/16, so router addresses
 -- cannot collide across tenants. They used to: onboarding handed every tenant's

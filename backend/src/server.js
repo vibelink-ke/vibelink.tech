@@ -516,6 +516,48 @@ app.post('/api/routers', async (req, res) => {
   res.json(r);
 });
 
+/**
+ * Prove the CoA path works before trusting it with a paying customer.
+ *
+ * CoA is the one link in the chain that fails silently: auth and accounting both
+ * show up in logs, but a CoA that never arrives just means speed changes wait for
+ * the next reconnect. This sends a real CoA for a username you choose and reports
+ * exactly what came back.
+ */
+app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  // Default to a name that cannot exist. A NAK then still proves the round trip:
+  // the router received the packet, agreed on the secret, and answered.
+  const username = req.body?.username?.trim() || `vibelink-coa-probe-${Date.now()}`;
+  const rate = req.body?.rate?.trim() || '1024k/1024k';
+
+  const coaClient = await import('./coa.js');
+  const result = await coaClient.send({
+    host: r.host, secret: r.secret, username, rate, timeoutMs: 2000, retries: 1,
+  });
+
+  // A NAK is a *good* result for a probe username — it means the router is
+  // listening and the shared secret matches. Say so, rather than showing a red X.
+  const reachable = result.ok || result.code === coaClient.codes.COA_NAK;
+
+  await pool.query(
+    `update routers set coa_last_at = now(), coa_last_ok = $2, coa_last_error = $3 where id = $1`,
+    [r.id, reachable, reachable ? null : String(result.error ?? '').slice(0, 300)]);
+  res.json({
+    ok: result.ok,
+    reachable,
+    username,
+    detail: result.ok
+      ? 'Router accepted the change (CoA-ACK).'
+      : reachable
+        ? 'Router answered and the shared secret matches. It rejected this username, which is expected for a probe — the CoA path works.'
+        : result.error,
+  });
+}));
+
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name,

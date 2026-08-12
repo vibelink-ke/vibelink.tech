@@ -11,6 +11,7 @@ export default function Routers() {
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
   const [form, setForm] = useState(null); // BLANK_ROUTER when the confirm modal is open
   const [busy, setBusy] = useState(false);
+  const [testing, setTesting] = useState(null);   // router id currently being probed
 
   const routers = store.routers ?? [];
   const up = routers.filter((r) => r.status === 'up').length;
@@ -48,6 +49,24 @@ export default function Routers() {
     URL.revokeObjectURL(a.href);
   };
 
+  // CoA is the one link that fails quietly — auth and accounting show up in logs,
+  // but a CoA that never lands just means speed changes wait for a reconnect.
+  const testCoa = async (r) => {
+    setTesting(r.id);
+    try {
+      const res = await api.testCoa(r.id);
+      store.toast(`${r.name}: ${res.detail}`);
+      store.setCollection('routers', (rs) =>
+        rs.map((x) => (x.id === r.id
+          ? { ...x, coa_last_at: new Date().toISOString(), coa_last_ok: res.reachable, coa_last_error: res.reachable ? null : res.detail }
+          : x)));
+    } catch (e) {
+      store.toast(`CoA test failed: ${e.message}`);
+    } finally {
+      setTesting(null);
+    }
+  };
+
   const confirmRouter = async () => {
     if (!form.name.trim() || !form.host.trim() || !form.secret.trim())
       return store.toast('Nickname, NAS address and RADIUS secret are all required');
@@ -74,7 +93,7 @@ export default function Routers() {
   return (
     <Screen
       title="Routers"
-      subtitle="MikroTiks reach us over an OVPN tunnel, so no port-forwarding or static public IP is needed on your side."
+      subtitle="MikroTiks reach us over a tunnel, so you need no port-forwarding and no static public IP. Use WireGuard on RouterOS 7; RouterOS 6 has no WireGuard, so use OVPN there."
       actions={
         <>
           <Button onClick={() => setForm(BLANK_ROUTER)}>Add manually</Button>
@@ -107,6 +126,31 @@ export default function Routers() {
               key: 'last_seen',
               label: 'Last seen',
               render: (r) => (r.last_seen ? new Date(r.last_seen).toLocaleString('en-KE') : '—'),
+            },
+            {
+              key: 'coa',
+              label: 'CoA',
+              render: (r) =>
+                !r.coa_last_at ? (
+                  <span style={{ color: color.muted }}>untested</span>
+                ) : (
+                  <span
+                    title={r.coa_last_error ?? 'Router answered the last change request'}
+                    style={{ color: r.coa_last_ok ? color.green : color.rust }}
+                  >
+                    {r.coa_last_ok ? 'reachable' : 'no answer'}
+                  </span>
+                ),
+            },
+            {
+              key: 'actions',
+              label: '',
+              align: 'right',
+              render: (r) => (
+                <Button onClick={() => testCoa(r)} disabled={testing === r.id}>
+                  {testing === r.id ? 'Testing…' : 'Test CoA'}
+                </Button>
+              ),
             },
           ]}
         />
@@ -145,7 +189,8 @@ export default function Routers() {
               style={{ fontFamily: font.mono, fontSize: 12, background: '#12211d', color: '#eaf3ef', borderColor: '#12211d' }}
             />
             <span style={{ fontSize: 12, color: color.muted }}>
-              The tunnel gives the router a stable address on 10.50.0.0/24. Come back here once it connects.
+              The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
+              can always reach it. Come back here once it connects.
             </span>
           </div>
         )}

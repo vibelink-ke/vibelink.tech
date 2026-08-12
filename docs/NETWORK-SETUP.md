@@ -354,15 +354,39 @@ tunnel address the router actually uses.
 
 ### Does CoA work?
 
-Apply a fair-use throttle from the UI ("Run check now" on Fair use policy) and
-watch the FreeRADIUS log. A connected session should change speed within seconds.
+CoA is the one link in the chain that fails quietly. Authentication and
+accounting both leave a trail; a CoA that never arrives just means speed changes
+wait for the subscriber to reconnect, which looks like nothing at all.
 
-**Known gap:** `coa()` in `radius.js` shells out to `radclient`, which is not
-installed alongside the API — and the failure is swallowed by `.catch(() => {})`.
-The database is always updated correctly, so the new speed applies at the next
-reconnect, but *live* changes will not fire until you either install
-`freeradius-utils` next to the API or move CoA into the FreeRADIUS container.
-Worth fixing before you rely on instant throttling.
+So test it directly: **Routers → Test CoA** sends a real CoA-Request to that
+router and reports what came back.
+
+| Result | Meaning |
+|---|---|
+| "Router accepted the change (CoA-ACK)" | Working |
+| "Router answered and the shared secret matches… rejected this username" | **Also working.** The probe uses a username that does not exist, so a NAK proves the round trip |
+| "no response after N attempts" | The router never answered — see below |
+
+Silence means one of: UDP 3799 not reachable over the tunnel, CoA not enabled on
+the router, or `routers.host` not holding the address the router actually uses.
+Enable it on the MikroTik with:
+
+```
+/radius incoming set accept=yes port=3799
+```
+
+The result is stored on the router row, so the Routers screen shows whether CoA
+last worked rather than leaving it invisible.
+
+For a live end-to-end check, apply a fair-use throttle ("Run check now" on Fair
+use policy) and watch the FreeRADIUS log — a connected session should change
+speed within seconds.
+
+> The app speaks RADIUS itself (`backend/src/coa.js`) rather than shelling out to
+> `radclient`. That binary is not installed next to the API and does not exist on
+> Windows, so every CoA used to fail silently. `npm test` in `backend/` checks the
+> packet encoding against a decoder, including that a reply signed with the wrong
+> secret is rejected.
 
 ---
 
@@ -377,7 +401,7 @@ Worth fixing before you rely on instant throttling.
 | Tunnel never handshakes | UDP 51820 blocked, or `WG_ENDPOINT` is wrong. WireGuard is silent by design — it does not reply to bad peers at all |
 | Handshake fine, no ping | Missing `/ip/address` on the router, or the firewall rule was not added |
 | Fair use always reads 0 | No `interim-update`, so nothing is written until a session ends |
-| Speed changes only on reconnect | The CoA gap above |
+| Speed changes only on reconnect | CoA is not landing — press **Test CoA** on the Routers screen; usually `/radius incoming` is not enabled on the MikroTik |
 | OVPN: `AUTH_FAILED` for a good password | The row is there but the script cannot reach Postgres. OpenVPN gives its scripts a bare environment, so they read `/etc/openvpn/db.env`, which the entrypoint writes at start |
 | OVPN: auth OK, then "no shared cipher" | `data-ciphers` does not include `AES-256-CBC` |
 | OVPN: router connects on the wrong address | `client-connect.sh` found no `ovpn_clients` row for that username |
