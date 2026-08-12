@@ -46,7 +46,7 @@ Everything funnels into `applyPayment()`, which is idempotent on `(tenant_id, pr
 
 Every table carries `tenant_id`. `db.forTenant(id)` returns a query helper that sets
 `SET LOCAL app.tenant_id` so the row-level security policies in schema.sql apply. Tenant is resolved from
-the request host (`zuri.billing.co.ke`), the NAS identifier for RADIUS traffic, or the shortcode on a webhook.
+the request host (`zuri.vibelink.tech`), the NAS identifier for RADIUS traffic, or the shortcode on a webhook.
 
 ## SMS gateways
 
