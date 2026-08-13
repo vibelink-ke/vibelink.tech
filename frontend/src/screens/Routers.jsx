@@ -316,7 +316,9 @@ export default function Routers() {
                     onClick={() =>
                       setEdit({
                         id: r.id, name: r.name, host: String(r.host).split('/')[0],
-                        secret: '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
+                        // The real secret, not blank: it is generated for you, so this
+                        // is the only place to read it when configuring a router by hand.
+                        secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
                       })
                     }
                   >
@@ -513,17 +515,32 @@ export default function Routers() {
               />
             </Field>
             <Field label="RADIUS shared secret" span={2}>
-              <Input
-                value={edit.secret}
-                autoComplete="off"
-                placeholder="leave blank to keep the current one"
-                onChange={(e) => setEdit((s) => ({ ...s, secret: e.target.value }))}
-              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input
+                  value={edit.secret}
+                  autoComplete="off"
+                  style={{ fontFamily: font.mono, fontSize: 12 }}
+                  onChange={(e) => setEdit((s) => ({ ...s, secret: e.target.value }))}
+                />
+                <Button
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(edit.secret);
+                      store.toast('Secret copied');
+                    } catch {
+                      store.toast('Copy failed — select the text and copy manually');
+                    }
+                  }}
+                >
+                  Copy
+                </Button>
+              </div>
             </Field>
             <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
               The NAS address is how RADIUS recognises this router and where CoA is sent — it must
-              stay the router’s tunnel address. Changing the secret here means changing it on the
-              MikroTik too, or authentication stops.
+              stay the router’s tunnel address. Configure pushes this secret for you; copy it only
+              if you are setting the MikroTik up by hand, and if you change it here, change it there
+              too or authentication stops.
             </span>
           </div>
         )}
