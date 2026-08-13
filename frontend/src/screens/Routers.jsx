@@ -4,19 +4,11 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Textarea } from '../ui/primitives';
 
-/**
- * A shared secret nobody should be inventing. It is never typed into the router
- * by hand any more — Configure pushes it — so a memorable one buys nothing and
- * costs entropy. Browser crypto, not Math.random.
- */
-function generateSecret(bytes = 24) {
-  const buf = new Uint8Array(bytes);
-  crypto.getRandomValues(buf);
-  return btoa(String.fromCharCode(...buf)).replace(/[^A-Za-z0-9]/g, '').slice(0, 28);
-}
-
+// No secret here. The server mints one when the field arrives empty, and
+// Configure pushes it to the router, so nobody types or even sees it during
+// onboarding. It stays readable under Edit for manual setups.
 const blankRouter = () => ({
-  name: '', host: '', secret: generateSecret(), apiPort: '8728', role: 'both',
+  name: '', host: '', secret: '', apiPort: '8728', role: 'both',
 });
 
 export default function Routers() {
@@ -28,6 +20,7 @@ export default function Routers() {
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
   const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
   const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
+  const [showSecret, setShowSecret] = useState(false);
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
@@ -200,8 +193,8 @@ export default function Routers() {
   };
 
   const confirmRouter = async () => {
-    if (!form.name.trim() || !form.host.trim() || !form.secret.trim())
-      return store.toast('Nickname, NAS address and RADIUS secret are all required');
+    if (!form.name.trim() || !form.host.trim())
+      return store.toast('Nickname and NAS address are both required');
     setBusy(true);
     try {
       const created = await api.createRouter({
@@ -615,9 +608,13 @@ export default function Routers() {
                 <Input
                   value={edit.secret}
                   autoComplete="off"
+                  // Masked by default: this screen gets opened in front of other
+                  // people, and the secret is only ever needed for manual setup.
+                  type={showSecret ? 'text' : 'password'}
                   style={{ fontFamily: font.mono, fontSize: 12 }}
                   onChange={(e) => setEdit((s) => ({ ...s, secret: e.target.value }))}
                 />
+                <Button onClick={() => setShowSecret((v) => !v)}>{showSecret ? 'Hide' : 'Show'}</Button>
                 <Button
                   onClick={async () => {
                     try {
@@ -667,16 +664,10 @@ export default function Routers() {
             <Field label="API port">
               <Input value={form.apiPort} onChange={set('apiPort')} type="number" />
             </Field>
-            <Field label="RADIUS shared secret" span={2}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Input value={form.secret} onChange={set('secret')} autoComplete="off" style={{ fontFamily: font.mono, fontSize: 12 }} />
-                <Button onClick={() => setForm((s) => ({ ...s, secret: generateSecret() }))}>New</Button>
-              </div>
-            </Field>
-            <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
-              Generated for you. Press Configure after adding the router and it is pushed there
-              automatically — you only need to copy it if you configure the MikroTik by hand.
-            </span>
+            {/* No secret field. It is generated on the server and pushed to the
+                router by Configure, so showing it here only invited someone to
+                replace a random value with a memorable one. It remains readable
+                under Edit for anyone configuring a MikroTik by hand. */}
             <Field label="Role" span={2}>
               <select
                 value={form.role}

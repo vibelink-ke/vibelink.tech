@@ -32,12 +32,23 @@ const { RouterOSAPI } = pkg;
 {
   const require = createRequire(import.meta.url);
   const { Channel } = require('node-routeros/dist/Channel');
-  const original = Channel.prototype.processPacket;
   if (!Channel.prototype.__emptyReplyPatched) {
+    const original = Channel.prototype.processPacket;
     Channel.prototype.processPacket = function processPacket(packet) {
       if (Array.isArray(packet) && packet[0] === '!empty') packet[0] = '!done';
       return original.call(this, packet);
     };
+
+    // Belt and braces. `!empty` is the one we hit, but the same default branch
+    // catches anything else RouterOS ever sends that this library predates, and
+    // the consequence is always the same: an exception thrown from inside a
+    // socket callback, which nothing can catch and which ends the process.
+    //
+    // A reply we cannot interpret should fail the one command, not the server.
+    Channel.prototype.onUnknown = function onUnknown(reply) {
+      this.emit('done', this.data ?? []);
+    };
+
     Channel.prototype.__emptyReplyPatched = true;
   }
 }
