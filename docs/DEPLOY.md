@@ -33,7 +33,8 @@ Hetzner (Falkenstein) and DigitalOcean (Frankfurt/Amsterdam) are ~150 ms away
 and cheap. A Nairobi host — Angani, Safaricom Cloud, EAC Directory — is ~5 ms
 and better if you can. Any of them is fine.
 
-Pick **Ubuntu 24.04 LTS**. The rest of this guide assumes it.
+**Ubuntu 24.04 LTS** or **Debian 12** both work. The only difference that bites:
+Debian does not ship `ufw`, so install it before the firewall step.
 
 > You create the account and the server yourself — that part needs your payment
 > details and nobody else should be entering them.
@@ -71,7 +72,9 @@ Both must print your VPS IP.
 
 ## 3. Prepare the server
 
-SSH in as root, then make a user so you are not deploying as root:
+SSH in as root, then make a user so you are not deploying as root. Do this
+**before** installing Docker — the install line adds this user to the `docker`
+group, and that fails if the user does not exist yet:
 
 ```bash
 adduser vibelink && usermod -aG sudo vibelink
@@ -83,10 +86,17 @@ Install Docker:
 curl -fsSL https://get.docker.com | sh && usermod -aG docker vibelink
 ```
 
-Open only what is needed:
+On Debian, install the firewall first (Ubuntu already has it):
 
 ```bash
-ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 1194/tcp && ufw allow 51820/udp && ufw enable
+apt-get install -y ufw
+```
+
+Open only what is needed. Allowing 22 in the same breath as `enable` is what
+stops you locking yourself out of your own SSH session:
+
+```bash
+ufw allow 22/tcp && ufw allow 80/tcp && ufw allow 443/tcp && ufw allow 1194/tcp && ufw allow 51820/udp && ufw --force enable
 ```
 
 What each is for: 22 SSH, 80 Let's Encrypt validation (it cannot use 443 to get
@@ -190,7 +200,12 @@ than staying pending. Pending means the webhook is not arriving.
 - [ ] `POSTGRES_PASSWORD` generated, not typed from memory
 - [ ] A different RADIUS secret per router; the UI already allows it
 - [ ] 1812/1813 restricted to `10.50.0.0/16`
-- [ ] SSH key-only: `PasswordAuthentication no` in `/etc/ssh/sshd_config`
+- [ ] SSH key-only. A public box with root password login gets brute-forced
+      within hours of being switched on. Copy your key up, prove it works in a
+      **second** terminal while the first stays open, and only then set
+      `PermitRootLogin no` and `PasswordAuthentication no` in
+      `/etc/ssh/sshd_config` and `systemctl restart ssh`. Doing it in that order
+      is the difference between hardening the box and locking yourself out of it.
 - [ ] Back up the `billing-ovpn-pki` volume. Losing the CA means re-onboarding
       every RouterOS 6 router.
 - [ ] A `radacct` retention policy — it grows fast and nothing prunes it
