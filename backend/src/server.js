@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import util from 'node:util';
 import express from 'express';
 import { pool, tenantByHost } from './db.js';
 import { router as daraja } from './payments/daraja.js';
@@ -598,6 +599,138 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
     defaultApiPort: 8728,
   });
 }));
+
+/**
+ * Configure a MikroTik over its API: RADIUS, CoA, PPPoE and hotspot, in one go.
+ *
+ * First run needs the operator's own admin login, used once to create our
+ * service account and then discarded. Every run after that uses that account,
+ * so changing the admin password does not break anything.
+ *
+ * Reachable only because the API container shares the tunnel namespace — the
+ * router's address here is its tunnel address, never a public one.
+ */
+app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  if (!secrets.configured())
+    return res.status(400).json({
+      error: 'APP_SECRET_KEY is not set on the server, so the router password cannot be stored safely. Generate one with: openssl rand -base64 32',
+    });
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const stored = secrets.decrypt(r.service_password_enc);
+  const admin = {
+    user: String(req.body?.username ?? '').trim(),
+    password: String(req.body?.password ?? ''),
+  };
+
+  // Prefer our own account; fall back to the credentials just supplied.
+  const login = stored && r.service_user
+    ? { user: r.service_user, password: stored }
+    : admin.user
+      ? admin
+      : null;
+
+  if (!login)
+    return res.status(428).json({
+      error: 'Enter the router’s admin username and password once. A dedicated account is created from it and used for every push after that.',
+      needsAdmin: true,
+    });
+
+  const done = [];
+  let conn;
+  try {
+    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+
+    const info = await ros.identify(conn);
+
+    // Mint our own account if we do not have one yet.
+    let servicePassword = stored;
+    if (!servicePassword) {
+      servicePassword = secrets.randomPassword();
+      const { created } = await ros.ensureServiceUser(conn, { password: servicePassword });
+      await pool.query(
+        `update routers set service_user=$2, service_password_enc=$3, service_created_at=now()
+          where id=$1`,
+        [r.id, ros.SERVICE_USER, secrets.encrypt(servicePassword)]);
+      done.push(created ? `created the ${ros.SERVICE_USER} account` : `took over the existing ${ros.SERVICE_USER} account`);
+    }
+
+    const radius = await ros.applyRadius(conn, {
+      serverIp: SERVER_IP,
+      secret: r.secret,
+      coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
+      services: r.role === 'both' ? 'ppp,hotspot' : r.role,
+    });
+    done.push(`pointed RADIUS at ${SERVER_IP} and enabled CoA`);
+    if (radius.replaced) done.push(`removed ${radius.replaced} stale RADIUS entr${radius.replaced === 1 ? 'y' : 'ies'}`);
+
+    if (r.role === 'both' || r.role === 'pppoe') {
+      await ros.applyPpp(conn);
+      done.push('enabled PPPoE accounting with 5-minute interim updates');
+    }
+    if (r.role === 'both' || r.role === 'hotspot') {
+      const { profiles } = await ros.applyHotspot(conn);
+      done.push(profiles
+        ? `switched ${profiles} hotspot profile${profiles === 1 ? '' : 's'} to RADIUS`
+        : 'no hotspot profiles on this router');
+    }
+
+    await pool.query(
+      `update routers set autoconfig_last_at=now(), autoconfig_last_ok=true, autoconfig_last_error=null,
+              ros_version=$2, ros_identity=$3, status='up', last_seen=now()
+        where id=$1`,
+      [r.id, info.version, info.identity]);
+
+    res.json({ ok: true, applied: done, ...info });
+  } catch (e) {
+    const message = describeRouterError(e, host, r.api_port ?? 8728);
+    await pool.query(
+      'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
+      [r.id, message.slice(0, 300)]);
+    res.status(502).json({ error: message, applied: done });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/**
+ * Turn a node-routeros failure into something worth reading.
+ *
+ * RosException carries the cause in `errno`, not in `message`: for a socket-level
+ * failure that is a raw libuv number with no matching entry in the library's
+ * message table, so `message` comes back as an empty string and the operator is
+ * shown a blank error. The number is also platform-specific — ECONNREFUSED is
+ * -4078 on Windows and -111 on Linux — so translate it rather than matching it.
+ */
+function describeRouterError(e, host, port) {
+  let code = e?.code ?? e?.errno;
+  if (typeof code === 'number') {
+    try { code = util.getSystemErrorName(code); } catch { code = String(code); }
+  }
+  code = String(code ?? '');
+
+  if (code === 'CANTLOGIN')
+    return 'The router rejected those credentials. Check the username and password, and that the account has full rights.';
+  if (code === 'ECONNREFUSED')
+    return `Nothing is listening on ${host}:${port}. Enable the API service on the router: /ip service enable api`;
+  if (code === 'SOCKTMOUT' || code === 'ETIMEDOUT')
+    return `No response from ${host}:${port}. Is the tunnel up, and is the NAS address the router's tunnel address rather than its LAN one?`;
+  if (code === 'EHOSTUNREACH' || code === 'ENETUNREACH')
+    return `No route to ${host}. The tunnel is probably down.`;
+  if (code === 'ECONNRESET')
+    return `${host} closed the connection. On RouterOS 7 check that the plain API service is enabled, not only api-ssl.`;
+
+  // Never return an empty string: a blank error is worse than a clumsy one.
+  return e?.message?.trim() || (code ? `${code} talking to ${host}:${port}` : `Could not configure ${host}:${port}`);
+}
 
 /** Rename a router, correct its NAS address, secret, API port or role. */
 app.put('/api/routers/:id', wrap(async (req, res) => {

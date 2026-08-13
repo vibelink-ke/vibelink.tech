@@ -691,6 +691,26 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── router service account ───────────────
+-- The app pushes RADIUS, PPPoE and hotspot settings over the RouterOS API rather
+-- than having operators paste commands. It logs in as its own account, created
+-- on first push using the operator's admin credentials, so that when they change
+-- their own password — and they will — pushes keep working instead of silently
+-- failing until someone notices.
+--
+-- Same username on every router so it is recognisable, but a different password
+-- on each: one shared password would turn a single compromised site into access
+-- to every customer's router. Stored encrypted (see src/secrets.js), because a
+-- database dump must not be a set of keys to the whole fleet.
+alter table routers add column if not exists service_user         text;
+alter table routers add column if not exists service_password_enc text;
+alter table routers add column if not exists service_created_at   timestamptz;
+alter table routers add column if not exists ros_version          text;
+alter table routers add column if not exists ros_identity         text;
+alter table routers add column if not exists autoconfig_last_at   timestamptz;
+alter table routers add column if not exists autoconfig_last_ok   boolean;
+alter table routers add column if not exists autoconfig_last_error text;
+
 -- ─────────────── CoA result ───────────────
 -- CoA is best-effort — radreply is already correct, so a failure only delays the
 -- new speed until the subscriber reconnects. That makes a permanently broken CoA

@@ -295,8 +295,32 @@ never reaches the log.
 
 ### Point the router at RADIUS
 
-Still on the MikroTik — substitute your own secret, the one you entered in the
-Routers form:
+**The easy way: press Configure on the Routers screen.** The server reaches the
+router over the tunnel on its API port and applies all of the below itself —
+RADIUS, CoA, PPPoE accounting and every hotspot profile.
+
+The first push asks for the router's admin login. It is used once, to create a
+`vibelink-svc` account, and is not stored. Everything after that uses that
+account, so an operator changing their own password does not quietly break
+future pushes. The account is commented "vibelink billing - do not delete";
+if someone deletes it anyway, the next push just asks for the admin login again.
+
+The password for that account is random **per router** — the username is the
+same everywhere so it is recognisable, but one shared password would turn a
+single compromised site into access to every customer's router. It is encrypted
+with `APP_SECRET_KEY`, which therefore has to be set before Configure will run.
+
+Re-running Configure is safe: it updates its own RADIUS entry rather than adding
+a second one, which RouterOS would otherwise accept and then load-balance across.
+
+For the API to be reachable at all, the router needs its API service on:
+
+```
+/ip service enable api
+```
+
+The manual equivalent, if you would rather do it by hand — substitute your own
+secret, the one you entered in the Routers form:
 
 ```
 /radius

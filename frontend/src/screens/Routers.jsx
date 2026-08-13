@@ -13,6 +13,8 @@ export default function Routers() {
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);   // router id currently being probed
   const [edit, setEdit] = useState(null);         // the router row open for editing
+  const [configuring, setConfiguring] = useState(null);   // router id being pushed to
+  const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
@@ -86,6 +88,32 @@ export default function Routers() {
       store.toast(`CoA test failed: ${e.message}`);
     } finally {
       setTesting(null);
+    }
+  };
+
+  /**
+   * Push RADIUS, CoA, PPPoE and hotspot settings to the router.
+   *
+   * The admin login is only needed the first time: the server uses it to create
+   * its own account and uses that from then on, so an operator changing their
+   * own password does not quietly break every later push.
+   */
+  const runAutoconfig = async (r, creds) => {
+    setConfiguring(r.id);
+    try {
+      const res = await api.autoconfigRouter(r.id, creds ?? {});
+      store.toast(`${r.name}: ${res.applied.join('; ')}`);
+      setAdminPrompt(null);
+      store.setCollection('routers', (rs) =>
+        rs.map((x) => (x.id === r.id
+          ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString(), ros_version: res.version }
+          : x)));
+    } catch (e) {
+      // 428 is the server saying it has no account yet and needs one from you.
+      if (e.status === 428) setAdminPrompt({ router: r, username: 'admin', password: '' });
+      else store.toast(`${r.name}: ${e.message}`);
+    } finally {
+      setConfiguring(null);
     }
   };
 
@@ -203,6 +231,13 @@ export default function Routers() {
               align: 'right',
               render: (r) => (
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <Button
+                    variant={r.autoconfig_last_ok ? undefined : 'primary'}
+                    onClick={() => runAutoconfig(r)}
+                    disabled={configuring === r.id}
+                  >
+                    {configuring === r.id ? 'Configuring…' : 'Configure'}
+                  </Button>
                   <Button onClick={() => testCoa(r)} disabled={testing === r.id}>
                     {testing === r.id ? 'Testing…' : 'Test CoA'}
                   </Button>
@@ -316,6 +351,62 @@ export default function Routers() {
             <span style={{ fontSize: 12, color: color.muted }}>
               The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
               can always reach it. Come back here once it connects.
+            </span>
+          </div>
+        )}
+      </Modal>
+
+      {/* First push only: the admin login used to mint our own account */}
+      <Modal
+        open={!!adminPrompt}
+        title={`Configure ${adminPrompt?.router?.name ?? 'router'}`}
+        onClose={() => setAdminPrompt(null)}
+        footer={
+          <>
+            <Button onClick={() => setAdminPrompt(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={configuring === adminPrompt?.router?.id}
+              onClick={() =>
+                runAutoconfig(adminPrompt.router, {
+                  username: adminPrompt.username,
+                  password: adminPrompt.password,
+                })
+              }
+            >
+              {configuring === adminPrompt?.router?.id ? 'Configuring…' : 'Configure router'}
+            </Button>
+          </>
+        }
+      >
+        {adminPrompt && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <span style={{ fontSize: 13, color: color.muted }}>
+              Your router login is needed once. It is used to create a dedicated{' '}
+              <strong style={{ fontFamily: font.mono }}>vibelink-svc</strong> account and is not
+              stored — every push after this uses that account, so changing your own password later
+              will not break anything.
+            </span>
+            <Field label="Router admin username">
+              <Input
+                value={adminPrompt.username}
+                autoComplete="off"
+                onChange={(e) => setAdminPrompt((s) => ({ ...s, username: e.target.value }))}
+              />
+            </Field>
+            <Field label="Router admin password">
+              <Input
+                type="password"
+                value={adminPrompt.password}
+                autoComplete="off"
+                onChange={(e) => setAdminPrompt((s) => ({ ...s, password: e.target.value }))}
+              />
+            </Field>
+            <span style={{ fontSize: 12, color: color.muted }}>
+              This will point RADIUS at the server, switch CoA on, and enable accounting for PPPoE
+              and hotspot. Re-running it later is safe — it updates rather than duplicates. The
+              account it creates is commented “do not delete”; removing it on the router just means
+              entering these details again.
             </span>
           </div>
         )}

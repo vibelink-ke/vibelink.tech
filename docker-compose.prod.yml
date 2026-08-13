@@ -48,6 +48,9 @@ services:
       BASE_URL: https://${ROOT_DOMAIN}
       ROOT_DOMAIN: ${ROOT_DOMAIN}
       RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
+      # Encrypts the per-router service passwords. Without it, pushing router
+      # configuration refuses rather than storing them in the clear.
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
     # No `ports` or `expose`: the namespace belongs to openvpn, so 8080 is
