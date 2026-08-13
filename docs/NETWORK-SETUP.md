@@ -375,7 +375,7 @@ Create a client in the UI with a PPPoE username and password, apply a payment so
 `activateSubscriber()` runs, then:
 
 ```bash
-docker compose exec -it db psql -U billing -d billing \
+set -a && . ./.env && set +a && docker compose exec -it db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   -c "select username, attribute, value from radcheck order by id desc limit 5;"
 ```
 

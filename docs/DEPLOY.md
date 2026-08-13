@@ -212,8 +212,17 @@ than staying pending. Pending means the webhook is not arriving.
 - [ ] Database backups:
 
 ```bash
-docker compose -f docker-compose.prod.yml exec db pg_dump -U billing billing | gzip > backup-$(date +%F).sql.gz
+set -a && . ./.env && set +a && docker compose -f docker-compose.prod.yml exec db pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > backup-$(date +%F).sql.gz
 ```
+
+---
+
+> Anything that runs `psql` or `pg_dump` needs the credentials from `.env`, so
+> source it first — `POSTGRES_USER` is not necessarily `billing`:
+>
+> ```bash
+> set -a && . ./.env && set +a
+> ```
 
 ---
 
@@ -221,6 +230,7 @@ docker compose -f docker-compose.prod.yml exec db pg_dump -U billing billing | g
 
 | Symptom | Cause |
 |---|---|
+| `role "billing" does not exist` | A command hardcoded the database user. Source `.env` and use `$POSTGRES_USER` |
 | Certificate never issues | DNS not pointing here yet, port 80 closed, or Cloudflare proxying is on (orange cloud) |
 | `unknown tenant` on every page | The hostname's first label matches no `tenants.subdomain`. The apex needs a tenant whose subdomain is the first label of your domain |
 | Certificate refused for a subdomain | On-demand TLS asked the API and got a 404 — that subdomain is not a tenant. Create the tenant first |
