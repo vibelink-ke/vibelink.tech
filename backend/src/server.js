@@ -203,6 +203,29 @@ app.use(async (req, res, next) => {
   next();
 });
 
+/**
+ * Everything below this line requires a signed-in admin.
+ *
+ * The resolver above establishes *which* tenant a request belongs to, from the
+ * session or failing that the hostname. Resolving a tenant is not the same as
+ * being allowed to read it, and nothing enforced the difference: on a public
+ * server every /api route answered anyone who knew the hostname — subscribers,
+ * payments, SMS logs, gateway settings. It only looked harmless while the
+ * database was empty.
+ *
+ * Exceptions, both public by necessity:
+ *   /portal/*  the captive portal, used by subscribers who have no admin login
+ *   /radius/*  called by FreeRADIUS over the internal network; Caddy must not
+ *              proxy it from outside
+ *
+ * Auth and webhook routes are mounted above the resolver and never reach here.
+ */
+app.use((req, res, next) => {
+  if (req.path.startsWith('/portal/') || req.path.startsWith('/radius/')) return next();
+  if (!req.session) return res.status(401).json({ error: 'sign in required' });
+  next();
+});
+
 // ── captive portal ────────────────────────────────
 app.get('/portal/plans', async (req, res) => {
   const { rows } = await pool.query(

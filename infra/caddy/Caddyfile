@@ -39,9 +39,10 @@
 	handle /webhooks/* {
 		reverse_proxy api:8080
 	}
-	handle /radius/* {
-		reverse_proxy api:8080
-	}
+
+	# /radius/* is deliberately not proxied. FreeRADIUS reaches the API over the
+	# compose network, so exposing it here would only let strangers POST to
+	# /radius/post-auth and start voucher clocks.
 
 	# The React bundle. try_files sends unknown paths to index.html so client-side
 	# routes survive a refresh.
