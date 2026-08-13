@@ -33,6 +33,15 @@ if [ ! -f "$PKI/server.crt" ]; then
   echo "PKI generated"
 fi
 
+# Keep the digest in one place. The generated MikroTik script reads the same
+# variable, so the two ends cannot drift apart and leave tunnels dying straight
+# after authentication.
+if [ -n "${OVPN_AUTH_DIGEST:-}" ]; then
+  digest=$(printf '%s' "$OVPN_AUTH_DIGEST" | tr '[:lower:]' '[:upper:]')
+  sed -i "s/^auth .*/auth ${digest}/" /etc/openvpn/server.conf
+  echo "auth digest set to ${digest}"
+fi
+
 # The tun device has to exist inside the container.
 mkdir -p /dev/net
 [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200

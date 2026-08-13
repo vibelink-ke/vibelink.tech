@@ -100,6 +100,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   auth.setSessionCookie(res, token, expiresAt);
   await pool.query('update staff set last_seen = now() where id = $1', [acct.id]);
   auth.pruneSessions();
+  auth.pruneHandoffs();
 
   const s = await auth.readSession(token);
   res.json(auth.publicSession(s));
@@ -153,7 +154,40 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
   const { token, expiresAt } = await auth.createSession(staff.id, tenant.id, { remember: true });
   auth.setSessionCookie(res, token, expiresAt);
   const s = await auth.readSession(token);
-  res.json(auth.publicSession(s));
+
+  // Send them to their own portal. Signup happens on the apex, but every screen
+  // resolves its tenant from the hostname, so staying here would leave them
+  // looking at whichever tenant owns the apex.
+  let redirectTo = null;
+  const root = process.env.ROOT_DOMAIN?.trim();
+  if (root && req.hostname !== `${sub}.${root}`) {
+    const handoff = await auth.createHandoff(token);
+    redirectTo = `https://${sub}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
+  }
+
+  res.json({ ...auth.publicSession(s), redirectTo });
+}));
+
+/**
+ * Adopt a session minted on another hostname.
+ *
+ * Only ever reachable with a ticket that the apex just issued, is good for a
+ * minute, and works once. On success it sets this host's own cookie and bounces
+ * to the app, so the address bar ends up clean rather than carrying the token.
+ */
+app.get('/api/auth/handoff', wrap(async (req, res) => {
+  const sessionToken = await auth.consumeHandoff(req.query.token);
+  if (!sessionToken) return res.redirect(302, '/?handoff=expired');
+
+  const s = await auth.readSession(sessionToken);
+  if (!s) return res.redirect(302, '/?handoff=expired');
+
+  // Match the cookie to whatever life the session has left, rather than
+  // re-deriving it and risking a cookie that outlives the row behind it.
+  const { rows: [row] } = await pool.query(
+    'select expires_at from admin_sessions where token = $1', [sessionToken]);
+  auth.setSessionCookie(res, sessionToken, new Date(row.expires_at));
+  res.redirect(302, '/');
 }));
 
 app.post('/api/auth/logout', wrap(async (req, res) => {
@@ -533,11 +567,18 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   const v6 = String(req.body?.routerosVersion ?? '7').startsWith('6');
   const cipher = v6 ? 'aes256' : 'aes256-cbc';
 
+  // Must match `auth` in infra/openvpn/server.conf — OpenVPN cannot negotiate the
+  // HMAC digest per client, so one wrong value here means the tunnel dies right
+  // after authenticating. Default sha1 because the RouterOS 6 OVPN client rejects
+  // sha256 outright ("syntax error" on the auth= token, not a runtime failure).
+  // HMAC-SHA1 is still sound: the SHA1 collision attacks do not carry over to HMAC.
+  const authDigest = (process.env.OVPN_AUTH_DIGEST ?? 'sha1').toLowerCase();
+
   const script = [
     // One line per command: the backslash continuation this used to emit is
     // fragile when pasted, and it hid which parameter the parser rejected.
     `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `
-      + `user=${username} password=${token} certificate=none cipher=${cipher} auth=sha256 `
+      + `user=${username} password=${token} certificate=none cipher=${cipher} auth=${authDigest} `
       // Explicit, because a management tunnel must never carry customer traffic
       // even if the server one day pushes a route.
       + 'add-default-route=no mode=ip',

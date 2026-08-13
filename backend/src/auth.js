@@ -64,6 +64,42 @@ export async function readSession(token) {
 export const destroySession = (token) =>
   pool.query('delete from admin_sessions where token = $1', [token]);
 
+/* ── handing a session to another subdomain ───────────────── */
+
+const HANDOFF_SECONDS = 60;
+
+/** One-use ticket the apex gives out so a tenant's own hostname can adopt the session. */
+export async function createHandoff(sessionToken) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  await pool.query(
+    `insert into session_handoffs (token, session_token, expires_at)
+     values ($1, $2, now() + ($3 || ' seconds')::interval)`,
+    [token, sessionToken, HANDOFF_SECONDS]
+  );
+  return token;
+}
+
+/**
+ * Redeem a ticket, at most once.
+ *
+ * The update is the guard: `used_at is null` inside the statement means two
+ * simultaneous requests cannot both come away with the session, without needing
+ * a transaction around a read.
+ */
+export async function consumeHandoff(token) {
+  if (!token) return null;
+  const { rows: [row] } = await pool.query(
+    `update session_handoffs set used_at = now()
+      where token = $1 and used_at is null and expires_at > now()
+      returning session_token`,
+    [token]
+  );
+  return row?.session_token ?? null;
+}
+
+export const pruneHandoffs = () =>
+  pool.query('delete from session_handoffs where expires_at < now()').catch(() => {});
+
 /** Opportunistic cleanup so expired rows do not accumulate. */
 export const pruneSessions = () =>
   pool.query('delete from admin_sessions where expires_at < now()').catch(() => {});

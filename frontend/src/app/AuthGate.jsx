@@ -149,6 +149,16 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink' }) {
     try {
       const session = await api.signup(f);
       clearSecrets();
+
+      // Their portal lives at their own subdomain, and every screen resolves its
+      // tenant from the hostname — so staying here would show them whoever owns
+      // the apex. The URL carries a one-use ticket that the subdomain trades for
+      // its own cookie, which is why they do not have to sign in again.
+      if (session.redirectTo) {
+        window.location.assign(session.redirectTo);
+        return;   // leave the spinner up; the page is on its way out
+      }
+
       onSignedIn(
         session,
         `${session.company} created at ${session.subdomain}.vibelink.tech — credentials emailed, first month free`

@@ -13,6 +13,6 @@ COPY client-connect.sh /etc/openvpn/client-connect.sh
 COPY entrypoint.sh    /entrypoint.sh
 RUN chmod +x /etc/openvpn/auth.sh /etc/openvpn/client-connect.sh /entrypoint.sh
 
-EXPOSE 1194/udp
+EXPOSE 1194/tcp
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["openvpn", "--config", "/etc/openvpn/server.conf"]

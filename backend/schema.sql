@@ -756,6 +756,24 @@ create table if not exists admin_sessions (
 );
 create index on admin_sessions (expires_at);
 
+-- ─────────────── signing in across subdomains ───────────────
+-- Signup happens on the apex, but a tenant's portal lives at its own subdomain,
+-- and the session cookie is host-only — so a redirect would land them on a login
+-- screen seconds after choosing a password.
+--
+-- Widening the cookie to .vibelink.tech would fix that and is the wrong trade:
+-- it would then be sent to every tenant's hostname, and since sibling subdomains
+-- count as same-site, SameSite=Lax would not hold a malicious tenant back.
+-- Instead the apex mints a single-use token, valid for a minute, that the
+-- subdomain exchanges for its own host-only cookie on the same session row.
+create table if not exists session_handoffs (
+  token         text primary key,
+  session_token text not null references admin_sessions on delete cascade,
+  expires_at    timestamptz not null,
+  used_at       timestamptz
+);
+create index if not exists session_handoffs_expiry on session_handoffs (expires_at);
+
 alter table outages       enable row level security;
 alter table sla_policies  enable row level security;
 alter table kb_articles   enable row level security;
