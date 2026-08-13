@@ -230,10 +230,7 @@ export default function Routers() {
       {/* Only worth showing when some credential is not backing a live router:
           those are the ones holding an address for no reason. */}
       {(store.ovpnClients ?? []).length > 0 && (
-        <Card
-          title="Tunnel credentials"
-          subtitle="Issued when you mint an OVPN script. Each one holds an address in your subnet until it is revoked."
-        >
+        <Card title="Tunnel credentials">
           <Table
             rowKey={(c) => c.id}
             empty="None issued"
