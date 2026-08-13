@@ -26,13 +26,20 @@ services:
       timeout: 5s
       retries: 10
 
+  # Shares the OpenVPN container's network namespace, which is the only place the
+  # tunnel exists. Without this the API has no route to 10.50.0.0/16, so every CoA
+  # is sent into a void and reported as "no answer" — the database stays correct,
+  # so the only symptom is that live speed changes never arrive.
   api:
     build: ./backend
     container_name: billing-api
     restart: unless-stopped
+    network_mode: 'service:openvpn'
     depends_on:
       db:
         condition: service_healthy
+      openvpn:
+        condition: service_started
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
       PORT: '8080'
@@ -43,8 +50,8 @@ services:
       RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
-    expose:
-      - '8080'
+    # No `ports` or `expose`: the namespace belongs to openvpn, so 8080 is
+    # published (or not) there. Caddy reaches it as openvpn:8080.
 
   web:
     build:
@@ -64,24 +71,26 @@ services:
       - caddy-data:/data      # certificates; losing this re-issues them
       - caddy-config:/config
 
+  # Also in the tunnel's namespace. Routers send RADIUS to 10.50.0.1, which is the
+  # tunnel-side address of that namespace — from anywhere else those packets
+  # arrive at the OpenVPN process and are dropped.
   freeradius:
     build: ./infra/freeradius
     container_name: billing-radius
     restart: unless-stopped
+    network_mode: 'service:openvpn'
     depends_on:
       db:
         condition: service_healthy
+      openvpn:
+        condition: service_started
     environment:
       PGHOST: db
       PGPORT: '5432'
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
-    ports:
-      # Only routers should reach these. Close them at the VPS firewall to
-      # everything except the tunnel supernet — see docs/DEPLOY.md.
-      - '1812:1812/udp'
-      - '1813:1813/udp'
+    # Ports live on the openvpn service; see the note there.
     volumes:
       - ./infra/freeradius:/config:ro
     entrypoint: ['/bin/sh', '/config/entrypoint.sh']
@@ -107,8 +116,16 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+    # This service owns the network namespace that api and freeradius join, so
+    # every port for all three is published here.
     ports:
       - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
+      # RADIUS. Reachable over the tunnel without these being open to the world —
+      # keep them closed at the VPS firewall. See docs/DEPLOY.md.
+      - '1812:1812/udp'
+      - '1813:1813/udp'
+      # 8080 (the API) is deliberately not published. Caddy reaches it inside the
+      # compose network as openvpn:8080.
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
 

@@ -12,6 +12,7 @@ export default function Routers() {
   const [form, setForm] = useState(null); // BLANK_ROUTER when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);   // router id currently being probed
+  const [edit, setEdit] = useState(null);         // the router row open for editing
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
@@ -85,6 +86,39 @@ export default function Routers() {
       store.toast(`CoA test failed: ${e.message}`);
     } finally {
       setTesting(null);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!edit.name?.trim() || !edit.host?.trim())
+      return store.toast('Nickname and NAS address are both required');
+    setBusy(true);
+    try {
+      const updated = await api.updateRouter(edit.id, {
+        name: edit.name, host: edit.host, secret: edit.secret,
+        apiPort: Number(edit.apiPort) || undefined, role: edit.role,
+      });
+      store.setCollection('routers', (rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
+      store.toast(`${updated.name} updated`);
+      setEdit(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Deleting a router strands any subscriber pointing at it, so the server
+  // refuses while any remain and says how many.
+  const removeRouter = async (r) => {
+    if (!window.confirm(`Delete ${r.name}? Its tunnel credentials are revoked and ${r.host} is freed for reuse.`))
+      return;
+    try {
+      await api.deleteRouter(r.id);
+      store.setCollection('routers', (rs) => rs.filter((x) => x.id !== r.id));
+      store.toast(`${r.name} deleted`);
+    } catch (e) {
+      store.toast(e.message);
     }
   };
 
@@ -168,9 +202,22 @@ export default function Routers() {
               label: '',
               align: 'right',
               render: (r) => (
-                <Button onClick={() => testCoa(r)} disabled={testing === r.id}>
-                  {testing === r.id ? 'Testing…' : 'Test CoA'}
-                </Button>
+                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                  <Button onClick={() => testCoa(r)} disabled={testing === r.id}>
+                    {testing === r.id ? 'Testing…' : 'Test CoA'}
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      setEdit({
+                        id: r.id, name: r.name, host: String(r.host).split('/')[0],
+                        secret: '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
+                      })
+                    }
+                  >
+                    Edit
+                  </Button>
+                  <Button onClick={() => removeRouter(r)}>Delete</Button>
+                </div>
               ),
             },
           ]}
@@ -269,6 +316,52 @@ export default function Routers() {
             <span style={{ fontSize: 12, color: color.muted }}>
               The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
               can always reach it. Come back here once it connects.
+            </span>
+          </div>
+        )}
+      </Modal>
+
+      {/* Edit an existing router */}
+      <Modal
+        open={!!edit}
+        title={`Edit ${edit?.name ?? 'router'}`}
+        onClose={() => setEdit(null)}
+        footer={
+          <>
+            <Button onClick={() => setEdit(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveEdit} disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </Button>
+          </>
+        }
+      >
+        {edit && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Nickname" span={2}>
+              <Input value={edit.name} onChange={(e) => setEdit((s) => ({ ...s, name: e.target.value }))} />
+            </Field>
+            <Field label="NAS address">
+              <Input value={edit.host} onChange={(e) => setEdit((s) => ({ ...s, host: e.target.value }))} />
+            </Field>
+            <Field label="API port">
+              <Input
+                type="number"
+                value={edit.apiPort}
+                onChange={(e) => setEdit((s) => ({ ...s, apiPort: e.target.value }))}
+              />
+            </Field>
+            <Field label="RADIUS shared secret" span={2}>
+              <Input
+                value={edit.secret}
+                autoComplete="off"
+                placeholder="leave blank to keep the current one"
+                onChange={(e) => setEdit((s) => ({ ...s, secret: e.target.value }))}
+              />
+            </Field>
+            <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
+              The NAS address is how RADIUS recognises this router and where CoA is sent — it must
+              stay the router’s tunnel address. Changing the secret here means changing it on the
+              MikroTik too, or authentication stops.
             </span>
           </div>
         )}

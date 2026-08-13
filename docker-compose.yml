@@ -33,18 +33,22 @@ services:
     container_name: billing-radius
     profiles: ['network']
     restart: unless-stopped
+    # Shares the OpenVPN container's namespace, the only place the tunnel exists.
+    # Routers send RADIUS to 10.50.0.1, the tunnel-side address of that namespace;
+    # from a container of its own those packets reach the OpenVPN process instead.
+    # Ports are published on the openvpn service.
+    network_mode: 'service:openvpn'
     depends_on:
       db:
         condition: service_healthy
+      openvpn:
+        condition: service_started
     environment:
       PGHOST: db
       PGPORT: '5432'
       PGUSER: billing
       PGPASSWORD: secret
       PGDATABASE: billing
-    ports:
-      - '1812:1812/udp'   # authentication
-      - '1813:1813/udp'   # accounting
     volumes:
       # Staged, not mounted into the config tree directly. Two reasons: this image
       # is built with --prefix=/opt so the tree is /opt/etc/raddb, and a bind mount
@@ -79,8 +83,11 @@ services:
       PGUSER: billing
       PGPASSWORD: secret
       PGDATABASE: billing
+    # Owns the namespace freeradius joins, so RADIUS ports are published here too.
     ports:
       - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
+      - '1812:1812/udp'   # authentication
+      - '1813:1813/udp'   # accounting
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
 

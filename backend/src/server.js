@@ -599,6 +599,54 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   });
 }));
 
+/** Rename a router, correct its NAS address, secret, API port or role. */
+app.put('/api/routers/:id', wrap(async (req, res) => {
+  const { name, host, secret, apiPort, role, nasIdentifier } = req.body ?? {};
+  const { rows: [r] } = await pool.query(
+    `update routers set
+       name           = coalesce(nullif($3,''), name),
+       host           = coalesce(nullif($4,'')::inet, host),
+       secret         = coalesce(nullif($5,''), secret),
+       api_port       = coalesce($6, api_port),
+       role           = coalesce(nullif($7,''), role),
+       nas_identifier = coalesce(nullif($8,''), nas_identifier)
+     where id=$1 and tenant_id=$2
+     returning *`,
+    [req.params.id, req.tenant.id, name ?? '', host ?? '', secret ?? '',
+     apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '']);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  res.json(r);
+}));
+
+/**
+ * Remove a router.
+ *
+ * Refuses while subscribers still point at it: subscribers.router_id is what
+ * activateSubscriber() follows to find the NAS to send CoA to, and orphaning it
+ * would silently stop enforcement for those customers rather than fail loudly.
+ * Their tunnel credentials go too, so a deleted router cannot dial back in.
+ */
+app.delete('/api/routers/:id', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const { rows: [{ count }] } = await pool.query(
+    'select count(*)::int from subscribers where router_id=$1', [r.id]);
+  if (count > 0)
+    return res.status(409).json({
+      error: count === 1
+        ? '1 subscriber still uses this router. Move them to another one first.'
+        : `${count} subscribers still use this router. Move them to another one first.`,
+    });
+
+  await pool.query('delete from ovpn_clients where tenant_id=$1 and assigned_ip=$2',
+    [req.tenant.id, r.host]);
+  await pool.query('delete from wg_peers where tenant_id=$1 and router_id=$2', [req.tenant.id, r.id]);
+  await pool.query('delete from routers where id=$1 and tenant_id=$2', [r.id, req.tenant.id]);
+  res.json({ ok: true, freed: r.host });
+}));
+
 // ── router onboarding via WireGuard ───────────────
 // Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
 // single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.
