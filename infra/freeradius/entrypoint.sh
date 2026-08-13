@@ -39,6 +39,13 @@ for m in sql expiration logintime pap chap mschap preprocess acct_unique \
   [ -f "mods-available/$m" ] && ln -sf "../mods-available/$m" "mods-enabled/$m"
 done
 
+# Log where Docker can see it. FreeRADIUS defaults to writing a file inside the
+# container, so `docker compose logs freeradius` shows the startup banner and
+# then nothing — every authentication decision, and every rejected packet, goes
+# somewhere you have to exec in to read. That turns an ordinary "why was this
+# request dropped" into an archaeology exercise.
+sed -i 's/^\([[:space:]]*\)destination = files/\1destination = stdout/' "$RADDB/radiusd.conf"
+
 # Fail loudly on a bad config rather than starting half-working.
 "$RADIUSD" -CX >/tmp/radcheck.log 2>&1 || {
   echo "--- FreeRADIUS rejected the configuration ---"
