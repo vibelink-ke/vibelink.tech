@@ -864,28 +864,60 @@ app.delete('/api/ovpn-clients/:id', wrap(async (req, res) => {
 /**
  * Prove the CoA path works before trusting it with a paying customer.
  *
- * CoA is the one link in the chain that fails silently: auth and accounting both
- * show up in logs, but a CoA that never arrives just means speed changes wait for
- * the next reconnect. This sends a real CoA for a username you choose and reports
- * exactly what came back.
+ * CoA fails silently in production: auth and accounting leave a trail, but a CoA
+ * that never lands only means speed changes wait for the next reconnect.
+ *
+ * The test targets a *live session* when there is one. It used to invent a
+ * username instead, on the assumption that a NAK would come back and prove the
+ * round trip — but RouterOS ignores a CoA for a session it does not have, with no
+ * reply at all. So on a router with nobody connected the test reported "no
+ * answer" no matter how correct the setup was, which sent operators hunting for
+ * a fault that did not exist.
  */
 app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!r) return res.status(404).json({ error: 'No such router' });
 
-  // Default to a name that cannot exist. A NAK then still proves the round trip:
-  // the router received the packet, agreed on the secret, and answered.
-  const username = req.body?.username?.trim() || `vibelink-coa-probe-${Date.now()}`;
-  const rate = req.body?.rate?.trim() || '1024k/1024k';
-
   const coaClient = await import('./coa.js');
+  const host = String(r.host).split('/')[0];
+
+  // A session actually on this NAS right now.
+  const { rows: [live] } = await pool.query(
+    `select a.username, a.acctsessionid,
+            (select value from radreply
+              where username = a.username and attribute = 'Mikrotik-Rate-Limit'
+              limit 1) as rate
+       from radacct a
+      where host(a.nasipaddress) = $1 and a.acctstoptime is null
+      order by a.acctstarttime desc limit 1`,
+    [host]);
+
+  const username = req.body?.username?.trim() || live?.username;
+  if (!username) {
+    // Say so plainly instead of sending a packet that cannot be answered.
+    await pool.query('update routers set coa_last_at = now() where id = $1', [r.id]);
+    return res.json({
+      ok: false,
+      reachable: null,
+      inconclusive: true,
+      detail: 'Nobody is connected through this router, so there is no session to change. '
+        + 'RouterOS ignores a Change-of-Authorization for a session it does not have — it does not '
+        + 'refuse it, it simply never replies — so this cannot be tested until a subscriber connects. '
+        + 'Come back once someone is online.',
+    });
+  }
+
+  // Re-send the rate they already have: a real CoA that proves the path without
+  // changing anyone's speed as a side effect of pressing a test button.
+  const rate = req.body?.rate?.trim() || live?.rate || '1024k/1024k';
+
   const result = await coaClient.send({
-    host: r.host, secret: r.secret, username, rate, timeoutMs: 2000, retries: 1,
+    host: r.host, secret: r.secret, username, rate,
+    sessionId: live?.acctsessionid, timeoutMs: 2000, retries: 1,
   });
 
-  // A NAK is a *good* result for a probe username — it means the router is
-  // listening and the shared secret matches. Say so, rather than showing a red X.
+  // A NAK still proves the round trip: the router answered and agreed on the secret.
   const reachable = result.ok || result.code === coaClient.codes.COA_NAK;
 
   await pool.query(
@@ -896,10 +928,10 @@ app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
     reachable,
     username,
     detail: result.ok
-      ? 'Router accepted the change (CoA-ACK).'
+      ? `Router accepted a live change for ${username} (CoA-ACK).`
       : reachable
-        ? 'Router answered and the shared secret matches. It rejected this username, which is expected for a probe — the CoA path works.'
-        : result.error,
+        ? 'Router answered and the shared secret matches, but rejected the change. The CoA path itself works.'
+        : `${result.error}. Check "/radius incoming print" shows accept=yes, and that the secret in "/radius print detail" matches this router's.`,
   });
 }));
 

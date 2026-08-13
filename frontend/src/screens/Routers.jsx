@@ -93,10 +93,14 @@ export default function Routers() {
     try {
       const res = await api.testCoa(r.id);
       store.toast(`${r.name}: ${res.detail}`);
-      store.setCollection('routers', (rs) =>
-        rs.map((x) => (x.id === r.id
-          ? { ...x, coa_last_at: new Date().toISOString(), coa_last_ok: res.reachable, coa_last_error: res.reachable ? null : res.detail }
-          : x)));
+      // `reachable: null` means untestable, not broken — leave the column alone
+      // rather than marking a working router as failed.
+      if (res.reachable !== null) {
+        store.setCollection('routers', (rs) =>
+          rs.map((x) => (x.id === r.id
+            ? { ...x, coa_last_at: new Date().toISOString(), coa_last_ok: res.reachable, coa_last_error: res.reachable ? null : res.detail }
+            : x)));
+      }
     } catch (e) {
       store.toast(`CoA test failed: ${e.message}`);
     } finally {
