@@ -1176,7 +1176,7 @@ app.get('/api/settlements', wrap(async (req, res) => {
 app.get('/api/plans', wrap(async (req, res) => {
   const { service } = req.query;
   const { rows } = await pool.query(
-    `select * from plans where tenant_id=$1 ${service ? 'and service=$2' : ''} order by price`,
+    `select * from plans where tenant_id=$1 and active ${service ? 'and service=$2' : ''} order by price`,
     service ? [req.tenant.id, service] : [req.tenant.id]);
   res.json(rows);
 }));
@@ -1190,6 +1190,27 @@ app.post('/api/plans', wrap(async (req, res) => {
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
      rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`]);
+  res.json(row);
+}));
+
+app.put('/api/plans/:id', wrap(async (req, res) => {
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb } = req.body ?? {};
+  const { rows: [row] } = await pool.query(
+    `update plans set
+       title        = coalesce(nullif($3,''), title),
+       price        = coalesce($4, price),
+       duration_min = coalesce($5, duration_min),
+       devices      = coalesce($6, devices),
+       rate_down    = coalesce($7, rate_down),
+       rate_up      = coalesce($8, rate_up),
+       -- Explicit null clears the cap, so distinguish "not sent" from "cleared".
+       data_cap_mb  = case when $9::text = 'keep' then data_cap_mb else $10::bigint end,
+       updated_at   = now()
+     where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
+     devices ?? null, rateDown ?? null, rateUp ?? null,
+     dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null]);
+  if (!row) return res.status(404).json({ error: 'No such plan' });
   res.json(row);
 }));
 

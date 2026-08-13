@@ -691,6 +691,24 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── fold tariffs into plans ───────────────
+-- `tariffs` and `plans` were parallel catalogues of the same thing, and only
+-- `plans` was real: subscribers.plan_id references it, activateSubscriber reads
+-- its rates, and fair use measures against its cap. Nothing ever read `tariffs`
+-- except the screen that wrote it — so an operator would create a tariff, open
+-- the client form, and be told there were no plans yet.
+--
+-- Carry anything already entered over, matching on title so re-running is safe.
+-- PPPoE is billed monthly, hence 43200 minutes.
+insert into plans (tenant_id, service, title, price, duration_min, devices,
+                   rate_down, rate_up, radius_profile, active)
+select t.tenant_id, 'pppoe', t.title, t.price, 43200, 1,
+       t.speed_down, t.speed_up, 'pppoe-' || t.title, t.active
+  from tariffs t
+ where not exists (
+   select 1 from plans p
+    where p.tenant_id = t.tenant_id and p.service = 'pppoe' and p.title = t.title);
+
 -- ─────────────── router service account ───────────────
 -- The app pushes RADIUS, PPPoE and hotspot settings over the RouterOS API rather
 -- than having operators paste commands. It logs in as its own account, created

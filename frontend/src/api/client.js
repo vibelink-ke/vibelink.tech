@@ -76,6 +76,7 @@ export const api = {
   plans: (service) => get(`/api/plans${service ? `?service=${service}` : ''}`),
   hotspotPlans: () => get('/api/plans?service=hotspot'),
   createPlan: (p) => post('/api/plans', p),
+  updatePlan: (id, p) => put(`/api/plans/${id}`, p),
   deletePlan: (id) => del(`/api/plans/${id}`),
   portalPlans: () => get('/portal/plans'),
 
