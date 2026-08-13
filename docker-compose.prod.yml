@@ -9,6 +9,30 @@
 #   - Caddy terminates TLS and is the only thing listening on 80/443.
 #   - FreeRADIUS runs without -X, which logs full credentials.
 services:
+  # Owns the network namespace that openvpn, api and freeradius all share. It does
+  # nothing but exist.
+  #
+  # The tunnel only exists inside one namespace, and the API has to reach routers
+  # through it while FreeRADIUS has to answer on its address. Making openvpn the
+  # owner worked until openvpn was rebuilt: recreating it destroys the namespace,
+  # leaving the other two attached to nothing and Caddy returning 502 until every
+  # one of them was restarted in the right order. A container that never changes
+  # holds it instead, so any of the three can be rebuilt on its own.
+  net:
+    image: alpine:3.20
+    container_name: billing-net
+    restart: unless-stopped
+    command: ['sleep', 'infinity']
+    # ip_forward belongs to the namespace, so it has to be set by whoever owns it.
+    sysctls:
+      - net.ipv4.ip_forward=1
+    # Every port for all four services is published here.
+    ports:
+      - '1194:1194/tcp'   # OVPN. TCP, not UDP: the RouterOS 6 client cannot do UDP
+      - '1812:1812/udp'   # RADIUS authentication
+      - '1813:1813/udp'   # RADIUS accounting
+      # 8080 stays unpublished; Caddy reaches the API inside the network as net:8080.
+
   db:
     image: postgres:16-alpine
     container_name: billing-db
@@ -26,19 +50,18 @@ services:
       timeout: 5s
       retries: 10
 
-  # Shares the OpenVPN container's network namespace, which is the only place the
-  # tunnel exists. Without this the API has no route to 10.50.0.0/16, so every CoA
-  # is sent into a void and reported as "no answer" — the database stays correct,
-  # so the only symptom is that live speed changes never arrive.
+  # In the shared namespace, which is the only place the tunnel exists. Without it
+  # the API has no route to 10.50.0.0/16 and every CoA goes into a void — the
+  # database stays correct, so the only symptom is speed changes never arriving.
   api:
     build: ./backend
     container_name: billing-api
     restart: unless-stopped
-    network_mode: 'service:openvpn'
+    network_mode: 'service:net'
     depends_on:
       db:
         condition: service_healthy
-      openvpn:
+      net:
         condition: service_started
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
@@ -53,8 +76,7 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
-    # No `ports` or `expose`: the namespace belongs to openvpn, so 8080 is
-    # published (or not) there. Caddy reaches it as openvpn:8080.
+    # No `ports`: the namespace belongs to `net`. Caddy reaches it as net:8080.
 
   web:
     build:
@@ -74,18 +96,18 @@ services:
       - caddy-data:/data      # certificates; losing this re-issues them
       - caddy-config:/config
 
-  # Also in the tunnel's namespace. Routers send RADIUS to 10.50.0.1, which is the
-  # tunnel-side address of that namespace — from anywhere else those packets
-  # arrive at the OpenVPN process and are dropped.
+  # Also in the shared namespace. Routers send RADIUS to 10.50.0.1, the tunnel-side
+  # address of that namespace — from anywhere else those packets arrive at the
+  # OpenVPN process and are dropped.
   freeradius:
     build: ./infra/freeradius
     container_name: billing-radius
     restart: unless-stopped
-    network_mode: 'service:openvpn'
+    network_mode: 'service:net'
     depends_on:
       db:
         condition: service_healthy
-      openvpn:
+      net:
         condition: service_started
     environment:
       PGHOST: db
@@ -93,7 +115,7 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
-    # Ports live on the openvpn service; see the note there.
+    # Ports live on `net`.
     volumes:
       - ./infra/freeradius:/config:ro
     entrypoint: ['/bin/sh', '/config/entrypoint.sh']
@@ -107,28 +129,22 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      net:
+        condition: service_started
+    network_mode: 'service:net'
+    # Capabilities and devices are per-container even when the namespace is shared,
+    # so these stay here rather than moving to `net`.
     cap_add:
       - NET_ADMIN
     devices:
       - /dev/net/tun:/dev/net/tun
-    sysctls:
-      - net.ipv4.ip_forward=1
     environment:
       PGHOST: db
       PGPORT: '5432'
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
-    # This service owns the network namespace that api and freeradius join, so
-    # every port for all three is published here.
-    ports:
-      - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
-      # RADIUS. Reachable over the tunnel without these being open to the world —
-      # keep them closed at the VPS firewall. See docs/DEPLOY.md.
-      - '1812:1812/udp'
-      - '1813:1813/udp'
-      # 8080 (the API) is deliberately not published. Caddy reaches it inside the
-      # compose network as openvpn:8080.
+    # Ports are published on `net`, which owns the namespace.
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
 

@@ -24,10 +24,10 @@ export default function Routers() {
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
   const [form, setForm] = useState(null); // blankRouter() when the confirm modal is open
   const [busy, setBusy] = useState(false);
-  const [testing, setTesting] = useState(null);   // router id currently being probed
   const [edit, setEdit] = useState(null);         // the router row open for editing
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
   const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
+  const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
@@ -86,41 +86,52 @@ export default function Routers() {
     URL.revokeObjectURL(a.href);
   };
 
-  // CoA is the one link that fails quietly — auth and accounting show up in logs,
-  // but a CoA that never lands just means speed changes wait for a reconnect.
-  const testCoa = async (r) => {
-    setTesting(r.id);
+  // There is no Test CoA button any more. CoA is an optimisation — without it a
+  // new speed applies at the subscriber's next reconnect rather than instantly —
+  // and Configure switches it on anyway, so a button that mostly reported
+  // "no answer" only made a working router look broken. POST
+  // /api/routers/:id/test-coa still exists for diagnosis.
+
+  /**
+   * Step one of Configure: log in and read the ports, so the operator can say
+   * which are LAN before anything is changed. Nothing is written yet.
+   *
+   * The admin login is only needed the first time — the server creates its own
+   * account from it and uses that thereafter, so an operator changing their own
+   * password does not quietly break every later push.
+   */
+  const openConfigure = async (r, creds) => {
+    setConfiguring(r.id);
     try {
-      const res = await api.testCoa(r.id);
-      store.toast(`${r.name}: ${res.detail}`);
-      // `reachable: null` means untestable, not broken — leave the column alone
-      // rather than marking a working router as failed.
-      if (res.reachable !== null) {
-        store.setCollection('routers', (rs) =>
-          rs.map((x) => (x.id === r.id
-            ? { ...x, coa_last_at: new Date().toISOString(), coa_last_ok: res.reachable, coa_last_error: res.reachable ? null : res.detail }
-            : x)));
-      }
+      const info = await api.routerInterfaces(r.id, creds ?? {});
+      setAdminPrompt(null);
+      setPlan({
+        router: r,
+        creds: creds ?? {},
+        lan: info.lan ?? [],
+        bridges: info.bridges ?? [],
+        version: info.version,
+        identity: info.identity,
+        // Nothing preselected: bridging a port that carries the uplink would take
+        // the site off the internet, and only the operator knows which that is.
+        selected: [],
+        bridge: (info.bridges ?? [])[0]?.name ?? 'bridge-lan',
+      });
     } catch (e) {
-      store.toast(`CoA test failed: ${e.message}`);
+      if (e.status === 428) setAdminPrompt({ router: r, username: 'admin', password: '' });
+      else store.toast(`${r.name}: ${e.message}`);
     } finally {
-      setTesting(null);
+      setConfiguring(null);
     }
   };
 
-  /**
-   * Push RADIUS, CoA, PPPoE and hotspot settings to the router.
-   *
-   * The admin login is only needed the first time: the server uses it to create
-   * its own account and uses that from then on, so an operator changing their
-   * own password does not quietly break every later push.
-   */
   const runAutoconfig = async (r, creds) => {
     setConfiguring(r.id);
     try {
       const res = await api.autoconfigRouter(r.id, creds ?? {});
-      store.toast(`${r.name}: ${res.applied.join('; ')}`);
+      store.toast(`${r.name} configured — ${res.applied.join('; ')}`);
       setAdminPrompt(null);
+      setPlan(null);
       store.setCollection('routers', (rs) =>
         rs.map((x) => (x.id === r.id
           ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString(), ros_version: res.version }
@@ -286,17 +297,21 @@ export default function Routers() {
               render: (r) => (r.last_seen ? new Date(r.last_seen).toLocaleString('en-KE') : '—'),
             },
             {
-              key: 'coa',
-              label: 'CoA',
+              // CoA is an optimisation, not a requirement: without it a new speed
+              // applies when the subscriber next reconnects rather than instantly.
+              // It had a column of its own reading "no answer", which made a
+              // perfectly working router look broken.
+              key: 'configured',
+              label: 'Configured',
               render: (r) =>
-                !r.coa_last_at ? (
-                  <span style={{ color: color.muted }}>untested</span>
+                !r.autoconfig_last_at ? (
+                  <span style={{ color: color.muted }}>not yet</span>
                 ) : (
                   <span
-                    title={r.coa_last_error ?? 'Router answered the last change request'}
-                    style={{ color: r.coa_last_ok ? color.green : color.rust }}
+                    title={r.autoconfig_last_error ?? `RouterOS ${r.ros_version ?? ''}`.trim()}
+                    style={{ color: r.autoconfig_last_ok ? color.green : color.rust }}
                   >
-                    {r.coa_last_ok ? 'reachable' : 'no answer'}
+                    {r.autoconfig_last_ok ? 'yes' : 'failed'}
                   </span>
                 ),
             },
@@ -308,13 +323,10 @@ export default function Routers() {
                 <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                   <Button
                     variant={r.autoconfig_last_ok ? undefined : 'primary'}
-                    onClick={() => runAutoconfig(r)}
+                    onClick={() => openConfigure(r)}
                     disabled={configuring === r.id}
                   >
-                    {configuring === r.id ? 'Configuring…' : 'Configure'}
-                  </Button>
-                  <Button onClick={() => testCoa(r)} disabled={testing === r.id}>
-                    {testing === r.id ? 'Testing…' : 'Test CoA'}
+                    {configuring === r.id ? 'Reading…' : 'Configure'}
                   </Button>
                   <Button
                     onClick={() =>
@@ -445,13 +457,13 @@ export default function Routers() {
               variant="primary"
               disabled={configuring === adminPrompt?.router?.id}
               onClick={() =>
-                runAutoconfig(adminPrompt.router, {
+                openConfigure(adminPrompt.router, {
                   username: adminPrompt.username,
                   password: adminPrompt.password,
                 })
               }
             >
-              {configuring === adminPrompt?.router?.id ? 'Configuring…' : 'Configure router'}
+              {configuring === adminPrompt?.router?.id ? 'Connecting…' : 'Continue'}
             </Button>
           </>
         }
@@ -484,6 +496,86 @@ export default function Routers() {
               and hotspot. Re-running it later is safe — it updates rather than duplicates. The
               account it creates is commented “do not delete”; removing it on the router just means
               entering these details again.
+            </span>
+          </div>
+        )}
+      </Modal>
+
+      {/* Step two of Configure: which ports are LAN. Nothing has been written yet. */}
+      <Modal
+        open={!!plan}
+        title={`Configure ${plan?.router?.name ?? 'router'}`}
+        width={560}
+        onClose={() => setPlan(null)}
+        footer={
+          <>
+            <Button onClick={() => setPlan(null)}>Cancel</Button>
+            <Button
+              variant="primary"
+              disabled={configuring === plan?.router?.id}
+              onClick={() =>
+                runAutoconfig(plan.router, {
+                  ...plan.creds,
+                  bridge: plan.bridge,
+                  lanPorts: plan.selected,
+                })
+              }
+            >
+              {configuring === plan?.router?.id ? 'Applying…' : 'Apply to router'}
+            </Button>
+          </>
+        }
+      >
+        {plan && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <span style={{ fontSize: 12.5, color: color.muted }}>
+              {plan.identity ? `${plan.identity} · ` : ''}RouterOS {plan.version ?? '?'} · RADIUS,
+              accounting and CoA will be set regardless. Ports below are optional: pick them and a
+              PPPoE server is built on a bridge of those ports.
+            </span>
+
+            <Field label="LAN ports for subscribers">
+              <div style={{ display: 'grid', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                {plan.lan.length === 0 && (
+                  <span style={{ fontSize: 12.5, color: color.muted }}>
+                    No free ports — every interface is already in a bridge or in use.
+                  </span>
+                )}
+                {plan.lan.map((i) => (
+                  <label key={i.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={plan.selected.includes(i.name)}
+                      onChange={(e) =>
+                        setPlan((s) => ({
+                          ...s,
+                          selected: e.target.checked
+                            ? [...s.selected, i.name]
+                            : s.selected.filter((n) => n !== i.name),
+                        }))
+                      }
+                    />
+                    <span style={{ fontFamily: font.mono }}>{i.name}</span>
+                    <span style={{ color: color.muted, fontSize: 12 }}>
+                      {i.type}{i.running ? ' · link up' : ' · no link'}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+
+            {plan.selected.length > 0 && (
+              <Field label="Bridge name">
+                <Input
+                  value={plan.bridge}
+                  onChange={(e) => setPlan((s) => ({ ...s, bridge: e.target.value }))}
+                />
+              </Field>
+            )}
+
+            <span style={{ fontSize: 12, color: color.rust }}>
+              Do not tick the port your internet comes in on. Bridging the uplink into the LAN
+              takes the site offline. Ports already in another bridge are skipped rather than moved.
             </span>
           </div>
         )}

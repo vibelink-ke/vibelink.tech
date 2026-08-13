@@ -126,6 +126,114 @@ export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
   return { profiles: profiles.length };
 }
 
+/**
+ * Physical ports worth offering as LAN members.
+ *
+ * Excludes the tunnel we arrived on, anything already enslaved to a bridge, and
+ * the bridges themselves — offering those would let someone cut the connection
+ * this very request is travelling over.
+ */
+export async function lanCandidates(conn) {
+  const all = await conn.write('/interface/print', []);
+  return all
+    .filter((i) => ['ether', 'wlan', 'sfp'].includes(String(i.type ?? '').split('-')[0]))
+    .filter((i) => i.name !== 'billing-ovpn' && !i['slave'])
+    .map((i) => ({
+      name: i.name,
+      type: i.type,
+      running: i.running === 'true',
+      comment: i.comment ?? null,
+    }));
+}
+
+/** Bridges already on the box, so we can offer to reuse one. */
+export async function bridges(conn) {
+  const rows = await conn.write('/interface/bridge/print', []);
+  return rows.map((b) => ({ name: b.name, comment: b.comment ?? null }));
+}
+
+/**
+ * Put the chosen ports into one bridge — the LAN subscribers plug into.
+ *
+ * Ports already in another bridge are left alone rather than moved: taking a port
+ * out from under an existing configuration is how you cut off a working site.
+ */
+export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
+  const existing = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
+  if (!existing) {
+    await conn.write('/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
+  }
+
+  const members = await conn.write('/interface/bridge/port/print', []);
+  const already = new Set(members.filter((m) => m.bridge === name).map((m) => m.interface));
+  const elsewhere = new Map(members.filter((m) => m.bridge !== name).map((m) => [m.interface, m.bridge]));
+
+  const added = [];
+  const skipped = [];
+  for (const port of ports) {
+    if (already.has(port)) continue;
+    if (elsewhere.has(port)) { skipped.push(`${port} (already in ${elsewhere.get(port)})`); continue; }
+    await conn.write('/interface/bridge/port/add', [
+      `=bridge=${name}`, `=interface=${port}`, `=comment=${MANAGED_COMMENT}`,
+    ]);
+    added.push(port);
+  }
+  return { bridge: name, added, skipped };
+}
+
+/**
+ * The PPPoE server itself, plus the address pool and profile it hands out.
+ *
+ * Speeds are deliberately absent from the profile: they come from RADIUS per
+ * subscriber, and a rate limit set here would override the plan for everyone.
+ */
+export async function applyPppoeServer(conn, {
+  bridge = 'bridge-lan',
+  poolName = 'vibelink-pppoe',
+  poolRange = '10.100.0.2-10.100.255.254',
+  gateway = '10.100.0.1',
+  profileName = 'vibelink-pppoe',
+  serviceName = 'vibelink',
+} = {}) {
+  const pool = (await conn.write('/ip/pool/print', [`?name=${poolName}`]))[0];
+  if (pool) await conn.write('/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
+  else await conn.write('/ip/pool/add', [`=name=${poolName}`, `=ranges=${poolRange}`, `=comment=${MANAGED_COMMENT}`]);
+
+  // The gateway address has to exist on the bridge or clients get a route to nowhere.
+  const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
+  if (!addrs.some((a) => String(a.address).startsWith(`${gateway}/`))) {
+    await conn.write('/ip/address/add', [
+      `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
+    ]);
+  }
+
+  const profileFields = [
+    `=local-address=${gateway}`,
+    `=remote-address=${poolName}`,
+    '=use-compression=no',
+    '=use-encryption=no',
+    '=only-one=yes',        // one session per subscriber, so a shared password is obvious
+    `=comment=${MANAGED_COMMENT}`,
+  ];
+  const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
+  if (profile) await conn.write('/ppp/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
+  else await conn.write('/ppp/profile/add', [`=name=${profileName}`, ...profileFields]);
+
+  const serverFields = [
+    `=interface=${bridge}`,
+    `=default-profile=${profileName}`,
+    `=service-name=${serviceName}`,
+    '=disabled=no',
+    '=one-session-per-host=yes',
+    '=authentication=pap,chap',   // what radcheck's Cleartext-Password supports
+  ];
+  const server = (await conn.write('/interface/pppoe-server/server/print', [`?interface=${bridge}`]))[0];
+  if (server) await conn.write('/interface/pppoe-server/server/set', [`=.id=${idOf(server)}`, ...serverFields]);
+  else await conn.write('/interface/pppoe-server/server/add', serverFields);
+
+  return { bridge, pool: poolName, profile: profileName };
+}
+
 /** Identity and version, for the Routers screen and for choosing OVPN cipher names. */
 export async function identify(conn) {
   const [res] = await conn.write('/system/resource/print', []);

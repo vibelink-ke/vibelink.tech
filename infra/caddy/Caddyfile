@@ -16,7 +16,7 @@
 		# Newer Caddy dropped the interval/burst rate limit here and relies on
 		# `ask` alone, so that endpoint is the only thing standing between a
 		# stranger's DNS record and our Let's Encrypt quota. Keep it strict.
-		ask http://openvpn:8080/internal/tls-check
+		ask http://net:8080/internal/tls-check
 	}
 }
 
@@ -31,18 +31,17 @@
 	# Everything the backend owns. /internal is deliberately absent: the TLS gate
 	# must not be reachable from outside.
 	#
-	# The upstream is "openvpn", not "api", and that is not a mistake: the API
-	# container shares the OpenVPN container's network namespace so it can reach
-	# routers over the tunnel, which means it has no DNS name of its own and its
-	# port answers on that service.
+	# The upstream is "net", not "api", and that is not a mistake: the API shares
+	# the `net` container's network namespace so it can reach routers over the
+	# tunnel, which leaves it without a DNS name of its own.
 	handle /api/* {
-		reverse_proxy openvpn:8080
+		reverse_proxy net:8080
 	}
 	handle /portal/* {
-		reverse_proxy openvpn:8080
+		reverse_proxy net:8080
 	}
 	handle /webhooks/* {
-		reverse_proxy openvpn:8080
+		reverse_proxy net:8080
 	}
 
 	# /radius/* is deliberately not proxied. FreeRADIUS reaches the API over the

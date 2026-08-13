@@ -601,6 +601,46 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
 }));
 
 /**
+ * Which login to use for a router: our own account if we have one, otherwise the
+ * admin credentials supplied with this request. Shared by every route that talks
+ * to a MikroTik, so they cannot drift apart on which takes precedence.
+ */
+async function routerLogin(r, body, secrets) {
+  const stored = secrets.decrypt(r.service_password_enc);
+  if (stored && r.service_user) return { user: r.service_user, password: stored, stored: true };
+  const user = String(body?.username ?? '').trim();
+  if (user) return { user, password: String(body?.password ?? ''), stored: false };
+  return null;
+}
+
+/** The router's own ports, so the operator can pick which are LAN. */
+app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Router login needed first.', needsAdmin: true });
+
+  const host = String(r.host).split('/')[0];
+  let conn;
+  try {
+    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+    const [lan, bridgeList, info] = await Promise.all([
+      ros.lanCandidates(conn), ros.bridges(conn), ros.identify(conn),
+    ]);
+    res.json({ lan, bridges: bridgeList, ...info });
+  } catch (e) {
+    res.status(502).json({ error: describeRouterError(e, host, r.api_port ?? 8728) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/**
  * Configure a MikroTik over its API: RADIUS, CoA, PPPoE and hotspot, in one go.
  *
  * First run needs the operator's own admin login, used once to create our
@@ -625,19 +665,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
   if (!r) return res.status(404).json({ error: 'No such router' });
 
   const host = String(r.host).split('/')[0];
-  const stored = secrets.decrypt(r.service_password_enc);
-  const admin = {
-    user: String(req.body?.username ?? '').trim(),
-    password: String(req.body?.password ?? ''),
-  };
-
-  // Prefer our own account; fall back to the credentials just supplied.
-  const login = stored && r.service_user
-    ? { user: r.service_user, password: stored }
-    : admin.user
-      ? admin
-      : null;
-
+  const login = await routerLogin(r, req.body, secrets);
   if (!login)
     return res.status(428).json({
       error: 'Enter the router’s admin username and password once. A dedicated account is created from it and used for every push after that.',
@@ -651,10 +679,9 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
 
     const info = await ros.identify(conn);
 
-    // Mint our own account if we do not have one yet.
-    let servicePassword = stored;
-    if (!servicePassword) {
-      servicePassword = secrets.randomPassword();
+    // Mint our own account if we arrived on someone else's credentials.
+    if (!login.stored) {
+      const servicePassword = secrets.randomPassword();
       const { created } = await ros.ensureServiceUser(conn, { password: servicePassword });
       await pool.query(
         `update routers set service_user=$2, service_password_enc=$3, service_created_at=now()
@@ -675,6 +702,25 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     if (r.role === 'both' || r.role === 'pppoe') {
       await ros.applyPpp(conn);
       done.push('enabled PPPoE accounting with 5-minute interim updates');
+
+      // Only when ports were chosen. Building a bridge unasked could swallow the
+      // uplink and take the site off the internet.
+      const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
+      if (lanPorts?.length) {
+        const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+        const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
+        done.push(bridge.added.length
+          ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
+          : `${bridge.bridge} already had those ports`);
+        if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
+
+        const pppoe = await ros.applyPppoeServer(conn, {
+          bridge: bridge.bridge,
+          poolRange: req.body?.poolRange,
+          gateway: req.body?.gateway,
+        });
+        done.push(`PPPoE server listening on ${pppoe.bridge}, handing out ${pppoe.pool}`);
+      }
     }
     if (r.role === 'both' || r.role === 'hotspot') {
       const { profiles } = await ros.applyHotspot(conn);
