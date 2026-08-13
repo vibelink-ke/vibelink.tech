@@ -4,6 +4,7 @@ import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
+import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
 import { color, font } from './theme/tokens';
 
@@ -34,6 +35,7 @@ import Settings from './screens/Settings';
 
 export default function App() {
   const { dark, session, signIn } = useStore();
+  const isMobile = useMediaQuery('(max-width: 900px)');
 
   // Browser tab shows the tenant's own company, so someone running two ISPs in
   // two tabs can tell them apart.
@@ -61,7 +63,19 @@ export default function App() {
       <Sidebar />
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Topbar />
-        <div style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+        {/* 26px of padding either side costs a seventh of a 375px screen, and the
+            content is what people came for. Tables and wide cards scroll inside
+            themselves rather than pushing the page sideways. */}
+        <div
+          style={{
+            padding: isMobile ? '14px 12px' : 26,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: isMobile ? 14 : 20,
+            minWidth: 0,
+            overflowX: 'hidden',
+          }}
+        >
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />

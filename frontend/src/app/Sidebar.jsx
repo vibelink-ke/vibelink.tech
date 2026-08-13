@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import { color, font, radius, SIDEBAR_W } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { NAV_SECTIONS } from './nav';
+import { useMediaQuery } from './useMediaQuery';
 
 const heading = {
   padding: '16px 8px 6px',
@@ -81,17 +82,48 @@ export default function Sidebar() {
     ? s.name.trim().split(/\s+/).slice(0, 2).map((x) => x[0].toUpperCase()).join('')
     : '—';
 
+  /**
+   * On a phone the sidebar is a drawer, not a column.
+   *
+   * It used to be a fixed 232px pinned open, which on a 375px screen left the
+   * actual work with a third of the width — tables ran off the side and every
+   * page had to be scrolled sideways to read. Below 900px it slides in over the
+   * content and closes as soon as you pick something.
+   */
+  const isMobile = useMediaQuery('(max-width: 900px)');
+  const open = !isMobile || store.navOpen;
+
+  const setNavOpen = store.setNavOpen;
+
+  // Picking a page on a phone should get the drawer out of the way.
+  const closeOnMobile = () => { if (isMobile) setNavOpen(false); };
+
   return (
+    <>
+      {isMobile && store.navOpen && (
+        <div
+          onClick={() => setNavOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(18,23,21,.45)', zIndex: 40 }}
+        />
+      )}
     <aside
+      onClick={closeOnMobile}
       style={{
         width: SIDEBAR_W,
-        flex: `0 0 ${SIDEBAR_W}px`,
+        flex: isMobile ? 'none' : `0 0 ${SIDEBAR_W}px`,
         display: 'flex',
         flexDirection: 'column',
-        position: 'sticky',
+        position: isMobile ? 'fixed' : 'sticky',
+        left: 0,
         top: 0,
         height: '100vh',
         background: color.sideBg,
+        zIndex: 41,
+        // Kept mounted and slid off-screen so opening it does not re-run every
+        // effect in the tree.
+        transform: open ? 'translateX(0)' : `translateX(-${SIDEBAR_W}px)`,
+        transition: 'transform .18s ease',
+        boxShadow: isMobile && open ? '0 0 40px rgba(18,23,21,.35)' : undefined,
       }}
     >
       <div style={{ padding: '20px 18px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${color.sideLine}` }}>
@@ -176,5 +208,6 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    </>
   );
 }

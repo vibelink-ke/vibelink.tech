@@ -59,6 +59,10 @@ export function StoreProvider({ children }) {
   const [session, setSession] = useState(undefined);
 
   // UI-only state, mirroring the mockup's non-data state fields.
+  // The mobile nav drawer. Lives here because the Topbar opens it and the
+  // Sidebar closes it, and they are siblings.
+  const [navOpen, setNavOpen] = useState(false);
+
   // Remembered across reloads. It was plain useState, so every refresh threw the
   // choice away and snapped back to light.
   const [dark, setDark] = useState(() => {
@@ -220,6 +224,8 @@ export function StoreProvider({ children }) {
       signIn,
       signOut,
       dark,
+      navOpen,
+      setNavOpen,
       setDark,
       role,
       setRole,
@@ -238,7 +244,7 @@ export function StoreProvider({ children }) {
     }),
     [
       data, unmatched, hotspotSettings, smsGateways, smsCredits, paymentMethods, settings,
-      loading, errors, session, signIn, signOut, dark, role, searchQuery, toastMsg, toast,
+      loading, errors, session, signIn, signOut, dark, navOpen, role, searchQuery, toastMsg, toast,
       reload, setCollection,
     ]
   );

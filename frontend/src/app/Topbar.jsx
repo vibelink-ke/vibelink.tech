@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, TOPBAR_H } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { useMediaQuery } from './useMediaQuery';
 
 const chip = {
   display: 'flex',
@@ -54,6 +55,7 @@ function useSearchResults(q, store) {
 
 export default function Topbar() {
   const store = useStore();
+  const isMobile = useMediaQuery('(max-width: 900px)');
   const navigate = useNavigate();
   const { searchQuery, setSearchQuery } = store;
   const results = useSearchResults(searchQuery, store);
@@ -78,8 +80,30 @@ export default function Topbar() {
         position: 'sticky',
         top: 0,
         zIndex: 20,
+        // The chips are fixed-width and there are more of them than fit on a
+        // phone, so let the bar scroll rather than clipping the last one.
+        overflowX: 'auto',
+        overflowY: 'hidden',
       }}
     >
+      {/* The way back to the pages once the drawer is closed. Desktop keeps the
+          sidebar pinned, so it would only be clutter there. */}
+      {isMobile && (
+        <button
+          type="button"
+          onClick={() => store.setNavOpen(!store.navOpen)}
+          aria-label="Menu"
+          aria-expanded={store.navOpen}
+          style={{
+            border: `1px solid ${color.line}`, background: color.subtleBg,
+            borderRadius: radius.md, cursor: 'pointer', fontSize: 15,
+            lineHeight: 1, padding: '7px 10px', flex: '0 0 auto', color: color.ink,
+          }}
+        >
+          ☰
+        </button>
+      )}
+
       <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 110, maxWidth: 380 }}>
         <div
           style={{
