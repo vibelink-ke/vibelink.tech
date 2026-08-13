@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { api } from '../api/client';
 import { Button } from '../ui/primitives';
 
 const RANGES = ['Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'This month'];
@@ -64,6 +65,15 @@ export default function Dashboard() {
       }),
     []
   );
+
+  // Fetched here rather than added to the shared collections: it is the tenant's
+  // own standing with us, and only this screen shows it.
+  const [licence, setLicence] = useState(null);
+  useEffect(() => {
+    let live = true;
+    api.licence().then((l) => { if (live) setLicence(l); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
 
   const clients = store.clients ?? [];
   const active = clients.filter((c) => c.status === 'active');
@@ -235,11 +245,45 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Licence standing. The invoice card is deliberately absent most of the
+            month: it appeared permanently at KES 0, which trained everyone to
+            ignore the one place that will later say they owe money. */}
         <div style={{ ...card, background: '#0f1a17', borderColor: '#0f1a17', color: '#e6ece8', gap: 10 }}>
-          <span style={{ fontSize: 14.5, fontWeight: 600 }}>Your invoice this month</span>
-          <span style={{ fontSize: 12.5, color: '#93a09a' }}>Platform fee</span>
-          <span style={{ fontFamily: font.mono, fontSize: 24, fontWeight: 500 }}>KES 0</span>
-          <span style={{ fontSize: 12.5, color: '#93a09a' }}>Billing starts once your first tenant is active</span>
+          <span style={{ fontSize: 14.5, fontWeight: 600 }}>Licence</span>
+          {licence?.licenceEnds ? (
+            <>
+              <span style={{ fontFamily: font.mono, fontSize: 24, fontWeight: 500 }}>
+                {new Date(licence.licenceEnds).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
+              </span>
+              <span style={{ fontSize: 12.5, color: licence.daysLeft <= 5 ? '#f0a58a' : '#93a09a' }}>
+                {licence.daysLeft > 0
+                  ? `valid for ${licence.daysLeft} more day${licence.daysLeft === 1 ? '' : 's'}`
+                  : 'expired'}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: 12.5, color: '#93a09a' }}>No expiry set</span>
+          )}
+
+          {licence?.invoice && (
+            <div style={{ borderTop: '1px solid #1e2c27', paddingTop: 10, display: 'grid', gap: 4 }}>
+              <span style={{ fontSize: 12.5, color: licence.invoice.prominent ? '#f0a58a' : '#93a09a' }}>
+                Invoice {licence.invoice.number}
+              </span>
+              <span style={{ fontFamily: font.mono, fontSize: 20 }}>KES {kes(licence.invoice.amount)}</span>
+              <span style={{ fontSize: 12, color: '#93a09a' }}>
+                {licence.readOnly
+                  ? 'Unpaid — your account is read-only until it is settled'
+                  : `day ${licence.invoice.day} · read-only from day 5`}
+              </span>
+            </div>
+          )}
+
+          {licence?.renewalTomorrow && (
+            <span style={{ fontSize: 12.5, color: '#93a09a', borderTop: '1px solid #1e2c27', paddingTop: 10 }}>
+              Renews tomorrow — the next invoice is raised on the 1st.
+            </span>
+          )}
         </div>
       </div>
     </div>

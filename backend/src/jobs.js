@@ -23,6 +23,57 @@ export function startJobs() {
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   cron.schedule('0 5 1 * *',  safely('billTenants', billTenants));
+  cron.schedule('0 7 * * *',  safely('chaseTenants', chaseTenants));
+}
+
+/**
+ * Chase tenants with an unpaid platform invoice, one step at a time.
+ *
+ * Counted in days from the invoice date, where the invoice itself is day 1:
+ *   day 2  the dashboard shows a banner (read from the API, nothing to do here)
+ *   day 4  SMS to the owner
+ *   day 5  read-only — they keep every screen, but cannot change anything
+ *
+ * Read-only rather than suspended on purpose. Cutting an operator off entirely
+ * means they cannot look up who owes them money, which is exactly what they need
+ * to be doing in order to pay us.
+ */
+export async function chaseTenants() {
+  const { rows } = await pool.query(`
+    select i.id, i.tenant_id, i.number, i.amount, i.dunning_stage,
+           (current_date - i.created_at::date) + 1 as day,
+           t.name as tenant, t.status
+      from invoices i join tenants t on t.id = i.tenant_id
+     where i.subscriber_id is null
+       and i.status <> 'paid'
+       and t.status in ('active', 'trial', 'readonly')`);
+
+  for (const inv of rows) {
+    if (inv.day >= 4 && inv.dunning_stage < 4) {
+      const { rows: [owner] } = await pool.query(
+        "select phone from staff where tenant_id=$1 and role='owner' limit 1", [inv.tenant_id]);
+      if (owner?.phone) {
+        await send(inv.tenant_id, owner.phone,
+          `${inv.tenant}: invoice ${inv.number} for ${inv.amount} is unpaid. `
+          + 'Your account becomes read-only tomorrow until it is settled.').catch(() => {});
+      }
+      await pool.query('update invoices set dunning_stage=4, notified_at=now() where id=$1', [inv.id]);
+    }
+
+    if (inv.day >= 5 && inv.status !== 'readonly') {
+      await pool.query("update tenants set status='readonly' where id=$1 and status<>'suspended'", [inv.tenant_id]);
+      await pool.query('update invoices set dunning_stage=5 where id=$1', [inv.id]);
+    }
+  }
+
+  // Anyone who has settled every platform invoice gets full access back. This has
+  // to be its own pass: payment arrives through a webhook that knows nothing about
+  // dunning, and nobody should have to wait for a human to flip them back.
+  await pool.query(`
+    update tenants t set status='active'
+     where t.status='readonly'
+       and not exists (select 1 from invoices i
+                        where i.tenant_id=t.id and i.subscriber_id is null and i.status<>'paid')`);
 }
 
 /** Grace -> walled garden -> suspended, with no human in the loop. */

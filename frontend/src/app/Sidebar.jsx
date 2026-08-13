@@ -69,10 +69,14 @@ export default function Sidebar() {
 
   // The tenant's own company name, not a platform-wide brand. Settings →
   // Organisation edits tenants.name, so renaming there renames it here.
-  const brandName = s?.company || 'Vibelink';
+  // Upper-cased however it was typed: operators enter their company in every
+  // casing imaginable and the sidebar is the one place it is always on screen.
+  const brandName = (s?.company || 'Vibelink').toUpperCase();
 
   const name = s?.name || 'Set up your profile';
-  const sub = s ? `${s.role || 'Owner'} · ${s.subdomain}.vibelink.tech` : 'Owner';
+  // Just the role. The subdomain used to hang off it, which told the operator
+  // nothing they needed and put their hostname on screen for anyone behind them.
+  const sub = s ? (s.role || 'Owner') : 'Owner';
   const initials = s?.name
     ? s.name.trim().split(/\s+/).slice(0, 2).map((x) => x[0].toUpperCase()).join('')
     : '—';
@@ -119,7 +123,7 @@ export default function Sidebar() {
             {brandName}
           </span>
           <span style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted }}>
-            {s?.subdomain ? `${s.subdomain}.vibelink.tech` : 'v2.4'}
+            v2.4
           </span>
         </div>
       </div>

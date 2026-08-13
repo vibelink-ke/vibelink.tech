@@ -691,6 +691,26 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── platform billing and dunning ───────────────
+-- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
+-- rest of that month free, which needs no special case: billTenants only runs on
+-- the 1st, so their first invoice is the following one.
+--
+-- Chasing an unpaid invoice used to be all or nothing — status went straight to
+-- 'suspended' and every API call returned 402, so an operator with an overdue
+-- bill could not even look at their own customers to work out who owed them. The
+-- escalation is graded instead, counted in days from the invoice date:
+--   day 1  invoice raised
+--   day 2  banner on their dashboard
+--   day 4  SMS to the owner
+--   day 5  read-only: they can see everything, change nothing
+alter table invoices add column if not exists dunning_stage int not null default 0;
+alter table invoices add column if not exists notified_at   timestamptz;
+
+-- Which invoices are the platform's own, rather than a subscriber's.
+create index if not exists invoices_saas_open
+  on invoices (tenant_id, due_date) where subscriber_id is null and status <> 'paid';
+
 -- ─────────────── fold tariffs into plans ───────────────
 -- `tariffs` and `plans` were parallel catalogues of the same thing, and only
 -- `plans` was real: subscribers.plan_id references it, activateSubscriber reads

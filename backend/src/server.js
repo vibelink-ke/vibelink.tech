@@ -247,6 +247,26 @@ app.use(async (req, res, next) => {
   if (!req.tenant && process.env.DEV_TENANT) req.tenant = await tenantByHost(process.env.DEV_TENANT);
   if (!req.tenant) return res.status(404).json({ error: 'unknown tenant' });
   if (req.tenant.status === 'suspended') return res.status(402).json({ error: 'subscription suspended' });
+
+  /**
+   * Read-only: an overdue platform invoice has reached day 5.
+   *
+   * Reading stays open on purpose. An operator who cannot see who owes them money
+   * cannot collect it, and collecting it is how they pay us — locking them out
+   * entirely works against the thing we want to happen. So every screen still
+   * loads and only changes are refused.
+   *
+   * The captive portal and webhooks are exempt: their customers are not the ones
+   * in arrears, and a payment arriving is what lifts this.
+   */
+  if (req.tenant.status === 'readonly'
+      && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+      && !req.path.startsWith('/portal/')) {
+    return res.status(402).json({
+      error: 'Your account is read-only until the platform invoice is paid. You can still view everything.',
+      readOnly: true,
+    });
+  }
   next();
 });
 
@@ -624,6 +644,54 @@ async function routerLogin(r, body, secrets) {
   if (user) return { user, password: String(body?.password ?? ''), stored: false };
   return null;
 }
+
+/**
+ * The tenant's own standing with the platform: licence validity, and whatever
+ * they owe us.
+ *
+ * Everything the dashboard needs to decide what to show, computed here so the
+ * date arithmetic is not repeated in the browser against a clock we do not
+ * control.
+ */
+app.get('/api/licence', wrap(async (req, res) => {
+  const { rows: [row] } = await pool.query(`
+    select t.status, t.licence_ends, t.plan_type, t.plan_amount,
+           (t.licence_ends - current_date)                  as days_left,
+           (current_date = (date_trunc('month', current_date)
+                            + interval '1 month - 1 day')::date) as last_day_of_month,
+           i.number, i.amount, i.due_date, i.status as invoice_status,
+           (current_date - i.created_at::date) + 1          as invoice_day
+      from tenants t
+      left join lateral (
+        select * from invoices
+         where tenant_id = t.id and subscriber_id is null and status <> 'paid'
+         order by created_at desc limit 1
+      ) i on true
+     where t.id = $1`, [req.tenant.id]);
+
+  const invoice = row?.number
+    ? {
+        number: row.number,
+        amount: Number(row.amount),
+        dueDate: row.due_date,
+        day: Number(row.invoice_day),
+        // Day 2 is when it stops being a note and starts being in the way.
+        prominent: Number(row.invoice_day) >= 2,
+      }
+    : null;
+
+  res.json({
+    status: row?.status ?? 'active',
+    readOnly: row?.status === 'readonly',
+    licenceEnds: row?.licence_ends ?? null,
+    daysLeft: row?.days_left ?? null,
+    planType: row?.plan_type ?? null,
+    planAmount: row?.plan_amount == null ? null : Number(row.plan_amount),
+    invoice,
+    // Nothing is owed yet, but billing runs at 05:00 tomorrow.
+    renewalTomorrow: !invoice && row?.last_day_of_month === true,
+  });
+}));
 
 /** The router's own ports, so the operator can pick which are LAN. */
 app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {

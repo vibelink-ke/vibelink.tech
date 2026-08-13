@@ -59,7 +59,18 @@ export function StoreProvider({ children }) {
   const [session, setSession] = useState(undefined);
 
   // UI-only state, mirroring the mockup's non-data state fields.
-  const [dark, setDark] = useState(false);
+  // Remembered across reloads. It was plain useState, so every refresh threw the
+  // choice away and snapped back to light.
+  const [dark, setDark] = useState(() => {
+    try {
+      const saved = localStorage.getItem('vibelink.dark');
+      if (saved !== null) return saved === '1';
+      // Never chosen: follow the operating system rather than assuming light.
+      return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+    } catch {
+      return false;   // private browsing can throw on localStorage
+    }
+  });
   const [role, setRole] = useState('owner');
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
@@ -185,6 +196,7 @@ export function StoreProvider({ children }) {
   // paints the page background behind the inverted tree.
   useEffect(() => {
     document.documentElement.classList.toggle('om-dark-root', dark);
+    try { localStorage.setItem('vibelink.dark', dark ? '1' : '0'); } catch { /* ignore */ }
   }, [dark]);
 
   /** Optimistically replace one collection (used after create/delete calls). */

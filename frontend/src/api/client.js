@@ -161,6 +161,7 @@ export const api = {
   createRouter: (r) => post('/api/routers', r),
   ovpnScript: (opts = {}) => post('/api/routers/ovpn-script', opts),
   tunnelInfo: () => get('/api/routers/tunnel-info'),
+  licence: () => get('/api/licence'),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
