@@ -12,6 +12,18 @@ import { startJobs } from './jobs.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
 
+// A crash used to be invisible: the process died, the proxy answered 502 with an
+// empty body, the container restarted, and nothing was written down. Say what
+// happened before going, so the next one takes minutes rather than an evening.
+process.on('uncaughtException', (e) => {
+  console.error('FATAL uncaught exception —', e?.stack ?? e);
+  process.exit(1);   // let the restart policy replace us, but on the record
+});
+process.on('unhandledRejection', (e) => {
+  console.error('FATAL unhandled rejection —', e?.stack ?? e);
+  process.exit(1);
+});
+
 const app = express();
 app.use(express.json());
 
@@ -634,7 +646,7 @@ app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
     ]);
     res.json({ lan, bridges: bridgeList, ...info });
   } catch (e) {
-    res.status(502).json({ error: describeRouterError(e, host, r.api_port ?? 8728) });
+    res.status(502).json({ error: describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728) });
   } finally {
     if (conn) ros.close(conn);
   }
@@ -737,7 +749,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
 
     res.json({ ok: true, applied: done, ...info });
   } catch (e) {
-    const message = describeRouterError(e, host, r.api_port ?? 8728);
+    const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]);

@@ -28,6 +28,18 @@ export async function connect({ host, port = 8728, user, password, timeoutSec = 
     timeout: timeoutSec,
     keepalive: false,
   });
+
+  // RouterOSAPI is an EventEmitter, and once a connection is established it
+  // re-emits every later socket error and timeout as an 'error' event. Node turns
+  // an unhandled 'error' event into an uncaught exception, so a router that
+  // accepted the login and then dropped the socket mid-conversation took the
+  // whole API process down with it — the browser saw a bare 502 from the proxy
+  // with no message, and nothing was logged because the process was already gone.
+  //
+  // A listener keeps it an ordinary failure. The in-flight write rejects on its
+  // own, and this records why so the caller can say something useful.
+  conn.on('error', (e) => { conn.__socketError = e; });
+
   await conn.connect();
   return conn;
 }
