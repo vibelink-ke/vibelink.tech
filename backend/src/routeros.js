@@ -10,8 +10,37 @@
  * adding a hotspot, and a second run must be a no-op rather than a duplicate
  * /radius entry, which RouterOS will happily accept and then load-balance across.
  */
+import { createRequire } from 'node:module';
 import pkg from 'node-routeros';
 const { RouterOSAPI } = pkg;
+
+/**
+ * node-routeros cannot read `!empty`, and RouterOS sends it whenever a query
+ * matches nothing — no bridges yet, no user by that name, no hotspot profiles.
+ *
+ * Its packet handler falls through to a `default` branch that emits 'unknown',
+ * whose listener throws from inside the socket's data callback. Nothing can catch
+ * that, so it became an uncaught exception and killed the API process: the
+ * browser saw a bare 502 from the proxy and the container quietly restarted.
+ * Onboarding a fresh router hits it immediately, because a fresh router has none
+ * of the things we look for.
+ *
+ * `!empty` means "done, nothing matched", which is exactly `!done` with no rows,
+ * so translate it before the switch sees it. Patching a dependency is not
+ * pleasant, but the alternative is writing the API protocol ourselves.
+ */
+{
+  const require = createRequire(import.meta.url);
+  const { Channel } = require('node-routeros/dist/Channel');
+  const original = Channel.prototype.processPacket;
+  if (!Channel.prototype.__emptyReplyPatched) {
+    Channel.prototype.processPacket = function processPacket(packet) {
+      if (Array.isArray(packet) && packet[0] === '!empty') packet[0] = '!done';
+      return original.call(this, packet);
+    };
+    Channel.prototype.__emptyReplyPatched = true;
+  }
+}
 
 /** Tags every object we own, so we can find ours again and humans leave it alone. */
 export const MANAGED_COMMENT = 'vibelink billing - do not delete';

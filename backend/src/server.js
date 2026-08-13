@@ -834,6 +834,11 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
   await pool.query('delete from ovpn_clients where tenant_id=$1 and assigned_ip=$2',
     [req.tenant.id, r.host]);
   await pool.query('delete from wg_peers where tenant_id=$1 and router_id=$2', [req.tenant.id, r.id]);
+  // ip_pools.router_id has no ON DELETE, so a pool assigned to this router blocked
+  // the delete outright with a raw foreign-key error. Detach rather than drop: the
+  // address range is still the operator's to reassign.
+  await pool.query('update ip_pools set router_id=null where tenant_id=$1 and router_id=$2',
+    [req.tenant.id, r.id]);
   await pool.query('delete from routers where id=$1 and tenant_id=$2', [r.id, req.tenant.id]);
   res.json({ ok: true, freed: r.host });
 }));
