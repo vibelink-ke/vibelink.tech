@@ -4,12 +4,25 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Textarea } from '../ui/primitives';
 
-const BLANK_ROUTER = { name: '', host: '', secret: '', apiPort: '8728', role: 'both' };
+/**
+ * A shared secret nobody should be inventing. It is never typed into the router
+ * by hand any more — Configure pushes it — so a memorable one buys nothing and
+ * costs entropy. Browser crypto, not Math.random.
+ */
+function generateSecret(bytes = 24) {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+  return btoa(String.fromCharCode(...buf)).replace(/[^A-Za-z0-9]/g, '').slice(0, 28);
+}
+
+const blankRouter = () => ({
+  name: '', host: '', secret: generateSecret(), apiPort: '8728', role: 'both',
+});
 
 export default function Routers() {
   const store = useStore();
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
-  const [form, setForm] = useState(null); // BLANK_ROUTER when the confirm modal is open
+  const [form, setForm] = useState(null); // blankRouter() when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);   // router id currently being probed
   const [edit, setEdit] = useState(null);         // the router row open for editing
@@ -142,9 +155,30 @@ export default function Routers() {
     if (!window.confirm(`Delete ${r.name}? Its tunnel credentials are revoked and ${r.host} is freed for reuse.`))
       return;
     try {
-      await api.deleteRouter(r.id);
+      const res = await api.deleteRouter(r.id);
       store.setCollection('routers', (rs) => rs.filter((x) => x.id !== r.id));
-      store.toast(`${r.name} deleted`);
+      // The server revoked the matching tunnel credential too; drop it here so the
+      // count and the list agree without a reload.
+      store.setCollection('ovpnClients', (cs) =>
+        cs.filter((c) => String(c.assigned_ip).split('/')[0] !== String(r.host).split('/')[0]));
+      store.toast(`${r.name} deleted — ${res.freed ?? r.host} is free again`);
+    } catch (e) {
+      store.toast(e.message);
+    }
+  };
+
+  /**
+   * Minting a script allocates an address and a credential straight away, so
+   * abandoning the flow halfway leaves one behind holding an address. Deleting a
+   * router clears its own, but never these — nothing links them to a router.
+   */
+  const revokeTunnel = async (c) => {
+    if (!window.confirm(`Revoke ${c.username}? Any router still using it loses the tunnel, and ${c.assigned_ip} is freed.`))
+      return;
+    try {
+      const res = await api.revokeOvpnClient(c.id);
+      store.setCollection('ovpnClients', (cs) => cs.filter((x) => x.id !== c.id));
+      store.toast(`${c.username} revoked — ${res.freed} is free again`);
     } catch (e) {
       store.toast(e.message);
     }
@@ -179,7 +213,7 @@ export default function Routers() {
       subtitle="MikroTiks reach us over a tunnel, so you need no port-forwarding and no static public IP. Use WireGuard on RouterOS 7; RouterOS 6 has no WireGuard, so use OVPN there."
       actions={
         <>
-          <Button onClick={() => setForm(BLANK_ROUTER)}>Add manually</Button>
+          <Button onClick={() => setForm(blankRouter())}>Add manually</Button>
           <Button variant="primary" onClick={openDialog}>
             + Onboard via OVPN
           </Button>
@@ -192,6 +226,46 @@ export default function Routers() {
         <Stat label="Down" value={down} tone={down ? color.rust : undefined} hint="watchdog runs every minute" />
         <Stat label="OVPN clients" value={(store.ovpnClients ?? []).length} hint="tunnels issued" />
       </Grid>
+
+      {/* Only worth showing when some credential is not backing a live router:
+          those are the ones holding an address for no reason. */}
+      {(store.ovpnClients ?? []).length > 0 && (
+        <Card
+          title="Tunnel credentials"
+          subtitle="Issued when you mint an OVPN script. Each one holds an address in your subnet until it is revoked."
+        >
+          <Table
+            rowKey={(c) => c.id}
+            empty="None issued"
+            rows={store.ovpnClients ?? []}
+            columns={[
+              { key: 'username', label: 'Username', render: (c) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.username}</span> },
+              { key: 'assigned_ip', label: 'Address', render: (c) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.assigned_ip}</span> },
+              {
+                key: 'router',
+                label: 'In use by',
+                render: (c) => {
+                  const owner = routers.find((r) => String(r.host).split('/')[0] === String(c.assigned_ip).split('/')[0]);
+                  return owner
+                    ? owner.name
+                    : <span style={{ color: color.muted }}>no router — safe to revoke</span>;
+                },
+              },
+              {
+                key: 'connected_at',
+                label: 'Last connected',
+                render: (c) => (c.connected_at ? new Date(c.connected_at).toLocaleString('en-KE') : 'never'),
+              },
+              {
+                key: 'actions',
+                label: '',
+                align: 'right',
+                render: (c) => <Button onClick={() => revokeTunnel(c)}>Revoke</Button>,
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       <Card title="Onboarded routers">
         <Table
@@ -326,7 +400,7 @@ export default function Routers() {
           <>
             <Button onClick={copyScript}>Copy</Button>
             <Button onClick={downloadScript}>Download .rsc</Button>
-            <Button variant="primary" onClick={() => setForm({ ...BLANK_ROUTER, host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}>
+            <Button variant="primary" onClick={() => setForm({ ...blankRouter(), host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}>
               Tunnel is up — continue
             </Button>
           </>
@@ -484,8 +558,15 @@ export default function Routers() {
               <Input value={form.apiPort} onChange={set('apiPort')} type="number" />
             </Field>
             <Field label="RADIUS shared secret" span={2}>
-              <Input value={form.secret} onChange={set('secret')} autoComplete="off" />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input value={form.secret} onChange={set('secret')} autoComplete="off" style={{ fontFamily: font.mono, fontSize: 12 }} />
+                <Button onClick={() => setForm((s) => ({ ...s, secret: generateSecret() }))}>New</Button>
+              </div>
             </Field>
+            <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
+              Generated for you. Press Configure after adding the router and it is pushed there
+              automatically — you only need to copy it if you configure the MikroTik by hand.
+            </span>
             <Field label="Role" span={2}>
               <select
                 value={form.role}

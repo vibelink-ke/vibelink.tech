@@ -162,6 +162,7 @@ export const api = {
   tunnelInfo: () => get('/api/routers/tunnel-info'),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
   autoconfigRouter: (id, creds = {}) => post(`/api/routers/${id}/autoconfig`, creds),
+  revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
   deleteRouter: (id) => del(`/api/routers/${id}`),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
   ovpnClients: () => get('/api/ovpn-clients'),

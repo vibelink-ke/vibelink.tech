@@ -829,14 +829,37 @@ app.get('/api/routers', async (req, res) => {
 });
 
 /** Confirm the router after the OVPN tunnel is up: nickname, NAS secret, API port (default 8728). */
-app.post('/api/routers', async (req, res) => {
+app.post('/api/routers', wrap(async (req, res) => {
   const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both' } = req.body;
+
+  // Nobody needs to invent this. It is a shared secret between us and one router,
+  // it is never typed by a human now that Configure pushes it, and a chosen one
+  // is only ever weaker than a random one.
+  const { randomPassword } = await import('./secrets.js');
+  const nasSecret = String(secret ?? '').trim() || randomPassword(24);
+
   const { rows: [r] } = await pool.query(
     `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret)
      values ($1,$2,$3,$4,$5,$6,$7) returning *`,
-    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, secret]);
+    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
   res.json(r);
-});
+}));
+
+/**
+ * Revoke a tunnel credential.
+ *
+ * Minting an OVPN script and never finishing onboarding leaves a credential that
+ * nothing else can remove — deleting a router only clears the one matching its
+ * address, and these have no router. They also hold an address out of the
+ * tenant's /24 until they go.
+ */
+app.delete('/api/ovpn-clients/:id', wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query(
+    'delete from ovpn_clients where id=$1 and tenant_id=$2 returning username, assigned_ip',
+    [req.params.id, req.tenant.id]);
+  if (!c) return res.status(404).json({ error: 'No such tunnel credential' });
+  res.json({ ok: true, freed: c.assigned_ip, username: c.username });
+}));
 
 /**
  * Prove the CoA path works before trusting it with a paying customer.
