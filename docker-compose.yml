@@ -26,8 +26,10 @@ services:
       retries: 10
 
   # Authenticates PPPoE and hotspot users against the radcheck/radreply rows the
-  # billing app writes. Reads its NAS list from the `nas` view over routers, so a
-  # router added in the UI is authorised immediately.
+  # billing app writes. Its NAS list comes from the `nas` view over routers — but
+  # read_clients loads that ONCE, at startup. A router added afterwards is unknown
+  # and its packets are dropped without a reply, which looks exactly like the
+  # server being down. Restart this service after onboarding a router.
   freeradius:
     build: ./infra/freeradius   # stock image + libpq, which it links against but omits
     container_name: billing-radius

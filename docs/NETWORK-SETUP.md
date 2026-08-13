@@ -155,8 +155,26 @@ create or replace view nas as
   select ... from routers r;
 ```
 
-So **adding a router in the UI authorises it immediately** — no file, no restart.
-The shared secret in the Routers form is the one the MikroTik must send.
+So the router list is the database, not a file you edit. The shared secret in the
+Routers form is the one the MikroTik must send.
+
+**But `read_clients` loads that view once, at startup.** A router onboarded after
+FreeRADIUS came up is unknown to it, and FreeRADIUS drops packets from unknown
+clients *silently* — no reply, nothing in its log. From the router it looks like
+the server is switched off:
+
+```
+radius,debug server timeout code=Accounting-Request
+```
+
+So after onboarding a router, restart it:
+
+```bash
+docker compose -f docker-compose.prod.yml restart freeradius
+```
+
+This is the one manual step left in onboarding. Making it unnecessary means
+FreeRADIUS dynamic clients, which look up an unknown NAS in SQL on first sight.
 
 ---
 
@@ -431,6 +449,7 @@ speed within seconds.
 | `radtest` gets no response | Container down, or UDP 1812 blocked |
 | `Access-Reject` for a valid user | No `radcheck` row — the payment never ran `activateSubscriber()` |
 | Rejected with "Client not found" | Router's source IP is not in `routers.host`, so the `nas` view does not list it |
+| Router logs `server timeout` and RADIUS logs nothing at all | FreeRADIUS loads its client list from the `nas` view **once, at startup**. A router onboarded since then is unknown, and unknown clients are dropped without a reply — indistinguishable from the server being down. Restart it: `docker compose -f docker-compose.prod.yml restart freeradius` |
 | Auth works, speed is wrong | `radreply` has the wrong `Mikrotik-Rate-Limit`; the format is `upload/download` in bits, e.g. `5000k/10000k` |
 | Tunnel never handshakes | UDP 51820 blocked, or `WG_ENDPOINT` is wrong. WireGuard is silent by design — it does not reply to bad peers at all |
 | Handshake fine, no ping | Missing `/ip/address` on the router, or the firewall rule was not added |
