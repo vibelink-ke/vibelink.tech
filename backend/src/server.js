@@ -464,6 +464,42 @@ app.post('/api/tariffs', async (req, res) => {
   res.json(t);
 });
 
+/**
+ * The address a router should dial to reach this server.
+ *
+ * Derived rather than typed. In order of trust:
+ *   1. OVPN_PUBLIC_HOST — set it when the tunnel lives on a different name or a
+ *      bare IP from the web app.
+ *   2. ROOT_DOMAIN — what the production compose file already sets.
+ *   3. The hostname this very request arrived on. Caddy passes the original Host
+ *      upstream, so in production this is by definition a name that resolves to
+ *      this server from the public internet.
+ *
+ * Never the per-tenant hostname: routers of every tenant dial the one OpenVPN
+ * server, and ovpn.<tenant>.vibelink.tech needs DNS nobody has created.
+ */
+function tunnelHost(req) {
+  const explicit = process.env.OVPN_PUBLIC_HOST?.trim();
+  if (explicit) return explicit;
+  const root = process.env.ROOT_DOMAIN?.trim();
+  if (root) return root;
+  return req.hostname;
+}
+
+/** What the Routers screen needs before it can offer to mint anything. */
+app.get('/api/routers/tunnel-info', wrap(async (req, res) => {
+  const { SERVER_IP, SUPERNET } = await import('./tunnel.js');
+  res.json({
+    serverHost: tunnelHost(req),
+    // True when we are guessing from the request. The UI says so, because on a
+    // laptop this resolves to "localhost", which no router can dial.
+    detected: !process.env.OVPN_PUBLIC_HOST && !process.env.ROOT_DOMAIN,
+    port: 1194,
+    serverIp: SERVER_IP,
+    supernet: SUPERNET,
+  });
+}));
+
 // ── router onboarding via OVPN ────────────────────
 // Each tenant owns a /24 out of 10.50.0.0/16 and the router is given the next free
 // address inside it. Addresses used to come from a single shared 10.50.0.0/24 and
@@ -486,12 +522,9 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
     [req.tenant.id, username, token, nasIp]
   );
 
-  // Where the router should dial. The per-tenant hostname is only right once DNS
-  // exists for it; on a bench the server is just an address on the same LAN, so
-  // this is overridable and the caller's value wins.
-  const host = String(req.body?.serverHost ?? '').trim()
-    || process.env.OVPN_PUBLIC_HOST
-    || `ovpn.${req.tenant.subdomain}.vibelink.tech`;
+  // Detected from the deployment; the caller may still override, because on a
+  // bench the server is just an address on the same LAN.
+  const host = String(req.body?.serverHost ?? '').trim() || tunnelHost(req);
 
   // RouterOS 6 and 7 spell the cipher differently, and pasting the wrong one
   // fails with a bare "syntax error" pointing at the column, which tells you

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -12,9 +12,24 @@ export default function Routers() {
   const [form, setForm] = useState(null); // BLANK_ROUTER when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [testing, setTesting] = useState(null);   // router id currently being probed
-  // Asked before minting: RouterOS 6 and 7 need different cipher names, and the
-  // address the router dials is not knowable from here.
+  // Asked before minting: RouterOS 6 and 7 need different cipher names. The
+  // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
+  const [detected, setDetected] = useState(null);   // { serverHost, detected, port }
+
+  // Prefill the dial address when the dialog opens. The server knows it — either
+  // from OVPN_PUBLIC_HOST / ROOT_DOMAIN, or from the hostname this page arrived
+  // on, which by definition resolves to the server from outside.
+  const openDialog = useCallback(async () => {
+    setDial((d) => ({ ...d, open: true }));
+    try {
+      const info = await api.tunnelInfo();
+      setDetected(info);
+      setDial((d) => (d.serverHost ? d : { ...d, serverHost: info.serverHost }));
+    } catch {
+      // Not fatal — the field is still editable.
+    }
+  }, []);
 
   const routers = store.routers ?? [];
   const up = routers.filter((r) => r.status === 'up').length;
@@ -103,7 +118,7 @@ export default function Routers() {
       actions={
         <>
           <Button onClick={() => setForm(BLANK_ROUTER)}>Add manually</Button>
-          <Button variant="primary" onClick={() => setDial((d) => ({ ...d, open: true }))}>
+          <Button variant="primary" onClick={openDialog}>
             + Onboard via OVPN
           </Button>
         </>
@@ -199,13 +214,23 @@ export default function Routers() {
             <Input
               value={dial.serverHost}
               onChange={(e) => setDial((d) => ({ ...d, serverHost: e.target.value }))}
-              placeholder="vpn.yourdomain.com or 192.168.88.254"
+              placeholder={detected ? '' : 'detecting…'}
             />
           </Field>
-          <span style={{ fontSize: 12, color: color.muted }}>
-            Whatever this router can actually reach on port 1194 — your server’s public hostname in
-            production, or its LAN address while testing on a bench.
-          </span>
+          {/* A hostname only this browser can resolve produces a script that fails
+              on the router with no useful error, so say so before it is pasted. */}
+          {detected?.detected || /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(dial.serverHost) ? (
+            <span style={{ fontSize: 12, color: color.rust }}>
+              This looks like a private or local address. Fine on a bench where the router shares
+              your network — but a router at a customer site cannot dial it. In production set
+              ROOT_DOMAIN (or OVPN_PUBLIC_HOST) on the server.
+            </span>
+          ) : (
+            <span style={{ fontSize: 12, color: color.muted }}>
+              Detected from this deployment. Override it if the tunnel answers on a different name
+              or address — it just has to be something this router can reach on port {detected?.port ?? 1194}.
+            </span>
+          )}
         </div>
       </Modal>
 
