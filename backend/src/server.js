@@ -2149,6 +2149,61 @@ app.post('/api/payment-gateways', wrap(async (req, res) => {
   }
 }));
 
+/**
+ * Reveal one gateway's stored credentials.
+ *
+ * The list deliberately reports only which keys are set, so after saving, an
+ * operator saw empty boxes and could not tell whether it had worked. Rather than
+ * returning secrets on every page load, this is a deliberate action — the same
+ * shape as the router's RADIUS secret.
+ */
+app.get('/api/payment-gateways/:id/credentials', wrap(async (req, res) => {
+  const { rows: [g] } = await pool.query(
+    'select credentials from tenant_payment_config where id=$1 and tenant_id=$2',
+    [req.params.id, req.tenant.id]);
+  if (!g) return res.status(404).json({ error: 'not found' });
+  res.json({ credentials: g.credentials ?? {} });
+}));
+
+/**
+ * Tell Safaricom where to send C2B payments for this paybill.
+ *
+ * Without this, a customer pays and the confirmation never reaches us: Daraja
+ * posts to whatever URL was registered, which for a new shortcode is nothing at
+ * all. registerC2B existed since the import and had no way to be called.
+ */
+app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
+  const { rows: [g] } = await pool.query(
+    'select provider, shortcode from tenant_payment_config where id=$1 and tenant_id=$2',
+    [req.params.id, req.tenant.id]);
+  if (!g) return res.status(404).json({ error: 'not found' });
+  if (g.provider !== 'daraja')
+    return res.status(400).json({ error: 'Only M-Pesa paybills register callback URLs this way.' });
+
+  const base = process.env.BASE_URL ?? '';
+  if (!/^https:\/\//.test(base))
+    return res.status(400).json({
+      error: `BASE_URL is "${base || 'unset'}". Safaricom will not accept a callback URL that is not public HTTPS.`,
+    });
+
+  try {
+    const out = await mpesa.registerC2B(req.tenant.id);
+    res.json({
+      ok: true,
+      confirmation: `${base}/webhooks/daraja/confirm`,
+      validation: `${base}/webhooks/daraja/validate`,
+      response: out,
+    });
+  } catch (e) {
+    // Safaricom puts the real reason in the body, not the status text.
+    const detail = e?.response?.data;
+    res.status(502).json({
+      error: detail?.errorMessage ?? detail?.ResponseDescription ?? e.message,
+      response: detail ?? null,
+    });
+  }
+}));
+
 app.put('/api/payment-gateways/:id', wrap(async (req, res) => {
   const { label, shortcode, credentials, enabledPppoe, enabledHotspot } = req.body;
   const { rows: [g] } = await pool.query(

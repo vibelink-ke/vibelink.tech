@@ -103,6 +103,40 @@ export default function Gateways() {
       enabledHotspot: g.enabled_hotspot,
     });
 
+  /**
+   * Pull the stored values into the open form.
+   *
+   * The list only ever reports which keys are set, so a saved gateway showed
+   * empty boxes and looked like it had not saved at all. Fetched on request
+   * rather than with every page load.
+   */
+  const [revealing, setRevealing] = useState(false);
+  const reveal = async () => {
+    setRevealing(true);
+    try {
+      const { credentials } = await api.gatewayCredentials(form.id);
+      setForm((f) => ({ ...f, credentials: { ...f.credentials, ...credentials } }));
+      store.toast('Saved values loaded into the form');
+    } catch (e) {
+      store.toast(`Could not read them: ${e.message}`);
+    } finally {
+      setRevealing(false);
+    }
+  };
+
+  /**
+   * Point Safaricom's C2B callbacks at us for this paybill. Without it a customer
+   * pays and the confirmation goes nowhere, which looks like the payment failed.
+   */
+  const registerUrls = async (g) => {
+    try {
+      const out = await api.registerGatewayUrls(g.id);
+      store.toast(`Callbacks registered for ${g.shortcode} → ${out.confirmation}`);
+    } catch (e) {
+      store.toast(`Safaricom refused: ${e.message}`);
+    }
+  };
+
   const save = async () => {
     const ch = CHANNELS[form.provider];
     if (!form.shortcode.trim()) return store.toast(`${ch.codeLabel} is required`);
@@ -229,6 +263,15 @@ export default function Gateways() {
                   align: 'right',
                   render: (g) => (
                     <span style={{ whiteSpace: 'nowrap' }}>
+                      {g.provider === 'daraja' && (
+                        <span
+                          onClick={() => registerUrls(g)}
+                          title="Tell Safaricom where to post payments for this paybill"
+                          style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
+                        >
+                          Register URLs
+                        </span>
+                      )}
                       {!g.is_default && (
                         <span onClick={() => makeDefault(g)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
                           Make default
@@ -253,6 +296,11 @@ export default function Gateways() {
         onClose={() => setForm(null)}
         footer={
           <>
+            {form?.id && (
+              <Button onClick={reveal} disabled={revealing}>
+                {revealing ? 'Reading…' : 'Show saved values'}
+              </Button>
+            )}
             <Button onClick={() => setForm(null)}>Cancel</Button>
             <Button variant="primary" onClick={save} disabled={busy}>
               {busy ? 'Saving…' : form?.id ? 'Save changes' : 'Add gateway'}

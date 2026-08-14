@@ -150,6 +150,8 @@ export const api = {
   createGateway: (g) => post('/api/payment-gateways', g),
   updateGateway: (id, g) => put(`/api/payment-gateways/${id}`, g),
   makeGatewayDefault: (id) => post(`/api/payment-gateways/${id}/default`, {}),
+  gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),
+  registerGatewayUrls: (id) => post(`/api/payment-gateways/${id}/register-urls`, {}),
   deleteGateway: (id) => del(`/api/payment-gateways/${id}`),
 
   // ── automation ──
