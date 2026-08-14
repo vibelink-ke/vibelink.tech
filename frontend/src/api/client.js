@@ -55,6 +55,7 @@ export const api = {
   updateSubscriber: (id, patchBody) => patch(`/api/subscribers/${id}`, patchBody),
   deleteSubscriber: (id) => del(`/api/subscribers/${id}`),
   setSubscriberAccess: (id, action) => post(`/api/subscribers/${id}/access`, { action }),
+  newSubscriberCredentials: () => get('/api/subscribers/new-credentials'),
   smsPlaceholders: () => get('/api/sms/placeholders'),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),
 

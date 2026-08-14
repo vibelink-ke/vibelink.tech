@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, radius } from '../theme/tokens';
+import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Field, Input, Screen, Select } from '../ui/primitives';
 
 /** Field defaults transcribed from `state.newClient` in the mockup. */
 const BLANK = {
+  account: '',
   login: '',
   password: '',
   firstName: '',
@@ -38,15 +39,42 @@ export default function AddClient() {
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
-  // Was 'ZN-1234' — initials from a mockup that meant nothing to anyone here.
-  // The customer's own name reads better on a router's PPPoE secrets list, with
-  // digits to keep it unique.
-  const genLogin = () =>
-    setF((s) => {
-      const base = `${s.firstName} ${s.lastName}`.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
-      return { ...s, login: `${base || 'user'}${100 + Math.floor(Math.random() * 900)}` };
-    });
-  const genPassword = () => setF((s) => ({ ...s, password: Math.random().toString(36).slice(2, 10) }));
+  /**
+   * Credentials are digits only — 5 for the account, 7 for the password.
+   *
+   * Both get read down a phone line and typed into a router by someone who is
+   * not looking at a screen, and "is that a lowercase L or a one?" costs a
+   * support call every time. The account number comes from the server because it
+   * has to be unique within the tenant and only the database knows what is free.
+   */
+  const genCredentials = async () => {
+    try {
+      const { account, password } = await api.newSubscriberCredentials();
+      // The PPPoE login follows the account number unless it was set by hand:
+      // one number to quote for payment and to dial with is one less to lose.
+      setF((s) => ({
+        ...s,
+        account,
+        login: !s.login || s.login === s.account ? account : s.login,
+        password,
+      }));
+    } catch (e) {
+      store.toast(`Could not generate: ${e.message}`);
+    }
+  };
+
+  const genLogin = async () => {
+    try {
+      const { account } = await api.newSubscriberCredentials();
+      setF((s) => ({ ...s, login: account }));
+    } catch (e) {
+      store.toast(`Could not generate: ${e.message}`);
+    }
+  };
+
+  // Typing is constrained too, so a pasted name cannot get into a numeric field.
+  const setDigits = (k, max) => (e) =>
+    setF((s) => ({ ...s, [k]: e.target.value.replace(/\D/g, '').slice(0, max) }));
 
   const [busy, setBusy] = useState(false);
   const pppoePlans = (store.plans ?? []).filter((p) => p.service === 'pppoe');
@@ -70,14 +98,14 @@ export default function AddClient() {
     setBusy(true);
     try {
       const created = await api.createSubscriber({
-        accountCode: f.login || f.phone,
+        accountCode: f.account || f.login || f.phone,
         name,
         phone: f.phone,
         phoneAlt: f.phoneAlt,
         service: f.service.toLowerCase() === 'hotspot' ? 'hotspot' : 'pppoe',
         planId: f.planId || null,
         routerId: f.mikrotik || null,
-        pppoeUser: f.login || null,
+        pppoeUser: f.login || f.account || null,
         pppoePass: f.password || null,
         staticIp: f.assignedIp || null,
       });
@@ -135,16 +163,40 @@ export default function AddClient() {
 
         <Card title="Credentials">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Field label="Login" hint="Also the paybill account number the client types">
+            <Field label="Account number" hint="5 digits. What the client types as the paybill account">
               <div style={{ display: 'flex', gap: 8 }}>
-                <Input value={f.login} onChange={set('login')} />
+                <Input
+                  value={f.account}
+                  onChange={setDigits('account', 5)}
+                  inputMode="numeric"
+                  placeholder="48213"
+                  style={{ fontFamily: font.mono }}
+                />
+                <Button onClick={genCredentials}>Generate</Button>
+              </div>
+            </Field>
+            <Field label="PPPoE username" hint="Defaults to the account number — one number to remember">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input
+                  value={f.login || f.account}
+                  onChange={setDigits('login', 5)}
+                  inputMode="numeric"
+                  placeholder={f.account || '48213'}
+                  style={{ fontFamily: font.mono }}
+                />
                 <Button onClick={genLogin}>Generate</Button>
               </div>
             </Field>
-            <Field label="Password">
+            <Field label="PPPoE password" hint="7 digits">
               <div style={{ display: 'flex', gap: 8 }}>
-                <Input value={f.password} onChange={set('password')} />
-                <Button onClick={genPassword}>Generate</Button>
+                <Input
+                  value={f.password}
+                  onChange={setDigits('password', 7)}
+                  inputMode="numeric"
+                  placeholder="4827193"
+                  style={{ fontFamily: font.mono }}
+                />
+                <Button onClick={genCredentials}>Generate</Button>
               </div>
             </Field>
             <Field label="Category">

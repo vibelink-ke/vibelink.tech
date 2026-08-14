@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import util from 'node:util';
 import express from 'express';
 import { pool, tenantByHost } from './db.js';
@@ -574,7 +575,6 @@ app.get('/api/routers/tunnel-info', wrap(async (req, res) => {
 // router's address was immediately handed to the next one.
 app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
-  const crypto = await import('node:crypto');
 
   const subnet = await ensureSubnet(req.tenant.id);
   const nasIp = await nextHostIp(req.tenant.id);
@@ -1124,6 +1124,37 @@ app.post('/api/ip-pools', async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════
 
 // ── subscribers (Clients screen) ──────────────────
+/**
+ * Mint credentials for a new client: a free 5-digit account number and a 7-digit
+ * password.
+ *
+ * Digits only, because both get read down a phone line and typed into a router
+ * by people who are not looking at a screen. "Is that a lowercase L or a one?"
+ * costs a support call every time.
+ *
+ * The account number is allocated here rather than in the browser because it has
+ * to be unique within the tenant, and only the database knows what is taken.
+ */
+app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
+  const digits = (n) => {
+    const lo = 10 ** (n - 1);
+    return String(lo + crypto.randomInt(0, 9 * lo));
+  };
+
+  let account = null;
+  for (let attempt = 0; attempt < 40 && !account; attempt++) {
+    const candidate = digits(5);
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where tenant_id=$1 and account_code=$2', [req.tenant.id, candidate]);
+    if (!rowCount) account = candidate;
+  }
+  // 90,000 possibilities: only an operator with most of them in use gets here,
+  // and silently handing back a duplicate would fail on insert anyway.
+  if (!account) return res.status(409).json({ error: 'Could not find a free 5-digit account number.' });
+
+  res.json({ account, password: digits(7) });
+}));
+
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay } = req.body;
