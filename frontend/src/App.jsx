@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
+import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
 import { color, font } from './theme/tokens';
@@ -36,12 +37,19 @@ import Settings from './screens/Settings';
 export default function App() {
   const { dark, session, signIn } = useStore();
   const isMobile = useMediaQuery('(max-width: 900px)');
+  const { pathname } = useLocation();
 
   // Browser tab shows the tenant's own company, so someone running two ISPs in
   // two tabs can tell them apart.
   useEffect(() => {
     document.title = session?.company ? `${session.company} · Vibelink` : 'Vibelink';
   }, [session?.company]);
+
+  // Customers get their own page, before any staff session is considered. It is
+  // a different audience on the same hostname: no sidebar, no admin store, and a
+  // cookie the admin routes do not accept. Checked first so a subscriber never
+  // sees the staff sign-in card.
+  if (pathname.startsWith('/customer')) return <CustomerPortal />;
 
   // undefined = the session check has not come back yet. Rendering nothing for
   // that tick avoids flashing the sign-in card at an already-authenticated user.

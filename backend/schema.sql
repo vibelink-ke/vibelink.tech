@@ -691,6 +691,20 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── customer portal sessions ───────────────
+-- Separate from admin_sessions on purpose. A customer signing in must never end
+-- up holding something the admin app would accept: same table, one bug, and a
+-- subscriber is reading their operator's books. Different table, different
+-- cookie, and the portal routes only ever read this one.
+create table if not exists portal_sessions (
+  token         text primary key,
+  subscriber_id uuid not null references subscribers on delete cascade,
+  tenant_id     uuid not null references tenants on delete cascade,
+  created_at    timestamptz not null default now(),
+  expires_at    timestamptz not null
+);
+create index if not exists portal_sessions_expiry on portal_sessions (expires_at);
+
 -- ─────────────── deleting a router ───────────────
 -- Three tables referenced routers with no delete behaviour, so removing one
 -- failed on a raw foreign-key error. The screen removed the row optimistically

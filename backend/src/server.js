@@ -294,6 +294,136 @@ app.use((req, res, next) => {
   next();
 });
 
+/* ── customer portal ───────────────────────────────
+ *
+ * Lives at /portal/*, which the guard above lets through unauthenticated —
+ * customers have no admin session and never will. Its own cookie and its own
+ * table, so a subscriber cannot end up holding anything the admin app accepts.
+ */
+const PORTAL_COOKIE = 'vibelink_portal';
+const PORTAL_DAYS = 30;
+
+function portalToken(req) {
+  const raw = req.headers.cookie;
+  if (!raw) return null;
+  for (const pair of raw.split(';')) {
+    const i = pair.indexOf('=');
+    if (i > -1 && pair.slice(0, i).trim() === PORTAL_COOKIE) return decodeURIComponent(pair.slice(i + 1).trim());
+  }
+  return null;
+}
+
+async function portalSession(req) {
+  const token = portalToken(req);
+  if (!token) return null;
+  const { rows: [row] } = await pool.query(
+    `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
+            sub.status, sub.expires_at, sub.credit, sub.service,
+            p.title as plan_title, p.price as plan_price, p.rate_down, p.rate_up
+       from portal_sessions s
+       join subscribers sub on sub.id = s.subscriber_id
+       left join plans p on p.id = sub.plan_id
+      where s.token = $1 and s.expires_at > now()`, [token]);
+  return row ?? null;
+}
+
+/**
+ * Sign in with the account number and the portal password.
+ *
+ * The account number is the username on purpose: it is the same number they
+ * quote when paying, already printed on their receipts, and the one thing a
+ * customer reliably knows about themselves.
+ */
+app.post('/portal/login', wrap(async (req, res) => {
+  const account = String(req.body?.account ?? '').trim();
+  const password = String(req.body?.password ?? '');
+  // Deliberately one message for both cases: telling a stranger which account
+  // numbers exist is a free customer list.
+  const wrong = { error: 'Wrong account number or password.' };
+  if (!account || !password) return res.status(400).json(wrong);
+
+  const { rows: [s] } = await pool.query(
+    'select id, portal_password_hash from subscribers where tenant_id=$1 and account_code=$2',
+    [req.tenant.id, account]);
+  if (!s?.portal_password_hash) return res.status(401).json(wrong);
+  if (!(await auth.verifyPassword(password, s.portal_password_hash))) return res.status(401).json(wrong);
+
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = new Date(Date.now() + PORTAL_DAYS * 864e5);
+  await pool.query(
+    'insert into portal_sessions (token, subscriber_id, tenant_id, expires_at) values ($1,$2,$3,$4)',
+    [token, s.id, req.tenant.id, expiresAt]);
+
+  const parts = [`${PORTAL_COOKIE}=${token}`, 'Path=/', 'HttpOnly', 'SameSite=Lax',
+    `Expires=${expiresAt.toUTCString()}`];
+  if (process.env.NODE_ENV === 'production') parts.push('Secure');
+  res.append('Set-Cookie', parts.join('; '));
+
+  await pool.query('delete from portal_sessions where expires_at < now()').catch(() => {});
+  res.json({ ok: true });
+}));
+
+app.post('/portal/logout', wrap(async (req, res) => {
+  const token = portalToken(req);
+  if (token) await pool.query('delete from portal_sessions where token=$1', [token]);
+  res.append('Set-Cookie', `${PORTAL_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+  res.json({ ok: true });
+}));
+
+/** Everything the customer's own page shows. Their row only — never a list. */
+app.get('/portal/me', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+
+  const { rows: payments } = await pool.query(
+    `select amount, received_at, provider_ref
+       from payments
+      where tenant_id=$1 and subscriber_id=$2 and status='applied'
+      order by received_at desc limit 10`, [s.tenant_id, s.subscriber_id]);
+
+  const { rows: [org] } = await pool.query(
+    'select name, support_phone from tenants where id=$1', [s.tenant_id]);
+  const { rows: [gw] } = await pool.query(
+    `select shortcode from tenant_payment_config
+      where tenant_id=$1 and shortcode is not null
+      order by is_default desc nulls last limit 1`, [s.tenant_id]).catch(() => ({ rows: [] }));
+
+  const days = s.expires_at ? Math.ceil((new Date(s.expires_at) - Date.now()) / 86400000) : null;
+  res.json({
+    name: s.name,
+    account: s.account_code,
+    phone: s.phone,
+    status: s.status,
+    service: s.service,
+    expiresAt: s.expires_at,
+    daysLeft: days == null ? null : Math.max(0, days),
+    balance: Number(s.credit ?? 0),
+    plan: s.plan_title ? {
+      title: s.plan_title,
+      price: Number(s.plan_price),
+      speed: s.rate_down ? `${Math.round(s.rate_down / 1000)}/${Math.round(s.rate_up / 1000)} Mbps` : null,
+    } : null,
+    company: org?.name ?? '',
+    supportPhone: org?.support_phone ?? '',
+    paybill: gw?.shortcode ?? '',
+    payments,
+  });
+}));
+
+/** Raise a support request from the portal, which the Tickets screen picks up. */
+app.post('/portal/support', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const subject = String(req.body?.subject ?? '').trim();
+  if (!subject) return res.status(400).json({ error: 'Say what the problem is.' });
+
+  const { rows: [t] } = await pool.query(
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium')
+     returning number`, [s.tenant_id, subject, s.subscriber_id]);
+  res.json({ ok: true, ticket: t.number });
+}));
+
 // ── captive portal ────────────────────────────────
 app.get('/portal/plans', async (req, res) => {
   const { rows } = await pool.query(
