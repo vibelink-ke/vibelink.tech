@@ -177,6 +177,9 @@ export const api = {
   ipPools: () => get('/api/ip-pools'),
   routerFreeIps: (id, limit = 300) => get(`/api/routers/${id}/free-ips?limit=${limit}`),
   createIpPool: (p) => post('/api/ip-pools', p),
+  updateIpPool: (id, p) => put(`/api/ip-pools/${id}`, p),
+  deleteIpPool: (id) => del(`/api/ip-pools/${id}`),
+  ipPoolUsage: (id) => get(`/api/ip-pools/${id}/usage`),
 
   // ── org ──
   staff: () => get('/api/staff'),

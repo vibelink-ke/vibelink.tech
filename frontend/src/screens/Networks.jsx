@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Bar, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
+import { Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
 const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe' };
+
+const act = (c) => ({ fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10, color: c });
 
 /** Usable host count for a CIDR block (excludes network + broadcast for /≤30). */
 export function cidrHosts(cidr) {
@@ -25,6 +27,49 @@ export default function Networks() {
 
   const totalHosts = pools.reduce((a, p) => a + cidrHosts(p.cidr), 0);
   const totalUsed = pools.reduce((a, p) => a + Number(p.used ?? 0), 0);
+
+  const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
+
+  /** Who actually holds addresses in this range. */
+  const viewPool = async (p) => {
+    setViewing({ pool: p, loading: true });
+    try {
+      setViewing({ ...(await api.ipPoolUsage(p.id)), loading: false });
+    } catch (e) {
+      setViewing(null);
+      store.toast(`Could not read the pool: ${e.message}`);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editing.name?.trim() || !editing.cidr?.trim())
+      return store.toast('Name and CIDR are required');
+    try {
+      const updated = await api.updateIpPool(editing.id, {
+        name: editing.name, cidr: editing.cidr,
+        routerId: editing.routerId, service: editing.service,
+      });
+      store.setCollection('ipPools', (ps) => ps.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
+      store.toast(`${updated.name} updated`);
+      setEditing(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
+
+  // The server refuses while clients hold addresses inside the range and says
+  // how many, so there is no need to guess here.
+  const removePool = async (p) => {
+    if (!window.confirm(`Delete ${p.name} (${p.cidr})?`)) return;
+    try {
+      await api.deleteIpPool(p.id);
+      store.setCollection('ipPools', (ps) => ps.filter((x) => x.id !== p.id));
+      store.toast(`${p.name} deleted`);
+    } catch (e) {
+      store.toast(e.message);
+    }
+  };
 
   const create = async () => {
     if (!f.name.trim() || !f.cidr.trim()) return store.toast('Name and CIDR are required');
@@ -99,9 +144,87 @@ export default function Networks() {
                 return <Bar pct={pct} tone={pct > 85 ? color.rust : pct > 60 ? color.amber : color.green} />;
               },
             },
+            {
+              key: 'actions',
+              label: '',
+              align: 'right',
+              render: (p) => (
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  <span onClick={() => viewPool(p)} style={act('#4a524c')}>View</span>
+                  <span onClick={() => setEditing({ ...p, routerId: p.router_id ?? '' })} style={act(color.green)}>Edit</span>
+                  <span onClick={() => removePool(p)} style={{ ...act(color.rust), marginRight: 0 }}>Delete</span>
+                </span>
+              ),
+            },
           ]}
         />
       </Card>
+
+      <Drawer
+        open={!!viewing}
+        title={viewing?.pool?.name ?? 'Pool'}
+        onClose={() => setViewing(null)}
+      >
+        {viewing?.loading && <span style={{ fontSize: 13 }}>Reading…</span>}
+        {viewing && !viewing.loading && (
+          <>
+            <KV k="Range" v={viewing.pool.cidr} />
+            <KV k="Service" v={viewing.pool.service} />
+            <KV k="Usable addresses" v={viewing.hosts} />
+            <KV k="In use" v={viewing.used} />
+            <KV k="Free" v={viewing.free} />
+            <div style={{ marginTop: 14 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600 }}>Who holds one</span>
+              {viewing.taken.length === 0 ? (
+                <p style={{ fontSize: 12.5, color: color.muted }}>Nobody yet.</p>
+              ) : (
+                <ul style={{ margin: '8px 0 0', paddingLeft: 18, fontSize: 12.5, display: 'grid', gap: 4 }}>
+                  {viewing.taken.map((t) => (
+                    <li key={t.ip}>
+                      <span style={{ fontFamily: font.mono }}>{t.ip}</span> — {t.name} ({t.account_code}, {t.status})
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
+      </Drawer>
+
+      <Modal
+        open={!!editing}
+        title={`Edit ${editing?.name ?? 'pool'}`}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveEdit}>Save changes</Button>
+          </>
+        }
+      >
+        {editing && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Name" span={2}>
+              <Input value={editing.name} onChange={(e) => setEditing((s) => ({ ...s, name: e.target.value }))} />
+            </Field>
+            <Field label="CIDR" hint={editing.cidr ? `${cidrHosts(editing.cidr)} usable addresses` : ''}>
+              <Input value={editing.cidr} onChange={(e) => setEditing((s) => ({ ...s, cidr: e.target.value }))} />
+            </Field>
+            <Field label="Router">
+              <Select
+                value={editing.routerId ?? ''}
+                onChange={(e) => setEditing((s) => ({ ...s, routerId: e.target.value }))}
+                options={[{ value: '', label: 'Any router' },
+                  ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+              />
+            </Field>
+            <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
+              Narrowing a range that clients already sit inside does not move them — check View
+              first to see who holds an address.
+            </span>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={open}

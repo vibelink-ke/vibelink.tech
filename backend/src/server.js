@@ -1138,6 +1138,74 @@ app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
  *
  * Network and broadcast are skipped, and anything already assigned is left out.
  */
+app.put('/api/ip-pools/:id', wrap(async (req, res) => {
+  const { name, cidr, routerId, service } = req.body ?? {};
+  const { rows: [p] } = await pool.query(
+    `update ip_pools set
+       name      = coalesce(nullif($3,''), name),
+       cidr      = coalesce(nullif($4,'')::cidr, cidr),
+       -- '' clears the assignment; absent leaves it alone.
+       router_id = case when $5::text is null then router_id
+                        when $5 = '' then null else $5::uuid end,
+       service   = coalesce(nullif($6,''), service)
+     where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, name ?? '', cidr ?? '',
+     routerId === undefined ? null : String(routerId), service ?? '']);
+  if (!p) return res.status(404).json({ error: 'No such pool' });
+  res.json(p);
+}));
+
+/**
+ * Remove a pool.
+ *
+ * Refuses while subscribers hold addresses inside it: those are live customers,
+ * and deleting the range they came from leaves nothing to reconcile against when
+ * working out which addresses are free.
+ */
+app.delete('/api/ip-pools/:id', wrap(async (req, res) => {
+  const { rows: [p] } = await pool.query(
+    'select * from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!p) return res.status(404).json({ error: 'No such pool' });
+
+  const { rows: [{ count }] } = await pool.query(
+    `select count(*)::int from subscribers
+      where tenant_id=$1 and static_ip is not null and static_ip << $2::cidr`,
+    [req.tenant.id, p.cidr]);
+  if (count > 0)
+    return res.status(409).json({
+      error: count === 1
+        ? '1 client holds an address in this pool. Move them before deleting it.'
+        : `${count} clients hold addresses in this pool. Move them before deleting it.`,
+    });
+
+  await pool.query('delete from ip_pools where id=$1 and tenant_id=$2', [p.id, req.tenant.id]);
+  res.json({ ok: true, freed: p.cidr });
+}));
+
+/** Addresses in one pool and who holds them, for the pool detail view. */
+app.get('/api/ip-pools/:id/usage', wrap(async (req, res) => {
+  const { rows: [p] } = await pool.query(
+    'select * from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!p) return res.status(404).json({ error: 'No such pool' });
+
+  const { rows: taken } = await pool.query(
+    `select host(static_ip) as ip, name, account_code, status
+       from subscribers
+      where tenant_id=$1 and static_ip is not null and static_ip << $2::cidr
+      order by static_ip`, [req.tenant.id, p.cidr]);
+
+  const { rows: [size] } = await pool.query(
+    'select (broadcast($1::cidr) - network($1::cidr) - 1)::bigint as hosts', [p.cidr]);
+
+  res.json({
+    pool: p,
+    hosts: Number(size.hosts),
+    used: taken.length,
+    free: Math.max(0, Number(size.hosts) - taken.length),
+    taken,
+  });
+}));
+
 app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const { rows } = await pool.query(`
