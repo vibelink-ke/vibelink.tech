@@ -56,6 +56,7 @@ export const api = {
   deleteSubscriber: (id) => del(`/api/subscribers/${id}`),
   setSubscriberAccess: (id, action) => post(`/api/subscribers/${id}/access`, { action }),
   newSubscriberCredentials: () => get('/api/subscribers/new-credentials'),
+  generatePortalPassword: (id) => post(`/api/subscribers/${id}/portal-password`, {}),
   smsPlaceholders: () => get('/api/sms/placeholders'),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),
 

@@ -11,6 +11,9 @@ const FILTERS = [
   { key: 'online', label: 'Online', match: (c) => c.status === 'active' },
   { key: 'grace', label: 'Grace period', match: (c) => c.status === 'grace' },
   { key: 'expired', label: 'Expired', match: (c) => c.status === 'expired' },
+  // Paused and suspended are different states now, so they need different tabs —
+  // otherwise a paused client appears nowhere but All.
+  { key: 'paused', label: 'Paused', match: (c) => c.status === 'paused' },
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
 ];
 
@@ -18,6 +21,7 @@ const STATUS_DOT = {
   active: color.mint,
   grace: color.amber,
   expired: '#c05a2e',
+  paused: color.amberInk,
   suspended: color.rust,
 };
 
@@ -199,6 +203,18 @@ export default function Clients() {
    * They used to be one button writing the same status, so nobody could tell the
    * two situations apart afterwards. Both are admin-only.
    */
+  // Shown once and texted; never retrievable afterwards.
+  const [portalPw, setPortalPw] = useState(null);
+  const makePortalPassword = async (c) => {
+    try {
+      const { password } = await api.generatePortalPassword(c.id);
+      setPortalPw({ id: c.id, password });
+      store.toast(`Portal password for ${c.name} generated and sent by SMS`);
+    } catch (e) {
+      store.toast(`Could not generate: ${e.message}`);
+    }
+  };
+
   const setAccess = async (c, action) => {
     try {
       const updated = await api.setSubscriberAccess(c.id, action);
@@ -419,6 +435,27 @@ export default function Clients() {
             <KV k="Credit" v={`KES ${kes(detail.credit)}`} />
             <KV k="Expires" v={detail.expires_at ? new Date(detail.expires_at).toLocaleString('en-KE') : '—'} />
             <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
+
+            {/* The portal password is hashed, so this is the only moment anyone
+                can read it — including us. It is texted to the customer at the
+                same time, because whoever presses this is rarely the person who
+                needs it and reading a code back over the phone is how it gets
+                mistyped. */}
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Customer portal</span>
+              {portalPw?.id === detail.id ? (
+                <span style={{ fontFamily: font.mono, fontSize: 15 }}>
+                  {detail.account_code} / {portalPw.password}
+                </span>
+              ) : (
+                <span style={{ fontSize: 12.5, color: color.muted }}>
+                  Sign-in is the account number. Generating a password replaces any they already have.
+                </span>
+              )}
+              <Button onClick={() => makePortalPassword(detail)}>
+                {portalPw?.id === detail.id ? 'Generate another' : 'Generate portal password'}
+              </Button>
+            </div>
           </>
         )}
       </Drawer>

@@ -711,6 +711,11 @@ alter table subscribers add constraint subscribers_status_check
 -- not the person who notices it is down. Both numbers get every notification.
 alter table subscribers add column if not exists phone_alt text;
 
+-- What a customer signs in to the portal with. Hashed like a staff password —
+-- the plaintext is shown once when it is generated and never stored, so a
+-- database dump does not hand someone every customer's account.
+alter table subscribers add column if not exists portal_password_hash text;
+
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
 -- rest of that month free, which needs no special case: billTenants only runs on

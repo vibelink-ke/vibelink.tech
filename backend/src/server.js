@@ -1208,6 +1208,30 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
 }));
 
 /**
+ * Give a customer a fresh portal password.
+ *
+ * Six digits, for the same reason the rest are: it gets read out over the phone
+ * by support. Returned once in the clear and stored only as a hash, so this is
+ * the only moment anyone can see it — including us.
+ */
+app.post('/api/subscribers/:id/portal-password', wrap(async (req, res) => {
+  const password = String(100000 + crypto.randomInt(0, 900000));
+  const hash = await auth.hashPassword(password);
+  const { rows: [s] } = await pool.query(
+    'update subscribers set portal_password_hash=$3 where id=$1 and tenant_id=$2 returning name, phone, account_code',
+    [req.params.id, req.tenant.id, hash]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+
+  res.json({ password, account: s.account_code });
+
+  // Texted as well as shown: the operator generating it is rarely the person who
+  // needs it, and reading a code back over the phone is how it gets mistyped.
+  notifySubscriber(req.tenant.id, req.params.id, 'custom', {
+    body: `Your ${'{company}'} account portal: login ${s.account_code}, password ${password}`,
+  }).catch(() => {});
+}));
+
+/**
  * Pause, suspend, or put a subscriber back on.
  *
  * These were one button writing status='suspended', so an operator could not

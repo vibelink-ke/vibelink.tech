@@ -51,6 +51,24 @@ const { RouterOSAPI } = pkg;
 
     Channel.prototype.__emptyReplyPatched = true;
   }
+
+  // The other half. Receiver.sendTagData throws UNREGISTEREDTAG when a reply
+  // arrives for a tag nobody is waiting on any more — also from inside the
+  // socket's data handler, also fatal.
+  //
+  // Ending a command early makes that certain rather than unlikely: the tag is
+  // unregistered and the router's real reply for it lands a moment later. So the
+  // patch above guaranteed this crash. A late or duplicate reply is not a reason
+  // to take the server down; drop it.
+  const { Receiver } = require('node-routeros/dist/connector/Receiver');
+  if (!Receiver.prototype.__strayTagPatched) {
+    Receiver.prototype.sendTagData = function sendTagData(currentTag) {
+      const tag = this.tags.get(currentTag);
+      if (tag) tag.callback(this.currentPacket);
+      this.cleanUp();
+    };
+    Receiver.prototype.__strayTagPatched = true;
+  }
 }
 
 /** Tags every object we own, so we can find ours again and humans leave it alone. */

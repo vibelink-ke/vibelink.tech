@@ -161,7 +161,7 @@ export default function AddClient() {
           </div>
         </Card>
 
-        <Card title="Credentials">
+        <Card title="Billing">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Field label="Account number" hint="5 digits. What the client types as the paybill account">
               <div style={{ display: 'flex', gap: 8 }}>
@@ -175,6 +175,17 @@ export default function AddClient() {
                 <Button onClick={genCredentials}>Generate</Button>
               </div>
             </Field>
+            <Field label="Category">
+              <Select value={f.category} onChange={set('category')} options={CATEGORIES} />
+            </Field>
+            <Field label="Billing">
+              <Select value={f.billing} onChange={set('billing')} options={BILLING} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card title="Service">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Field label="PPPoE username" hint="Defaults to the account number — one number to remember">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
@@ -199,17 +210,6 @@ export default function AddClient() {
                 <Button onClick={genCredentials}>Generate</Button>
               </div>
             </Field>
-            <Field label="Category">
-              <Select value={f.category} onChange={set('category')} options={CATEGORIES} />
-            </Field>
-            <Field label="Billing">
-              <Select value={f.billing} onChange={set('billing')} options={BILLING} />
-            </Field>
-          </div>
-        </Card>
-
-        <Card title="Service">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Field label="Service type">
               <Select value={f.service} onChange={set('service')} options={SERVICES} />
             </Field>
