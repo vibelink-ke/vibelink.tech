@@ -163,14 +163,14 @@ export default function Routers() {
    * into a specific wrong value — or confirms both ends agree, which points the
    * search somewhere else entirely.
    */
-  const [radius, setRadius] = useState(null);
+  const [radiusReport, setRadiusReport] = useState(null);
   const checkRadius = async (r) => {
-    setRadius({ router: r, state: 'running' });
+    setRadiusReport({ router: r, state: 'running' });
     try {
       const res = await api.radiusCheck(r.id);
-      setRadius({ router: r, state: 'done', ...res });
+      setRadiusReport({ router: r, state: 'done', ...res });
     } catch (e) {
-      setRadius({ router: r, state: 'done', error: e.message, ...(e.body ?? {}) });
+      setRadiusReport({ router: r, state: 'done', error: e.message, ...(e.body ?? {}) });
     }
   };
 
@@ -617,46 +617,46 @@ export default function Routers() {
 
       {/* Both sides of the RADIUS setup, side by side. */}
       <Modal
-        open={!!radius}
-        title={`RADIUS · ${radius?.router?.name ?? ''}`}
+        open={!!radiusReport}
+        title={`RADIUS · ${radiusReport?.router?.name ?? ''}`}
         width={560}
-        onClose={() => setRadius(null)}
-        footer={<Button onClick={() => setRadius(null)}>Close</Button>}
+        onClose={() => setRadiusReport(null)}
+        footer={<Button onClick={() => setRadiusReport(null)}>Close</Button>}
       >
-        {radius && (
+        {radiusReport && (
           <div style={{ display: 'grid', gap: 14 }}>
-            {radius.state === 'running' && <span style={{ fontSize: 13 }}>Reading the router…</span>}
+            {radiusReport.state === 'running' && <span style={{ fontSize: 13 }}>Reading the router…</span>}
 
-            {radius.expected && (
+            {radiusReport.expected && (
               <div style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
                 <span style={{ fontWeight: 600 }}>What the router should point at</span>
-                <span>RADIUS server <strong style={{ fontFamily: font.mono }}>{radius.expected.radiusServer}</strong>{' '}
-                  · auth {radius.expected.authPort} · accounting {radius.expected.acctPort}</span>
-                <span>CoA back to this router on port <strong style={{ fontFamily: font.mono }}>{radius.expected.coaPort}</strong></span>
-                <span>Its NAS address here is <strong style={{ fontFamily: font.mono }}>{radius.expected.nasAddress}</strong></span>
-                <span style={{ color: radius.knownToRadius ? color.neutralInk : color.rust }}>
-                  {radius.knownToRadius
+                <span>RADIUS server <strong style={{ fontFamily: font.mono }}>{radiusReport.expected.radiusServer}</strong>{' '}
+                  · auth {radiusReport.expected.authPort} · accounting {radiusReport.expected.acctPort}</span>
+                <span>CoA back to this router on port <strong style={{ fontFamily: font.mono }}>{radiusReport.expected.coaPort}</strong></span>
+                <span>Its NAS address here is <strong style={{ fontFamily: font.mono }}>{radiusReport.expected.nasAddress}</strong></span>
+                <span style={{ color: radiusReport.knownToRadius ? color.neutralInk : color.rust }}>
+                  {radiusReport.knownToRadius
                     ? 'RADIUS accepts requests from that address only. A router sending from any other — its LAN address rather than its tunnel address — is dropped without a reply.'
                     : 'RADIUS has no record of that address, so every request from it is dropped without a reply.'}
                 </span>
               </div>
             )}
 
-            {radius.error && (
-              <span style={{ fontSize: 12.5, color: color.rust }}>{radius.error}</span>
+            {radiusReport.error && (
+              <span style={{ fontSize: 12.5, color: color.rust }}>{radiusReport.error}</span>
             )}
 
-            {radius.checks && (
+            {radiusReport.checks && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>What the router actually says</span>
-                {radius.checks.map((c) => (
+                {radiusReport.checks.map((c) => (
                   <div key={c.name} style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline' }}>
                     <span style={{ color: c.ok ? color.green : color.rust, fontWeight: 700 }}>{c.ok ? '✓' : '✕'}</span>
                     <span style={{ flex: 1 }}>{c.name}</span>
                     {!c.ok && <span style={{ color: color.muted }}>{c.detail}</span>}
                   </div>
                 ))}
-                {!radius.ok && (
+                {!radiusReport.ok && (
                   <span style={{ fontSize: 12, color: color.muted, marginTop: 4 }}>
                     Press Configure to push the correct values, or Refresh to re-send them.
                   </span>
