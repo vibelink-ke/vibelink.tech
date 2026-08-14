@@ -54,6 +54,8 @@ export const api = {
   createSubscriber: (s) => post('/api/subscribers', s),
   updateSubscriber: (id, patchBody) => patch(`/api/subscribers/${id}`, patchBody),
   deleteSubscriber: (id) => del(`/api/subscribers/${id}`),
+  setSubscriberAccess: (id, action) => post(`/api/subscribers/${id}/access`, { action }),
+  smsPlaceholders: () => get('/api/sms/placeholders'),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),
 
   // ── money ──
@@ -170,6 +172,7 @@ export const api = {
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
   ovpnClients: () => get('/api/ovpn-clients'),
   ipPools: () => get('/api/ip-pools'),
+  routerFreeIps: (id, limit = 300) => get(`/api/routers/${id}/free-ips?limit=${limit}`),
   createIpPool: (p) => post('/api/ip-pools', p),
 
   // ── org ──

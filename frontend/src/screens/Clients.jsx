@@ -98,7 +98,7 @@ export default function Clients() {
     const picked = selectedClients();
     if (!picked.length) return store.toast('Select at least one client first');
     const results = await Promise.allSettled(
-      picked.map((c) => api.updateSubscriber(c.id, { status: c.status === 'suspended' ? 'active' : 'suspended' }))
+      picked.map((c) => api.setSubscriberAccess(c.id, c.status === 'active' ? 'pause' : 'resume'))
     );
     const done = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
     store.setCollection('clients', (cs) => cs.map((c) => done.find((d) => d.id === c.id) ?? c));
@@ -191,12 +191,19 @@ export default function Clients() {
     }
   };
 
-  const togglePause = async (c) => {
-    const status = c.status === 'suspended' ? 'active' : 'suspended';
+  /**
+   * Pause, suspend and resume are three different things.
+   *
+   * Pause is an admin stopping the service on purpose — automation leaves those
+   * alone. Suspend is a block, normally for non-payment, which a payment clears.
+   * They used to be one button writing the same status, so nobody could tell the
+   * two situations apart afterwards. Both are admin-only.
+   */
+  const setAccess = async (c, action) => {
     try {
-      const updated = await api.updateSubscriber(c.id, { status });
+      const updated = await api.setSubscriberAccess(c.id, action);
       store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? updated : x)));
-      store.toast(`${c.name} ${status === 'suspended' ? 'paused' : 'resumed'}`);
+      store.toast(`${c.name} ${{ pause: 'paused', suspend: 'suspended', resume: 'resumed' }[action]}`);
     } catch (e) {
       store.toast(`Could not update: ${e.message}`);
     }
@@ -371,9 +378,20 @@ export default function Clients() {
                     </td>
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <span onClick={() => setDetail(c)} style={{ ...action, color: '#4a524c' }}>View</span>
-                      <span onClick={() => togglePause(c)} style={{ ...action, color: color.amberInk }}>
-                        {c.status === 'suspended' ? 'Resume' : 'Pause'}
+                      <span onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')} style={{ ...action, color: color.amberInk }}>
+                        {c.status === 'active' ? 'Pause' : 'Resume'}
                       </span>
+                      {/* Distinct from Pause: this is a block, and only an admin
+                          sees it. Hidden once they are already suspended. */}
+                      {store.isAdmin && c.status !== 'suspended' && (
+                        <span
+                          onClick={() => setAccess(c, 'suspend')}
+                          title="Block this customer — a payment clears it"
+                          style={{ ...action, color: color.rust }}
+                        >
+                          Suspend
+                        </span>
+                      )}
                       <span onClick={() => setEditing({ ...c })} style={{ ...action, color: color.green }}>Edit</span>
                       <span onClick={() => removeClient(c)} style={{ ...action, color: color.rust, marginRight: 0 }}>
                         Delete

@@ -691,6 +691,26 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── pause vs suspend, and a second number ───────────────
+-- "Pause" wrote status='suspended', so the two were the same thing wearing
+-- different labels and an operator could not tell a customer they had stopped on
+-- purpose from one the system cut off for not paying. They are separate now:
+--
+--   paused     an admin stopped the service deliberately. Automation leaves it
+--              alone — nothing re-enables it, and the nightly sweep will not
+--              "expire" someone who is already off by choice.
+--   suspended  the system blocked them, normally for non-payment. A payment
+--              clears it.
+--
+-- Both are admin actions. Neither is ever offered to the customer.
+alter table subscribers drop constraint if exists subscribers_status_check;
+alter table subscribers add constraint subscribers_status_check
+  check (status in ('active','grace','expired','paused','suspended'));
+
+-- Households share a connection but not a handset: the person who pays is often
+-- not the person who notices it is down. Both numbers get every notification.
+alter table subscribers add column if not exists phone_alt text;
+
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
 -- rest of that month free, which needs no special case: billTenants only runs on

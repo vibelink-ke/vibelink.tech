@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -13,6 +13,7 @@ const BLANK = {
   lastName: '',
   email: '',
   phone: '',
+  phoneAlt: '',
   category: 'Individual Monthly',
   billing: 'Monthly (prepaid)',
   birthday: '',
@@ -37,11 +38,30 @@ export default function AddClient() {
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
-  const genLogin = () => setF((s) => ({ ...s, login: 'ZN-' + (1000 + Math.floor(Math.random() * 900)) }));
+  // Was 'ZN-1234' — initials from a mockup that meant nothing to anyone here.
+  // The customer's own name reads better on a router's PPPoE secrets list, with
+  // digits to keep it unique.
+  const genLogin = () =>
+    setF((s) => {
+      const base = `${s.firstName} ${s.lastName}`.trim().toLowerCase().replace(/[^a-z0-9]+/g, '.').replace(/^\.|\.$/g, '');
+      return { ...s, login: `${base || 'user'}${100 + Math.floor(Math.random() * 900)}` };
+    });
   const genPassword = () => setF((s) => ({ ...s, password: Math.random().toString(36).slice(2, 10) }));
 
   const [busy, setBusy] = useState(false);
   const pppoePlans = (store.plans ?? []).filter((p) => p.service === 'pppoe');
+
+  // Free addresses for the chosen router, refreshed whenever it changes.
+  const [freeIps, setFreeIps] = useState({ addresses: [], pools: [], loading: false });
+  useEffect(() => {
+    if (!f.mikrotik) return setFreeIps({ addresses: [], pools: [], loading: false });
+    let live = true;
+    setFreeIps((s) => ({ ...s, loading: true }));
+    api.routerFreeIps(f.mikrotik)
+      .then((r) => live && setFreeIps({ addresses: r.addresses ?? [], pools: r.pools ?? [], loading: false }))
+      .catch(() => live && setFreeIps({ addresses: [], pools: [], loading: false }));
+    return () => { live = false; };
+  }, [f.mikrotik]);
 
   const save = async () => {
     const name = `${f.firstName} ${f.lastName}`.trim();
@@ -53,6 +73,7 @@ export default function AddClient() {
         accountCode: f.login || f.phone,
         name,
         phone: f.phone,
+        phoneAlt: f.phoneAlt,
         service: f.service.toLowerCase() === 'hotspot' ? 'hotspot' : 'pppoe',
         planId: f.planId || null,
         routerId: f.mikrotik || null,
@@ -94,6 +115,11 @@ export default function AddClient() {
             </Field>
             <Field label="Phone" hint="Used for M-Pesa matching">
               <Input value={f.phone} onChange={set('phone')} placeholder="07xx xxx xxx" />
+            </Field>
+            {/* A household shares the line but not the handset — whoever pays is
+                often not whoever notices it is down. Both get every message. */}
+            <Field label="Second number" hint="Optional. Also receives every notification">
+              <Input value={f.phoneAlt} onChange={set('phoneAlt')} placeholder="07xx xxx xxx" />
             </Field>
             <Field label="Email">
               <Input value={f.email} onChange={set('email')} type="email" />
@@ -153,8 +179,25 @@ export default function AddClient() {
                   ...store.routers.map((r) => ({ value: r.id, label: r.name }))]}
               />
             </Field>
-            <Field label="Assigned IP" hint="Leave blank to take the next free address from the pool">
-              <Input value={f.assignedIp} onChange={set('assignedIp')} placeholder="10.10.0.0" />
+            {/* Free addresses from that router's own pools, rather than a text
+                box where a typo becomes a customer who cannot get online. */}
+            <Field
+              label="Assigned IP"
+              hint={
+                !f.mikrotik ? 'Pick a router first'
+                  : freeIps.loading ? 'Reading the pool…'
+                  : freeIps.addresses.length ? `${freeIps.addresses.length} free in ${freeIps.pools.join(', ')}`
+                  : 'No pool on this router — add one under Networks'
+              }
+            >
+              <Select
+                value={f.assignedIp}
+                onChange={set('assignedIp')}
+                options={[
+                  { value: '', label: 'Next free address' },
+                  ...freeIps.addresses.map((ip) => ({ value: ip, label: ip })),
+                ]}
+              />
             </Field>
           </div>
         </Card>

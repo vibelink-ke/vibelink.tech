@@ -1066,6 +1066,43 @@ app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
   });
 }));
 
+/**
+ * Free addresses a subscriber on this router could be given.
+ *
+ * Any prefix length, not just /24: the offsets come from inet arithmetic on the
+ * pool's own cidr, so a /22 or /16 enumerates correctly instead of quietly
+ * assuming 254 hosts. Capped, because a /16 is 65k addresses and nobody picks
+ * from that in a dropdown.
+ *
+ * Network and broadcast are skipped, and anything already assigned is left out.
+ */
+app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
+  const limit = Math.min(Number(req.query.limit) || 300, 1000);
+  const { rows } = await pool.query(`
+    with pools as (
+      select cidr from ip_pools
+       where tenant_id = $1
+         and (router_id = $2 or router_id is null)
+         and service = 'pppoe'
+    )
+    select host(network(p.cidr) + i) as ip, text(p.cidr) as pool
+      from pools p,
+           lateral generate_series(
+             1,
+             greatest(least(broadcast(p.cidr) - network(p.cidr) - 1, $3::bigint), 0)
+           ) as i
+     where not exists (
+       -- host() on both sides: inet equality compares the prefix length as well,
+       -- so a stored 10.44.0.1/32 never matches a generated 10.44.0.1/22 and
+       -- every taken address was being offered again.
+       select 1 from subscribers s
+        where s.tenant_id = $1 and host(s.static_ip) = host(network(p.cidr) + i))
+     order by 1
+     limit $3`, [req.tenant.id, req.params.id, limit]);
+
+  res.json({ addresses: rows.map((r) => r.ip), pools: [...new Set(rows.map((r) => r.pool))] });
+}));
+
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name,
@@ -1088,17 +1125,44 @@ app.post('/api/ip-pools', async (req, res) => {
 
 // ── subscribers (Clients screen) ──────────────────
 app.post('/api/subscribers', wrap(async (req, res) => {
-  const { accountCode, name, phone, service = 'pppoe', planId, routerId,
+  const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   const { rows: [s] } = await pool.query(
-    `insert into subscribers (tenant_id, account_code, name, phone, service, plan_id,
+    `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
        router_id, pppoe_user, pppoe_pass, static_ip, autopay)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
-    [req.tenant.id, accountCode ?? phone, name, phone, service, planId ?? null,
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+    [req.tenant.id, accountCode ?? phone, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null]);
+
   res.json(s);
+
+  // After responding: a customer is created whether or not their phone is
+  // reachable, and the operator should not wait on an SMS gateway to find out.
+  notifySubscriber(req.tenant.id, s.id, 'welcome').catch(() => {});
 }));
+
+/**
+ * Send one templated message to a subscriber, on every number they gave us.
+ *
+ * A household shares the connection but not the handset — the person who pays is
+ * often not the one who notices it is down — so both numbers get everything.
+ */
+async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
+  const sms = await import('./sms.js');
+  const { rows: [s] } = await pool.query(
+    `select ${sms.SUBSCRIBER_VARS_SQL}
+       from subscribers s
+       left join plans p on p.id = s.plan_id
+       left join routers r on r.id = s.router_id
+      where s.id = $1 and s.tenant_id = $2`, [subscriberId, tenantId]);
+  if (!s) return;
+
+  const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId)), ...extra };
+  // Duplicates would text the same handset twice when both fields match.
+  const numbers = [...new Set([s.phone, s.phone_alt].filter(Boolean))];
+  for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});
+}
 
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'status', 'plan_id', 'router_id', 'static_ip', 'autopay', 'expires_at'];
@@ -1109,6 +1173,41 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
      where tenant_id=$1 and id=$2 returning *`,
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!s) return res.status(404).json({ error: 'not found' });
+  res.json(s);
+}));
+
+/**
+ * Pause, suspend, or put a subscriber back on.
+ *
+ * These were one button writing status='suspended', so an operator could not
+ * tell someone they had stopped deliberately from someone the system cut off for
+ * not paying — and the nightly sweep would happily "expire" a paused customer.
+ *
+ *   pause    deliberate, by an admin. Automation leaves it alone.
+ *   suspend  a block. A payment clears it.
+ *   resume   back to active, and the plan's speed is reapplied.
+ *
+ * Admin-only, and never exposed to the customer.
+ */
+app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
+  const action = String(req.body?.action ?? '');
+  const target = { pause: 'paused', suspend: 'suspended', resume: 'active' }[action];
+  if (!target) return res.status(400).json({ error: 'action must be pause, suspend or resume' });
+
+  const { rows: [s] } = await pool.query(
+    'update subscribers set status=$3 where id=$1 and tenant_id=$2 returning *',
+    [req.params.id, req.tenant.id, target]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+
+  const { withTenant } = await import('./db.js');
+  const radius = await import('./radius.js');
+  await withTenant(req.tenant.id, async (c) => {
+    if (target === 'active') await radius.activateSubscriber(c, req.tenant.id, s.id);
+    // Both off-states use the walled garden: the session drops to a crawl rather
+    // than vanishing, so the customer gets a portal page instead of silence.
+    else await radius.walledGarden(c, req.tenant.id, s.id);
+  }).catch((e) => console.warn('access change: radius not updated —', e?.message ?? e));
+
   res.json(s);
 }));
 
@@ -1624,19 +1723,33 @@ app.post('/api/sms/bulk', wrap(async (req, res) => {
     expired: ["and status='expired'", []],
   };
   const [clause, extra] = filters[audience] ?? filters.all;
+  const sms = await import('./sms.js');
+  // Joined so every placeholder can be filled — plan, price and speed live on
+  // plans, and the router name on routers.
   const { rows } = await pool.query(
-    `select name, phone, account_code, expires_at from subscribers where tenant_id=$1 ${clause}`,
+    `select ${sms.SUBSCRIBER_VARS_SQL}
+       from subscribers s
+       left join plans p on p.id = s.plan_id
+       left join routers r on r.id = s.router_id
+      where s.tenant_id=$1 ${clause.replace(/\b(router_id|plan_id|status|expires_at)\b/g, 's.$1')}`,
     [req.tenant.id, ...extra]);
 
   res.json({ queued: rows.length });
 
-  const { send } = await import('./sms.js');
+  // One lookup for the whole run rather than per recipient.
+  const org = await sms.orgVars(req.tenant.id);
   for (const s of rows) {
-    await send(req.tenant.id, s.phone, 'custom', {
-      body, name: s.name?.split(' ')[0] ?? '', account: s.account_code,
-      expires: s.expires_at ? new Date(s.expires_at).toLocaleString('en-KE') : '',
-    }).catch(() => {});
+    const vars = { ...sms.subscriberVars(s, org), body };
+    for (const n of [...new Set([s.phone, s.phone_alt].filter(Boolean))]) {
+      await sms.send(req.tenant.id, n, 'custom', vars).catch(() => {});
+    }
   }
+}));
+
+/** The tokens a template may contain, for the message composer to offer. */
+app.get('/api/sms/placeholders', wrap(async (_req, res) => {
+  const { PLACEHOLDERS } = await import('./sms.js');
+  res.json(PLACEHOLDERS);
 }));
 
 // ── tenants and platform billing (owner screens) ──

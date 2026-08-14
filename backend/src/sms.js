@@ -91,10 +91,92 @@ const DEFAULTS = {
   brief:    'Today: KES {collected} collected, {subs} new clients, {down} router(s) down.',
   // Free-text sends (POST /api/messages, POST /api/sms/bulk) pass the body through
   // the same renderer, so {name}/{account}/{expires} still interpolate per recipient.
-  custom:   '{body}'
+  custom:   '{body}',
+  welcome:  'Welcome to {company}, {first_name}. Your account number is {account} — quote it when '
+          + 'you pay. Paybill {paybill}. Plan: {plan} at KES {price}. Help: {support_phone} {support_email}',
 };
 
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+
+/**
+ * Every token a template may use, for the UI to list.
+ *
+ * The point is that one written message reaches each customer with their own
+ * details in it — a bulk send addressed to "Dear customer" is the thing this
+ * exists to avoid. Unknown tokens render as empty rather than being left on
+ * screen as literal braces.
+ */
+export const PLACEHOLDERS = [
+  { token: 'name',          desc: 'Full name' },
+  { token: 'first_name',    desc: 'First name only' },
+  { token: 'account',       desc: 'Account number they quote when paying' },
+  { token: 'phone',         desc: 'Their primary number' },
+  { token: 'plan',          desc: 'Plan name' },
+  { token: 'price',         desc: 'Plan price' },
+  { token: 'speed',         desc: 'Plan speed, e.g. 10/5 Mbps' },
+  { token: 'expires',       desc: 'When their service runs out' },
+  { token: 'days_left',     desc: 'Days until expiry' },
+  { token: 'status',        desc: 'active, expired, paused …' },
+  { token: 'balance',       desc: 'Outstanding balance' },
+  { token: 'company',       desc: 'Your company name' },
+  { token: 'support_phone', desc: 'Your customer care number' },
+  { token: 'support_email', desc: 'Your support email' },
+  { token: 'paybill',       desc: 'Your default paybill or till' },
+  { token: 'router',        desc: 'Router they are connected to' },
+];
+
+/** The joins a row needs before subscriberVars can fill every token. */
+export const SUBSCRIBER_VARS_SQL = `
+  s.*, p.title as plan_title, p.price as plan_price,
+  p.rate_down, p.rate_up, r.name as router_name`;
+
+/** Build the token map for one subscriber. `org` is per-tenant and looked up once. */
+export function subscriberVars(s, org = {}) {
+  const days = s.expires_at
+    ? Math.ceil((new Date(s.expires_at) - Date.now()) / 86400000)
+    : null;
+  const mbps = (k) => (k ? Math.round(k / 1000) : 0);
+  return {
+    name: s.name ?? '',
+    first_name: (s.name ?? '').trim().split(/\s+/)[0] ?? '',
+    account: s.account_code ?? '',
+    phone: s.phone ?? '',
+    plan: s.plan_title ?? '',
+    price: s.plan_price == null ? '' : String(Number(s.plan_price)),
+    speed: s.rate_down ? `${mbps(s.rate_down)}/${mbps(s.rate_up)} Mbps` : '',
+    expires: s.expires_at ? new Date(s.expires_at).toLocaleDateString('en-KE') : '',
+    days_left: days == null ? '' : String(Math.max(0, days)),
+    status: s.status ?? '',
+    balance: s.credit == null ? '' : String(Number(s.credit)),
+    router: s.router_name ?? '',
+    company: org.company ?? '',
+    support_phone: org.supportPhone ?? '',
+    support_email: org.supportEmail ?? '',
+    paybill: org.paybill ?? '',
+  };
+}
+
+/** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
+export async function orgVars(tenantId) {
+  const { rows: [t] } = await pool.query(
+    'select name, support_phone from tenants where id=$1', [tenantId]);
+  const { rows: [gw] } = await pool.query(
+    `select shortcode from tenant_payment_config
+      where tenant_id=$1 and shortcode is not null
+      order by is_default desc nulls last limit 1`, [tenantId]).catch(() => ({ rows: [] }));
+  // app_settings is one row per tenant with jsonb blobs, not key/value pairs.
+  const { rows: [cfg] } = await pool.query(
+    "select prefs->>'supportEmail' as email, smtp->>'from' as smtp_from from app_settings where tenant_id=$1",
+    [tenantId]).catch(() => ({ rows: [] }));
+  return {
+    company: t?.name ?? '',
+    supportPhone: t?.support_phone ?? '',
+    // Falls back to whatever address the mail gateway sends as, which is the
+    // address customers would reply to anyway.
+    supportEmail: cfg?.email ?? cfg?.smtp_from ?? '',
+    paybill: gw?.shortcode ?? '',
+  };
+}
 
 /** Send with automatic failover down the tenant's configured gateway list. */
 export async function send(tenantId, phone, template, vars = {}) {
