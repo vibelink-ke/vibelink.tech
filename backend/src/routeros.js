@@ -304,6 +304,73 @@ export async function applyPppoeServer(conn, {
   return { bridge, pool: poolName, profile: profileName };
 }
 
+/**
+ * Read back what the router actually believes about RADIUS.
+ *
+ * Pushing configuration and assuming it took is how the last few days went. This
+ * compares the router's own view against what the server expects and names each
+ * mismatch, so "RADIUS is not working" becomes a specific wrong value.
+ */
+export async function radiusCheck(conn, { serverIp, secret, coaPort = 3799 }) {
+  const [servers, incoming, aaa] = await Promise.all([
+    conn.write('/radius/print', []),
+    conn.write('/radius/incoming/print', []),
+    conn.write('/ppp/aaa/print', []),
+  ]);
+
+  const mine = servers.filter((s) => String(s.address) === String(serverIp));
+  const inc = incoming[0] ?? {};
+  const ppp = aaa[0] ?? {};
+  const yes = (v) => v === 'true' || v === 'yes';
+
+  const checks = [
+    {
+      name: `RADIUS server ${serverIp} configured`,
+      ok: mine.length > 0,
+      detail: mine.length ? `${mine.length} entr${mine.length === 1 ? 'y' : 'ies'}`
+        : `router lists ${servers.length} RADIUS server(s), none at ${serverIp}`,
+    },
+    {
+      name: 'shared secret matches',
+      ok: mine.some((s) => s.secret === secret),
+      // Never echo either value: this is read by whoever is on the screen.
+      detail: mine.length ? 'the router holds a different secret' : 'no entry to compare',
+    },
+    {
+      name: 'used for PPPoE',
+      ok: mine.some((s) => String(s.service ?? '').includes('ppp')),
+      detail: mine[0]?.service ? `service=${mine[0].service}` : 'no entry',
+    },
+    {
+      name: 'accepts CoA',
+      ok: yes(inc.accept),
+      detail: `accept=${inc.accept ?? '?'} — /radius incoming set accept=yes`,
+    },
+    {
+      name: `CoA port ${coaPort}`,
+      ok: String(inc.port ?? '') === String(coaPort),
+      detail: `router listens on ${inc.port ?? '?'}`,
+    },
+    {
+      name: 'PPP uses RADIUS',
+      ok: yes(ppp['use-radius']),
+      detail: `use-radius=${ppp['use-radius'] ?? '?'}`,
+    },
+    {
+      name: 'PPP accounting on',
+      ok: yes(ppp.accounting),
+      detail: `accounting=${ppp.accounting ?? '?'}`,
+    },
+    {
+      name: 'interim updates set',
+      ok: !!ppp['interim-update'] && ppp['interim-update'] !== '00:00:00',
+      detail: `interim-update=${ppp['interim-update'] ?? '?'} — without it usage only lands when a session ends`,
+    },
+  ];
+
+  return { checks, ok: checks.every((c) => c.ok) };
+}
+
 /** Identity and version, for the Routers screen and for choosing OVPN cipher names. */
 export async function identify(conn) {
   const [res] = await conn.write('/system/resource/print', []);

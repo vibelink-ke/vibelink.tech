@@ -20,6 +20,7 @@ export default function Routers() {
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
   const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
   const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
+  const [result, setResult] = useState(null);             // outcome of the last push
   const [showSecret, setShowSecret] = useState(false);
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
@@ -118,24 +119,65 @@ export default function Routers() {
     }
   };
 
-  const runAutoconfig = async (r, creds) => {
+  /**
+   * Apply the configuration, and say what happened.
+   *
+   * A toast was not enough: the push takes several seconds against a router over
+   * a tunnel, and a dialog that simply closed left no way to tell "it worked"
+   * from "nothing happened". The result stays on screen until dismissed, listing
+   * each step, and offers to run again.
+   */
+  const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
+    setResult({ router: r, state: 'running', opts });
     try {
-      const res = await api.autoconfigRouter(r.id, creds ?? {});
-      store.toast(`${r.name} configured — ${res.applied.join('; ')}`);
+      const res = await api.autoconfigRouter(r.id, opts ?? {});
       setAdminPrompt(null);
       setPlan(null);
+      setResult({ router: r, state: 'ok', applied: res.applied ?? [], version: res.version, opts });
       store.setCollection('routers', (rs) =>
         rs.map((x) => (x.id === r.id
           ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString(), ros_version: res.version }
           : x)));
     } catch (e) {
       // 428 is the server saying it has no account yet and needs one from you.
-      if (e.status === 428) setAdminPrompt({ router: r, username: 'admin', password: '' });
-      else store.toast(`${r.name}: ${e.message}`);
+      if (e.status === 428) {
+        setResult(null);
+        setAdminPrompt({ router: r, username: 'admin', password: '' });
+      } else {
+        // Whatever it managed before failing is worth showing — it says how far
+        // it got, which is the difference between "wrong password" and "wrong port".
+        setResult({ router: r, state: 'failed', error: e.message, applied: e.body?.applied ?? [], opts });
+        store.setCollection('routers', (rs) =>
+          rs.map((x) => (x.id === r.id ? { ...x, autoconfig_last_ok: false } : x)));
+      }
     } finally {
       setConfiguring(null);
     }
+  };
+
+  /**
+   * Read the router's RADIUS settings back and compare them with ours.
+   *
+   * "RADIUS is not working" is not something anyone can act on. This turns it
+   * into a specific wrong value — or confirms both ends agree, which points the
+   * search somewhere else entirely.
+   */
+  const [radius, setRadius] = useState(null);
+  const checkRadius = async (r) => {
+    setRadius({ router: r, state: 'running' });
+    try {
+      const res = await api.radiusCheck(r.id);
+      setRadius({ router: r, state: 'done', ...res });
+    } catch (e) {
+      setRadius({ router: r, state: 'done', error: e.message, ...(e.body ?? {}) });
+    }
+  };
+
+  /** Re-send the same configuration. Safe by design: pushes update, not duplicate. */
+  const rerun = (r) => {
+    const last = result?.opts ?? {};
+    runAutoconfig(r, last);
   };
 
   const saveEdit = async () => {
@@ -319,8 +361,19 @@ export default function Routers() {
                     onClick={() => openConfigure(r)}
                     disabled={configuring === r.id}
                   >
-                    {configuring === r.id ? 'Reading…' : 'Configure'}
+                    {configuring === r.id ? 'Reading…' : r.autoconfig_last_ok ? 'Reconfigure' : 'Configure'}
                   </Button>
+                  {/* Re-sends the same settings without asking about ports again —
+                      for after a router has been reset, or its config drifted. */}
+                  {r.autoconfig_last_ok && (
+                    <Button
+                      onClick={() => runAutoconfig(r, {})}
+                      disabled={configuring === r.id}
+                      title="Push the current settings again"
+                    >
+                      {configuring === r.id ? 'Sending…' : 'Refresh'}
+                    </Button>
+                  )}
                   <Button
                     onClick={() =>
                       setEdit({
@@ -333,6 +386,7 @@ export default function Routers() {
                   >
                     Edit
                   </Button>
+                  <Button onClick={() => checkRadius(r)}>Check RADIUS</Button>
                   <Button onClick={() => removeRouter(r)}>Delete</Button>
                 </div>
               ),
@@ -490,6 +544,125 @@ export default function Routers() {
               account it creates is commented “do not delete”; removing it on the router just means
               entering these details again.
             </span>
+          </div>
+        )}
+      </Modal>
+
+      {/* What the push actually did. Stays until dismissed — a dialog that just
+          closed left no way to tell success from nothing happening. */}
+      <Modal
+        open={!!result}
+        title={
+          result?.state === 'running' ? `Configuring ${result?.router?.name ?? ''}…`
+            : result?.state === 'ok' ? `${result?.router?.name} configured`
+            : `${result?.router?.name} — configuration failed`
+        }
+        width={540}
+        onClose={() => result?.state !== 'running' && setResult(null)}
+        footer={
+          result?.state === 'running' ? null : (
+            <>
+              <Button onClick={() => setResult(null)}>Close</Button>
+              <Button
+                variant="primary"
+                disabled={configuring === result?.router?.id}
+                onClick={() => rerun(result.router)}
+              >
+                {configuring === result?.router?.id ? 'Sending…' : 'Send again'}
+              </Button>
+            </>
+          )
+        }
+      >
+        {result && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            {result.state === 'running' && (
+              <span style={{ fontSize: 13 }}>
+                Talking to the router over the tunnel. This takes a few seconds — RADIUS, CoA,
+                accounting, and the bridge and PPPoE server if you chose ports.
+              </span>
+            )}
+
+            {result.state === 'ok' && (
+              <>
+                <span style={{ fontSize: 13, color: color.green, fontWeight: 600 }}>
+                  Success{result.version ? ` · RouterOS ${result.version}` : ''}
+                </span>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: 'grid', gap: 4 }}>
+                  {result.applied.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              </>
+            )}
+
+            {result.state === 'failed' && (
+              <>
+                <span style={{ fontSize: 13, color: color.rust }}>{result.error}</span>
+                {result.applied.length > 0 && (
+                  <>
+                    <span style={{ fontSize: 12.5, color: color.muted }}>Completed before it stopped:</span>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: 'grid', gap: 4 }}>
+                      {result.applied.map((line) => <li key={line}>{line}</li>)}
+                    </ul>
+                  </>
+                )}
+                <span style={{ fontSize: 12, color: color.muted }}>
+                  Sending again is safe — every step updates what is there rather than adding a
+                  second copy.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Both sides of the RADIUS setup, side by side. */}
+      <Modal
+        open={!!radius}
+        title={`RADIUS · ${radius?.router?.name ?? ''}`}
+        width={560}
+        onClose={() => setRadius(null)}
+        footer={<Button onClick={() => setRadius(null)}>Close</Button>}
+      >
+        {radius && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            {radius.state === 'running' && <span style={{ fontSize: 13 }}>Reading the router…</span>}
+
+            {radius.expected && (
+              <div style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
+                <span style={{ fontWeight: 600 }}>What the router should point at</span>
+                <span>RADIUS server <strong style={{ fontFamily: font.mono }}>{radius.expected.radiusServer}</strong>{' '}
+                  · auth {radius.expected.authPort} · accounting {radius.expected.acctPort}</span>
+                <span>CoA back to this router on port <strong style={{ fontFamily: font.mono }}>{radius.expected.coaPort}</strong></span>
+                <span>Its NAS address here is <strong style={{ fontFamily: font.mono }}>{radius.expected.nasAddress}</strong></span>
+                <span style={{ color: radius.knownToRadius ? color.neutralInk : color.rust }}>
+                  {radius.knownToRadius
+                    ? 'RADIUS accepts requests from that address only. A router sending from any other — its LAN address rather than its tunnel address — is dropped without a reply.'
+                    : 'RADIUS has no record of that address, so every request from it is dropped without a reply.'}
+                </span>
+              </div>
+            )}
+
+            {radius.error && (
+              <span style={{ fontSize: 12.5, color: color.rust }}>{radius.error}</span>
+            )}
+
+            {radius.checks && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600 }}>What the router actually says</span>
+                {radius.checks.map((c) => (
+                  <div key={c.name} style={{ display: 'flex', gap: 8, fontSize: 12.5, alignItems: 'baseline' }}>
+                    <span style={{ color: c.ok ? color.green : color.rust, fontWeight: 700 }}>{c.ok ? '✓' : '✕'}</span>
+                    <span style={{ flex: 1 }}>{c.name}</span>
+                    {!c.ok && <span style={{ color: color.muted }}>{c.detail}</span>}
+                  </div>
+                ))}
+                {!radius.ok && (
+                  <span style={{ fontSize: 12, color: color.muted, marginTop: 4 }}>
+                    Press Configure to push the correct values, or Refresh to re-send them.
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

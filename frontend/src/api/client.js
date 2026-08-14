@@ -169,6 +169,7 @@ export const api = {
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
+  radiusCheck: (id) => post(`/api/routers/${id}/radius-check`, {}),
   revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
   deleteRouter: (id) => del(`/api/routers/${id}`),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),

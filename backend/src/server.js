@@ -693,6 +693,68 @@ app.get('/api/licence', wrap(async (req, res) => {
   });
 }));
 
+/**
+ * Compare the router's RADIUS settings against what this server expects.
+ *
+ * Also reports the server's own side, so "confirm the IPs and the password" has
+ * one answer in one place instead of being reconstructed from three screens.
+ */
+app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const coaPort = Number(process.env.RADIUS_COA_PORT ?? 3799);
+  const expected = {
+    radiusServer: SERVER_IP,
+    authPort: 1812,
+    acctPort: 1813,
+    coaPort,
+    nasAddress: String(r.host).split('/')[0],
+    // The secret itself is not returned; the comparison happens server-side.
+    secretSetOnServer: Boolean(r.secret),
+  };
+
+  // The `nas` view is derived from the routers table, so this is all but
+  // guaranteed for a router that exists. It is reported not as a test but as the
+  // one address RADIUS will accept from: a router sending from anything else —
+  // its LAN address, say, rather than its tunnel address — is dropped without a
+  // reply, and that is the failure this whole screen exists to make visible.
+  const { rows: [nas] } = await pool.query(
+    'select nasname, shortname from nas where nasname = $1', [expected.nasAddress]);
+
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) {
+    return res.json({
+      expected,
+      knownToRadius: Boolean(nas),
+      checks: null,
+      note: 'Router login needed to read its side.',
+    });
+  }
+
+  let conn;
+  try {
+    conn = await ros.connect({ host: expected.nasAddress, port: r.api_port ?? 8728, user: login.user, password: login.password });
+    const { checks, ok } = await ros.radiusCheck(conn, {
+      serverIp: SERVER_IP, secret: r.secret, coaPort,
+    });
+    res.json({ expected, knownToRadius: Boolean(nas), ok: ok && Boolean(nas), checks });
+  } catch (e) {
+    res.status(502).json({
+      expected,
+      knownToRadius: Boolean(nas),
+      error: describeRouterError(conn?.__socketError ?? e, expected.nasAddress, r.api_port ?? 8728),
+    });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 /** The router's own ports, so the operator can pick which are LAN. */
 app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
