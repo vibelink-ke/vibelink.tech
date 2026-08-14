@@ -26,9 +26,15 @@ sql {
     # than a default.
     group_attribute = "SQL-Group"
 
-    # Read the NAS list from the `nas` view over the routers table, so adding a
-    # router in the UI authorises it without touching clients.conf or restarting.
-    read_clients = yes
+    # Off deliberately. This loads the NAS list once, at startup, so a router
+    # onboarded afterwards was unknown until someone restarted RADIUS — and an
+    # unknown client is dropped silently, which from the router looks exactly
+    # like the server being down.
+    #
+    # The listeners use a dynamic client pool instead (see sites-available/billing),
+    # which looks each router up in this same `nas` view the first time it
+    # appears. One mechanism, and no restart.
+    read_clients = no
     client_table = "nas"
 
     # Do not let a SQL outage reject everyone; fail through to the next module.

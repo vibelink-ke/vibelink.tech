@@ -5,16 +5,26 @@
 # writes accounting into radacct. Everything else FreeRADIUS ships with is
 # switched off so there is less to reason about.
 
+#
+# Routers are looked up in SQL the first time they appear, rather than read into
+# memory at startup. read_clients did the latter, which meant a router onboarded
+# after this process began was unknown to it — and FreeRADIUS drops packets from
+# an unknown client silently, with nothing in its own log. From the router that
+# is indistinguishable from the server being switched off, and the only cure was
+# restarting RADIUS after every single onboarding.
+
 server billing {
     listen {
         type = auth
         ipaddr = *
         port = 1812
+        clients = tunnel_clients
     }
     listen {
         type = acct
         ipaddr = *
         port = 1813
+        clients = tunnel_clients
     }
 
     authorize {
@@ -77,6 +87,47 @@ server billing {
         Post-Auth-Type REJECT {
             sql
             attr_filter.access_reject
+        }
+    }
+}
+
+#
+# The pool the listeners above point at. Nothing is listed here: any address in
+# the tunnel supernet is allowed to *ask*, and `dynamic_clients` names the
+# virtual server that decides whether it is really one of ours.
+#
+clients tunnel_clients {
+    client tunnel {
+        ipaddr  = 10.50.0.0
+        netmask = 16
+        dynamic_clients = dynamic_client_lookup
+        # Re-checked periodically, so a router whose secret was rotated or whose
+        # row was deleted stops working on its own.
+        lifetime = 300
+    }
+}
+
+#
+# Asked once per unknown router. Fills in the three attributes FreeRADIUS needs
+# to admit a client, straight from the `nas` view over the routers table.
+#
+# The secret is the gate: a source address with no row returns an empty string,
+# and the reject below keeps it out. Without that check every address in the
+# supernet would be admitted with a blank secret.
+#
+server dynamic_client_lookup {
+    authorize {
+        update control {
+            &FreeRADIUS-Client-IP-Address = "%{Packet-Src-IP-Address}"
+            &FreeRADIUS-Client-Shortname  = "%{sql:SELECT shortname FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' LIMIT 1}"
+            &FreeRADIUS-Client-Secret     = "%{sql:SELECT secret FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' LIMIT 1}"
+        }
+
+        if (!&control:FreeRADIUS-Client-Secret || &control:FreeRADIUS-Client-Secret == "") {
+            reject
+        }
+        else {
+            ok
         }
     }
 }

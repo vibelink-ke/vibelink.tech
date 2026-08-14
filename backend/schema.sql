@@ -691,6 +691,25 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── deleting a router ───────────────
+-- Three tables referenced routers with no delete behaviour, so removing one
+-- failed on a raw foreign-key error. The screen removed the row optimistically
+-- and the server refused, so the router came back on the next reload — deleted
+-- as far as the operator could tell, and still there.
+--
+-- sessions is accounting history and must survive the router it was recorded on;
+-- ip_pools is an address range the operator may reassign. Both are detached
+-- rather than deleted. subscribers is deliberately left blocking: the route
+-- checks it first and explains, because silently unlinking customers would stop
+-- enforcement for them without saying so.
+alter table sessions  drop constraint if exists sessions_router_id_fkey;
+alter table sessions  add  constraint sessions_router_id_fkey
+  foreign key (router_id) references routers on delete set null;
+
+alter table ip_pools  drop constraint if exists ip_pools_router_id_fkey;
+alter table ip_pools  add  constraint ip_pools_router_id_fkey
+  foreign key (router_id) references routers on delete set null;
+
 -- ─────────────── pause vs suspend, and a second number ───────────────
 -- "Pause" wrote status='suspended', so the two were the same thing wearing
 -- different labels and an operator could not tell a customer they had stopped on
