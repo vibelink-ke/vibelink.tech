@@ -1202,8 +1202,11 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     if (portal) {
       try {
         const page = await step('login page', () =>
-          ros.pushHotspotPage(conn, { url: `https://${portal}/hotspot/login.html` }), 40000);
-        done.push(`installed the ${portal} login page (${page.bytes} bytes)`);
+          ros.pushHotspotPage(conn, {
+            url: `https://${portal}/hotspot/login.html`,
+            bridge: bridge.bridge,
+          }), 40000);
+        done.push(`installed the ${portal} login page at ${page.path} (${page.bytes} bytes)`);
       } catch (e) {
         done.push(`could not install the login page (${e.message}) — the stock MikroTik page stays`);
       }
@@ -1393,6 +1396,23 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       done.push(garden.allowed
         ? `walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'} before login`
         : 'walled garden is empty — guests cannot reach M-Pesa before paying');
+
+      // Also here, not only behind the Hotspot button. An operator who presses
+      // Configure has every reason to expect a configured hotspot, and leaving
+      // MikroTik's stock page behind looks like the push did nothing at all.
+      const { rows: [tt] } = await pool.query(
+        'select subdomain from tenants where id=$1', [req.tenant.id]);
+      const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+      if (tt?.subdomain) {
+        try {
+          const page = await ros.pushHotspotPage(conn, {
+            url: `https://${tt.subdomain}.${rootDomain}/hotspot/login.html`,
+          });
+          done.push(`installed the login page at ${page.path} (${page.bytes} bytes)`);
+        } catch (e) {
+          done.push(`could not install the login page (${e.message}) — the stock page stays`);
+        }
+      }
     }
 
     await pool.query(

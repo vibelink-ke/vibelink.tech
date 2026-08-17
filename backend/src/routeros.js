@@ -481,14 +481,33 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
  * management tunnel rides over it), and the walled garden is irrelevant here
  * because the router is not a hotspot client of itself.
  */
-export async function pushHotspotPage(conn, { url }) {
+export async function pushHotspotPage(conn, { url, bridge }) {
   if (!/^https?:\/\//i.test(String(url ?? ''))) {
     throw new Error(`"${url}" is not a usable URL for the hotspot page.`);
   }
 
+  /**
+   * Write where the router actually reads from.
+   *
+   * This used to write to "hotspot/" on the assumption that every hotspot uses
+   * the default directory. A profile can point html-directory anywhere, and
+   * RouterOS 7 ships some builds pointing at "hotspot" while others use
+   * "flash/hotspot" — so the file landed somewhere real, the push reported
+   * success, and the guest carried on seeing MikroTik's stock page. Ask the
+   * profile the server is actually using instead of assuming.
+   */
+  const servers = await conn.write('/ip/hotspot/print', []);
+  const server = servers.find((h) => !bridge || h.interface === bridge) ?? servers[0];
+  let dir = 'hotspot';
+  if (server?.profile) {
+    const profiles = await conn.write('/ip/hotspot/profile/print', [`?name=${server.profile}`]);
+    dir = String(profiles[0]?.['html-directory'] ?? 'hotspot').replace(/\/+$/, '');
+  }
+
+  const dst = `${dir}/login.html`;
   await cmd(conn, 'fetch login page', '/tool/fetch', [
     `=url=${url}`,
-    '=dst-path=hotspot/login.html',
+    `=dst-path=${dst}`,
     // check-certificate=no because a tenant may still be on a self-signed or
     // freshly-issued certificate, and a captive portal that refuses to install
     // over a certificate detail is worse than one that installs.
@@ -499,11 +518,11 @@ export async function pushHotspotPage(conn, { url }) {
   // Confirm it landed and is not a truncated or empty download. RouterOS reports
   // a failed fetch as an error, but a proxy or a redirect to a login page can
   // produce a file that exists and is useless.
-  const files = await conn.write('/file/print', ['?name=hotspot/login.html']);
+  const files = await conn.write('/file/print', [`?name=${dst}`]);
   const size = Number(files[0]?.size ?? 0);
-  if (!size) throw new Error('The login page downloaded as an empty file.');
+  if (!size) throw new Error(`The page downloaded to ${dst} but is empty.`);
 
-  return { bytes: size };
+  return { bytes: size, path: dst };
 }
 
 /**
