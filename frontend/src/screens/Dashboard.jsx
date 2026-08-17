@@ -265,23 +265,15 @@ export default function Dashboard() {
             <span style={{ fontSize: 12.5, color: '#93a09a' }}>No expiry set</span>
           )}
 
-          {licence?.invoice && (
-            <div style={{ borderTop: '1px solid #1e2c27', paddingTop: 10, display: 'grid', gap: 4 }}>
-              <span style={{ fontSize: 12.5, color: licence.invoice.prominent ? '#f0a58a' : '#93a09a' }}>
-                Invoice {licence.invoice.number}
-              </span>
-              <span style={{ fontFamily: font.mono, fontSize: 20 }}>KES {kes(licence.invoice.amount)}</span>
-              <span style={{ fontSize: 12, color: '#93a09a' }}>
-                {licence.readOnly
-                  ? 'Unpaid — your account is read-only until it is settled'
-                  : `day ${licence.invoice.day} · read-only from day 5`}
-              </span>
-            </div>
+          {licence?.expiringSoon && (
+            <span style={{ fontSize: 12.5, color: '#f0a58a', borderTop: '1px solid #1e2c27', paddingTop: 10 }}>
+              Renew soon to avoid the account going read-only.
+            </span>
           )}
 
-          {licence?.renewalTomorrow && (
-            <span style={{ fontSize: 12.5, color: '#93a09a', borderTop: '1px solid #1e2c27', paddingTop: 10 }}>
-              Renews tomorrow — the next invoice is raised on the 1st.
+          {licence?.readOnly && (
+            <span style={{ fontSize: 12.5, color: '#f0a58a', borderTop: '1px solid #1e2c27', paddingTop: 10 }}>
+              Licence expired — you can view everything but not make changes.
             </span>
           )}
         </div>

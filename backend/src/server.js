@@ -785,104 +785,20 @@ async function routerLogin(r, body, secrets) {
  */
 app.get('/api/licence', wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(`
-    select t.status, t.licence_ends, t.plan_type, t.plan_amount,
-           (t.licence_ends - current_date)                  as days_left,
-           (current_date = (date_trunc('month', current_date)
-                            + interval '1 month - 1 day')::date) as last_day_of_month,
-           i.number, i.amount, i.due_date, i.status as invoice_status,
-           (current_date - i.created_at::date) + 1          as invoice_day
-      from tenants t
-      left join lateral (
-        select * from invoices
-         where tenant_id = t.id and subscriber_id is null and status <> 'paid'
-         order by created_at desc limit 1
-      ) i on true
-     where t.id = $1`, [req.tenant.id]);
+    select t.status, t.licence_ends,
+           (t.licence_ends - current_date) as days_left
+      from tenants t where t.id = $1`, [req.tenant.id]);
 
-  const invoice = row?.number
-    ? {
-        number: row.number,
-        amount: Number(row.amount),
-        dueDate: row.due_date,
-        day: Number(row.invoice_day),
-        // Day 2 is when it stops being a note and starts being in the way.
-        prominent: Number(row.invoice_day) >= 2,
-      }
-    : null;
-
+  const daysLeft = row?.days_left == null ? null : Number(row.days_left);
   res.json({
     status: row?.status ?? 'active',
     readOnly: row?.status === 'readonly',
     licenceEnds: row?.licence_ends ?? null,
-    daysLeft: row?.days_left ?? null,
-    planType: row?.plan_type ?? null,
-    planAmount: row?.plan_amount == null ? null : Number(row.plan_amount),
-    invoice,
-    // Nothing is owed yet, but billing runs at 05:00 tomorrow.
-    renewalTomorrow: !invoice && row?.last_day_of_month === true,
+    daysLeft,
+    // Invoicing belongs to WHMCS. All this reports is how long the licence has
+    // left, and whether it is close enough to be worth saying so.
+    expiringSoon: daysLeft != null && daysLeft <= 7,
   });
-}));
-
-/**
- * Compare the router's RADIUS settings against what this server expects.
- *
- * Also reports the server's own side, so "confirm the IPs and the password" has
- * one answer in one place instead of being reconstructed from three screens.
- */
-app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
-  const ros = await import('./routeros.js');
-  const secrets = await import('./secrets.js');
-  const { SERVER_IP } = await import('./tunnel.js');
-
-  const { rows: [r] } = await pool.query(
-    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-  if (!r) return res.status(404).json({ error: 'No such router' });
-
-  const coaPort = Number(process.env.RADIUS_COA_PORT ?? 3799);
-  const expected = {
-    radiusServer: SERVER_IP,
-    authPort: 1812,
-    acctPort: 1813,
-    coaPort,
-    nasAddress: String(r.host).split('/')[0],
-    // The secret itself is not returned; the comparison happens server-side.
-    secretSetOnServer: Boolean(r.secret),
-  };
-
-  // The `nas` view is derived from the routers table, so this is all but
-  // guaranteed for a router that exists. It is reported not as a test but as the
-  // one address RADIUS will accept from: a router sending from anything else —
-  // its LAN address, say, rather than its tunnel address — is dropped without a
-  // reply, and that is the failure this whole screen exists to make visible.
-  const { rows: [nas] } = await pool.query(
-    'select nasname, shortname from nas where nasname = $1', [expected.nasAddress]);
-
-  const login = await routerLogin(r, req.body, secrets);
-  if (!login) {
-    return res.json({
-      expected,
-      knownToRadius: Boolean(nas),
-      checks: null,
-      note: 'Router login needed to read its side.',
-    });
-  }
-
-  let conn;
-  try {
-    conn = await ros.connect({ host: expected.nasAddress, port: r.api_port ?? 8728, user: login.user, password: login.password });
-    const { checks, ok } = await ros.radiusCheck(conn, {
-      serverIp: SERVER_IP, secret: r.secret, coaPort,
-    });
-    res.json({ expected, knownToRadius: Boolean(nas), ok: ok && Boolean(nas), checks });
-  } catch (e) {
-    res.status(502).json({
-      expected,
-      knownToRadius: Boolean(nas),
-      error: describeRouterError(conn?.__socketError ?? e, expected.nasAddress, r.api_port ?? 8728),
-    });
-  } finally {
-    if (conn) ros.close(conn);
-  }
 }));
 
 /** The router's own ports, so the operator can pick which are LAN. */
@@ -2105,6 +2021,88 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   res.json(t);
 }));
 
+/**
+ * Add or remove licence days.
+ *
+ * Billing lives in WHMCS now, so this is the switch that carries its decisions
+ * across: a payment there means days here. Relative rather than absolute because
+ * that is how it is actually used — "give them another month", "take back the
+ * week they did not pay for" — and it counts from today when a licence has
+ * already lapsed, so an expired tenant gets the full extension rather than days
+ * swallowed by the gap.
+ */
+app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
+  const days = Number(req.body?.days);
+  if (!Number.isFinite(days) || days === 0)
+    return res.status(400).json({ error: 'days must be a non-zero number' });
+
+  const { rows: [t] } = await pool.query(
+    `update tenants set licence_ends =
+       greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' days')::interval
+     where id=$1 returning id, name, licence_ends`,
+    [req.params.id, days]);
+  if (!t) return res.status(404).json({ error: 'not found' });
+
+  // Days back on the clock should restore access without waiting for anything.
+  if (days > 0) {
+    await pool.query(
+      "update tenants set status='active' where id=$1 and status in ('readonly','suspended')",
+      [t.id]);
+  }
+  res.json(t);
+}));
+
+/**
+ * Reset a tenant owner's sign-in details.
+ *
+ * Operators lock themselves out and there was nobody who could help — no reset
+ * path existed at all, so the only recovery was editing the database by hand.
+ * The password is returned once so it can be read down the phone, and stored
+ * only as a hash.
+ */
+app.post('/api/tenants/:id/owner', superAdminOnly, wrap(async (req, res) => {
+  const { email, username, password } = req.body ?? {};
+
+  const { rows: [owner] } = await pool.query(
+    // staff has no created_at; id is stable and there is normally one owner.
+    "select id from staff where tenant_id=$1 and role='owner' order by id limit 1",
+    [req.params.id]);
+  if (!owner) return res.status(404).json({ error: 'That tenant has no owner account.' });
+
+  // Both are unique across the whole platform, so a clash has to be caught here
+  // rather than surfacing as a constraint violation the operator cannot read.
+  if (email) {
+    const { rowCount } = await pool.query(
+      'select 1 from staff where lower(email)=lower($1) and id<>$2', [String(email).trim(), owner.id]);
+    if (rowCount) return res.status(409).json({ error: 'Another account already uses that email.' });
+  }
+  const user = username ? String(username).toLowerCase().replace(/[^a-z0-9._-]/g, '') : null;
+  if (user) {
+    const { rowCount } = await pool.query(
+      'select 1 from staff where lower(username)=lower($1) and id<>$2', [user, owner.id]);
+    if (rowCount) return res.status(409).json({ error: `The username "${user}" is taken.` });
+  }
+
+  // Generated when asked for rather than accepted from the form: nobody should
+  // be choosing another person's password, and it is never stored in the clear.
+  const fresh = password === true ? crypto.randomBytes(6).toString('base64url') : null;
+  const hash = fresh ? await auth.hashPassword(fresh) : null;
+
+  const { rows: [s] } = await pool.query(
+    `update staff set
+       email = coalesce(nullif($2,''), email),
+       username = coalesce($3, username),
+       password_hash = coalesce($4, password_hash)
+     where id=$1 returning email, username`,
+    [owner.id, email ? String(email).trim() : '', user, hash]);
+
+  // Signing them out everywhere: a reset that leaves old sessions alive has not
+  // actually taken the account back.
+  if (fresh) await pool.query('delete from admin_sessions where staff_id=$1', [owner.id]);
+
+  res.json({ email: s.email, username: s.username, password: fresh });
+}));
+
 // ── fair use policy ───────────────────────────────
 app.get('/api/fup-policies', wrap(async (req, res) => {
   const { rows } = await pool.query(
@@ -2399,7 +2397,7 @@ const AUTOMATION_JOBS = [
   { job: 'enforceFup', name: 'Fair-use enforcement', cron: '*/15 * * * *', detail: 'Totals session bytes against each cap, warns, then throttles' },
   { job: 'watchdog', name: 'Router watchdog', cron: '*/1 * * * *', detail: 'Pings every NAS and flags the ones that stop answering' },
   { job: 'ownerBrief', name: 'Owner brief', cron: '0 20 * * *', detail: 'Evening SMS: collected, new clients, routers down' },
-  { job: 'billTenants', name: 'Bill tenants', cron: '0 5 1 * *', detail: 'Monthly SaaS invoice — flat, per-device or revenue share' },
+  { job: 'expireTenantLicences', name: 'Tenant licences', cron: '0 7 * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
 ];
 
 app.get('/api/automation', wrap(async (req, res) => {
