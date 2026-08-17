@@ -257,6 +257,20 @@ app.get('/internal/tls-check', wrap(async (req, res) => {
   // Only ever our own zone; a stray CNAME from elsewhere must not earn a cert.
   if (domain !== root && !domain.endsWith(`.${root}`)) return res.status(404).end();
 
+  /**
+   * The root domain always gets a certificate.
+   *
+   * It used to qualify by accident: tenantByHost matched on the first label, so
+   * vibelink.tech resolved to the tenant whose subdomain is "vibelink". Fixing
+   * that — the root belongs to no tenant — stopped this answering for the root
+   * as well, and Caddy stopped serving TLS on the platform's own domain:
+   * ERR_SSL_PROTOCOL_ERROR on the front page, the signup flow and the hotspot
+   * preview, all from a change that was about tenant isolation.
+   *
+   * The root and www are ours by definition and need no tenant to prove it.
+   */
+  if (domain === root || domain === `www.${root}`) return res.status(200).end();
+
   const tenant = await tenantByHost(domain);
   return tenant ? res.status(200).end() : res.status(404).end();
 }));
