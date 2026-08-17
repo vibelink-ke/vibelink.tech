@@ -140,8 +140,17 @@ export async function ensureServiceUser(conn, { user = SERVICE_USER, password })
  * exposed to the internet and the reply has to come back down the same tunnel.
  */
 export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, services = 'ppp,hotspot' }) {
+  // Every entry aimed at our server, not only the ones we commented.
+  //
+  // Matching on the comment alone left hand-made entries in place: an operator
+  // who ran `/radius add` themselves during setup ended up with two entries for
+  // the same address holding different secrets, and RouterOS signs with whichever
+  // it reaches first. FreeRADIUS then reports "invalid Message-Authenticator" and
+  // drops the request, which looks like a broken secret rather than a duplicate.
+  //
+  // Anything pointing at this server is ours to own, however it got there.
   const mine = (await conn.write('/radius/print', []))
-    .filter((r) => r.comment === MANAGED_COMMENT);
+    .filter((r) => String(r.address) === String(serverIp));
 
   const fields = [
     `=service=${services}`,
@@ -153,8 +162,9 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
 
   if (mine.length) {
     await conn.write('/radius/set', [`=.id=${idOf(mine[0])}`, ...fields]);
-    // A second managed entry can only be debris from an interrupted run; leaving
-    // it would send half the auth requests somewhere stale.
+    // Any other entry for this server is debris — an interrupted run, or one
+    // added by hand during setup. Leaving it means half the requests get signed
+    // with a stale secret and dropped.
     for (const dupe of mine.slice(1)) await conn.write('/radius/remove', [`=.id=${idOf(dupe)}`]);
   } else {
     await conn.write('/radius/add', fields);
