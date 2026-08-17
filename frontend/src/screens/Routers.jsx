@@ -189,6 +189,37 @@ export default function Routers() {
     return () => { live = false; clearInterval(id); };
   }, [traffic?.router?.id]);
 
+  /**
+   * Import the router's own PPPoE accounts.
+   *
+   * Preview first, always. Creating several hundred customers is not something
+   * to do on a misclick, and the operator needs to see how many are new, how
+   * many already exist, and which cannot come across before agreeing to it.
+   */
+  const [importing, setImporting] = useState(null);   // { router, preview, result, busy }
+
+  const previewImport = async (r) => {
+    setImporting({ router: r, busy: true });
+    try {
+      const preview = await api.previewSecrets(r.id);
+      setImporting({ router: r, preview, busy: false });
+    } catch (e) {
+      setImporting({ router: r, error: e.message, busy: false });
+    }
+  };
+
+  const applyImport = async () => {
+    setImporting((i) => ({ ...i, busy: true }));
+    try {
+      const result = await api.importSecrets(importing.router.id);
+      setImporting((i) => ({ ...i, result, busy: false }));
+      store.setCollection('clients', await api.subscribers());
+      store.toast(`Imported ${result.imported} client(s)`);
+    } catch (e) {
+      setImporting((i) => ({ ...i, error: e.message, busy: false }));
+    }
+  };
+
   const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
     setResult({ router: r, state: 'running', opts });
@@ -533,6 +564,12 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                     Traffic
                   </Button>
                   <Button
+                    onClick={() => previewImport(r)}
+                    title="Create clients from the PPPoE accounts already on this router"
+                  >
+                    Import
+                  </Button>
+                  <Button
                     onClick={() =>
                       setEdit({
                         id: r.id, name: r.name, host: String(r.host).split('/')[0],
@@ -695,6 +732,81 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               view: down is what it received on that port.
             </div>
           </>
+        )}
+      </Modal>
+
+      {/* Import: preview, then confirm. */}
+      <Modal
+        open={!!importing}
+        title={`Import from ${importing?.router?.name ?? ''}`}
+        onClose={() => !importing?.busy && setImporting(null)}
+        footer={
+          <>
+            <Button onClick={() => setImporting(null)} disabled={importing?.busy}>Close</Button>
+            {importing?.preview && !importing?.result && (
+              <Button
+                variant="primary"
+                onClick={applyImport}
+                disabled={importing.busy || !importing.preview.importable.length}
+              >
+                {importing.busy ? 'Importing…' : `Import ${importing.preview.importable.length}`}
+              </Button>
+            )}
+          </>
+        }
+      >
+        {importing?.error && (
+          <div style={{ fontSize: 13, color: color.rust }}>{importing.error}</div>
+        )}
+        {importing?.busy && !importing?.preview && (
+          <div style={{ fontSize: 13, color: color.muted }}>Reading /ppp/secret…</div>
+        )}
+
+        {importing?.preview && !importing?.result && (
+          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+            <span>
+              <strong>{importing.preview.importable.length}</strong> new of{' '}
+              {importing.preview.total} account(s) on the router.
+            </span>
+            {!!importing.preview.already.length && (
+              <span style={{ color: color.muted }}>
+                {importing.preview.already.length} already exist here and are left alone — the
+                system is authoritative once a customer is billed from it.
+              </span>
+            )}
+            {!!importing.preview.noPassword.length && (
+              <span style={{ color: color.amberInk }}>
+                {importing.preview.noPassword.length} have no password on the router and cannot be
+                imported: {importing.preview.noPassword.slice(0, 5).join(', ')}
+                {importing.preview.noPassword.length > 5 ? '…' : ''}
+              </span>
+            )}
+            {!!importing.preview.importable.length && (
+              <div style={{ maxHeight: 180, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
+                {importing.preview.importable.slice(0, 100).map((x) => (
+                  <div key={x.name}>{x.name}{x.remoteAddress ? ` · ${x.remoteAddress}` : ''}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {importing?.result && (
+          <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+            <span><strong>{importing.result.imported}</strong> client(s) created.</span>
+            {!!importing.result.needPhone && (
+              <span style={{ color: color.amberInk }}>
+                None have a phone number — the router does not store one. Payments are matched on
+                the phone number, so add them before these customers pay.
+              </span>
+            )}
+            {!!importing.result.failed?.length && (
+              <span style={{ color: color.rust }}>
+                {importing.result.failed.length} could not be created:{' '}
+                {importing.result.failed.slice(0, 3).map((f) => `${f.name} (${f.error})`).join('; ')}
+              </span>
+            )}
+          </div>
         )}
       </Modal>
 

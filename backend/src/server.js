@@ -1321,6 +1321,97 @@ app.post('/api/routers/:id/traffic', wrap(async (req, res) => {
   }
 }));
 
+/**
+ * Read the PPPoE accounts off a router, and optionally create clients from them.
+ *
+ * Two steps on purpose. GET-like preview first, because importing several
+ * hundred customers is not something to trigger by misclicking, and the
+ * operator needs to see what is about to be created and which already exist.
+ *
+ * Names that already exist as a pppoe_user are reported and skipped rather than
+ * updated: the database is authoritative once a customer is billed from here,
+ * and quietly overwriting a password from a router that has drifted would cut
+ * that customer off.
+ */
+app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const radius = await import('./radius.js');
+  const apply = req.body?.apply === true;
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const found = await step('read /ppp/secret', () => ros.pppSecrets(conn), 30000);
+    ros.close(conn);
+    conn = null;
+
+    const { rows: existing } = await pool.query(
+      'select pppoe_user from subscribers where tenant_id=$1 and pppoe_user is not null',
+      [req.tenant.id]);
+    const known = new Set(existing.map((x) => x.pppoe_user));
+
+    const importable = found.filter((f) => f.password && !known.has(f.name));
+    const already = found.filter((f) => known.has(f.name)).map((f) => f.name);
+    // A secret with no password cannot be authenticated from here, and inventing
+    // one would lock the customer out at their next reconnect.
+    const noPassword = found.filter((f) => !f.password).map((f) => f.name);
+
+    if (!apply) {
+      return res.json({
+        preview: true,
+        total: found.length,
+        importable: importable.map((f) => ({ name: f.name, remoteAddress: f.remoteAddress })),
+        already,
+        noPassword,
+      });
+    }
+
+    const created = [];
+    const failed = [];
+    for (const f of importable) {
+      try {
+        // Per row rather than one transaction: one malformed secret should not
+        // undo an import of several hundred that worked.
+        const { rows: [sub] } = await pool.query(
+          `insert into subscribers (tenant_id, account_code, name, phone, service,
+             pppoe_user, pppoe_pass, router_id, static_ip)
+           values ($1,$2,$3,$4,'pppoe',$5,$6,$7,$8) returning id`,
+          [req.tenant.id, f.name, f.comment?.trim() || f.name, '', f.name, f.password, r.id,
+           f.remoteAddress || null]);
+        await radius.syncSubscriberCredentials(pool, req.tenant.id, sub.id);
+        created.push(f.name);
+      } catch (e) {
+        failed.push({ name: f.name, error: e.message });
+      }
+    }
+
+    // Every imported client has an empty phone: /ppp/secret does not hold one.
+    // Said plainly, because payments are matched on the phone number and an
+    // import that looks complete but silently breaks matching is worse than one
+    // that admits what it left undone.
+    res.json({
+      imported: created.length, created, already, noPassword, failed,
+      needPhone: created.length,
+    });
+  } catch (e) {
+    res.status(502).json({
+      error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)),
+    });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 /** The router's own ports, so the operator can pick which are LAN. */
 app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
   const ros = await import('./routeros.js');

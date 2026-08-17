@@ -599,6 +599,30 @@ export async function portTraffic(conn) {
   });
 }
 
+/**
+ * Read the PPPoE accounts already on the router.
+ *
+ * An ISP moving onto this platform has their whole customer list in
+ * /ppp/secret, and retyping several hundred of them is the reason migrations
+ * stall. Passwords come back in clear over the API, which is how RouterOS
+ * stores them — that is exactly why this is worth importing rather than asking
+ * anyone to read them out.
+ */
+export async function pppSecrets(conn) {
+  const rows = await conn.write('/ppp/secret/print', []);
+  return rows.map((r) => ({
+    name: r.name,
+    password: r.password ?? null,
+    profile: r.profile ?? null,
+    service: r.service ?? null,
+    // A per-secret address is the router's own IP assignment, which becomes
+    // Framed-IP-Address once the customer is billed from here.
+    remoteAddress: r['remote-address'] ?? null,
+    comment: r.comment ?? null,
+    disabled: r.disabled === 'true',
+  })).filter((r) => r.name);
+}
+
 /** Bridges already on the box, so we can offer to reuse one. */
 export async function bridges(conn) {
   const rows = await conn.write('/interface/bridge/print', []);

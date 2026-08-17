@@ -184,6 +184,8 @@ export const api = {
   pushHotspot: (id, opts = {}) => post(`/api/routers/${id}/hotspot`, opts),
   routerTunnels: () => get('/api/routers/tunnels'),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),
+  previewSecrets: (id) => post(`/api/routers/${id}/import-secrets`, {}),
+  importSecrets: (id) => post(`/api/routers/${id}/import-secrets`, { apply: true }),
   revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
   deleteRouter: (id, force = false) => del(`/api/routers/${id}${force ? '?force=1' : ''}`),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
