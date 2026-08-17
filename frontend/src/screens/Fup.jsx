@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { Badge, Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table, Toggle } from '../ui/primitives';
 
@@ -60,14 +61,30 @@ export default function Fup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [policies.length]);
 
+  const action = useAction();
+
   const runNow = async () => {
     setEnforcing(true);
     try {
-      const r = await api.runFupEnforcement();
-      await loadUsage();
-      store.toast(`Checked ${r.checked} · warned ${r.warned} · throttled ${r.throttled} · restored ${r.restored}`);
-    } catch (e) {
-      store.toast(`Enforcement failed: ${e.message}`);
+      // This throttles real customers. What it did should stay on screen long
+      // enough to read, and to notice if the numbers are not what was expected.
+      await action.run('Applying fair use', async () => {
+        const r = await api.runFupEnforcement();
+        await loadUsage();
+        return r;
+      }, {
+        working: 'Totting up usage and comparing it with each policy…',
+        describe: (r) => ({
+          lines: [
+            `${r.checked} subscriber(s) checked`,
+            `${r.warned} warned`,
+            `${r.throttled} throttled`,
+            `${r.restored} restored to full speed`,
+          ],
+        }),
+      });
+    } catch {
+      // Reported in the dialog.
     } finally {
       setEnforcing(false);
     }
@@ -404,6 +421,8 @@ export default function Fup() {
           </div>
         )}
       </Modal>
+
+      <ActionResult state={action.state} onClose={action.dismiss} />
     </Screen>
   );
 }

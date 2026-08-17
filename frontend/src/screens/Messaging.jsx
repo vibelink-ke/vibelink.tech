@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { Button, Card, Field, Input, Screen, Select, Table, Tabs, Textarea } from '../ui/primitives';
 
@@ -74,6 +75,8 @@ export default function Messaging() {
     setSms((s) => ({ ...s, template: t, body: TEMPLATES[t] ?? s.body }));
   };
 
+  const action = useAction();
+
   const send = async () => {
     if (!sms.body.trim()) return store.toast('Write a message first');
     if (tab === 'single' && !sms.singleClient) return store.toast('Pick a client');
@@ -90,16 +93,22 @@ export default function Messaging() {
           'Expiring soon': 'expiring',
           Expired: 'expired',
         }[sms.audience] ?? 'all';
-        const { queued } = await api.sendBulkSms({
+        // Its own dialog rather than a toast: a bulk send takes seconds against
+        // the gateway, and an operator who sees nothing happening presses the
+        // button again — which for SMS means paying for every message twice.
+        await action.run('Sending to everyone selected', () => api.sendBulkSms({
           audience,
           routerId: sms.router || null,
           planId: sms.pkg || null,
           body: sms.body,
+        }), {
+          working: 'Handing the messages to your SMS gateway…',
+          describe: (r) => `Queued for ${r.queued} recipient(s).`,
         });
-        store.toast(`Queued for ${queued} recipient(s)`);
       }
-    } catch (e) {
-      store.toast(`Send failed: ${e.message}`);
+    } catch {
+      // Bulk failures are shown in the dialog; only the single-send path needs
+      // a toast, and it has already thrown by here.
     } finally {
       setBusy(false);
     }
@@ -252,6 +261,8 @@ export default function Messaging() {
       ) : (
         composer
       )}
+
+      <ActionResult state={action.state} onClose={action.dismiss} />
     </Screen>
   );
 }

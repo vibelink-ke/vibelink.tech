@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import { Button, Drawer, Empty, Field, Input, KV, Modal, Screen, Select } from '../ui/primitives';
@@ -145,6 +146,8 @@ export default function Clients() {
     }
   };
 
+  const action = useAction();
+
   /** CSV import. Expected headers: name, phone, account_code, plan, static_ip. */
   const importCsv = () => {
     const picker = document.createElement('input');
@@ -171,8 +174,22 @@ export default function Clients() {
       );
       const made = results.filter((r) => r.status === 'fulfilled').map((r) => r.value);
       store.setCollection('clients', (cs) => [...made, ...cs]);
-      const failed = rows.length - made.length;
-      store.toast(failed ? `Imported ${made.length} of ${rows.length} — ${failed} rejected` : `Imported ${made.length} client(s)`);
+      const failed = results.filter((r) => r.status === 'rejected');
+
+      // A partial import is the normal case with a spreadsheet somebody
+      // maintained by hand, and "3 rejected" in a toast that disappears tells
+      // nobody which three or why.
+      action.run('Importing clients', async () => ({ made: made.length, rows: rows.length, failed }), {
+        describe: (r) => ({
+          lines: [
+            `${r.made} of ${r.rows} row(s) imported`,
+            ...(r.failed.length
+              ? [`${r.failed.length} rejected:`,
+                 ...r.failed.slice(0, 5).map((f) => f.reason?.message ?? 'unknown reason')]
+              : []),
+          ],
+        }),
+      });
     };
     picker.click();
   };
@@ -632,6 +649,7 @@ export default function Clients() {
           </div>
         )}
       </Modal>
+      <ActionResult state={action.state} onClose={action.dismiss} />
     </Screen>
   );
 }

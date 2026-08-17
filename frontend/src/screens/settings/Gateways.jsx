@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
+import { useAction, ActionResult } from '../../ui/action';
 import { api } from '../../api/client';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
@@ -133,12 +134,24 @@ export default function Gateways() {
    * Point Safaricom's C2B callbacks at us for this paybill. Without it a customer
    * pays and the confirmation goes nowhere, which looks like the payment failed.
    */
+  const action = useAction();
+
   const registerUrls = async (g) => {
+    // A round trip to Safaricom, and the URL it registered is worth reading:
+    // a wrong one means payments are taken and never confirmed, which nobody
+    // notices until a customer says they paid.
     try {
-      const out = await api.registerGatewayUrls(g.id);
-      store.toast(`Callbacks registered for ${g.shortcode} → ${out.confirmation}`);
-    } catch (e) {
-      store.toast(`Safaricom refused: ${e.message}`);
+      await action.run(`Registering callbacks for ${g.shortcode}`, () => api.registerGatewayUrls(g.id), {
+        working: 'Asking Safaricom to send confirmations here…',
+        describe: (out) => ({
+          lines: [
+            `Confirmation: ${out.confirmation}`,
+            ...(out.validation ? [`Validation: ${out.validation}`] : []),
+          ],
+        }),
+      });
+    } catch {
+      // Reported in the dialog.
     }
   };
 
@@ -381,6 +394,8 @@ export default function Gateways() {
           </div>
         )}
       </Modal>
+
+      <ActionResult state={action.state} onClose={action.dismiss} />
     </div>
   );
 }

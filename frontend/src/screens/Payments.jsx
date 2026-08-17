@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { downloadCsv } from '../lib/csv';
 import { Badge, Button, Empty, Field, Input, Modal, Screen, Select, Table, Textarea } from '../ui/primitives';
@@ -152,15 +153,33 @@ export default function Payments() {
     }
   };
 
+  const action = useAction();
+
   const reconcile = async () => {
     if (!reconcileText?.trim()) return store.toast('Paste the statement first');
     try {
-      const r = await api.reconcileStatement(reconcileText);
-      await store.reload();
-      store.toast(`${r.parsed} parsed · ${r.applied} applied · ${r.unmatched} unmatched · ${r.duplicate} duplicate · ${r.skipped} unreadable`);
+      // Five numbers in a toast that vanishes is a report nobody can read
+      // twice, and this is the one action whose result decides what an operator
+      // does next — chase the unmatched, or re-read the unreadable lines.
+      await action.run('Reconciling the statement', async () => {
+        const r = await api.reconcileStatement(reconcileText);
+        await store.reload();
+        return r;
+      }, {
+        working: 'Reading each line and matching it to an account…',
+        describe: (r) => ({
+          lines: [
+            `${r.parsed} line(s) understood`,
+            `${r.applied} applied to an account`,
+            `${r.unmatched} could not be matched — these need a person`,
+            `${r.duplicate} already recorded`,
+            `${r.skipped} unreadable`,
+          ],
+        }),
+      });
       setReconcileText(null);
-    } catch (e) {
-      store.toast(`Could not reconcile: ${e.message}`);
+    } catch {
+      // Reported in the dialog.
     }
   };
 
@@ -618,6 +637,8 @@ export default function Payments() {
           />
         </div>
       </Modal>
+
+      <ActionResult state={action.state} onClose={action.dismiss} />
     </Screen>
   );
 }
