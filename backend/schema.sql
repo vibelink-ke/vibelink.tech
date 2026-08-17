@@ -780,6 +780,15 @@ alter table subscribers add column if not exists portal_password_enc text;
 -- else, so nothing may depend on this being present.
 alter table subscribers add column if not exists email text;
 
+-- Mikrotik-Group named a PPP profile that has to exist on the router, and
+-- plans.radius_profile holds labels generated here ("pppoe-Home 10 Mbps") that
+-- exist nowhere else. The router accepted each login, could not find the
+-- profile, and dropped the session at once: a clean "Login OK" in the log every
+-- thirty seconds while nobody could get online. Drop the attribute; the pushed
+-- PPPoE server's default-profile supplies addressing and the speed comes from
+-- Mikrotik-Rate-Limit.
+delete from radreply where attribute = 'Mikrotik-Group';
+
 -- ─────────────── deleting a customer ───────────────
 -- Four tables referenced subscribers with no delete rule, so a customer who had
 -- ever paid, raised a ticket, been texted or held a session could not be

@@ -89,9 +89,23 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
     : { rows: [{ a: null }] };
   await upsert('Framed-IP-Address', ip?.a ?? null);
 
-  // Mikrotik-Group selects the PPP profile on the router by name, so the plan's
-  // profile is chosen centrally instead of being wired per secret on the box.
-  await upsert('Mikrotik-Group', s.radius_profile ?? null);
+  /**
+   * Mikrotik-Group is deliberately NOT sent.
+   *
+   * It names a PPP profile that must already exist on the router. plans.
+   * radius_profile holds generated labels like "pppoe-Home 10 Mbps" which exist
+   * only in this database, so the router accepted the login, failed to find the
+   * profile, and dropped the session immediately — the log showed a clean
+   * "Login OK" every thirty seconds while the customer never got online. An
+   * authentication that succeeds and a session that dies look nothing alike in
+   * the log and identical to the person dialling.
+   *
+   * Nothing is lost by omitting it: the PPPoE server we push sets
+   * default-profile, which carries the address pool and gateway, and the speed
+   * arrives per-user in Mikrotik-Rate-Limit above. Removing any value written by
+   * an earlier version, so upgrading clears the bad attribute.
+   */
+  await upsert('Mikrotik-Group', null);
 
   return true;
 }
