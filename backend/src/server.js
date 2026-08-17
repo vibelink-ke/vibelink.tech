@@ -1436,6 +1436,17 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     }));
     done.push(`user profile ${prof.profile} (${hs?.multi_device ? 3 : 1} device${hs?.multi_device ? 's' : ''} per code)`);
 
+    // Masquerade, stated as its own step rather than buried inside building the
+    // hotspot. It is the difference between guests having an address and guests
+    // having internet, and when it is missing nobody can tell from the result
+    // that it was ever meant to happen.
+    const nat = await step('NAT', () => ros.applyNat(conn, {
+      subnet: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+    }));
+    done.push(nat.wan
+      ? `masquerading guests out ${nat.wan}`
+      : 'masquerading guests (uplink not identified, so out of every interface)');
+
     // The tenant's own portal must be reachable before login or a guest cannot
     // buy anything — that is the entire point of the walled garden here.
     const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();

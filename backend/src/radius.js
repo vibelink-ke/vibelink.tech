@@ -1,5 +1,21 @@
 import * as coaClient from './coa.js';
 
+/**
+ * The hotspot user profile the router push creates.
+ *
+ * Sent as Mikrotik-Group so a voucher session actually uses it. The profile was
+ * being created on every hotspot push and selected by nothing, so the
+ * shared-users limit and idle timeout it carries never applied — the router
+ * fell back to its own "default" profile and the anti-sharing setting was
+ * decoration.
+ *
+ * Safe to name here, unlike the PPPoE case that had to be removed: this profile
+ * is created by ensureHotspotUserProfile on the same push, so it exists on any
+ * router the voucher can be used on. Naming a profile the router does not have
+ * is what disconnects a session immediately after it authenticates.
+ */
+const HOTSPOT_PROFILE = 'hs-default';
+
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */
 export async function activateSubscriber(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
@@ -240,8 +256,10 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value) values
        ($4,$1,'Mikrotik-Rate-Limit',':=',$2),
-       ($4,$1,'Session-Timeout',':=',$3)`,
-    [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId]);
+       ($4,$1,'Session-Timeout',':=',$3),
+       ($4,$1,'Mikrotik-Group',':=',$5)`,
+    [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId,
+     HOTSPOT_PROFILE]);
   return v;
 }
 

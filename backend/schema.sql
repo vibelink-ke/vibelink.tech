@@ -816,6 +816,19 @@ alter table routers add column if not exists pppoe_pool text;
 -- ones that are genuinely in range.
 delete from radreply where attribute = 'Framed-IP-Address';
 
+-- Point existing vouchers at the hotspot profile the router push creates.
+--
+-- The profile carries the shared-users limit that stops one code being used on
+-- a whole building, and nothing selected it — so every voucher issued so far
+-- ran on the router's own "default" profile and the limit never applied.
+insert into radreply (tenant_id, username, attribute, op, value)
+select v.tenant_id, v.code, 'Mikrotik-Group', ':=', 'hs-default'
+  from vouchers v
+ where v.status <> 'expired'
+   and exists (select 1 from radcheck rc
+                where rc.username = v.code and rc.tenant_id = v.tenant_id)
+on conflict (tenant_id, username, attribute) do nothing;
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.
