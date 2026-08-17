@@ -44,7 +44,79 @@ export async function registerC2B(tenantId) {
   return data;
 }
 
+/**
+ * Send money out — the other direction from everything else here.
+ *
+ * This is what settles a tenant who collects on somebody else's shortcode: the
+ * money lands centrally and has to be paid on to them. It is also the only way
+ * to refund without someone walking to an agent.
+ *
+ * The initiator password is never sent. It is RSA-encrypted with Safaricom's
+ * published certificate into a SecurityCredential, which is what the endpoint
+ * expects; daraja-credential.js does that.
+ *
+ * Nothing here decides that a payout is owed. It performs one that has already
+ * been decided, and records nothing itself — the caller owns the ledger, so a
+ * retry after a timeout cannot invent a second payment.
+ */
+export async function b2c(tenantId, { phone, amount, remarks = 'Settlement', occasion = '' }) {
+  const cfg = await config(tenantId, 'daraja');
+  if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
+
+  const { initiator_name: initiator, initiator_password: initiatorPassword } = cfg.credentials ?? {};
+  if (!initiator || !initiatorPassword) {
+    throw new Error('Payouts need an initiator name and password from the M-Pesa portal. '
+      + 'Add them under Settings → Payment gateways.');
+  }
+
+  const { securityCredential } = await import('./daraja-credential.js');
+  const msisdn = normalise(phone);
+  const value = Math.floor(Number(amount));
+  if (!(value > 0)) throw new Error('A payout must be for a positive whole number of shillings.');
+
+  const { data } = await axios.post(`${BASE}/mpesa/b2c/v1/paymentrequest`, {
+    InitiatorName: initiator,
+    SecurityCredential: securityCredential(initiatorPassword),
+    // BusinessPayment: a settlement, not a promotion or salary. The choice
+    // changes the message the recipient sees and how Safaricom reports it.
+    CommandID: 'BusinessPayment',
+    Amount: value,
+    PartyA: cfg.shortcode,
+    PartyB: msisdn,
+    Remarks: String(remarks).slice(0, 100),
+    QueueTimeOutURL: `${process.env.BASE_URL}/webhooks/daraja/b2c-timeout`,
+    ResultURL: `${process.env.BASE_URL}/webhooks/daraja/b2c-result`,
+    Occasion: String(occasion).slice(0, 100),
+  }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
+
+  if (data.ResponseCode && data.ResponseCode !== '0') {
+    throw new Error(data.ResponseDescription ?? data.errorMessage ?? 'M-Pesa refused the payout.');
+  }
+  return { conversationId: data.ConversationID, originatorId: data.OriginatorConversationID, raw: data };
+}
+
 export const router = express.Router();
+
+/**
+ * Where a payout ends up.
+ *
+ * Safaricom answers the b2c call immediately with "queued" and reports the real
+ * outcome here, minutes later. Logged rather than acted on: only the caller
+ * knows what the payout was for, and guessing would be worse than a record
+ * somebody can read.
+ */
+router.post('/b2c-result', express.json(), async (req, res) => {
+  const r = req.body?.Result ?? {};
+  console.log('daraja b2c result', r.ResultCode, r.ResultDesc, r.OriginatorConversationID ?? '');
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+});
+
+// A timeout is not a failure: the payout may still have gone through, and
+// treating it as failed is how money gets sent twice.
+router.post('/b2c-timeout', express.json(), async (req, res) => {
+  console.warn('daraja b2c timed out — the payout may still complete', JSON.stringify(req.body ?? {}));
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+});
 
 // Validation: accept anything we can plausibly place; Safaricom needs a fast 200.
 router.post('/validate', (_req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));

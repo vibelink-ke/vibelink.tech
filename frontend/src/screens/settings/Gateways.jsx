@@ -25,6 +25,11 @@ export const CHANNELS = {
       { key: 'consumer_key', label: 'Consumer key', secret: true },
       { key: 'consumer_secret', label: 'Consumer secret', secret: true },
       { key: 'passkey', label: 'Passkey', secret: true },
+      // Payouts only. STK push and C2B work without these, so they are optional:
+      // most tenants collect and never send, and demanding a credential they do
+      // not have would block them setting up at all.
+      { key: 'initiator_name', label: 'Initiator name', hint: 'Only for payouts and refunds', optional: true },
+      { key: 'initiator_password', label: 'Initiator password', secret: true, optional: true },
     ],
     services: { pppoe: true, hotspot: true },
   },
@@ -141,7 +146,9 @@ export default function Gateways() {
     const ch = CHANNELS[form.provider];
     if (!form.shortcode.trim()) return store.toast(`${ch.codeLabel} is required`);
     if (!form.id) {
-      const missing = ch.fields.filter((f) => !String(form.credentials[f.key] ?? '').trim());
+      const missing = ch.fields
+        .filter((f) => !f.optional)
+        .filter((f) => !String(form.credentials[f.key] ?? '').trim());
       if (missing.length) return store.toast(`Fill in ${missing.map((m) => m.label).join(', ')}`);
     }
     setBusy(true);
@@ -239,13 +246,21 @@ export default function Gateways() {
                   key: 'creds',
                   label: 'Credentials',
                   render: (g) => {
-                    const need = ch.fields.map((f) => f.key);
+                    // Optional fields are excluded: a gateway that collects
+                    // perfectly well would otherwise report itself incomplete
+                    // for lacking payout credentials it never needs.
+                    const need = ch.fields.filter((f) => !f.optional).map((f) => f.key);
                     const missing = need.filter((k) => !g.credentialKeys.includes(k));
+                    const payouts = ch.fields.some((f) => f.optional)
+                      && ch.fields.filter((f) => f.optional)
+                        .every((f) => g.credentialKeys.includes(f.key));
                     if (!need.length) return <span style={{ color: color.muted }}>none needed</span>;
                     return missing.length ? (
                       <span style={{ color: color.rust, fontSize: 12 }}>missing {missing.length}</span>
                     ) : (
-                      <span style={{ color: color.green, fontSize: 12 }}>complete</span>
+                      <span style={{ color: color.green, fontSize: 12 }}>
+                        complete{payouts ? ' · payouts on' : ''}
+                      </span>
                     );
                   },
                 },
