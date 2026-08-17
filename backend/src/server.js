@@ -1192,7 +1192,14 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     console.log('hotspot push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, gateway: built.gateway });
   } catch (e) {
-    const message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
+    let message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
+    if (!conn) {
+      const why = await explainUnreachable(req.tenant.id, host);
+      // Replace the guess rather than append to it. The stock text asks whether
+      // the tunnel is up and whether the address is the right one; when both can
+      // be answered, asking as well only buries the answer.
+      if (why) message = `${atStep(e, `Could not reach ${host}:${r.api_port ?? 8728}.`)}${why}`;
+    }
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]).catch(() => {});
@@ -1368,7 +1375,14 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     console.log('configure push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, ...info });
   } catch (e) {
-    const message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
+    let message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
+    if (!conn) {
+      const why = await explainUnreachable(req.tenant.id, host);
+      // Replace the guess rather than append to it. The stock text asks whether
+      // the tunnel is up and whether the address is the right one; when both can
+      // be answered, asking as well only buries the answer.
+      if (why) message = `${atStep(e, `Could not reach ${host}:${r.api_port ?? 8728}.`)}${why}`;
+    }
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]);
@@ -1389,6 +1403,41 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
  * shown a blank error. The number is also platform-specific — ECONNREFUSED is
  * -4078 on Windows and -111 on Linux — so translate it rather than matching it.
  */
+/**
+ * Turn a connection failure into the answer, not a question.
+ *
+ * describeRouterError asks whether the tunnel is up and whether the address is
+ * the tunnel one. Both are knowable: OpenVPN's status file says exactly which
+ * routers are connected and on what address. Asking the operator to go and check
+ * has cost several rounds of this already.
+ */
+async function explainUnreachable(tenantId, host) {
+  try {
+    const { liveTunnels } = await import('./tunnel.js');
+    const { rows: [t] } = await pool.query(
+      'select tunnel_subnet from tenants where id=$1', [tenantId]);
+    const prefix = t?.tunnel_subnet
+      ? String(t.tunnel_subnet).split('/')[0].split('.').slice(0, 3).join('.')
+      : null;
+
+    const all = await liveTunnels();
+    const mine = prefix ? all.filter((x) => x.address.startsWith(`${prefix}.`)) : all;
+
+    if (mine.some((x) => x.address === host)) {
+      return ` The tunnel to ${host} is up, so the router is reachable but its API did not answer —`
+        + ' check /ip service that "api" is enabled and not restricted by address.';
+    }
+    if (!mine.length) {
+      return ' No router is connected to the tunnel at all right now, so this address cannot answer.';
+    }
+    return ` Nothing is connected on ${host}. Connected right now: `
+      + `${mine.map((x) => x.address).join(', ')}. Use the banner on this page to adopt the right one.`;
+  } catch {
+    // Diagnostics must never replace the real error with one of their own.
+    return '';
+  }
+}
+
 function describeRouterError(e, host, port) {
   let code = e?.code ?? e?.errno;
   if (typeof code === 'number') {
