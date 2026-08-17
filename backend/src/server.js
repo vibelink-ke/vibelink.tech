@@ -979,6 +979,43 @@ app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
 }));
 
 /**
+ * Tunnels that are connected right now, matched against what we think.
+ *
+ * Exists because of a failure that wasted a lot of time: the router dialled in
+ * on 10.50.3.2, the UI said 10.50.2.2, and nothing anywhere pointed out that the
+ * two disagreed. Every push then failed with a connection timeout, which reads
+ * as "the router is down" rather than "you are calling the wrong number".
+ */
+app.get('/api/routers/tunnels', wrap(async (req, res) => {
+  const { liveTunnels } = await import('./tunnel.js');
+  const { rows: routers } = await pool.query(
+    'select id, name, host from routers where tenant_id=$1', [req.tenant.id]);
+  const { rows: [t] } = await pool.query(
+    'select tunnel_subnet from tenants where id=$1', [req.tenant.id]);
+
+  const mine = t?.tunnel_subnet
+    ? String(t.tunnel_subnet).split('/')[0].split('.').slice(0, 3).join('.')
+    : '';
+  const byHost = new Map(routers.map((r) => [String(r.host).split('/')[0], r]));
+
+  // Only this tenant's block. The status file is server-wide and one tenant must
+  // not be shown another's routers.
+  const tunnels = (await liveTunnels())
+    .filter((t) => !mine || t.address.startsWith(`${mine}.`))
+    .map((t) => ({ ...t, router: byHost.get(t.address) ?? null }));
+
+  const live = new Set(tunnels.map((t) => t.address));
+  res.json({
+    tunnels,
+    // A router whose address is not connected, when some other address is. That
+    // pairing is what makes it a mismatch rather than simply being offline.
+    stale: routers
+      .filter((r) => !live.has(String(r.host).split('/')[0]))
+      .map((r) => ({ ...r, suggestion: tunnels.find((t) => !t.router)?.address ?? null })),
+  });
+}));
+
+/**
  * Push the whole hotspot to one router, in one press.
  *
  * Separate from Configure because the two are wanted at different moments: a

@@ -86,3 +86,46 @@ export async function nextHostIp(tenantId) {
   }
   throw new Error(`Tenant subnet ${prefix}.0/24 is full`);
 }
+
+/**
+ * Which routers are connected right now, and on what address.
+ *
+ * This is the only source of truth for a router's tunnel address. Everything
+ * else is an intention: ovpn_clients says what we allocated, routers.host says
+ * what somebody typed. When a credential is reissued or a row is deleted while
+ * the tunnel stays up, those two drift apart and the router is unreachable at
+ * the address the UI shows — with no way to tell from the UI that it is wrong.
+ *
+ * OpenVPN rewrites the file every 10 seconds. Its ROUTING TABLE section maps
+ * virtual address to common name, which is exactly the pairing we need.
+ */
+export async function liveTunnels() {
+  const fs = await import('node:fs/promises');
+  const path = process.env.OVPN_STATUS_FILE ?? '/run/openvpn/status.log';
+
+  let text;
+  try {
+    text = await fs.readFile(path, 'utf8');
+  } catch {
+    // Not an error worth throwing: on a laptop there is no OpenVPN at all, and
+    // the caller should show "no tunnels" rather than a broken screen.
+    return [];
+  }
+
+  const out = [];
+  let inRouting = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('ROUTING TABLE')) { inRouting = true; continue; }
+    if (line.startsWith('GLOBAL STATS')) break;
+    if (!inRouting) continue;
+    if (line.startsWith('Virtual Address') || !line.trim()) continue;
+
+    const [virtualAddress, commonName, realAddress, lastRef] = line.split(',');
+    // Only host routes. A client pushing a subnet appears here too, and adopting
+    // "10.5.50.0/24" as a router address would be nonsense.
+    if (!virtualAddress || virtualAddress.includes('/')) continue;
+    out.push({ address: virtualAddress.trim(), username: (commonName ?? '').trim(),
+               realAddress: (realAddress ?? '').trim(), lastRef: (lastRef ?? '').trim() });
+  }
+  return out;
+}

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -26,6 +26,8 @@ export default function Routers() {
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
   const [detected, setDetected] = useState(null);   // { serverHost, detected, port }
+  // What OpenVPN says is actually connected, which is the only reliable answer.
+  const [tunnels, setTunnels] = useState({ tunnels: [], stale: [] });
 
   // Prefill the dial address when the dialog opens. The server knows it — either
   // from OVPN_PUBLIC_HOST / ROOT_DOMAIN, or from the hostname this page arrived
@@ -127,6 +129,29 @@ export default function Routers() {
    * from "nothing happened". The result stays on screen until dismissed, listing
    * each step, and offers to run again.
    */
+  const loadTunnels = useCallback(() => {
+    api.routerTunnels().then(setTunnels).catch(() => {});
+  }, []);
+
+  useEffect(() => { loadTunnels(); }, [loadTunnels]);
+
+  /**
+   * Adopt the address a router is really dialling in on.
+   *
+   * The alternative was retyping it into Edit, which is how the two got out of
+   * step in the first place.
+   */
+  const adoptAddress = async (router, address) => {
+    try {
+      const updated = await api.updateRouter(router.id, { host: address });
+      store.setCollection('routers', (rs) => rs.map((x) => (x.id === router.id ? updated : x)));
+      store.toast(`${router.name} now points at ${address}`);
+      loadTunnels();
+    } catch (e) {
+      store.toast(`Could not update: ${e.message}`);
+    }
+  };
+
   const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
     setResult({ router: r, state: 'running', opts });
@@ -367,6 +392,30 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
         </Card>
       )}
 
+      {/* The mismatch that cost days: the router dials in on one address while
+          the row says another, every push times out, and it reads as "the
+          router is down" rather than "we are calling the wrong number". */}
+      {tunnels.stale.filter((r) => r.suggestion).map((r) => (
+        <div
+          key={r.id}
+          style={{
+            fontSize: 13, color: color.amberInk, background: color.amberBg,
+            border: '1px solid #ecd9a8', borderRadius: radius.md,
+            padding: '10px 13px', display: 'flex', gap: 10,
+            alignItems: 'center', flexWrap: 'wrap', marginBottom: 12,
+          }}
+        >
+          <span>
+            <strong>{r.name}</strong> is set to <code>{String(r.host).split('/')[0]}</code>,
+            but the tunnel connected is <code>{r.suggestion}</code>. Pushes will
+            time out until these match.
+          </span>
+          <Button onClick={() => adoptAddress(r, r.suggestion)}>
+            Use {r.suggestion}
+          </Button>
+        </div>
+      ))}
+
       <Card title="Onboarded routers">
         <Table
           rowKey={(r) => r.id}
@@ -429,16 +478,17 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                     </Button>
                   )}
                   {/* Re-sends the same settings without asking about ports again —
-                      for after a router has been reset, or its config drifted. */}
-                  {r.autoconfig_last_ok && (
-                    <Button
-                      onClick={() => runAutoconfig(r, {})}
-                      disabled={configuring === r.id}
-                      title="Push the current settings again"
-                    >
-                      {configuring === r.id ? 'Sending…' : 'Refresh'}
-                    </Button>
-                  )}
+                      after a reset, after config drift, or after a first attempt
+                      that failed. Previously this was hidden until a push had
+                      already succeeded, which withheld the retry button from
+                      exactly the routers that needed retrying. */}
+                  <Button
+                    onClick={() => runAutoconfig(r, {})}
+                    disabled={configuring === r.id}
+                    title="Push the current settings again, without asking about ports"
+                  >
+                    {configuring === r.id ? 'Sending…' : 'Refresh'}
+                  </Button>
                   <Button
                     onClick={() =>
                       setEdit({

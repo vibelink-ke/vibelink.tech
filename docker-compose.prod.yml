@@ -76,6 +76,10 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
+    volumes:
+      # Read-only: the API only needs to see which tunnels are up and on what
+      # address. Anything that can write here could redirect a router.
+      - ovpn-run:/run/openvpn:ro
     # No `ports`: the namespace belongs to `net`. Caddy reaches it as net:8080.
 
   web:
@@ -148,6 +152,9 @@ services:
     # Ports are published on `net`, which owns the namespace.
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
+      # Writer side of the status file the API reads to learn which routers are
+      # actually connected, and on which tunnel address.
+      - ovpn-run:/run/openvpn
 
   wireguard:
     image: linuxserver/wireguard:latest
@@ -171,6 +178,7 @@ services:
 
 volumes:
   billing-pgdata:
+  ovpn-run:           # openvpn status file, shared read-only with the API
   billing-ovpn-pki:   # the tunnel CA; losing it means re-onboarding every router
   caddy-data:
   caddy-config:
