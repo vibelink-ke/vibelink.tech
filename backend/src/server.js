@@ -1288,6 +1288,39 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
   }
 }));
 
+/**
+ * Live throughput per port.
+ *
+ * Polled by the browser rather than pushed, and each poll opens and closes its
+ * own connection. Holding one open per operator watching a screen would leave
+ * sockets on the router whenever a tab is closed or a laptop is shut, and
+ * RouterOS has a small connection limit that is unpleasant to exhaust.
+ */
+app.post('/api/routers/:id/traffic', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const ports = await step('read traffic', () => ros.portTraffic(conn), 15000);
+    res.json({ ports, at: new Date().toISOString() });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 /** The router's own ports, so the operator can pick which are LAN. */
 app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
   const ros = await import('./routeros.js');

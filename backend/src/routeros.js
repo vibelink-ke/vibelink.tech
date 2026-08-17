@@ -557,6 +557,48 @@ export async function lanCandidates(conn) {
     }));
 }
 
+/**
+ * Throughput on every port, right now.
+ *
+ * `once` matters: without it monitor-traffic streams until the socket closes,
+ * and this library resolves on the first reply anyway — leaving the router
+ * talking to nobody and the command never finishing.
+ *
+ * Rates come from the router's own counters rather than being derived from byte
+ * totals here. Two samples a few seconds apart would need state we do not keep,
+ * and would report nonsense whenever a counter wraps or a port is reset.
+ */
+export async function portTraffic(conn) {
+  const interfaces = await conn.write('/interface/print', []);
+  const names = interfaces
+    .filter((i) => ['ether', 'wlan', 'sfp', 'bridge'].includes(String(i.type ?? '').split('-')[0]))
+    .map((i) => i.name);
+  if (!names.length) return [];
+
+  // One call for every port. Asking per interface is a round trip each over a
+  // tunnel that may be on a rural link, and a dozen of those is a visible pause.
+  const rows = await conn.write('/interface/monitor-traffic', [
+    `=interface=${names.join(',')}`,
+    '=once=',
+  ]);
+
+  const byName = new Map(interfaces.map((i) => [i.name, i]));
+  return rows.map((r) => {
+    const iface = byName.get(r.name) ?? {};
+    return {
+      name: r.name,
+      type: iface.type ?? null,
+      running: iface.running === 'true',
+      disabled: iface.disabled === 'true',
+      // bits per second, as RouterOS reports them
+      rxBps: Number(r['rx-bits-per-second'] ?? 0),
+      txBps: Number(r['tx-bits-per-second'] ?? 0),
+      rxPps: Number(r['rx-packets-per-second'] ?? 0),
+      txPps: Number(r['tx-packets-per-second'] ?? 0),
+    };
+  });
+}
+
 /** Bridges already on the box, so we can offer to reuse one. */
 export async function bridges(conn) {
   const rows = await conn.write('/interface/bridge/print', []);

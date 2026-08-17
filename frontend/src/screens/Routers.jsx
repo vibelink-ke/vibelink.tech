@@ -11,6 +11,15 @@ const blankRouter = () => ({
   name: '', host: '', secret: '', apiPort: '8728', role: 'both',
 });
 
+/** Bits per second in the units an operator reads, not raw digits. */
+const bitrate = (bps) => {
+  const n = Number(bps) || 0;
+  if (n >= 1e9) return `${(n / 1e9).toFixed(2)} Gbps`;
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)} Mbps`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} kbps`;
+  return `${n} bps`;
+};
+
 export default function Routers() {
   const store = useStore();
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
@@ -151,6 +160,34 @@ export default function Routers() {
       store.toast(`Could not update: ${e.message}`);
     }
   };
+
+  /**
+   * Live throughput, polled while the panel is open.
+   *
+   * Every poll is a fresh connection to the router, so closing the panel stops
+   * the load entirely — no socket left behind when a tab is closed or a laptop
+   * is shut. Five seconds is slow enough not to punish a rural link and fast
+   * enough that plugging a cable in shows up while you are still holding it.
+   */
+  const [traffic, setTraffic] = useState(null);   // { router, ports, error, at }
+
+  useEffect(() => {
+    if (!traffic?.router) return undefined;
+    let live = true;
+    const tick = async () => {
+      try {
+        const out = await api.routerTraffic(traffic.router.id);
+        if (live) setTraffic((t) => (t?.router?.id === traffic.router.id
+          ? { ...t, ports: out.ports, at: out.at, error: null } : t));
+      } catch (e) {
+        if (live) setTraffic((t) => (t?.router?.id === traffic.router.id
+          ? { ...t, error: e.message } : t));
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { live = false; clearInterval(id); };
+  }, [traffic?.router?.id]);
 
   const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
@@ -490,6 +527,12 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                     {configuring === r.id ? 'Sending…' : 'Refresh'}
                   </Button>
                   <Button
+                    onClick={() => setTraffic({ router: r, ports: null, error: null })}
+                    title="Live throughput on every port"
+                  >
+                    Traffic
+                  </Button>
+                  <Button
                     onClick={() =>
                       setEdit({
                         id: r.id, name: r.name, host: String(r.host).split('/')[0],
@@ -604,6 +647,54 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               can always reach it. Come back here once it connects.
             </span>
           </div>
+        )}
+      </Modal>
+
+      {/* Live traffic. Its own dialog rather than a column, because it polls and
+          a table that repaints every five seconds is unreadable while scanning
+          a list of routers. */}
+      <Modal
+        open={!!traffic}
+        title={`Traffic on ${traffic?.router?.name ?? ''}`}
+        onClose={() => setTraffic(null)}
+        footer={<Button onClick={() => setTraffic(null)}>Close</Button>}
+      >
+        {traffic?.error && (
+          <div style={{ fontSize: 13, color: color.rust, marginBottom: 10 }}>{traffic.error}</div>
+        )}
+        {!traffic?.ports && !traffic?.error && (
+          <div style={{ fontSize: 13, color: color.muted }}>Reading the router…</div>
+        )}
+        {traffic?.ports && (
+          <>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={th}>PORT</th>
+                  <th style={{ ...th, textAlign: 'right' }}>DOWN</th>
+                  <th style={{ ...th, textAlign: 'right' }}>UP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {traffic.ports.map((p) => (
+                  <tr key={p.name}>
+                    <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5 }}>
+                      {p.name}
+                      {!p.running && (
+                        <span style={{ color: color.muted, fontFamily: 'inherit' }}> · no link</span>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.rxBps)}</td>
+                    <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.txBps)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ marginTop: 10, fontSize: 12, color: color.muted }}>
+              Updating every 5 seconds. Down and up are from the router's point of
+              view: down is what it received on that port.
+            </div>
+          </>
         )}
       </Modal>
 
