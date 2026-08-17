@@ -46,6 +46,16 @@ done
 # request dropped" into an archaeology exercise.
 sed -i 's/^\([[:space:]]*\)destination = files/\1destination = stdout/' "$RADDB/radiusd.conf"
 
+# Log the decision itself, not just that a request happened. FreeRADIUS ships
+# with `auth = no`, so an Access-Reject leaves no trace whatsoever: the router
+# reports "authentication failed", the server log stays empty, and there is
+# nothing to tell a wrong password apart from a wrong shared secret or a missing
+# user. Turning this on is what makes the reject state its own reason.
+#
+# auth_badpass stays off deliberately — it writes the attempted password to the
+# log in clear, and these logs are read casually over `docker compose logs`.
+sed -i 's/^\([[:space:]]*\)auth = no/\1auth = yes/' "$RADDB/radiusd.conf"
+
 # Fail loudly on a bad config rather than starting half-working.
 "$RADIUSD" -CX >/tmp/radcheck.log 2>&1 || {
   echo "--- FreeRADIUS rejected the configuration ---"
