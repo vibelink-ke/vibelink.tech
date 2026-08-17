@@ -203,15 +203,70 @@ export default function Clients() {
    * They used to be one button writing the same status, so nobody could tell the
    * two situations apart afterwards. Both are admin-only.
    */
-  // Shown once and texted; never retrievable afterwards.
-  const [portalPw, setPortalPw] = useState(null);
-  const makePortalPassword = async (c) => {
+  /**
+   * Credentials are fetched on demand rather than arriving with the client list.
+   * The list is reloaded by half the app; passwords riding along in it would end
+   * up in every cache and devtools panel that ever had Clients open.
+   */
+  const [creds, setCreds] = useState(null);          // { id, ...values } once loaded
+  const [credsEdit, setCredsEdit] = useState(null);  // the form, while editing
+  const [credsBusy, setCredsBusy] = useState(false);
+
+  // Opening a different client must not inherit the last one's revealed password.
+  const closeCreds = () => { setCreds(null); setCredsEdit(null); };
+
+  const loadCreds = async (c) => {
+    setCredsBusy(true);
     try {
-      const { password } = await api.generatePortalPassword(c.id);
-      setPortalPw({ id: c.id, password });
-      store.toast(`Portal password for ${c.name} generated and sent by SMS`);
+      const v = await api.subscriberCredentials(c.id);
+      setCreds({ id: c.id, ...v });
+    } catch (e) {
+      store.toast(`Could not read credentials: ${e.message}`);
+    } finally {
+      setCredsBusy(false);
+    }
+  };
+
+  const saveCreds = async (c) => {
+    setCredsBusy(true);
+    try {
+      const { pppoeUser, pppoePassword, portalPassword } = credsEdit;
+      const before = creds ?? {};
+
+      // Only send what actually changed. Rewriting the PPPoE username with its
+      // own value would drop and re-add the RADIUS row for no reason.
+      const patch = {};
+      if (pppoeUser !== before.pppoeUser) patch.pppoe_user = pppoeUser;
+      if (pppoePassword !== before.pppoePassword) patch.pppoe_pass = pppoePassword;
+      if (Object.keys(patch).length) {
+        const updated = await api.updateSubscriber(c.id, patch);
+        store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? updated : x)));
+        setDetail(updated);
+      }
+      if (portalPassword && portalPassword !== before.portalPassword) {
+        await api.generatePortalPassword(c.id, portalPassword);
+      }
+
+      await loadCreds(c);
+      setCredsEdit(null);
+      store.toast('Credentials updated');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setCredsBusy(false);
+    }
+  };
+
+  const makePortalPassword = async (c) => {
+    setCredsBusy(true);
+    try {
+      await api.generatePortalPassword(c.id);
+      await loadCreds(c);
+      store.toast(`New portal password for ${c.name}, sent by SMS`);
     } catch (e) {
       store.toast(`Could not generate: ${e.message}`);
+    } finally {
+      setCredsBusy(false);
     }
   };
 
@@ -348,7 +403,7 @@ export default function Clients() {
                     </td>
                     <td style={td}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span onClick={() => setDetail(c)} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
+                        <span onClick={() => { closeCreds(); setDetail(c); }} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
                           {c.name}
                         </span>
                         <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>
@@ -393,7 +448,7 @@ export default function Clients() {
                       </span>
                     </td>
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <span onClick={() => setDetail(c)} style={{ ...action, color: '#4a524c' }}>View</span>
+                      <span onClick={() => { closeCreds(); setDetail(c); }} style={{ ...action, color: '#4a524c' }}>View</span>
                       <span onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')} style={{ ...action, color: color.amberInk }}>
                         {c.status === 'active' ? 'Pause' : 'Resume'}
                       </span>
@@ -421,7 +476,7 @@ export default function Clients() {
         )}
       </div>
 
-      <Drawer open={!!detail} title={detail?.name} onClose={() => setDetail(null)}>
+      <Drawer open={!!detail} title={detail?.name} onClose={() => { setDetail(null); closeCreds(); }}>
         {detail && (
           <>
             <KV k="Account" v={detail.account_code} />
@@ -436,25 +491,80 @@ export default function Clients() {
             <KV k="Expires" v={detail.expires_at ? new Date(detail.expires_at).toLocaleString('en-KE') : '—'} />
             <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
 
-            {/* The portal password is hashed, so this is the only moment anyone
-                can read it — including us. It is texted to the customer at the
-                same time, because whoever presses this is rarely the person who
-                needs it and reading a code back over the phone is how it gets
-                mistyped. */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>Customer portal</span>
-              {portalPw?.id === detail.id ? (
-                <span style={{ fontFamily: font.mono, fontSize: 15 }}>
-                  {detail.account_code} / {portalPw.password}
-                </span>
+            {/* Credentials are behind a button rather than on screen by default.
+                Support has this drawer open while sharing a screen or sitting in
+                an open office, and the customer's password does not need to be
+                visible for the nine times out of ten the question is about
+                something else. */}
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 10 }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Credentials</span>
+
+              {creds?.id !== detail.id ? (
+                <Button onClick={() => loadCreds(detail)} disabled={credsBusy}>
+                  {credsBusy ? 'Loading…' : 'Show credentials'}
+                </Button>
+              ) : credsEdit ? (
+                <>
+                  <Field label="PPPoE username">
+                    <Input
+                      value={credsEdit.pppoeUser ?? ''}
+                      inputMode="numeric"
+                      onChange={(e) => setCredsEdit({ ...credsEdit, pppoeUser: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="PPPoE password">
+                    <Input
+                      value={credsEdit.pppoePassword ?? ''}
+                      inputMode="numeric"
+                      onChange={(e) => setCredsEdit({ ...credsEdit, pppoePassword: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="Portal password">
+                    <Input
+                      value={credsEdit.portalPassword ?? ''}
+                      inputMode="numeric"
+                      onChange={(e) => setCredsEdit({ ...credsEdit, portalPassword: e.target.value })}
+                    />
+                  </Field>
+                  <span style={{ fontSize: 12, color: color.muted }}>
+                    Digits only. Changing the PPPoE username signs the old one out.
+                  </span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Button onClick={() => saveCreds(detail)} disabled={credsBusy}>
+                      {credsBusy ? 'Saving…' : 'Save'}
+                    </Button>
+                    <Button onClick={() => setCredsEdit(null)} disabled={credsBusy}>Cancel</Button>
+                  </div>
+                </>
               ) : (
-                <span style={{ fontSize: 12.5, color: color.muted }}>
-                  Sign-in is the account number. Generating a password replaces any they already have.
-                </span>
+                <>
+                  <KV k="PPPoE username" v={creds.pppoeUser ?? '—'} />
+                  <KV k="PPPoE password" v={creds.pppoePassword ?? '—'} />
+                  <KV k="Portal login" v={creds.account} />
+                  <KV
+                    k="Portal password"
+                    v={creds.portalPassword
+                      ?? (creds.portalPasswordSet
+                        ? 'Set before passwords could be shown — generate a new one to see it'
+                        : 'Not set')}
+                  />
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <Button
+                      onClick={() => setCredsEdit({
+                        pppoeUser: creds.pppoeUser ?? '',
+                        pppoePassword: creds.pppoePassword ?? '',
+                        portalPassword: creds.portalPassword ?? '',
+                      })}
+                    >
+                      Edit
+                    </Button>
+                    <Button onClick={() => makePortalPassword(detail)} disabled={credsBusy}>
+                      New portal password
+                    </Button>
+                    <Button onClick={() => setCreds(null)}>Hide</Button>
+                  </div>
+                </>
               )}
-              <Button onClick={() => makePortalPassword(detail)}>
-                {portalPw?.id === detail.id ? 'Generate another' : 'Generate portal password'}
-              </Button>
             </div>
           </>
         )}

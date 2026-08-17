@@ -762,6 +762,19 @@ alter table subscribers add column if not exists phone_alt text;
 -- database dump does not hand someone every customer's account.
 alter table subscribers add column if not exists portal_password_hash text;
 
+-- The same password again, encrypted rather than hashed, so support can read it
+-- back to a customer who has lost it instead of resetting and re-texting.
+--
+-- This is deliberately weaker than the hash beside it and the reason is worth
+-- stating: a hash cannot be shown to anybody, which meant every forgotten portal
+-- password became a reset. Encrypting instead keeps a database dump useless on
+-- its own -- the key lives in APP_SECRET_KEY, outside the database -- but anyone
+-- holding both the dump and the key can read every customer's portal password.
+-- The hash stays authoritative for sign-in; this column is only ever read to
+-- display. pppoe_pass has always been stored in clear, so this is not the
+-- weakest link, but it is a real one.
+alter table subscribers add column if not exists portal_password_enc text;
+
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
 -- rest of that month free, which needs no special case: billTenants only runs on

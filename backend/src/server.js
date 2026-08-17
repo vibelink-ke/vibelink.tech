@@ -1461,7 +1461,22 @@ app.post('/api/subscribers', wrap(async (req, res) => {
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
   }
 
-  res.json(s);
+  // Every customer gets a portal login at registration rather than waiting for
+  // someone to press a button later. A portal account that only exists once
+  // support creates it is one the customer never discovers they have.
+  //
+  // The readable copy is skipped when APP_SECRET_KEY is unset. Storing it in
+  // clear instead would be worse than not storing it, and failing the whole
+  // creation over it would be worse still — being able to add a customer must
+  // not depend on an optional convenience being configured.
+  const secrets = await import('./secrets.js');
+  const portalPassword = String(100000 + crypto.randomInt(0, 900000));
+  await pool.query(
+    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+    [s.id, await auth.hashPassword(portalPassword),
+     secrets.configured() ? secrets.encrypt(portalPassword) : null]);
+
+  res.json({ ...s, portal_password: portalPassword });
 
   // After responding: a customer is created whether or not their phone is
   // reachable, and the operator should not wait on an SMS gateway to find out.
@@ -1491,23 +1506,85 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 }
 
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
-  const allowed = ['name', 'phone', 'status', 'plan_id', 'router_id', 'static_ip', 'autopay', 'expires_at'];
+  const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
+                   'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  // Numbers only, and the same lengths the generator uses. These get dictated
+  // over the phone and typed into a router by someone who is not looking at a
+  // screen, which is the whole reason they are digits.
+  if (req.body.pppoe_user != null && !/^\d{4,12}$/.test(String(req.body.pppoe_user))) {
+    return res.status(400).json({ error: 'PPPoE username must be 4-12 digits' });
+  }
+  if (req.body.pppoe_pass != null && !/^\d{4,12}$/.test(String(req.body.pppoe_pass))) {
+    return res.status(400).json({ error: 'PPPoE password must be 4-12 digits' });
+  }
+
+  // A username change leaves the old radcheck row behind, still valid. Anyone
+  // holding the previous credentials would keep getting online after support
+  // "changed" them, which is exactly what changing them is meant to prevent.
+  let previousUser = null;
+  if (req.body.pppoe_user != null) {
+    const { rows: [old] } = await pool.query(
+      'select pppoe_user from subscribers where id=$1 and tenant_id=$2',
+      [req.params.id, req.tenant.id]);
+    previousUser = old?.pppoe_user ?? null;
+  }
   const { rows: [s] } = await pool.query(
     `update subscribers set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}
      where tenant_id=$1 and id=$2 returning *`,
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!s) return res.status(404).json({ error: 'not found' });
 
-  // A plan change moves the rate limit, which lives in radreply. Without this the
-  // subscriber keeps their old speed until the next payment happens to rewrite it.
-  if (sets.includes('plan_id') && s.pppoe_user) {
+  // A plan change moves the rate limit, which lives in radreply; a credential
+  // change moves the password. Without this the subscriber keeps the old value
+  // until some later payment happens to rewrite it.
+  const touchedRadius = ['plan_id', 'pppoe_user', 'pppoe_pass'].some((k) => sets.includes(k));
+  if (touchedRadius && s.pppoe_user) {
     const radius = await import('./radius.js');
+    if (previousUser && previousUser !== s.pppoe_user) {
+      await radius.forgetSubscriberCredentials(pool, previousUser);
+    }
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
   }
 
   res.json(s);
+}));
+
+/**
+ * Read back everything a customer needs to get online or sign in.
+ *
+ * Separate from GET /api/subscribers on purpose: the list is loaded constantly by
+ * every screen, and putting passwords in it would spray them through logs, caches
+ * and the browser devtools of anyone who happens to have Clients open. This is a
+ * deliberate act with its own request.
+ *
+ * The portal password is only readable for customers whose password was set after
+ * the encrypted column existed. Older ones have a hash and nothing else, so they
+ * report as unreadable rather than pretending to be missing.
+ */
+app.get('/api/subscribers/:id/credentials', wrap(async (req, res) => {
+  const secrets = await import('./secrets.js');
+  const { rows: [s] } = await pool.query(
+    `select account_code, pppoe_user, pppoe_pass, portal_password_enc, portal_password_hash
+       from subscribers where id=$1 and tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+
+  let portalPassword = null;
+  if (s.portal_password_enc) {
+    // A key rotation makes old ciphertext undecryptable. That is a bad reason to
+    // fail the whole request when the PPPoE half is still perfectly readable.
+    try { portalPassword = secrets.decrypt(s.portal_password_enc); } catch { /* unreadable */ }
+  }
+
+  res.json({
+    account: s.account_code,
+    pppoeUser: s.pppoe_user,
+    pppoePassword: s.pppoe_pass,
+    portalPassword,
+    portalPasswordSet: Boolean(s.portal_password_hash),
+  });
 }));
 
 /**
@@ -1518,11 +1595,19 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
  * the only moment anyone can see it — including us.
  */
 app.post('/api/subscribers/:id/portal-password', wrap(async (req, res) => {
-  const password = String(100000 + crypto.randomInt(0, 900000));
+  // An operator may set one the customer has chosen; omitting it generates one.
+  const chosen = String(req.body?.password ?? '').trim();
+  if (chosen && !/^\d{6,12}$/.test(chosen)) {
+    return res.status(400).json({ error: 'Portal password must be 6-12 digits' });
+  }
+  const password = chosen || String(100000 + crypto.randomInt(0, 900000));
+  const secrets = await import('./secrets.js');
   const hash = await auth.hashPassword(password);
   const { rows: [s] } = await pool.query(
-    'update subscribers set portal_password_hash=$3 where id=$1 and tenant_id=$2 returning name, phone, account_code',
-    [req.params.id, req.tenant.id, hash]);
+    `update subscribers set portal_password_hash=$3, portal_password_enc=$4
+      where id=$1 and tenant_id=$2 returning name, phone, account_code`,
+    [req.params.id, req.tenant.id, hash,
+     secrets.configured() ? secrets.encrypt(password) : null]);
   if (!s) return res.status(404).json({ error: 'not found' });
 
   res.json({ password, account: s.account_code });

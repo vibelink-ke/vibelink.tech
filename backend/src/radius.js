@@ -65,6 +65,13 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
   return true;
 }
 
+/** Remove a username from RADIUS entirely — used when credentials are renamed. */
+export async function forgetSubscriberCredentials(c, username) {
+  if (!username) return;
+  await c.query('delete from radcheck where username=$1', [username]);
+  await c.query('delete from radreply where username=$1', [username]);
+}
+
 /**
  * Drop a subscriber to their fair-use speed without cutting the session.
  * Same mechanism as the walled garden: rewrite the reply attribute, then CoA so
