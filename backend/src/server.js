@@ -1454,6 +1454,13 @@ app.post('/api/subscribers', wrap(async (req, res) => {
     [req.tenant.id, accountCode ?? phone, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null]);
 
+  // Before responding, not after: the operator's next move is to hand over the
+  // credentials and have the customer dial in, and RADIUS has to know them by then.
+  if (s.pppoe_user) {
+    const radius = await import('./radius.js');
+    await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
+  }
+
   res.json(s);
 
   // After responding: a customer is created whether or not their phone is
@@ -1492,6 +1499,14 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
      where tenant_id=$1 and id=$2 returning *`,
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!s) return res.status(404).json({ error: 'not found' });
+
+  // A plan change moves the rate limit, which lives in radreply. Without this the
+  // subscriber keeps their old speed until the next payment happens to rewrite it.
+  if (sets.includes('plan_id') && s.pppoe_user) {
+    const radius = await import('./radius.js');
+    await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
+  }
+
   res.json(s);
 }));
 

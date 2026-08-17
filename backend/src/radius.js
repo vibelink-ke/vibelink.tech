@@ -29,6 +29,43 @@ export async function activateSubscriber(c, tenantId, subId) {
 }
 
 /**
+ * Push a subscriber's PPPoE credentials into RADIUS.
+ *
+ * activateSubscriber() does this too, but only runs on payment or on an explicit
+ * "set active" — so a client created in the UI had a username and password in the
+ * subscribers table and nothing at all in radcheck. FreeRADIUS cannot authenticate
+ * a user it has never heard of, so every fresh client failed to dial in with
+ * "authentication failed" while the credentials looked perfectly correct on screen.
+ *
+ * Deliberately no CoA: there is no live session to modify when credentials are
+ * first written, and the CoA would block waiting for a reply that cannot come.
+ */
+export async function syncSubscriberCredentials(c, tenantId, subId) {
+  const { rows: [s] } = await c.query(
+    `select s.pppoe_user, s.pppoe_pass, p.rate_down, p.rate_up
+       from subscribers s left join plans p on p.id = s.plan_id
+      where s.id = $1 and s.tenant_id = $2`, [subId, tenantId]);
+  if (!s?.pppoe_user || !s.pppoe_pass) return false;
+
+  await c.query(
+    `insert into radcheck (username, attribute, op, value)
+     values ($1,'Cleartext-Password',':=',$2)
+     on conflict (username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, s.pppoe_pass]);
+
+  // No plan yet means no rate to enforce. Writing a "nullk/nullk" rate limit would
+  // be rejected by the router and take the whole login down with it.
+  if (s.rate_up != null && s.rate_down != null) {
+    await c.query(
+      `insert into radreply (username, attribute, op, value)
+       values ($1,'Mikrotik-Rate-Limit',':=',$2)
+       on conflict (username, attribute) do update set value = excluded.value`,
+      [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`]);
+  }
+  return true;
+}
+
+/**
  * Drop a subscriber to their fair-use speed without cutting the session.
  * Same mechanism as the walled garden: rewrite the reply attribute, then CoA so
  * it takes effect on the live session instead of at next auth.
