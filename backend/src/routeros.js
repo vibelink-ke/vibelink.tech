@@ -370,7 +370,69 @@ export async function applyHotspotServer(conn, {
     done.push('hotspot server');
   }
 
-  return { gateway, pool: poolRange, changed: done };
+  // Without this the guests have a lease and no internet, which is the single
+  // most common "the hotspot does not work" report.
+  const nat = await applyNat(conn, { subnet: cidr });
+  if (nat.created) done.push(`NAT for ${cidr}${nat.wan ? ` out ${nat.wan}` : ''}`);
+
+  return { gateway, pool: poolRange, changed: done, wan: nat.wan };
+}
+
+/**
+ * Which interface the internet is on.
+ *
+ * Read from the default route rather than guessed at. Every site wires its
+ * uplink differently — ether1 on one box, a PPPoE client or an LTE modem on the
+ * next — and a masquerade rule pointed at the wrong interface silently does
+ * nothing.
+ */
+export async function wanInterface(conn) {
+  const routes = await conn.write('/ip/route/print', ['?dst-address=0.0.0.0/0']);
+  const live = routes.find((r) => r.active === 'true' && r['gateway-status']) ?? routes[0];
+  // gateway-status reads like "41.90.1.1 reachable via ether1".
+  const via = String(live?.['gateway-status'] ?? '').split(' via ').pop()?.trim();
+  return via || String(live?.gateway ?? '').trim() || null;
+}
+
+/**
+ * Let a subnet reach the internet.
+ *
+ * Nothing here created a NAT rule, so a hotspot or PPPoE client got an address,
+ * a gateway and DNS, associated happily — and could reach nothing. Private
+ * addresses do not route on the internet; without masquerade the replies have
+ * nowhere to come back to. It is the one step that turns a working lease into
+ * working internet, and its absence looks exactly like "connected, no internet".
+ *
+ * Matched on the source subnet rather than the comment alone: an operator who
+ * already added masquerade by hand should not end up with two rules doing the
+ * same thing.
+ */
+export async function applyNat(conn, { subnet, wan = null }) {
+  const out = wan ?? await wanInterface(conn);
+
+  const rules = await conn.write('/ip/firewall/nat/print', []);
+  const same = rules.filter((r) => String(r.chain) === 'srcnat'
+    && String(r.action) === 'masquerade'
+    && String(r['src-address'] ?? '') === String(subnet));
+
+  const fields = [
+    '=chain=srcnat',
+    `=src-address=${subnet}`,
+    '=action=masquerade',
+    `=comment=${MANAGED_COMMENT}`,
+    // out-interface is deliberately omitted when the uplink cannot be
+    // determined: masquerading out of every interface is wrong in principle but
+    // still gets customers online, whereas naming the wrong interface does
+    // nothing at all and is far harder to spot.
+    ...(out ? [`=out-interface=${out}`] : []),
+  ];
+
+  if (same.length) {
+    await cmd(conn, 'NAT rule', '/ip/firewall/nat/set', [`=.id=${idOf(same[0])}`, ...fields]);
+    return { created: false, wan: out };
+  }
+  await cmd(conn, 'NAT rule', '/ip/firewall/nat/add', fields);
+  return { created: true, wan: out };
 }
 
 /**
@@ -747,7 +809,16 @@ export async function applyPppoeServer(conn, {
   if (server) await conn.write('/interface/pppoe-server/server/set', [`=.id=${idOf(server)}`, ...serverFields]);
   else await conn.write('/interface/pppoe-server/server/add', serverFields);
 
-  return { bridge, pool: poolName, profile: profileName };
+  // Same reason as the hotspot: a subscriber given an address out of a private
+  // pool with no NAT connects, authenticates, and reaches nothing.
+  //
+  // The pool range itself, not a /24 derived from the gateway. The default range
+  // runs to 10.100.255.254, so a /24 would have covered the first 253
+  // subscribers and left everyone after them without internet — a fault that
+  // only appears once a site grows, and looks nothing like a NAT problem.
+  const nat = await applyNat(conn, { subnet: poolRange });
+
+  return { bridge, pool: poolName, profile: profileName, nat: poolRange, wan: nat.wan };
 }
 
 /**

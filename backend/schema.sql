@@ -789,6 +789,17 @@ alter table subscribers add column if not exists email text;
 -- Mikrotik-Rate-Limit.
 delete from radreply where attribute = 'Mikrotik-Group';
 
+-- ─────────────── router downtime ───────────────
+-- When a router first stopped answering, and whether anyone has been told.
+--
+-- The watchdog has always written status='up'/'down' and has never notified
+-- anybody, despite the comment above it promising exactly that. Status alone
+-- cannot support a notification: without knowing when it went down there is no
+-- way to wait out a brief blip, and without knowing whether a message was sent
+-- a minutely job would text the owner sixty times an hour.
+alter table routers add column if not exists offline_since timestamptz;
+alter table routers add column if not exists offline_notified boolean not null default false;
+
 -- ─────────────── where the customer is ───────────────
 -- Add client has collected a location and coordinates since it was built and
 -- had nowhere to put them. A technician sent to a fault needs the house, not
