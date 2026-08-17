@@ -43,8 +43,11 @@ export async function activateSubscriber(c, tenantId, subId) {
 export async function syncSubscriberCredentials(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
     `select s.pppoe_user, s.pppoe_pass, s.static_ip,
-            p.rate_down, p.rate_up, p.radius_profile
-       from subscribers s left join plans p on p.id = s.plan_id
+            p.rate_down, p.rate_up, p.radius_profile,
+            r.pppoe_pool
+       from subscribers s
+       left join plans p on p.id = s.plan_id
+       left join routers r on r.id = s.router_id
       where s.id = $1 and s.tenant_id = $2`, [subId, tenantId]);
   if (!s?.pppoe_user || !s.pppoe_pass) return false;
 
@@ -81,13 +84,26 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
   await upsert('Mikrotik-Rate-Limit',
     s.rate_up != null && s.rate_down != null ? `${s.rate_up}k/${s.rate_down}k` : null);
 
-  // The address the system assigned, not one the router invents from its pool.
-  // host() strips any prefix length: Framed-IP-Address is a bare address, and
-  // sending "10.0.0.5/32" makes the router ignore the attribute silently.
+  /**
+   * The address the system assigned — but only if the router can give it out.
+   *
+   * Framed-IP-Address for an address outside the router's pool is not ignored.
+   * The router assigns it, finds it collides with one of its own interfaces,
+   * and terminates the session a second after authenticating: "logged in,
+   * 192.168.0.110" followed immediately by "terminating...". That reads as a
+   * credentials problem and is not one.
+   *
+   * So an address the router cannot serve is dropped rather than sent, and the
+   * subscriber gets one from the pool. Losing a preferred address is a far
+   * smaller harm than a line that authenticates and will not stay up.
+   *
+   * host() strips any prefix length: the attribute is a bare address, and
+   * "10.0.0.5/32" is discarded by the router without complaint.
+   */
   const { rows: [ip] } = s.static_ip
     ? await c.query('select host($1::inet) as a', [s.static_ip])
     : { rows: [{ a: null }] };
-  await upsert('Framed-IP-Address', ip?.a ?? null);
+  await upsert('Framed-IP-Address', inPool(ip?.a, s.pppoe_pool) ? ip.a : null);
 
   /**
    * Mikrotik-Group is deliberately NOT sent.
@@ -108,6 +124,37 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
   await upsert('Mikrotik-Group', null);
 
   return true;
+}
+
+/**
+ * Is this address one the router's PPPoE pool can hand out?
+ *
+ * RouterOS pool ranges look like "10.100.0.2-10.100.255.254". Comparing as
+ * 32-bit integers handles ranges that straddle octet boundaries, which a
+ * string or per-octet comparison gets wrong.
+ *
+ * An unknown pool means the router has not been configured through us yet. The
+ * address is refused in that case: assigning one the router may not own is what
+ * causes the session to be dropped, and a subscriber on a pool address works
+ * while a subscriber on a rejected one does not connect at all.
+ */
+function inPool(address, poolRange) {
+  if (!address || !poolRange) return false;
+  const toInt = (ip) => {
+    const parts = String(ip).trim().split('.').map(Number);
+    if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+  };
+
+  const value = toInt(address);
+  if (value === null) return false;
+
+  // A pool may list several ranges separated by commas.
+  return String(poolRange).split(',').some((part) => {
+    const [from, to] = part.split('-').map((x) => toInt(x));
+    if (from === null) return false;
+    return value >= from && value <= (to ?? from);
+  });
 }
 
 /** Remove a username from RADIUS entirely — used when credentials are renamed. */

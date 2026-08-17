@@ -789,6 +789,18 @@ alter table subscribers add column if not exists email text;
 -- Mikrotik-Rate-Limit.
 delete from radreply where attribute = 'Mikrotik-Group';
 
+-- ─────────────── the address pool a router hands out ───────────────
+-- Recorded when the PPPoE server is configured, so RADIUS can tell whether a
+-- subscriber's static IP is one this router can actually give out.
+--
+-- Sending Framed-IP-Address for an address outside the pool is not ignored: the
+-- router assigns it, finds it collides with one of its own interfaces, and
+-- terminates the session about a second after authenticating. The log reads
+-- "logged in, 192.168.0.110" then "terminating..." — an authentication that
+-- succeeds followed by a disconnect, which is nothing like a credentials
+-- problem and gets diagnosed as one.
+alter table routers add column if not exists pppoe_pool text;
+
 -- ─────────────── router downtime ───────────────
 -- When a router first stopped answering, and whether anyone has been told.
 --

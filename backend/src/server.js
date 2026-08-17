@@ -1629,6 +1629,11 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
             gateway: req.body?.gateway,
           }), 40000);
         done.push(`PPPoE server listening on ${pppoe.bridge}, handing out ${pppoe.pool}`);
+
+        // Recorded so RADIUS can refuse a static IP this router cannot serve.
+        // Sending one outside the pool makes the router authenticate the
+        // subscriber and then drop the session a second later.
+        await pool.query('update routers set pppoe_pool=$2 where id=$1', [r.id, pppoe.nat]);
       }
     }
     if (r.role === 'both' || r.role === 'hotspot') {
