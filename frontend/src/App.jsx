@@ -4,7 +4,7 @@ import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
-import { isPlatformHost, portalUrl } from './app/host';
+import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
@@ -85,20 +85,17 @@ export default function App() {
     }
 
     /**
-     * A session on this domain still does not open the product here.
+     * The marketing site, whether or not there is a session.
      *
-     * The check used to run only when signed out, so anyone holding a cookie
-     * from an earlier visit got the full billing system on vibelink.tech —
-     * which is how the platform's front page turned into somebody's dashboard.
-     * Whoever they are, their portal is on their own subdomain, so send them
-     * there rather than rendering a second copy of the app on a hostname that
-     * resolves to no tenant.
+     * Anyone arriving at vibelink.tech has looked up the company, so that is
+     * what they get. Redirecting a signed-in visitor to their portal was wrong
+     * for the same reason rendering the app here was: somebody searching for
+     * the product should see the product's page, not whichever account happens
+     * to be signed in on that browser.
+     *
+     * Signing in happens on a subdomain — the platform owner's own portal is
+     * vibelink.vibelink.tech like any other tenant's.
      */
-    if (session) {
-      window.location.replace(portalUrl(session.subdomain));
-      return null;
-    }
-
     return (
       <Suspense fallback={null}>
         <Landing onRegister={() => { window.location.href = '/signup'; }} />

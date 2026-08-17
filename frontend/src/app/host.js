@@ -19,6 +19,3 @@ export function isPlatformHost(hostname = window.location.hostname) {
   if (h === 'localhost' || h === '127.0.0.1') return false;
   return h === ROOT || h === `www.${ROOT}`;
 }
-
-/** Where a newly registered ISP should land. */
-export const portalUrl = (subdomain) => `https://${subdomain}.${ROOT}`;
