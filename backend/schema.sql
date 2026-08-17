@@ -801,6 +801,21 @@ delete from radreply where attribute = 'Mikrotik-Group';
 -- problem and gets diagnosed as one.
 alter table routers add column if not exists pppoe_pool text;
 
+-- Clear every Framed-IP-Address written before the pool check existed.
+--
+-- Refusing to write a bad one does nothing about the ones already stored, and
+-- those are what the router reads at the next login: a subscriber carrying
+-- 192.168.0.110 keeps being handed it, keeps colliding with the router's own
+-- LAN, and keeps being disconnected a second after authenticating. The upgrade
+-- has to remove them, not merely stop adding more.
+--
+-- Deleting all of them rather than only the ones out of range: working out
+-- which are valid needs the router's pool, which is recorded on the next
+-- Configure, and a subscriber briefly on a pool address is online while one on
+-- a colliding address is not. scripts/sync-radius.mjs --apply writes back the
+-- ones that are genuinely in range.
+delete from radreply where attribute = 'Framed-IP-Address';
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.
