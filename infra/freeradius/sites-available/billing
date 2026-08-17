@@ -49,6 +49,15 @@ server billing {
         expiration
         logintime
 
+        # One module per protocol the PPPoE server offers.
+        #
+        # These do not authenticate here — they inspect the request and set
+        # Auth-Type so the authenticate section below knows which to use. Only
+        # `pap` was listed, so a CHAP or MS-CHAP login reached authenticate with
+        # no Auth-Type and was rejected however correct the password was. Windows
+        # uses MS-CHAPv2 by default, so no Windows client could ever have got on.
+        chap
+        mschap
         pap
     }
 

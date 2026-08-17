@@ -306,7 +306,14 @@ export async function applyPppoeServer(conn, {
     `=service-name=${serviceName}`,
     '=disabled=no',
     '=one-session-per-host=yes',
-    '=authentication=pap,chap',   // what radcheck's Cleartext-Password supports
+    // Windows dials PPPoE with MS-CHAPv2 and refuses to fall back on its own —
+    // it reports "the selected authentication protocol is not permitted on the
+    // remote access server" and never sends credentials at all. Offering only
+    // pap,chap therefore locked out every Windows client.
+    //
+    // All four work against a Cleartext-Password in radcheck, and the client
+    // picks the strongest both ends share.
+    '=authentication=pap,chap,mschap1,mschap2',
   ];
   const server = (await conn.write('/interface/pppoe-server/server/print', [`?interface=${bridge}`]))[0];
   if (server) await conn.write('/interface/pppoe-server/server/set', [`=.id=${idOf(server)}`, ...serverFields]);
