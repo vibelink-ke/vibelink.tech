@@ -75,10 +75,14 @@ export default function PlatformMonitor() {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
   const [at, setAt] = useState(null);
+  const [health, setHealth] = useState(null);
 
   const load = useCallback(async () => {
     try {
       setRows(await api.platformOverview());
+      // Separate call, and a failure here must not blank the tenant table: the
+      // server describing itself is useful, not essential.
+      api.platformHealth().then(setHealth).catch(() => setHealth(null));
       setAt(new Date());
       setError(null);
     } catch (e) {
@@ -139,6 +143,57 @@ export default function PlatformMonitor() {
           </Card>
         ))}
       </div>
+
+
+      {/* The machine everything else runs on. When a VPS fills its disk or the
+          database starts answering slowly, every screen degrades in ways that
+          look like unrelated faults — payments not landing, pushes timing out —
+          and nobody thinks to check the host until late. */}
+      {health && (
+        <Card title="This server" subtitle="The VPS running Vibelink">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
+            {(() => {
+              const gb = (b) => `${(b / 1e9).toFixed(1)} GB`;
+              const pct = (used, total) => Math.round((used / total) * 100);
+              const memUsed = health.memory.totalBytes - health.memory.freeBytes;
+              const diskUsed = health.disk ? health.disk.totalBytes - health.disk.freeBytes : null;
+              // Load is per core: over 1.0 each means work is queueing rather
+              // than the machine merely being busy.
+              const loadPer = health.load.one / (health.load.cores || 1);
+              const days = Math.floor(health.hostUptimeSeconds / 86400);
+              const hours = Math.floor((health.hostUptimeSeconds % 86400) / 3600);
+
+              const tiles = [
+                ['Database', health.db.ok ? `${health.db.ms} ms` : 'not answering',
+                 health.db.ok ? 'responding' : (health.db.error ?? 'failed'),
+                 health.db.ok ? null : color.rust],
+                ['Memory', `${pct(memUsed, health.memory.totalBytes)}%`,
+                 `${gb(memUsed)} of ${gb(health.memory.totalBytes)}`,
+                 pct(memUsed, health.memory.totalBytes) > 90 ? color.rust : null],
+                ['Disk', health.disk ? `${pct(diskUsed, health.disk.totalBytes)}%` : 'unknown',
+                 health.disk ? `${gb(health.disk.freeBytes)} free` : 'not reported by this host',
+                 health.disk && pct(diskUsed, health.disk.totalBytes) > 90 ? color.rust : null],
+                ['Load', health.load.one.toFixed(2),
+                 `${health.load.cores} core(s)`, loadPer > 1 ? color.amberInk : null],
+                ['Tunnels', health.tunnels ?? '—', 'routers dialled in', null],
+                ['Uptime', days ? `${days}d ${hours}h` : `${hours}h`, 'since last reboot', null],
+              ];
+
+              return tiles.map(([label, value, note, tone]) => (
+                <div key={label}>
+                  <div style={{ fontSize: 11, letterSpacing: '.07em', color: color.muted }}>
+                    {label.toUpperCase()}
+                  </div>
+                  <div style={{ fontSize: 21, fontWeight: 600, margin: '3px 0 2px', color: tone ?? color.ink }}>
+                    {value}
+                  </div>
+                  <div style={{ fontSize: 12, color: color.muted }}>{note}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        </Card>
+      )}
 
       <Card title="Tenants">
         {!rows ? <Empty text="Loading…" /> : !rows.length ? <Empty text="No tenants yet" /> : (

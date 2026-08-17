@@ -3146,6 +3146,77 @@ app.get('/api/platform/overview', superAdminOnly, wrap(async (_req, res) => {
   res.json(rows);
 }));
 
+/**
+ * How the server itself is doing.
+ *
+ * An ISP's dashboard shows their routers and their customers, and says nothing
+ * about the machine all of it depends on. When the VPS runs out of disk or the
+ * database stops answering, every screen degrades in ways that look like
+ * unrelated faults — payments not landing, pushes timing out — and nobody
+ * thinks to check the host until late.
+ *
+ * Owner-only: it describes the platform, not a tenant, and disk figures are
+ * nobody else's business.
+ */
+app.get('/api/platform/health', superAdminOnly, wrap(async (_req, res) => {
+  const os = await import('node:os');
+  const fsp = await import('node:fs/promises');
+
+  const load = os.loadavg();
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+
+  // Timed rather than assumed reachable: a database answering slowly is the
+  // shape of trouble that precedes it not answering at all.
+  const startedAt = Date.now();
+  let db = { ok: false, ms: null, error: null };
+  try {
+    await pool.query('select 1');
+    db = { ok: true, ms: Date.now() - startedAt, error: null };
+  } catch (e) {
+    db = { ok: false, ms: Date.now() - startedAt, error: e.message };
+  }
+
+  // Disk, from statfs where the platform provides it. Not available everywhere,
+  // and a missing figure is reported as unknown rather than guessed at.
+  let disk = null;
+  try {
+    const st = await fsp.statfs('/');
+    disk = {
+      totalBytes: st.blocks * st.bsize,
+      freeBytes: st.bavail * st.bsize,
+    };
+  } catch { disk = null; }
+
+  const { rows: [counts] } = await pool.query(`
+    select
+      (select count(*) from tenants)                          tenants,
+      (select count(*) from routers where status='up')        routers_up,
+      (select count(*) from routers where status='down')      routers_down,
+      (select count(*) from radacct where acctstoptime is null) sessions_open`);
+
+  // The tunnel: how many routers are actually dialled in right now.
+  let tunnels = null;
+  try {
+    const { liveTunnels } = await import('./tunnel.js');
+    tunnels = (await liveTunnels()).length;
+  } catch { tunnels = null; }
+
+  res.json({
+    at: new Date().toISOString(),
+    uptimeSeconds: Math.round(process.uptime()),
+    hostUptimeSeconds: Math.round(os.uptime()),
+    // On Linux this is runnable processes per core; over 1.0 per core means
+    // work is queueing rather than merely being busy.
+    load: { one: load[0], five: load[1], fifteen: load[2], cores: os.cpus().length },
+    memory: { totalBytes: totalMem, freeBytes: freeMem, processBytes: process.memoryUsage().rss },
+    disk,
+    db,
+    tunnels,
+    counts,
+  });
+}));
+
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   const { name, subdomain, planType = 'flat', planAmount, revsharePct, supportPhone } = req.body;
   if (!name || !subdomain) return res.status(400).json({ error: 'name and subdomain are required' });
