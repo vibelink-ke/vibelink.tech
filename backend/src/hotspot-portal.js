@@ -42,6 +42,7 @@ function duration(min) {
 
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
+  headline = null, subtext = null,
 }) {
   // Where the page should send its purchase requests. Empty on the preview,
   // where the page is already being served by the billing system itself.
@@ -52,7 +53,7 @@ export function loginPage({
   const planCards = plans.length
     ? plans.map((p) => `
       <li class="plan">
-        <div>
+        <div class="plan-name">
           <strong>${esc(p.title)}</strong>
           <span class="meta">${esc(duration(p.duration_min))} · ${esc(String(p.rate_down / 1000))} Mbps</span>
         </div>
@@ -63,13 +64,11 @@ export function loginPage({
 
   // No separate buy block: every bundle above is its own button now.
 
-  // Said plainly. Someone looking at this on the root domain is evaluating the
-  // product, and letting them think it is their own live page wastes their time
-  // when the bundles turn out to be invented.
-  const previewNote = preview
-    ? '<p class="note">Example page. Each ISP gets this on their own subdomain, '
-      + 'with their name, their bundles and their prices.</p>'
-    : '';
+  // No banner on the preview. The page is shown to operators to judge how it
+  // looks, and a notice explaining itself is the first thing they asked to have
+  // removed. The invented bundles are inert there anyway: they carry no id, so
+  // the buttons say so rather than starting a payment that cannot complete.
+  const previewNote = '';
 
   const help = supportPhone
     ? `<p class="hint">Need help? Call <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a></p>`
@@ -83,7 +82,8 @@ export function loginPage({
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(company)} WiFi</title>
 <style>
-  :root { --ink:#161a17; --muted:#6b736c; --line:#e4e6e1; --green:#0f7a5f; --bg:#f5f6f3; }
+  :root { --ink:#161a17; --muted:#6b736c; --line:#e4e6e1; --green:#0f7a5f;
+          --greenDark:#0b5c47; --bg:#f5f6f3; }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
@@ -100,11 +100,21 @@ export function loginPage({
   button { width:100%; margin-top:18px; padding:12px; font-size:15px; font-weight:600;
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
-  .plan { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:7px 0; }
-  .meta { display:block; color:var(--muted); font-size:12.5px; }
+  .plans-title { font-size:12.5px; color:var(--muted); margin:0 0 10px; }
+  .plan { display:flex; justify-content:space-between; align-items:center; gap:14px;
+          padding:10px 0; border-bottom:1px solid var(--line); }
+  .plan:last-child { border-bottom:0; }
+  .plan-name { min-width:0; }
+  .plan-name strong { display:block; font-size:15px; }
+  .meta { display:block; color:var(--muted); font-size:12.5px; white-space:nowrap; }
   .price { font-weight:600; white-space:nowrap; }
-  .buy { padding:7px 13px; font-size:13.5px; font-weight:600; white-space:nowrap;
-         color:#fff; background:var(--green); border:0; border-radius:8px; cursor:pointer; }
+  /* width:auto and margin-top:0 undo the global button rule above, which exists
+     for Connect. Without them every price button stretched to the full width of
+     the card and squeezed the bundle name into a two-line column. */
+  .buy { width:auto; margin-top:0; padding:8px 14px; font-size:14px; font-weight:600;
+         white-space:nowrap; color:#fff; background:var(--green); border:0;
+         border-radius:8px; cursor:pointer; min-width:96px; }
+  .buy:hover { background:var(--greenDark); }
   .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
          background:var(--bg); display:none; }
   .pay.on { display:block; }
@@ -123,8 +133,12 @@ export function loginPage({
 </head>
 <body>
   <div class="card">
-    <h1>${esc(company)}</h1>
-    <p class="sub">Enter your voucher code to get online</p>
+    <!-- Both come from Hotspot -> Settings, so the operator can change what a
+         guest reads without anyone touching this file. Falling back to the
+         company name and a plain instruction means an operator who sets neither
+         still gets a sensible page. -->
+    <h1>${esc(headline || company)}</h1>
+    <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
     ${previewNote}
 
     <!--
@@ -162,6 +176,7 @@ export function loginPage({
       <button type="submit">Connect</button>
     </form>
 
+    <p class="plans-title">Buy a bundle</p>
     <ul class="plans">${planCards}</ul>
 
     <!-- Buying happens here rather than on another page. A guest on the walled
@@ -212,6 +227,19 @@ export function loginPage({
     document.querySelectorAll('.buy').forEach(function (b) {
       b.addEventListener('click', function () {
         planId = b.getAttribute('data-plan');
+        // The preview's bundles are illustrations and carry no id. Saying so
+        // beats a button that swallows the click and looks broken.
+        if (!planId) {
+          pay.classList.add('on');
+          title.textContent = b.getAttribute('data-title');
+          note.textContent = 'This is an example bundle. On your own subdomain this '
+            + 'sends the M-Pesa prompt.';
+          phone.style.display = 'none';
+          go.style.display = 'none';
+          return;
+        }
+        phone.style.display = '';
+        go.style.display = '';
         title.textContent = 'Buy ' + b.getAttribute('data-title');
         pay.classList.add('on');
         note.textContent = '';

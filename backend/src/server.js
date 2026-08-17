@@ -324,11 +324,18 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
       where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
     [tenant.id]);
 
+  // Branding the operator controls from Hotspot -> Settings.
+  const { rows: [hs] } = await pool.query(
+    'select banner_headline, banner_subtext from hotspot_settings where tenant_id=$1',
+    [tenant.id]);
+
   res.type('html').send(loginPage({
     company: tenant.name ?? 'WiFi',
     plans,
     supportPhone: tenant.support_phone ?? null,
     portalUrl: tenant.subdomain ? `https://${tenant.subdomain}.${root}` : null,
+    headline: hs?.banner_headline ?? null,
+    subtext: hs?.banner_subtext ?? null,
   }));
 }));
 

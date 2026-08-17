@@ -104,6 +104,18 @@ export default function HotspotSettings() {
             <Field label="SSID">
               <Input value={f.ssid ?? ''} onChange={set('ssid')} />
             </Field>
+            {/* What a guest reads at the top of the captive portal. Blank falls
+                back to the company name and a plain instruction. */}
+            <Field label="Portal headline" hint="Shown large on the login page. Blank uses your company name">
+              <Input value={f.banner_headline ?? ''} onChange={set('banner_headline')} placeholder={f.ssid || 'Your company'} />
+            </Field>
+            <Field label="Portal subtitle" hint="One line under it">
+              <Input
+                value={f.banner_subtext ?? ''}
+                onChange={set('banner_subtext')}
+                placeholder="Enter your voucher code to get online"
+              />
+            </Field>
             <Field label="Redirect after login" hint="Where the browser lands once connected">
               <Input value={f.redirect_url ?? ''} onChange={set('redirect_url')} placeholder="https://…" />
             </Field>
