@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import util from 'node:util';
 import express from 'express';
 import { pool, tenantByHost } from './db.js';
@@ -27,6 +28,33 @@ process.on('unhandledRejection', (e) => {
 
 const app = express();
 app.use(express.json());
+
+/**
+ * Which build is actually running.
+ *
+ * `git pull` does not replace a running container, and the symptom of forgetting
+ * `--build` is a 404 on a route that exists in the source — which reads as a bug
+ * rather than a stale deploy. Several days went into questions this answers in
+ * one request.
+ *
+ * The fingerprint is of this file: it changes whenever the API does, needs
+ * nothing baked in at build time, and no git inside the image.
+ */
+const BUILD = {
+  startedAt: new Date().toISOString(),
+  source: (() => {
+    try {
+      const file = new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+      return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 12);
+    } catch {
+      return 'unknown';
+    }
+  })(),
+};
+
+// Deliberately public and above the tenant resolver: it carries nothing private,
+// and needing to authenticate to ask "is the new code live?" defeats the point.
+app.get('/api/version', (_req, res) => res.json(BUILD));
 
 // Express 4 does not await handlers, so a rejected async handler becomes an
 // unhandled rejection — which on Node 22+ terminates the process. One DB blip
