@@ -110,6 +110,7 @@ services:
       net:
         condition: service_started
     environment:
+      TZ: ${TZ:-Africa/Nairobi}
       PGHOST: db
       PGPORT: '5432'
       PGUSER: ${POSTGRES_USER}

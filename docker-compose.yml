@@ -46,6 +46,7 @@ services:
       openvpn:
         condition: service_started
     environment:
+      TZ: Africa/Nairobi
       PGHOST: db
       PGPORT: '5432'
       PGUSER: billing
@@ -80,6 +81,7 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
     environment:
+      TZ: Africa/Nairobi
       PGHOST: db
       PGPORT: '5432'
       PGUSER: billing
