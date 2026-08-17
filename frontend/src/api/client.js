@@ -213,6 +213,8 @@ export const api = {
   deleteSiteProfile: (id) => del(`/api/site-profiles/${id}`),
 
   settings: () => get('/api/settings'),
+  updateMe: (me) => patch('/api/me', me),
+  changePassword: (current, next) => post('/api/me/password', { current, next }),
   saveSettings: (s) => put('/api/settings', s),
 
   // ── platform owner ──

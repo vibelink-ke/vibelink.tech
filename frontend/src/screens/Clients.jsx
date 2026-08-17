@@ -9,7 +9,11 @@ import { Button, Drawer, Empty, Field, Input, KV, Modal, Screen, Select } from '
 
 const FILTERS = [
   { key: 'all', label: 'All' },
-  { key: 'online', label: 'Online', match: (c) => c.status === 'active' },
+  // Online means a live session, not "paid up" — those are different questions
+  // and the tab claiming to answer the first was answering the second.
+  { key: 'online', label: 'Online', match: (c) => !!c.online },
+  { key: 'owing', label: 'Owing but online', match: (c) => !!c.online
+      && ['expired', 'suspended', 'paused'].includes(c.status) },
   { key: 'grace', label: 'Grace period', match: (c) => c.status === 'grace' },
   { key: 'expired', label: 'Expired', match: (c) => c.status === 'expired' },
   // Paused and suspended are different states now, so they need different tabs —
@@ -24,6 +28,40 @@ const STATUS_DOT = {
   expired: '#c05a2e',
   paused: color.amberInk,
   suspended: color.rust,
+};
+
+/**
+ * What this customer is, in the terms an operator acts on.
+ *
+ * Billing status alone could not tell these apart, and they need different
+ * things done:
+ *
+ *   online          paid and connected — nothing to do
+ *   active, offline paid but not connected — a fault, or they are simply out
+ *   expired         not paid and not connected — a collection call
+ *   expired, online not paid and still connected — the line should have been
+ *                   cut and was not, which is money going out of the door
+ */
+function presence(c) {
+  const paidUp = !['expired', 'suspended', 'paused'].includes(c.status);
+  if (c.online && !paidUp) {
+    return { label: `${c.status} · online`, colour: color.rust, weight: 700,
+             note: 'still connected — not paid' };
+  }
+  if (c.online) return { label: 'online', colour: color.green, weight: 600, note: 'connected now' };
+  if (!paidUp) return { label: c.status, colour: STATUS_DOT[c.status] ?? color.muted, weight: 600, note: 'offline' };
+  return { label: c.status, colour: color.muted, weight: 500, note: 'offline' };
+}
+
+/** "3m ago", "2d ago" — a duration reads faster than a timestamp in a table. */
+const seenAgo = (iso) => {
+  if (!iso) return 'never seen';
+  const mins = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 };
 
 const th = {
@@ -436,7 +474,23 @@ export default function Clients() {
                     <td style={{ ...td, fontFamily: font.mono, fontSize: 12, color: '#4a524c' }}>
                       {rtr?.name ?? '—'}
                       <br />
-                      {c.static_ip ?? '—'}
+                      {/* The address the router actually gave them, falling back
+                          to the one assigned here. Showing only the assigned one
+                          hid the case that matters: a customer connected on a
+                          different address from the one on file. */}
+                      {c.current_ip ? (
+                        <span title="Address on the live session">{c.current_ip}</span>
+                      ) : c.static_ip ? (
+                        <span style={{ color: color.muted }} title="Assigned here; not connected">
+                          {c.static_ip}
+                        </span>
+                      ) : '—'}
+                      {c.current_ip && c.static_ip && c.current_ip !== String(c.static_ip).split('/')[0] && (
+                        <span style={{ display: 'block', color: color.amberInk, fontSize: 11 }}
+                              title={`Assigned ${c.static_ip}`}>
+                          not the assigned IP
+                        </span>
+                      )}
                     </td>
                     <td style={{ ...td, fontSize: 13.5 }}>
                       {exp}
@@ -459,10 +513,21 @@ export default function Clients() {
                       </span>
                     </td>
                     <td style={td}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 500 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: STATUS_DOT[c.status] ?? color.muted }} />
-                        {c.status}
-                      </span>
+                      {(() => {
+                        const p = presence(c);
+                        return (
+                          <>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
+                                           fontSize: 13, fontWeight: p.weight, color: p.colour }}>
+                              <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: p.colour }} />
+                              {p.label}
+                            </span>
+                            <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 2 }}>
+                              {c.online ? p.note : seenAgo(c.last_seen)}
+                            </span>
+                          </>
+                        );
+                      })()}
                     </td>
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right', whiteSpace: 'nowrap' }}>
                       <span onClick={() => { closeCreds(); setDetail(c); }} style={{ ...action, color: '#4a524c' }}>View</span>

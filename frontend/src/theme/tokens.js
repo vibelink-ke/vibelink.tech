@@ -47,7 +47,12 @@ export const color = {
 };
 
 export const font = {
-  sans: "'Instrument Sans', system-ui, sans-serif",
+  // Inter, which was drawn for user interfaces at small sizes — this app is
+  // mostly dense tables of numbers read on a laptop or a phone in a van, and
+  // its taller x-height and unambiguous digits are easier there than a display
+  // face. The system stack behind it means the app still renders correctly if
+  // Google Fonts is slow or blocked.
+  sans: "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
   mono: "'JetBrains Mono', monospace",
 };
 

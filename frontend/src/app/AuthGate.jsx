@@ -480,12 +480,18 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
                 {busy ? 'Creating…' : 'Create account'}
               </button>
 
-              <span style={{ fontSize: 12, color: color.neutralInk, textAlign: 'center', flex: '0 0 auto' }}>
-                Already have an account?{' '}
-                <span onClick={tab('login')} style={{ fontWeight: 600, color: color.green, cursor: 'pointer' }}>
-                  Sign in
+              {/* No "sign in" here. Registration happens on the platform domain
+                  and signing in happens on a tenant subdomain, so this link
+                  offered a switch to a form that cannot authenticate anybody
+                  from this hostname. Shown only where both are possible. */}
+              {!only && (
+                <span style={{ fontSize: 12, color: color.neutralInk, textAlign: 'center', flex: '0 0 auto' }}>
+                  Already have an account?{' '}
+                  <span onClick={tab('login')} style={{ fontWeight: 600, color: color.green, cursor: 'pointer' }}>
+                    Sign in
+                  </span>
                 </span>
-              </span>
+              )}
             </div>
           )}
         </div>

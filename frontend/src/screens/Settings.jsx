@@ -144,6 +144,42 @@ export default function Settings() {
   const setO = (k) => (e) => setOrg((s) => ({ ...s, [k]: e.target.value }));
   const setS = (k) => (e) => setSmtp((s) => ({ ...s, [k]: e.target.value }));
 
+  const [me, setMeState] = useState({
+    name: store.session?.name ?? '', email: store.session?.email ?? '', phone: '',
+  });
+  const [pw, setPwState] = useState({ current: '', next: '', again: '' });
+  const setMe = (k) => (e) => setMeState((v) => ({ ...v, [k]: e.target.value }));
+  const setPw = (k) => (e) => setPwState((v) => ({ ...v, [k]: e.target.value }));
+
+  const saveMe = async () => {
+    setSaving(true);
+    try {
+      const saved = await api.updateMe(me);
+      setMeState((v) => ({ ...v, ...saved }));
+      store.toast('Your details are saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const changePassword = async () => {
+    if (pw.next !== pw.again) return store.toast('The two new passwords do not match');
+    if (pw.next.length < 8) return store.toast('Use at least 8 characters');
+    setSaving(true);
+    try {
+      await api.changePassword(pw.current, pw.next);
+      // Cleared immediately: a password left in a form is one a shoulder reads.
+      setPwState({ current: '', next: '', again: '' });
+      store.toast('Password changed');
+    } catch (e) {
+      store.toast(`Could not change: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   /**
    * The SMTP form used to write into the generic settings blob, which nothing
    * ever read — saving it looked like success and sent no mail. It now talks to
@@ -243,10 +279,53 @@ export default function Settings() {
           { id: 'sms', label: 'SMS gateways' },
           { id: 'smtp', label: 'Email' },
           { id: 'prefs', label: 'Preferences' },
+          { id: 'account', label: 'My account' },
         ]}
       />
 
       {tab === 'gateways' && <Gateways />}
+
+      {/* Your own login, not the business. Neither could be changed from inside
+          the product: a mistyped name at signup was permanent, and anyone who
+          thought their password was known had to ask us to reset it — which
+          means somebody being told a password, the thing passwords avoid. */}
+      {tab === 'account' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 14, alignItems: 'start' }}>
+          <Card title="Your details" subtitle="How you appear to your team">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Field label="Full name">
+                <Input value={me.name} onChange={setMe('name')} />
+              </Field>
+              <Field label="Email" hint="You sign in with this">
+                <Input value={me.email} onChange={setMe('email')} autoComplete="email" />
+              </Field>
+              <Field label="Phone">
+                <Input value={me.phone} onChange={setMe('phone')} />
+              </Field>
+              <Button variant="primary" onClick={saveMe} disabled={saving}>
+                {saving ? 'Saving…' : 'Save details'}
+              </Button>
+            </div>
+          </Card>
+
+          <Card title="Password" subtitle="Changing it does not sign out your other devices">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Field label="Current password">
+                <Input type="password" value={pw.current} onChange={setPw('current')} autoComplete="current-password" />
+              </Field>
+              <Field label="New password" hint="At least 8 characters">
+                <Input type="password" value={pw.next} onChange={setPw('next')} autoComplete="new-password" />
+              </Field>
+              <Field label="Repeat new password">
+                <Input type="password" value={pw.again} onChange={setPw('again')} autoComplete="new-password" />
+              </Field>
+              <Button variant="primary" onClick={changePassword} disabled={saving}>
+                {saving ? 'Changing…' : 'Change password'}
+              </Button>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {tab === 'general' && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(330px, 1fr))', gap: 14, alignItems: 'start' }}>

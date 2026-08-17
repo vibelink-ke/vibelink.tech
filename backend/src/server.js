@@ -743,9 +743,41 @@ app.post('/portal/verify-code', async (req, res) => {
 });
 
 // ── admin ─────────────────────────────────────────
+/**
+ * Clients, with whether they are actually connected.
+ *
+ * The list carried only the billing status, so "active" meant "paid up" and
+ * said nothing about whether the customer is online — and an expired customer
+ * still connected looked identical to one who had gone. Those are different
+ * problems: one is a collection call, the other is a line that should have been
+ * cut and was not.
+ *
+ * The address comes from the live session rather than subscribers.static_ip:
+ * that field is what we asked for, this is what the router actually gave them,
+ * and when they differ the second one is the one that matters.
+ */
 app.get('/api/subscribers', async (req, res) => {
-  const { rows } = await pool.query(
-    'select * from subscribers where tenant_id=$1 order by created_at desc limit 200', [req.tenant.id]);
+  const { rows } = await pool.query(`
+    select s.*,
+           a.framedipaddress            is not null as online,
+           host(a.framedipaddress)      as current_ip,
+           a.acctstarttime              as session_started,
+           coalesce(a.acctupdatetime, a.acctstarttime, last.seen) as last_seen
+      from subscribers s
+      -- The open session, if there is one.
+      left join lateral (
+        select framedipaddress, acctstarttime, acctupdatetime
+          from radacct
+         where username = s.pppoe_user and acctstoptime is null
+         order by acctstarttime desc limit 1) a on true
+      -- Otherwise when they were last seen at all, so "offline since" is
+      -- answerable rather than blank.
+      left join lateral (
+        select max(coalesce(acctstoptime, acctupdatetime)) seen
+          from radacct where username = s.pppoe_user) last on true
+     where s.tenant_id = $1
+     order by s.created_at desc
+     limit 200`, [req.tenant.id]);
   res.json(rows);
 });
 
@@ -3671,6 +3703,67 @@ app.put('/api/automation/:job', wrap(async (req, res) => {
 }));
 
 // ── organisation settings (Settings screen) ───────
+/**
+ * Your own account: who you are, and your password.
+ *
+ * Neither could be changed from inside the product. Staff details were editable
+ * only through the platform owner, so an operator who mistyped their name at
+ * signup lived with it, and anyone who thought their password was known had to
+ * ask us to reset it — which means telling somebody a password, the thing
+ * passwords exist to avoid.
+ */
+app.patch('/api/me', wrap(async (req, res) => {
+  const name = String(req.body?.name ?? '').trim();
+  const email = String(req.body?.email ?? '').trim().toLowerCase();
+  const phone = String(req.body?.phone ?? '').trim();
+
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return res.status(400).json({ error: 'That is not a valid email address.' });
+  }
+  // Email identifies the account at sign-in, so a duplicate would make one of
+  // the two unreachable.
+  if (email) {
+    const { rows: [taken] } = await pool.query(
+      'select 1 from staff where lower(email)=lower($1) and id<>$2', [email, req.session.staff_id]);
+    if (taken) return res.status(409).json({ error: 'Another account already uses that email.' });
+  }
+
+  const { rows: [me] } = await pool.query(
+    `update staff set name=coalesce(nullif($2,''), name),
+            email=coalesce(nullif($3,''), email),
+            phone=coalesce(nullif($4,''), phone)
+      where id=$1 and tenant_id=$5
+      returning name, email, phone, username, role`,
+    [req.session.staff_id, name, email, phone, req.tenant.id]);
+  if (!me) return res.status(404).json({ error: 'Account not found' });
+  res.json(me);
+}));
+
+app.post('/api/me/password', wrap(async (req, res) => {
+  const current = String(req.body?.current ?? '');
+  const next = String(req.body?.next ?? '');
+
+  if (next.length < 8) {
+    return res.status(400).json({ error: 'The new password must be at least 8 characters.' });
+  }
+
+  const { rows: [acct] } = await pool.query(
+    'select password_hash from staff where id=$1 and tenant_id=$2',
+    [req.session.staff_id, req.tenant.id]);
+  if (!acct) return res.status(404).json({ error: 'Account not found' });
+
+  // The current password is required even though the session proves who they
+  // are: a session is often a laptop somebody walked away from, and changing
+  // the password is what locks the real owner out.
+  if (!(await auth.verifyPassword(current, acct.password_hash))) {
+    return res.status(403).json({ error: 'That is not your current password.' });
+  }
+
+  await pool.query('update staff set password_hash=$2 where id=$1',
+    [req.session.staff_id, await auth.hashPassword(next)]);
+  res.json({ ok: true });
+}));
+
 app.get('/api/settings', wrap(async (req, res) => {
   const { rows: [extra] } = await pool.query('select * from app_settings where tenant_id=$1', [req.tenant.id]);
   const { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status } = req.tenant;
