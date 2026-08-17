@@ -95,6 +95,7 @@ export function loginPage({
   .hint { margin:10px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:12.5px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
+  .err:empty { display:none; }
   .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:13px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   a { color:var(--green); }
@@ -106,7 +107,16 @@ export function loginPage({
     <p class="sub">Enter your voucher code to get online</p>
     ${previewNote}
 
-    $(if error)<p class="err">$(error)</p>$(endif)
+    <!--
+      No $(if ...) here on purpose. That conditional is the only RouterOS-
+      specific construct on the page, and it is the one thing that differs
+      between rendering correctly as a file and rendering blank once the router
+      is serving it. A parser that dislikes it can swallow everything after it.
+
+      Always emitting the paragraph is safe whatever the parser does: when there
+      is no error the substitution leaves it empty, and :empty hides it.
+    -->
+    <p class="err">$(error)</p>
 
     <!--
       One field, not two.
