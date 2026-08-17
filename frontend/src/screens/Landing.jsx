@@ -41,7 +41,7 @@ const Section = ({ children, style }) => (
   </section>
 );
 
-export default function Landing({ onRegister, onSignIn }) {
+export default function Landing({ onRegister }) {
   return (
     <div style={{
       minHeight: '100vh', background: color.pageBg, color: color.ink,
@@ -53,13 +53,11 @@ export default function Landing({ onRegister, onSignIn }) {
           height: 62, padding: '0 22px',
         }}>
           <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: '-.01em' }}>Vibelink</span>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {/* Sign in leads nowhere useful from here — an ISP signs in on their
-                own subdomain. Asking which one is better than a dead link or a
-                login box that rejects everybody. */}
-            <button type="button" onClick={onSignIn} style={ghost}>Sign in</button>
-            <button type="button" onClick={onRegister} style={solid}>Register</button>
-          </div>
+          {/* No sign-in here. This domain is the website, not the product:
+              nobody's customers live on it, and every ISP works on their own
+              subdomain. A sign-in button invites people to try signing in
+              somewhere that cannot authenticate them. */}
+          <button type="button" onClick={onRegister} style={solid}>Register</button>
         </Section>
       </header>
 
@@ -146,58 +144,3 @@ const ghost = {
   background: 'transparent', color: color.ink, border: `1px solid ${color.line}`,
   borderRadius: 9, padding: '9px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
 };
-
-/**
- * "Sign in" from the marketing site.
- *
- * There is no sign-in here: each ISP signs in on their own subdomain. Asking
- * which one and sending them there beats a login box on this domain, which
- * would reject every single person who used it.
- */
-export function PortalFinder({ onBack }) {
-  const [sub, setSub] = useState('');
-  const clean = sub.toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const root = (import.meta.env.VITE_ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
-
-  const go = () => { if (clean) window.location.href = `https://${clean}.${root}`; };
-
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 22,
-      background: color.pageBg, color: color.ink, fontFamily: font.sans,
-    }}>
-      <div style={{
-        width: '100%', maxWidth: 400, background: color.cardBg,
-        border: `1px solid ${color.line}`, borderRadius: 12, padding: 24,
-      }}>
-        <h1 style={{ fontSize: 19, margin: '0 0 4px' }}>Go to your portal</h1>
-        <p style={{ fontSize: 13.5, color: color.inkSoft, margin: '0 0 16px' }}>
-          You sign in on your own subdomain, not here.
-        </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <input
-            value={sub}
-            onChange={(e) => setSub(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && go()}
-            placeholder="yourisp"
-            autoFocus
-            style={{
-              flex: 1, minWidth: 0, padding: '10px 12px', fontSize: 15,
-              border: `1px solid ${color.line}`, borderRadius: 9,
-              background: color.subtleBg, color: color.ink, outline: 'none',
-            }}
-          />
-          <span style={{ fontSize: 13.5, color: color.muted, whiteSpace: 'nowrap' }}>.{root}</span>
-        </div>
-        <button type="button" onClick={go} disabled={!clean}
-          style={{ ...solid, width: '100%', marginTop: 14, padding: 11, opacity: clean ? 1 : 0.5 }}>
-          Continue
-        </button>
-        <button type="button" onClick={onBack}
-          style={{ ...ghost, width: '100%', marginTop: 8, padding: 11 }}>
-          Back
-        </button>
-      </div>
-    </div>
-  );
-}

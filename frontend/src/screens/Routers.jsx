@@ -220,6 +220,20 @@ export default function Routers() {
     }
   };
 
+  /**
+   * Close the result dialog once a push has succeeded.
+   *
+   * Only on success, and only after a pause long enough to read the summary.
+   * A failure stays until dismissed: it names the step that broke and is the
+   * one thing worth keeping on screen. Closing that automatically would hide
+   * the only explanation the operator gets.
+   */
+  useEffect(() => {
+    if (result?.state !== 'ok') return undefined;
+    const id = setTimeout(() => setResult(null), 4000);
+    return () => clearTimeout(id);
+  }, [result?.state, result?.router?.id]);
+
   const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
     setResult({ router: r, state: 'running', opts });
@@ -883,7 +897,9 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
         footer={
           result?.state === 'running' ? null : (
             <>
-              <Button onClick={() => setResult(null)}>Close</Button>
+              <Button onClick={() => setResult(null)}>
+                {result?.state === 'ok' ? 'Close now' : 'Close'}
+              </Button>
               <Button
                 variant="primary"
                 disabled={configuring === result?.router?.id}
@@ -912,6 +928,9 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                 <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, display: 'grid', gap: 4 }}>
                   {result.applied.map((line) => <li key={line}>{line}</li>)}
                 </ul>
+                <span style={{ fontSize: 12, color: color.muted }}>
+                  Closing on its own in a moment.
+                </span>
               </>
             )}
 

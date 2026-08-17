@@ -1,10 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
-import Landing, { PortalFinder } from './screens/Landing';
 import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
@@ -14,29 +13,43 @@ import { color, font } from './theme/tokens';
 import Dashboard from './screens/Dashboard';
 import Clients from './screens/Clients';
 import AddClient from './screens/AddClient';
-import Hotspot from './screens/Hotspot';
 import Networks from './screens/Networks';
 import Tariffs from './screens/Tariffs';
-import Fup from './screens/Fup';
 import Routers from './screens/Routers';
-import MapScreen from './screens/Map';
-import PlatformMonitor from './screens/PlatformMonitor';
-import Analytics from './screens/Analytics';
 import Tickets from './screens/Tickets';
-import Leads from './screens/Leads';
-import Messaging from './screens/Messaging';
-import LiveSupport from './screens/LiveSupport';
-import Outages from './screens/Outages';
-import Sla from './screens/Sla';
-import KnowledgeBase from './screens/KnowledgeBase';
 import Payments from './screens/Payments';
 import PaymentMethods from './screens/PaymentMethods';
-import SiteProfiles from './screens/SiteProfiles';
-import Automation from './screens/Automation';
-import Tenants from './screens/Tenants';
-import SaasRevenue from './screens/SaasRevenue';
-import Staff from './screens/Staff';
 import Settings from './screens/Settings';
+
+/**
+ * Screens fetched when first opened, not on every load.
+ *
+ * The whole app was one 604 kB bundle, so opening Clients also downloaded the
+ * map library, the platform monitor and every screen a tenant may never touch.
+ * On a phone on mobile data that is the difference between a slow app and a
+ * usable one.
+ *
+ * What an operator uses hourly — clients, payments, routers — stays in the main
+ * bundle: splitting those would trade a slow first load for a pause every time
+ * they move between them.
+ */
+const Landing = lazy(() => import('./screens/Landing'));
+const Hotspot = lazy(() => import('./screens/Hotspot'));
+const Fup = lazy(() => import('./screens/Fup'));
+const MapScreen = lazy(() => import('./screens/Map'));
+const PlatformMonitor = lazy(() => import('./screens/PlatformMonitor'));
+const Analytics = lazy(() => import('./screens/Analytics'));
+const Leads = lazy(() => import('./screens/Leads'));
+const Messaging = lazy(() => import('./screens/Messaging'));
+const LiveSupport = lazy(() => import('./screens/LiveSupport'));
+const Outages = lazy(() => import('./screens/Outages'));
+const Sla = lazy(() => import('./screens/Sla'));
+const KnowledgeBase = lazy(() => import('./screens/KnowledgeBase'));
+const SiteProfiles = lazy(() => import('./screens/SiteProfiles'));
+const Automation = lazy(() => import('./screens/Automation'));
+const Tenants = lazy(() => import('./screens/Tenants'));
+const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
+const Staff = lazy(() => import('./screens/Staff'));
 
 export default function App() {
   const { dark, session, signIn } = useStore();
@@ -70,14 +83,10 @@ export default function App() {
     if (pathname === '/signup' || pathname === '/register') {
       return <AuthGate onSignedIn={signIn} only="signup" />;
     }
-    if (pathname === '/signin') {
-      return <PortalFinder onBack={() => { window.location.href = '/'; }} />;
-    }
     return (
-      <Landing
-        onRegister={() => { window.location.href = '/signup'; }}
-        onSignIn={() => { window.location.href = '/signin'; }}
-      />
+      <Suspense fallback={null}>
+        <Landing onRegister={() => { window.location.href = '/signup'; }} />
+      </Suspense>
     );
   }
 
@@ -113,7 +122,12 @@ export default function App() {
             overflowX: 'hidden',
           }}
         >
-          <Routes>
+          {/* Lazy screens need this or a route renders nothing while its chunk
+              downloads. Deliberately blank rather than a spinner: on a fast
+              connection the chunk arrives in a frame or two and a spinner that
+              flashes reads as jank. */}
+          <Suspense fallback={null}>
+            <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/new" element={<AddClient />} />
@@ -146,7 +160,8 @@ export default function App() {
             <Route path="/settings" element={<Settings />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+            </Routes>
+          </Suspense>
         </div>
       </main>
       <Toast />
