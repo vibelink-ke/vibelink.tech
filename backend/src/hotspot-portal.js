@@ -48,8 +48,8 @@ export function loginPage({
   // is the only place that can take a payment. Rendered only when we know that
   // address — a dead button is worse than none.
   const buyBlock = portalUrl ? `
-      <a class="buy" href="${esc(portalUrl)}/customer">Buy a bundle</a>
-      <p class="hint">You can reach the payment page without logging in.</p>` : '';
+      <a class="buy" href="${esc(portalUrl)}/customer">Buy a code</a>
+      <p class="hint">No code yet? You can pay without connecting first.</p>` : '';
 
   // Said plainly. Someone looking at this on the root domain is evaluating the
   // product, and letting them think it is their own live page wastes their time
@@ -103,18 +103,32 @@ export function loginPage({
 <body>
   <div class="card">
     <h1>${esc(company)}</h1>
-    <p class="sub">Sign in to use the internet</p>
+    <p class="sub">Enter your voucher code to get online</p>
     ${previewNote}
 
     $(if error)<p class="err">$(error)</p>$(endif)
 
-    <form action="$(link-login-only)" method="post">
+    <!--
+      One field, not two.
+
+      A hotspot guest has no account. They buy a voucher and type the code, and
+      issueVoucherAccess stores that code as both the RADIUS username and its
+      Cleartext-Password — so asking for a username and a password separately
+      demanded a distinction that does not exist and left people guessing what
+      to put where.
+
+      The router's login form still wants both fields, so the code is copied
+      into a hidden password on submit. The script is inline and tiny because
+      the page is served by the router to a guest who cannot reach anything
+      else; an external file would simply not load.
+    -->
+    <form action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
       <input type="hidden" name="dst" value="$(link-orig)">
-      <label for="username">Account number</label>
+      <label for="username">Voucher code</label>
       <input id="username" name="username" type="text" inputmode="numeric"
-             autocomplete="username" autocapitalize="off" autocorrect="off" required>
-      <label for="password">Password</label>
-      <input id="password" name="password" type="password" autocomplete="current-password" required>
+             autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
+             spellcheck="false" placeholder="Type the code from your voucher" required>
+      <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
 
