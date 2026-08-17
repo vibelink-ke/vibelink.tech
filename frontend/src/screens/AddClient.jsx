@@ -20,8 +20,11 @@ const BLANK = {
   birthday: '',
   identification: '',
   location: '',
-  lat: '0.5246895745365',
-  lng: '35.309421976184',
+  // Blank, not a default. These shipped filled in with one spot in Eldoret, so
+  // every client saved without touching the field would have claimed to live
+  // there — a map full of confident wrong pins is worse than an empty one.
+  lat: '',
+  lng: '',
   service: 'PPPoE',
   mikrotik: '',
   assignedIp: '',
@@ -38,6 +41,9 @@ export default function AddClient() {
   const [f, setF] = useState(BLANK);
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+
+  const hasCoords = Number.isFinite(Number(f.lat)) && Number.isFinite(Number(f.lng))
+    && String(f.lat).trim() !== '' && String(f.lng).trim() !== '';
 
   /**
    * Credentials are digits only — 5 for the account, 7 for the password.
@@ -91,6 +97,37 @@ export default function AddClient() {
     return () => { live = false; };
   }, [f.mikrotik]);
 
+  /**
+   * Ask the browser where it is.
+   *
+   * Only works over HTTPS or on localhost, which is what production serves, and
+   * needs the installer to allow it. A refusal is reported rather than swallowed
+   * so nobody stands there wondering whether the button did anything.
+   */
+  const [locating, setLocating] = useState(false);
+  const useMyLocation = () => {
+    if (!navigator.geolocation) return store.toast('This browser cannot report a location');
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setF((s) => ({
+          ...s,
+          lat: pos.coords.latitude.toFixed(6),
+          lng: pos.coords.longitude.toFixed(6),
+        }));
+        setLocating(false);
+        store.toast(`Location set to within about ${Math.round(pos.coords.accuracy)} m`);
+      },
+      (err) => {
+        setLocating(false);
+        store.toast(err.code === err.PERMISSION_DENIED
+          ? 'Location permission was refused — allow it, or type the coordinates'
+          : `Could not get a location: ${err.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  };
+
   const save = async () => {
     const name = `${f.firstName} ${f.lastName}`.trim();
     if (!name) return store.toast('Give the client a name first');
@@ -108,6 +145,9 @@ export default function AddClient() {
         pppoeUser: f.login || f.account || null,
         pppoePass: f.password || null,
         staticIp: f.assignedIp || null,
+        location: f.location || null,
+        lat: f.lat,
+        lng: f.lng,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
       store.toast(`${created.name} added`);
@@ -267,21 +307,30 @@ export default function AddClient() {
                 <Input value={f.lng} onChange={set('lng')} />
               </Field>
             </div>
-            <div
-              style={{
-                height: 120,
-                borderRadius: radius.md,
-                background: color.tileBg,
-                border: `1px dashed ${color.line}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 12.5,
-                color: color.muted,
-              }}
-            >
-              Map preview
+            {/* The installer standing at the house is the only person who can
+                record where it is. Asking them to read coordinates off another
+                app and retype them is how the field ends up full of the default
+                value it ships with. */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <Button onClick={useMyLocation} disabled={locating}>
+                {locating ? 'Finding…' : 'Use my location'}
+              </Button>
+              {hasCoords && (
+                <a
+                  href={`https://www.google.com/maps?q=${f.lat},${f.lng}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 12.5, color: color.green, fontWeight: 600 }}
+                >
+                  Open in Maps
+                </a>
+              )}
             </div>
+            <span style={{ fontSize: 12.5, color: color.muted }}>
+              {hasCoords
+                ? 'Saved with the client, so a technician can be sent straight there.'
+                : 'Leave blank if you are not at the house — a wrong pin is worse than none.'}
+            </span>
           </div>
         </Card>
       </div>

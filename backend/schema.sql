@@ -789,6 +789,23 @@ alter table subscribers add column if not exists email text;
 -- Mikrotik-Rate-Limit.
 delete from radreply where attribute = 'Mikrotik-Group';
 
+-- ─────────────── where the customer is ───────────────
+-- Add client has collected a location and coordinates since it was built and
+-- had nowhere to put them. A technician sent to a fault needs the house, not
+-- the account number, and the nearest tower is a coverage question nobody can
+-- answer from a list of names.
+--
+-- Plain numerics rather than PostGIS: this is for showing pins and reading out
+-- directions, not for spatial queries, and PostGIS is a heavy dependency to add
+-- to every deployment for a decimal pair.
+alter table subscribers add column if not exists location text;
+alter table subscribers add column if not exists lat numeric(9,6);
+alter table subscribers add column if not exists lng numeric(9,6);
+
+-- Towers have a place too, so coverage can be seen rather than remembered.
+alter table routers add column if not exists lat numeric(9,6);
+alter table routers add column if not exists lng numeric(9,6);
+
 -- ─────────────── deleting a customer ───────────────
 -- Four tables referenced subscribers with no delete rule, so a customer who had
 -- ever paid, raised a ticket, been texted or held a session could not be

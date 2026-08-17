@@ -1876,16 +1876,31 @@ app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
   res.json({ account, password: digits(7) });
 }));
 
+/**
+ * A coordinate, or null.
+ *
+ * The Add client form ships with a default latitude and longitude filled in, so
+ * a blank string and an out-of-range number both arrive routinely. Storing
+ * either would put pins in the sea; null means "we do not know", which is
+ * honest and shows nothing on the map.
+ */
+function coord(value, limit) {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
+}
+
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
-          pppoeUser, pppoePass, staticIp, autopay } = req.body;
+          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
-       router_id, pppoe_user, pppoe_pass, static_ip, autopay)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning *`,
     [req.tenant.id, accountCode ?? phone, name, phone, phoneAlt || null, service, planId ?? null,
-     routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null]);
+     routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
+     location || null, coord(lat, 90), coord(lng, 180)]);
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.
@@ -1940,9 +1955,14 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
-                   'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass'];
+                   'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  // Same rule as on create: an unusable coordinate becomes null rather than a
+  // numeric cast error, or a pin somewhere out at sea.
+  if ('lat' in req.body) req.body.lat = coord(req.body.lat, 90);
+  if ('lng' in req.body) req.body.lng = coord(req.body.lng, 180);
 
   // Numbers only, and the same lengths the generator uses. These get dictated
   // over the phone and typed into a router by someone who is not looking at a

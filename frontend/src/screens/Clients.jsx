@@ -484,6 +484,25 @@ export default function Clients() {
             <KV k="Service" v={detail.service} />
             <KV k="PPPoE user" v={detail.pppoe_user ?? '—'} />
             <KV k="Static IP" v={detail.static_ip ?? '—'} />
+            <KV k="Location" v={detail.location ?? '—'} />
+            {/* A link rather than an embedded map: this drawer is opened dozens
+                of times a day and almost never for directions, and whoever needs
+                them wants their own maps app with navigation, not a picture. */}
+            {detail.lat != null && detail.lng != null && (
+              <KV
+                k="Coordinates"
+                v={
+                  <a
+                    href={`https://www.google.com/maps?q=${detail.lat},${detail.lng}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: color.green, fontWeight: 600 }}
+                  >
+                    {Number(detail.lat).toFixed(5)}, {Number(detail.lng).toFixed(5)}
+                  </a>
+                }
+              />
+            )}
             <KV k="Plan" v={planById[detail.plan_id]?.title ?? '—'} />
             <KV k="Router" v={routerById[detail.router_id]?.name ?? '—'} />
             <KV k="Status" v={detail.status} />
