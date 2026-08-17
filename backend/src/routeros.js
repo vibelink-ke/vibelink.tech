@@ -473,6 +473,17 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
  */
 export async function lanCandidates(conn) {
   const all = await conn.write('/interface/print', []);
+
+  // Which bridge each port is already in, resolved to a name. RouterOS 7 reports
+  // the bridge as an internal id here too, and "in *11" means nothing to the
+  // person choosing ports — showing it as "in bridge-lan" is the difference
+  // between understanding the current state and guessing at it.
+  const bridgeRows = await conn.write('/interface/bridge/print', []);
+  const nameById = new Map(bridgeRows.map((b) => [idOf(b), b.name]));
+  const members = await conn.write('/interface/bridge/port/print', []);
+  const bridgeOf = new Map(
+    members.map((m) => [m.interface, nameById.get(m.bridge) ?? m.bridge]));
+
   return all
     .filter((i) => ['ether', 'wlan', 'sfp'].includes(String(i.type ?? '').split('-')[0]))
     .filter((i) => i.name !== 'billing-ovpn' && !i['slave'])
@@ -481,6 +492,7 @@ export async function lanCandidates(conn) {
       type: i.type,
       running: i.running === 'true',
       comment: i.comment ?? null,
+      bridge: bridgeOf.get(i.name) ?? null,
     }));
 }
 
@@ -502,9 +514,30 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
     await conn.write('/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
   }
 
+  // Re-read: we may have just created it, and we need its internal id.
+  const self = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
+  const selfId = idOf(self);
+
+  // A bridge port's `bridge` field comes back as the bridge's internal id
+  // ("*11") on RouterOS 7, not its name. Comparing against the name alone
+  // therefore matched nothing, so ports that were already in our own bridge
+  // were reported as belonging to some other bridge called "*11" and skipped.
+  // The push then built the PPPoE server and hotspot on a bridge it believed
+  // was empty — configuration that applies cleanly and serves nobody.
+  //
+  // Names are still accepted: older RouterOS does return them.
+  const isOurs = (m) => m.bridge === name || (selfId && m.bridge === selfId);
+
+  // Resolve ids to names so "already in ether-lan" is readable rather than
+  // "already in *11", which tells an operator nothing they can act on.
+  const bridges = await conn.write('/interface/bridge/print', []);
+  const nameById = new Map(bridges.map((b) => [idOf(b), b.name]));
+  const label = (ref) => nameById.get(ref) ?? ref;
+
   const members = await conn.write('/interface/bridge/port/print', []);
-  const already = new Set(members.filter((m) => m.bridge === name).map((m) => m.interface));
-  const elsewhere = new Map(members.filter((m) => m.bridge !== name).map((m) => [m.interface, m.bridge]));
+  const already = new Set(members.filter(isOurs).map((m) => m.interface));
+  const elsewhere = new Map(
+    members.filter((m) => !isOurs(m)).map((m) => [m.interface, label(m.bridge)]));
 
   const added = [];
   const skipped = [];

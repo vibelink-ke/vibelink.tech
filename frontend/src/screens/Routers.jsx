@@ -842,6 +842,10 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                     <span style={{ fontFamily: font.mono }}>{i.name}</span>
                     <span style={{ color: color.muted, fontSize: 12 }}>
                       {i.type}{i.running ? ' · link up' : ' · no link'}
+                      {/* Which bridge it is already in. Ticking a port that is
+                          already bridged is a no-op, and not showing that led to
+                          a hotspot being built on a bridge believed to be empty. */}
+                      {i.bridge ? ` · in ${i.bridge}` : ''}
                     </span>
                   </label>
                 ))}
