@@ -4,7 +4,7 @@ import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
-import { isPlatformHost } from './app/host';
+import { isPlatformHost, portalUrl } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
@@ -79,10 +79,26 @@ export default function App() {
    * registers on this domain once and works on their own subdomain every day
    * after. Showing a sign-in card here would reject everyone who tried it.
    */
-  if (session === null && isPlatformHost()) {
+  if (isPlatformHost()) {
     if (pathname === '/signup' || pathname === '/register') {
       return <AuthGate onSignedIn={signIn} only="signup" />;
     }
+
+    /**
+     * A session on this domain still does not open the product here.
+     *
+     * The check used to run only when signed out, so anyone holding a cookie
+     * from an earlier visit got the full billing system on vibelink.tech —
+     * which is how the platform's front page turned into somebody's dashboard.
+     * Whoever they are, their portal is on their own subdomain, so send them
+     * there rather than rendering a second copy of the app on a hostname that
+     * resolves to no tenant.
+     */
+    if (session) {
+      window.location.replace(portalUrl(session.subdomain));
+      return null;
+    }
+
     return (
       <Suspense fallback={null}>
         <Landing onRegister={() => { window.location.href = '/signup'; }} />
