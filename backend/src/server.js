@@ -1016,6 +1016,35 @@ app.get('/api/routers/tunnels', wrap(async (req, res) => {
 }));
 
 /**
+ * Run one push step with a deadline and a name.
+ *
+ * Two failures this prevents. A RouterOS write that never answers hangs the
+ * request forever — the browser sits on "Applying…" with no way to tell a slow
+ * link from a dead one, which is what a stuck push actually looked like. And a
+ * bare error message ("timeout", "no such item") says nothing about which of a
+ * dozen commands produced it.
+ *
+ * 20 seconds per step: long enough for a slow tunnel to a rural tower, short
+ * enough that a failure is reported while the operator is still watching.
+ */
+async function step(label, fn, ms = 20000) {
+  let timer;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}: no reply after ${ms / 1000}s`)), ms);
+      }),
+    ]);
+  } catch (e) {
+    // Re-thrown with the step name attached, unless it already has one.
+    throw e.message?.startsWith(label) ? e : new Error(`${label}: ${e.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Push the whole hotspot to one router, in one press.
  *
  * Separate from Configure because the two are wanted at different moments: a
@@ -1055,32 +1084,35 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
   const done = [];
   let conn;
   try {
-    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
 
-    const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
+    const bridge = await step('bridge', () =>
+      ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
     if (bridge.added.length) done.push(`bridged ${bridge.added.join(', ')} into ${bridge.bridge}`);
 
     // RADIUS first: a hotspot server that comes up before the router knows where
     // to authenticate will refuse every login until the next push.
-    await ros.applyRadius(conn, {
+    await step('RADIUS', () => ros.applyRadius(conn, {
       serverIp: SERVER_IP,
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
       services: r.role === 'both' ? 'ppp,hotspot' : 'hotspot',
-    });
+    }));
     done.push(`RADIUS pointed at ${SERVER_IP}`);
 
-    const built = await ros.applyHotspotServer(conn, {
-      bridge: bridge.bridge,
-      network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
-    });
+    const built = await step('hotspot server, DHCP and pool', () =>
+      ros.applyHotspotServer(conn, {
+        bridge: bridge.bridge,
+        network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+      }), 40000);
     done.push(`hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool}`);
     if (built.changed.length) done.push(`created ${built.changed.join(', ')}`);
 
-    const prof = await ros.ensureHotspotUserProfile(conn, {
+    const prof = await step('hotspot user profile', () => ros.ensureHotspotUserProfile(conn, {
       sharedUsers: hs?.multi_device ? 3 : 1,
       idleMinutes: hs?.idle_timeout_min ?? 10,
-    });
+    }));
     done.push(`user profile ${prof.profile} (${hs?.multi_device ? 3 : 1} device${hs?.multi_device ? 's' : ''} per code)`);
 
     // The tenant's own portal must be reachable before login or a guest cannot
@@ -1088,11 +1120,11 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
     const portal = t?.subdomain ? `${t.subdomain}.${root}` : null;
     const gardenHosts = [...(hs?.walled_garden ?? []), portal].filter(Boolean);
-    const garden = await ros.applyWalledGarden(conn, gardenHosts);
+    const garden = await step('walled garden', () => ros.applyWalledGarden(conn, gardenHosts), 40000);
     done.push(`walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'}`
       + (portal ? `, including ${portal}` : ''));
 
-    const ttl = await ros.applyAntiSharing(conn, { bridge: bridge.bridge });
+    const ttl = await step('anti-sharing rule', () => ros.applyAntiSharing(conn, { bridge: bridge.bridge }));
     done.push(ttl.created
       ? 'anti-sharing TTL rule added'
       : 'anti-sharing TTL rule already in place');
@@ -1177,9 +1209,10 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
   const done = [];
   let conn;
   try {
-    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
 
-    const info = await ros.identify(conn);
+    const info = await step('identify', () => ros.identify(conn));
 
     // Mint our own account if we arrived on someone else's credentials.
     if (!login.stored) {
@@ -1192,17 +1225,17 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       done.push(created ? `created the ${ros.SERVICE_USER} account` : `took over the existing ${ros.SERVICE_USER} account`);
     }
 
-    const radius = await ros.applyRadius(conn, {
+    const radius = await step('RADIUS', () => ros.applyRadius(conn, {
       serverIp: SERVER_IP,
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
       services: r.role === 'both' ? 'ppp,hotspot' : r.role,
-    });
+    }));
     done.push(`pointed RADIUS at ${SERVER_IP} and enabled CoA`);
     if (radius.replaced) done.push(`removed ${radius.replaced} stale RADIUS entr${radius.replaced === 1 ? 'y' : 'ies'}`);
 
     if (r.role === 'both' || r.role === 'pppoe') {
-      await ros.applyPpp(conn);
+      await step('PPP accounting', () => ros.applyPpp(conn));
       done.push('enabled PPPoE accounting with 5-minute interim updates');
 
       // Only when ports were chosen. Building a bridge unasked could swallow the
@@ -1210,17 +1243,19 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
       if (lanPorts?.length) {
         const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
-        const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
+        const bridge = await step('bridge', () =>
+          ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
         done.push(bridge.added.length
           ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
           : `${bridge.bridge} already had those ports`);
         if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
 
-        const pppoe = await ros.applyPppoeServer(conn, {
-          bridge: bridge.bridge,
-          poolRange: req.body?.poolRange,
-          gateway: req.body?.gateway,
-        });
+        const pppoe = await step('PPPoE server, pool and profile', () =>
+          ros.applyPppoeServer(conn, {
+            bridge: bridge.bridge,
+            poolRange: req.body?.poolRange,
+            gateway: req.body?.gateway,
+          }), 40000);
         done.push(`PPPoE server listening on ${pppoe.bridge}, handing out ${pppoe.pool}`);
       }
     }
