@@ -213,6 +213,7 @@ export const api = {
 
   // ── platform owner ──
   tenants: () => get('/api/tenants'),
+  platformOverview: () => get('/api/platform/overview'),
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
   deleteTenant: (id) => del(`/api/tenants/${id}`),

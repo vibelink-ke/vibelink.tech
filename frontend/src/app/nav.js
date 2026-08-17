@@ -41,6 +41,7 @@ export const NAV_SECTIONS = [
     heading: 'PLATFORM OWNER',
     ownerOnly: true,
     items: [
+      { to: '/platform', label: 'Platform monitor' },
       { to: '/tenants', label: 'ISP tenants', count: (s) => s.tenants.length },
       { to: '/saas-revenue', label: 'SaaS revenue' },
     ],

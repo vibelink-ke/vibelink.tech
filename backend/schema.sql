@@ -902,6 +902,11 @@ create sequence if not exists tenant_ref_seq start 1001;
 alter table tenants add column if not exists billing_ref text unique;
 update tenants set billing_ref = 'VL-' || nextval('tenant_ref_seq') where billing_ref is null;
 
+-- A default, not only a backfill. Without this every tenant created after the
+-- migration had no billing reference at all, which is precisely the ones being
+-- invoiced from now on.
+alter table tenants alter column billing_ref set default ('VL-' || nextval('tenant_ref_seq'));
+
 -- ─────────────── email gateway ───────────────
 -- SMTP per tenant, shaped like tenant_sms_config so both are managed the same
 -- way. The password inside credentials is encrypted with APP_SECRET_KEY before

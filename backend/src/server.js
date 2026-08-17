@@ -2980,6 +2980,52 @@ app.get('/api/tenants', superAdminOnly, wrap(async (_req, res) => {
   res.json(rows);
 }));
 
+/**
+ * Every tenant, and whether they are in trouble.
+ *
+ * Built to answer one question in one screen: which of these needs attention
+ * today. The tenant list already shows who exists and what they pay; none of it
+ * says whose towers are down, who has stopped collecting, or who has nobody
+ * connected — which is what turns into a support call or a cancellation.
+ *
+ * One query rather than one per tenant. A per-tenant loop is fine at five ISPs
+ * and unusable at two hundred, and this is the screen most likely to be left
+ * open on a second monitor.
+ */
+app.get('/api/platform/overview', superAdminOnly, wrap(async (_req, res) => {
+  const { rows } = await pool.query(`
+    select
+      t.id, t.name, t.subdomain, t.billing_ref, t.status, t.licence_ends,
+      t.plan_type, t.plan_amount, t.created_at,
+
+      (select count(*) from subscribers s where s.tenant_id = t.id) subscribers,
+      (select count(*) from subscribers s
+        where s.tenant_id = t.id and s.status = 'active') active_subscribers,
+
+      (select count(*) from routers r where r.tenant_id = t.id) routers,
+      (select count(*) from routers r
+        where r.tenant_id = t.id and r.status = 'down') routers_down,
+      (select max(r.last_seen) from routers r where r.tenant_id = t.id) router_last_seen,
+
+      -- Sessions still open. Zero across a tenant with customers is the shape of
+      -- an outage nobody has reported yet.
+      (select count(*) from radacct a
+        where a.acctstoptime is null
+          and a.username in (select pppoe_user from subscribers
+                              where tenant_id = t.id and pppoe_user is not null)) online,
+
+      (select coalesce(sum(p.amount), 0) from payments p
+        where p.tenant_id = t.id and p.status = 'applied'
+          and p.received_at >= date_trunc('month', now())) collected_this_month,
+      (select max(p.received_at) from payments p
+        where p.tenant_id = t.id and p.status = 'applied') last_payment_at
+
+    from tenants t
+    order by t.created_at desc`);
+
+  res.json(rows);
+}));
+
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   const { name, subdomain, planType = 'flat', planAmount, revsharePct, supportPhone } = req.body;
   if (!name || !subdomain) return res.status(400).json({ error: 'name and subdomain are required' });

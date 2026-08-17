@@ -18,6 +18,7 @@ import Tariffs from './screens/Tariffs';
 import Fup from './screens/Fup';
 import Routers from './screens/Routers';
 import MapScreen from './screens/Map';
+import PlatformMonitor from './screens/PlatformMonitor';
 import Analytics from './screens/Analytics';
 import Tickets from './screens/Tickets';
 import Leads from './screens/Leads';
@@ -95,6 +96,7 @@ export default function App() {
             <Route path="/fair-use" element={<Fup />} />
             <Route path="/routers" element={<Routers />} />
             <Route path="/map" element={<MapScreen />} />
+            <Route path="/platform" element={<PlatformMonitor />} />
             <Route path="/analytics" element={<Analytics />} />
 
             <Route path="/tickets" element={<Tickets />} />
