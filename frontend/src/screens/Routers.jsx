@@ -157,6 +157,41 @@ export default function Routers() {
   };
 
   /**
+   * Push the hotspot, separately from Configure.
+   *
+   * Its own button because the two are wanted at different moments: a PPPoE
+   * tower is set up once and left alone, while a hotspot site gets pushed,
+   * checked, and pushed again after a plan changes. Sharing one button meant
+   * re-sending PPPoE just to fix a captive portal.
+   *
+   * Reuses the same result dialog, so "it is working" and "it failed at the
+   * firewall" look the same wherever they came from.
+   */
+  const runHotspot = async (r, opts) => {
+    setConfiguring(r.id);
+    setResult({ router: r, state: 'running', hotspot: true, opts });
+    try {
+      const res = await api.pushHotspot(r.id, opts ?? {});
+      setAdminPrompt(null);
+      setResult({ router: r, state: 'ok', hotspot: true, applied: res.applied ?? [], opts });
+      store.setCollection('routers', (rs) =>
+        rs.map((x) => (x.id === r.id
+          ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString() }
+          : x)));
+    } catch (e) {
+      if (e.status === 428) {
+        setResult(null);
+        setAdminPrompt({ router: r, username: 'admin', password: '', hotspot: true });
+      } else {
+        setResult({ router: r, state: 'failed', hotspot: true, error: e.message,
+                    applied: e.body?.applied ?? [], opts });
+      }
+    } finally {
+      setConfiguring(null);
+    }
+  };
+
+  /**
    * Read the router's RADIUS settings back and compare them with ours.
    *
    * "RADIUS is not working" is not something anyone can act on. This turns it
@@ -381,6 +416,18 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                   >
                     {configuring === r.id ? 'Reading…' : r.autoconfig_last_ok ? 'Reconfigure' : 'Configure'}
                   </Button>
+                  {/* Only for routers that serve a hotspot. Offering it on a
+                      PPPoE-only tower would invite pushing a captive portal
+                      onto a link that has no guests on it. */}
+                  {(r.role === 'hotspot' || r.role === 'both') && (
+                    <Button
+                      onClick={() => runHotspot(r, {})}
+                      disabled={configuring === r.id}
+                      title="Push DHCP, hotspot server, profile, walled garden and the anti-sharing rule"
+                    >
+                      Hotspot
+                    </Button>
+                  )}
                   {/* Re-sends the same settings without asking about ports again —
                       for after a router has been reset, or its config drifted. */}
                   {r.autoconfig_last_ok && (
@@ -513,7 +560,7 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
       {/* First push only: the admin login used to mint our own account */}
       <Modal
         open={!!adminPrompt}
-        title={`Configure ${adminPrompt?.router?.name ?? 'router'}`}
+        title={`${adminPrompt?.hotspot ? 'Hotspot' : 'Configure'} ${adminPrompt?.router?.name ?? 'router'}`}
         onClose={() => setAdminPrompt(null)}
         footer={
           <>
@@ -521,12 +568,15 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
             <Button
               variant="primary"
               disabled={configuring === adminPrompt?.router?.id}
-              onClick={() =>
-                openConfigure(adminPrompt.router, {
-                  username: adminPrompt.username,
-                  password: adminPrompt.password,
-                })
-              }
+              onClick={() => {
+                const creds = { username: adminPrompt.username, password: adminPrompt.password };
+                // Go back to whichever push asked for the password, not always
+                // Configure — a hotspot push that stopped for credentials must
+                // resume as a hotspot push.
+                return adminPrompt.hotspot
+                  ? runHotspot(adminPrompt.router, creds)
+                  : openConfigure(adminPrompt.router, creds);
+              }}
             >
               {configuring === adminPrompt?.router?.id ? 'Connecting…' : 'Continue'}
             </Button>

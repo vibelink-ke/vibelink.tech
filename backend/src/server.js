@@ -978,6 +978,106 @@ app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
   }
 }));
 
+/**
+ * Push the whole hotspot to one router, in one press.
+ *
+ * Separate from Configure because the two are wanted at different moments: a
+ * PPPoE tower is configured once and left, while a hotspot site gets its
+ * captive portal set up, checked, and set up again after someone changes the
+ * plan. Bundling them meant re-pushing PPPoE to fix a hotspot.
+ *
+ * Everything here is idempotent, so the answer to "did that work?" is always to
+ * press it again and read the result.
+ */
+app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const { rows: [hs] } = await pool.query(
+    'select * from hotspot_settings where tenant_id=$1', [req.tenant.id]);
+  const { rows: [t] } = await pool.query(
+    'select subdomain from tenants where id=$1', [req.tenant.id]);
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({
+    error: 'Enter the router’s admin username and password once. A dedicated account is created from it and used for every push after that.',
+    needsAdmin: true,
+  });
+
+  // The bridge to build on. Ports are only needed the first time; afterwards the
+  // bridge already exists and we attach to it by name.
+  const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : [];
+  const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+
+  const done = [];
+  let conn;
+  try {
+    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+
+    const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
+    if (bridge.added.length) done.push(`bridged ${bridge.added.join(', ')} into ${bridge.bridge}`);
+
+    // RADIUS first: a hotspot server that comes up before the router knows where
+    // to authenticate will refuse every login until the next push.
+    await ros.applyRadius(conn, {
+      serverIp: SERVER_IP,
+      secret: r.secret,
+      coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
+      services: r.role === 'both' ? 'ppp,hotspot' : 'hotspot',
+    });
+    done.push(`RADIUS pointed at ${SERVER_IP}`);
+
+    const built = await ros.applyHotspotServer(conn, {
+      bridge: bridge.bridge,
+      network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+    });
+    done.push(`hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool}`);
+    if (built.changed.length) done.push(`created ${built.changed.join(', ')}`);
+
+    const prof = await ros.ensureHotspotUserProfile(conn, {
+      sharedUsers: hs?.multi_device ? 3 : 1,
+      idleMinutes: hs?.idle_timeout_min ?? 10,
+    });
+    done.push(`user profile ${prof.profile} (${hs?.multi_device ? 3 : 1} device${hs?.multi_device ? 's' : ''} per code)`);
+
+    // The tenant's own portal must be reachable before login or a guest cannot
+    // buy anything — that is the entire point of the walled garden here.
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    const portal = t?.subdomain ? `${t.subdomain}.${root}` : null;
+    const gardenHosts = [...(hs?.walled_garden ?? []), portal].filter(Boolean);
+    const garden = await ros.applyWalledGarden(conn, gardenHosts);
+    done.push(`walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'}`
+      + (portal ? `, including ${portal}` : ''));
+
+    const ttl = await ros.applyAntiSharing(conn, { bridge: bridge.bridge });
+    done.push(ttl.created
+      ? 'anti-sharing TTL rule added'
+      : 'anti-sharing TTL rule already in place');
+
+    await pool.query(
+      `update routers set autoconfig_last_at=now(), autoconfig_last_ok=true,
+              autoconfig_last_error=null, status='up', last_seen=now() where id=$1`, [r.id]);
+
+    res.json({ ok: true, applied: done, gateway: built.gateway });
+  } catch (e) {
+    const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
+    await pool.query(
+      'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
+      [r.id, message.slice(0, 300)]).catch(() => {});
+    // The steps that did land are worth reporting: "it failed" is far less
+    // useful than "it failed after the hotspot came up, at the firewall".
+    res.status(502).json({ error: message, applied: done });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 /** The router's own ports, so the operator can pick which are LAN. */
 app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
   const ros = await import('./routeros.js');

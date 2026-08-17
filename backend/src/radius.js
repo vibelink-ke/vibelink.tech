@@ -42,7 +42,8 @@ export async function activateSubscriber(c, tenantId, subId) {
  */
 export async function syncSubscriberCredentials(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    `select s.pppoe_user, s.pppoe_pass, p.rate_down, p.rate_up
+    `select s.pppoe_user, s.pppoe_pass, s.static_ip,
+            p.rate_down, p.rate_up, p.radius_profile
        from subscribers s left join plans p on p.id = s.plan_id
       where s.id = $1 and s.tenant_id = $2`, [subId, tenantId]);
   if (!s?.pppoe_user || !s.pppoe_pass) return false;
@@ -53,15 +54,45 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
      on conflict (username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, s.pppoe_pass]);
 
-  // No plan yet means no rate to enforce. Writing a "nullk/nullk" rate limit would
-  // be rejected by the router and take the whole login down with it.
-  if (s.rate_up != null && s.rate_down != null) {
+  /**
+   * Reply attributes decide what the router does with the session. Anything not
+   * sent here has to be configured on the router by hand, per customer, which
+   * defeats central billing entirely — so the address and the profile travel
+   * with the login rather than living in /ppp/secret on each box.
+   *
+   * upsert() rather than one statement because an attribute that no longer
+   * applies has to be deleted, not left behind: a customer moved off a static
+   * IP would otherwise keep being handed the old one forever.
+   */
+  const upsert = async (attribute, value) => {
+    if (value == null || value === '') {
+      await c.query('delete from radreply where username=$1 and attribute=$2',
+        [s.pppoe_user, attribute]);
+      return;
+    }
     await c.query(
-      `insert into radreply (username, attribute, op, value)
-       values ($1,'Mikrotik-Rate-Limit',':=',$2)
+      `insert into radreply (username, attribute, op, value) values ($1,$2,':=',$3)
        on conflict (username, attribute) do update set value = excluded.value`,
-      [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`]);
-  }
+      [s.pppoe_user, attribute, String(value)]);
+  };
+
+  // No plan yet means no rate to enforce. A "nullk/nullk" rate limit is rejected
+  // by the router and takes the whole login down with it.
+  await upsert('Mikrotik-Rate-Limit',
+    s.rate_up != null && s.rate_down != null ? `${s.rate_up}k/${s.rate_down}k` : null);
+
+  // The address the system assigned, not one the router invents from its pool.
+  // host() strips any prefix length: Framed-IP-Address is a bare address, and
+  // sending "10.0.0.5/32" makes the router ignore the attribute silently.
+  const { rows: [ip] } = s.static_ip
+    ? await c.query('select host($1::inet) as a', [s.static_ip])
+    : { rows: [{ a: null }] };
+  await upsert('Framed-IP-Address', ip?.a ?? null);
+
+  // Mikrotik-Group selects the PPP profile on the router by name, so the plan's
+  // profile is chosen centrally instead of being wired per secret on the box.
+  await upsert('Mikrotik-Group', s.radius_profile ?? null);
+
   return true;
 }
 

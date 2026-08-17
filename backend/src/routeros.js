@@ -334,6 +334,72 @@ export async function applyWalledGarden(conn, hosts = []) {
 }
 
 /**
+ * A rate-limited user profile for hotspot sessions.
+ *
+ * RADIUS supplies the per-customer speed, so this only carries what a profile
+ * must have regardless: the shared-users limit and the idle timeout. It exists
+ * so the hotspot server has a default profile that is ours rather than the
+ * built-in one, which we would otherwise be editing on a box we do not own.
+ */
+export async function ensureHotspotUserProfile(conn, {
+  name = 'hs-default', sharedUsers = 1, idleMinutes = 10,
+} = {}) {
+  const rows = await conn.write('/ip/hotspot/user/profile/print', []);
+  const found = rows.find((p) => p.name === name);
+  const fields = [
+    `=shared-users=${sharedUsers}`,
+    `=idle-timeout=00:${String(idleMinutes).padStart(2, '0')}:00`,
+    '=status-autorefresh=1m',
+    `=comment=${MANAGED_COMMENT}`,
+  ];
+  if (found) {
+    await conn.write('/ip/hotspot/user/profile/set', [`=.id=${idOf(found)}`, ...fields]);
+    return { profile: name, created: false };
+  }
+  await conn.write('/ip/hotspot/user/profile/add', [`=name=${name}`, ...fields]);
+  return { profile: name, created: true };
+}
+
+/**
+ * Stop one paid session being shared with the whole building.
+ *
+ * Packets leaving towards the guest LAN get TTL 1. A phone that has paid can use
+ * them; the moment someone routes them onward — a tethered hotspot, a second
+ * router — the TTL hits zero and the packet dies. This is the standard trick
+ * because it needs nothing on the client and cannot be turned off from there.
+ *
+ * shared-users on the profile is the other half: TTL stops re-routing, the
+ * profile stops the same code being used on several devices directly.
+ *
+ * Note this is not absolute. A determined user can rewrite TTL on their own
+ * router, so treat it as a deterrent rather than enforcement.
+ */
+export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
+  const rules = await conn.write('/ip/firewall/mangle/print', []);
+  const mine = rules.filter((r) => r.comment === MANAGED_COMMENT
+    && String(r.chain) === 'postrouting' && String(r['out-interface']) === bridge);
+
+  const fields = [
+    '=chain=postrouting',
+    `=out-interface=${bridge}`,
+    '=action=change-ttl',
+    '=new-ttl=set:1',
+    `=comment=${MANAGED_COMMENT}`,
+  ];
+  if (mine.length) {
+    await conn.write('/ip/firewall/mangle/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    // Duplicates would each rewrite the TTL; harmless but they accumulate on
+    // every run and make the firewall unreadable.
+    for (const dupe of mine.slice(1)) {
+      await conn.write('/ip/firewall/mangle/remove', [`=.id=${idOf(dupe)}`]);
+    }
+    return { created: false, removed: mine.length - 1 };
+  }
+  await conn.write('/ip/firewall/mangle/add', fields);
+  return { created: true, removed: 0 };
+}
+
+/**
  * Physical ports worth offering as LAN members.
  *
  * Excludes the tunnel we arrived on, anything already enslaved to a bridge, and
