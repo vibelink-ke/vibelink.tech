@@ -1037,11 +1037,21 @@ async function step(label, fn, ms = 20000) {
       }),
     ]);
   } catch (e) {
-    // Re-thrown with the step name attached, unless it already has one.
-    throw e.message?.startsWith(label) ? e : new Error(`${label}: ${e.message}`);
+    // The label goes on the error object, not only into the message. The push
+    // routes report socket errors via conn.__socketError rather than the thrown
+    // error, so a message-only label was discarded exactly when it mattered --
+    // a mid-push disconnect produced a generic "no response from the router"
+    // and never said which command caused it.
+    e.step = e.step ?? label;
+    throw e;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Prefix a router error with the step that produced it, when we know it. */
+function atStep(e, message) {
+  return e?.step ? `${e.step} — ${message}` : message;
 }
 
 /**
@@ -1136,7 +1146,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     console.log('hotspot push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, gateway: built.gateway });
   } catch (e) {
-    const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
+    const message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]).catch(() => {});
@@ -1312,7 +1322,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     console.log('configure push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, ...info });
   } catch (e) {
-    const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
+    const message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]);

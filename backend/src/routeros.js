@@ -446,9 +446,20 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
   for (const port of ports) {
     if (already.has(port)) continue;
     if (elsewhere.has(port)) { skipped.push(`${port} (already in ${elsewhere.get(port)})`); continue; }
-    await conn.write('/interface/bridge/port/add', [
-      `=bridge=${name}`, `=interface=${port}`, `=comment=${MANAGED_COMMENT}`,
-    ]);
+    try {
+      await conn.write('/interface/bridge/port/add', [
+        `=bridge=${name}`, `=interface=${port}`, `=comment=${MANAGED_COMMENT}`,
+      ]);
+    } catch (e) {
+      // Name the port. Enslaving one is the step most likely to cut the very
+      // connection carrying the request: if the port is the uplink, or if
+      // bridging it to another already-bridged port closes a loop, the tunnel
+      // drops mid-command and every later step reports a bare timeout. Knowing
+      // which port did it is the difference between a one-tick fix and
+      // bisecting the list by hand.
+      e.step = e.step ?? `bridge port ${port}`;
+      throw e;
+    }
     added.push(port);
   }
   return { bridge: name, added, skipped };
