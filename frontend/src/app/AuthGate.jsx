@@ -93,8 +93,12 @@ const cta = {
 
 // Before sign-in there is no tenant, so this is the platform's own brand. Once
 // signed in the sidebar switches to the tenant's company name.
-export default function AuthGate({ onSignedIn, brandName = 'Vibelink' }) {
-  const [mode, setMode] = useState('login');
+export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = null }) {
+  // `only` pins the card to one purpose: sign-in on a tenant's own subdomain,
+  // registration on the platform domain. Offering both on a tenant portal
+  // invites an operator to register a second time and split their customers
+  // across two portals they then have to reconcile by hand.
+  const [mode, setMode] = useState(only ?? 'login');
   const [f, setF] = useState(BLANK);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -259,14 +263,17 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink' }) {
             minHeight: 0,
           }}
         >
-          <div style={{ display: 'flex', gap: 2, background: color.tileBg, borderRadius: 9, padding: 4 }}>
-            <div onClick={tab('login')} style={tabStyle(mode === 'login')}>
-              Sign in
+          {/* The switch only appears where both make sense. */}
+          {!only && (
+            <div style={{ display: 'flex', gap: 2, background: color.tileBg, borderRadius: 9, padding: 4 }}>
+              <div onClick={tab('login')} style={tabStyle(mode === 'login')}>
+                Sign in
+              </div>
+              <div onClick={tab('signup')} style={tabStyle(mode === 'signup')}>
+                Create ISP account
+              </div>
             </div>
-            <div onClick={tab('signup')} style={tabStyle(mode === 'signup')}>
-              Create ISP account
-            </div>
-          </div>
+          )}
 
           {mode === 'login' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

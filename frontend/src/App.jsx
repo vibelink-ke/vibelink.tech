@@ -4,6 +4,8 @@ import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
+import Landing, { PortalFinder } from './screens/Landing';
+import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
@@ -56,7 +58,32 @@ export default function App() {
   // undefined = the session check has not come back yet. Rendering nothing for
   // that tick avoids flashing the sign-in card at an already-authenticated user.
   if (session === undefined) return null;
-  if (session === null) return <AuthGate onSignedIn={signIn} />;
+
+  /**
+   * The platform's own domain is the marketing site, not a portal.
+   *
+   * Nobody's customers live here, so there is nothing to sign into: an ISP
+   * registers on this domain once and works on their own subdomain every day
+   * after. Showing a sign-in card here would reject everyone who tried it.
+   */
+  if (session === null && isPlatformHost()) {
+    if (pathname === '/signup' || pathname === '/register') {
+      return <AuthGate onSignedIn={signIn} only="signup" />;
+    }
+    if (pathname === '/signin') {
+      return <PortalFinder onBack={() => { window.location.href = '/'; }} />;
+    }
+    return (
+      <Landing
+        onRegister={() => { window.location.href = '/signup'; }}
+        onSignIn={() => { window.location.href = '/signin'; }}
+      />
+    );
+  }
+
+  // A tenant's own subdomain: sign in only. Registering a second account from
+  // inside a working portal splits an operator's customers across two of them.
+  if (session === null) return <AuthGate onSignedIn={signIn} only="login" />;
 
   return (
     // `om-dark` is the mockup's rootClass: it inverts the whole tree, and
