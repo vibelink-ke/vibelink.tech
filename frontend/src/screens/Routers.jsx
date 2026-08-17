@@ -201,18 +201,36 @@ export default function Routers() {
 
   // Deleting a router strands any subscriber pointing at it, so the server
   // refuses while any remain and says how many.
-  const removeRouter = async (r) => {
-    if (!window.confirm(`Delete ${r.name}? Its tunnel credentials are revoked and ${r.host} is freed for reuse.`))
+  const removeRouter = async (r, force = false) => {
+    if (!force && !window.confirm(`Delete ${r.name}? Its tunnel credentials are revoked and ${r.host} is freed for reuse.`))
       return;
     try {
-      const res = await api.deleteRouter(r.id);
+      const res = await api.deleteRouter(r.id, force);
       store.setCollection('routers', (rs) => rs.filter((x) => x.id !== r.id));
       // The server revoked the matching tunnel credential too; drop it here so the
       // count and the list agree without a reload.
       store.setCollection('ovpnClients', (cs) =>
         cs.filter((c) => String(c.assigned_ip).split('/')[0] !== String(r.host).split('/')[0]));
-      store.toast(`${r.name} deleted — ${res.freed ?? r.host} is free again`);
+      store.toast(res.detached
+        ? `${r.name} deleted — ${res.freed ?? r.host} freed, ${res.detached} customer(s) detached`
+        : `${r.name} deleted — ${res.freed ?? r.host} is free again`);
     } catch (e) {
+      // The server refuses while customers are attached, but offers a way
+      // through rather than leaving the operator stuck — which is what blocked
+      // clearing duplicate rows for one physical router.
+      if (e.body?.canForce) {
+        const n = e.body.subscribers;
+        if (window.confirm(
+          `${e.message}
+
+Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
+          + 'They keep working and keep their speed; only mid-session speed changes wait for a reconnect '
+          + 'until you give them another router.'
+        )) {
+          return removeRouter(r, true);
+        }
+        return;
+      }
       store.toast(e.message);
     }
   };

@@ -1028,12 +1028,34 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
 
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from subscribers where router_id=$1', [r.id]);
-  if (count > 0)
+
+  /*
+   * The guard is a default, not a rule.
+   *
+   * Refusing outright was wrong: duplicate rows for one physical router could not
+   * be cleared without first moving customers off rows that should never have
+   * existed. force=1 deletes anyway and detaches the customers instead of
+   * deleting them.
+   *
+   * What that costs is worth being precise about. Their radcheck and radreply
+   * entries are keyed by username, so authentication and their speed keep
+   * working. What breaks is CoA: activateSubscriber follows router_id to find the
+   * NAS, so with none, a mid-session change waits for the subscriber to
+   * reconnect. Give them a router again and it resumes.
+   */
+  const force = req.query.force === '1' || req.body?.force === true;
+  if (count > 0 && !force)
     return res.status(409).json({
       error: count === 1
-        ? '1 subscriber still uses this router. Move them to another one first.'
-        : `${count} subscribers still use this router. Move them to another one first.`,
+        ? '1 subscriber still uses this router. Move them to another one, or delete anyway.'
+        : `${count} subscribers still use this router. Move them to another one, or delete anyway.`,
+      subscribers: count,
+      canForce: true,
     });
+
+  if (count > 0) {
+    await pool.query('update subscribers set router_id=null where router_id=$1', [r.id]);
+  }
 
   await pool.query('delete from ovpn_clients where tenant_id=$1 and assigned_ip=$2',
     [req.tenant.id, r.host]);
@@ -1044,7 +1066,7 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
   await pool.query('update ip_pools set router_id=null where tenant_id=$1 and router_id=$2',
     [req.tenant.id, r.id]);
   await pool.query('delete from routers where id=$1 and tenant_id=$2', [r.id, req.tenant.id]);
-  res.json({ ok: true, freed: r.host });
+  res.json({ ok: true, freed: r.host, detached: count });
 }));
 
 // ── router onboarding via WireGuard ───────────────

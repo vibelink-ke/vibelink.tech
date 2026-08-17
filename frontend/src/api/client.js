@@ -173,7 +173,7 @@ export const api = {
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
   radiusCheck: (id) => post(`/api/routers/${id}/radius-check`, {}),
   revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
-  deleteRouter: (id) => del(`/api/routers/${id}`),
+  deleteRouter: (id, force = false) => del(`/api/routers/${id}${force ? '?force=1' : ''}`),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
   ovpnClients: () => get('/api/ovpn-clients'),
   ipPools: () => get('/api/ip-pools'),
