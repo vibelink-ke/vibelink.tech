@@ -11,6 +11,7 @@
  * /radius entry, which RouterOS will happily accept and then load-balance across.
  */
 import { createRequire } from 'node:module';
+import nodeCrypto from 'node:crypto';
 import pkg from 'node-routeros';
 const { RouterOSAPI } = pkg;
 
@@ -321,6 +322,19 @@ export async function applyPppoeServer(conn, {
  * compares the router's own view against what the server expects and names each
  * mismatch, so "RADIUS is not working" becomes a specific wrong value.
  */
+/**
+ * A description of a secret that is safe to put on screen: how long it is, and
+ * six hex characters of its SHA-256. Enough to tell two values apart, useless to
+ * anyone reading over a shoulder.
+ */
+function fingerprint(v) {
+  if (v == null || v === '') return 'nothing';
+  const s = String(v);
+  const hash = nodeCrypto.createHash('sha256').update(s).digest('hex').slice(0, 6);
+  const padded = s !== s.trim() ? ', has surrounding whitespace' : '';
+  return `${s.length} chars #${hash}${padded}`;
+}
+
 export async function radiusCheck(conn, { serverIp, secret, coaPort = 3799 }) {
   const [servers, incoming, aaa] = await Promise.all([
     conn.write('/radius/print', []),
@@ -343,8 +357,19 @@ export async function radiusCheck(conn, { serverIp, secret, coaPort = 3799 }) {
     {
       name: 'shared secret matches',
       ok: mine.some((s) => s.secret === secret),
-      // Never echo either value: this is read by whoever is on the screen.
-      detail: mine.length ? 'the router holds a different secret' : 'no entry to compare',
+      /*
+       * When they differ, say *how* without printing either.
+       *
+       * "The secret is wrong" has been the answer for days without being
+       * actionable. A length and a short fingerprint distinguish the cases that
+       * matter: different lengths means the wrong value was written, same length
+       * with different fingerprints means two different values, and identical
+       * fingerprints with a failing comparison means whitespace or encoding
+       * rather than the value itself.
+       */
+      detail: mine.length
+        ? `server holds ${fingerprint(secret)}, router holds ${mine.map((m) => fingerprint(m.secret)).join(' / ')}`
+        : 'no entry to compare',
     },
     {
       name: 'used for PPPoE',
