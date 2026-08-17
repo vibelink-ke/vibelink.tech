@@ -117,10 +117,21 @@ clients tunnel_clients {
 #
 server dynamic_client_lookup {
     authorize {
+        #
+        # ORDER BY matters more than it looks. These are two separate queries,
+        # and LIMIT 1 without an order is not deterministic — so if two rows ever
+        # shared an address, the shortname could come from one and the secret
+        # from the other. The router then signs with a secret we never compare
+        # against, and FreeRADIUS reports "invalid Message-Authenticator" for
+        # ever, however many times the configuration is pushed.
+        #
+        # Ordering both by id makes them agree on a single row. The unique index
+        # in schema.sql stops the duplicate arising at all; this keeps the lookup
+        # honest regardless.
         update control {
             &FreeRADIUS-Client-IP-Address = "%{Packet-Src-IP-Address}"
-            &FreeRADIUS-Client-Shortname  = "%{sql:SELECT shortname FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' LIMIT 1}"
-            &FreeRADIUS-Client-Secret     = "%{sql:SELECT secret FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' LIMIT 1}"
+            &FreeRADIUS-Client-Shortname  = "%{sql:SELECT shortname FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' ORDER BY id LIMIT 1}"
+            &FreeRADIUS-Client-Secret     = "%{sql:SELECT secret FROM nas WHERE nasname = '%{Packet-Src-IP-Address}' ORDER BY id LIMIT 1}"
         }
 
         if (!&control:FreeRADIUS-Client-Secret || &control:FreeRADIUS-Client-Secret == "") {

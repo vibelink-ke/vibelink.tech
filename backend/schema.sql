@@ -691,6 +691,19 @@ create table if not exists radpostauth (
 );
 create index if not exists radpostauth_username on radpostauth (username, authdate desc);
 
+-- ─────────────── one router per address ───────────────
+-- Two rows sharing a NAS address cannot both be right, and the consequences are
+-- ugly rather than obvious: FreeRADIUS looks a router up by source address, and
+-- with duplicates it could take the name from one row and the secret from
+-- another — reporting "invalid Message-Authenticator" for ever while both the
+-- router and the database looked correct.
+--
+-- Nothing enforced this before, and re-onboarding after a failed delete left
+-- exactly that. Globally unique, not per tenant: each tenant owns a distinct /24
+-- out of the tunnel supernet, so an address collision across tenants is already
+-- a fault, and RADIUS resolves clients by address alone with no tenant in hand.
+create unique index if not exists routers_host_unique on routers (host);
+
 -- ─────────────── customer portal sessions ───────────────
 -- Separate from admin_sessions on purpose. A customer signing in must never end
 -- up holding something the admin app would accept: same table, one bug, and a
