@@ -313,11 +313,15 @@ app.use(async (req, res, next) => {
  *   /portal/*  the captive portal, used by subscribers who have no admin login
  *   /radius/*  called by FreeRADIUS over the internal network; Caddy must not
  *              proxy it from outside
+ *   /hotspot/* the login page a RouterOS box downloads with /tool/fetch. It has
+ *              no session and cannot acquire one, and the page carries only a
+ *              company name and prices already advertised to guests.
  *
  * Auth and webhook routes are mounted above the resolver and never reach here.
  */
 app.use((req, res, next) => {
-  if (req.path.startsWith('/portal/') || req.path.startsWith('/radius/')) return next();
+  if (req.path.startsWith('/portal/') || req.path.startsWith('/radius/')
+      || req.path.startsWith('/hotspot/')) return next();
   if (!req.session) return res.status(401).json({ error: 'sign in required' });
   next();
 });
@@ -548,6 +552,34 @@ app.put('/api/hotspot/settings', async (req, res) => {
      f.hotspot_network ?? null]);
   res.json(s);
 });
+
+/**
+ * The captive-portal page, as the router will store it.
+ *
+ * Public and above the session guard: the only thing that ever requests it is a
+ * RouterOS box running /tool/fetch, which has no session and never will. It
+ * carries nothing private — a company name and the prices already on display.
+ *
+ * Served per tenant by Host, the same as every other tenant-scoped route, so
+ * each router fetches its own branding from its own subdomain.
+ */
+app.get('/hotspot/login.html', wrap(async (req, res) => {
+  const { loginPage } = await import('./hotspot-portal.js');
+  const { rows: plans } = await pool.query(
+    `select title, price, duration_min, rate_down from plans
+      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
+    [req.tenant.id]);
+  const { rows: [t] } = await pool.query(
+    'select name, subdomain, support_phone from tenants where id=$1', [req.tenant.id]);
+
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  res.type('html').send(loginPage({
+    company: t?.name ?? 'WiFi',
+    plans,
+    supportPhone: t?.support_phone ?? null,
+    portalUrl: t?.subdomain ? `https://${t.subdomain}.${root}` : null,
+  }));
+}));
 
 // ─────────────── email gateway ───────────────
 
@@ -1133,6 +1165,20 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     const garden = await step('walled garden', () => ros.applyWalledGarden(conn, gardenHosts), 40000);
     done.push(`walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'}`
       + (portal ? `, including ${portal}` : ''));
+
+    // The tenant's own login page, replacing MikroTik's. Non-fatal: a hotspot
+    // serving the stock page still sells bundles and still authenticates, so a
+    // router that cannot reach the internet to fetch it should not fail the
+    // whole push — it should say so and leave everything else in place.
+    if (portal) {
+      try {
+        const page = await step('login page', () =>
+          ros.pushHotspotPage(conn, { url: `https://${portal}/hotspot/login.html` }), 40000);
+        done.push(`installed the ${portal} login page (${page.bytes} bytes)`);
+      } catch (e) {
+        done.push(`could not install the login page (${e.message}) — the stock MikroTik page stays`);
+      }
+    }
 
     const ttl = await step('anti-sharing rule', () => ros.applyAntiSharing(conn, { bridge: bridge.bridge }));
     done.push(ttl.created

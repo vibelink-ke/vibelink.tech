@@ -465,6 +465,48 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
 }
 
 /**
+ * Replace the router's captive-portal page with the tenant's own.
+ *
+ * The RouterOS API cannot upload a file — there is no command that carries
+ * content — so the router is told to fetch it instead. /tool/fetch pulls the
+ * page from the tenant's subdomain over HTTPS and writes it into the hotspot
+ * directory, replacing MikroTik's stock login.html.
+ *
+ * Only login.html is replaced. The stock directory also holds error, status and
+ * logout pages; overwriting the whole directory would mean shipping all of them
+ * and getting every RouterOS-version quirk right, and a missing one breaks the
+ * hotspot outright.
+ *
+ * The router needs to reach the internet for this. It has a default route (the
+ * management tunnel rides over it), and the walled garden is irrelevant here
+ * because the router is not a hotspot client of itself.
+ */
+export async function pushHotspotPage(conn, { url }) {
+  if (!/^https?:\/\//i.test(String(url ?? ''))) {
+    throw new Error(`"${url}" is not a usable URL for the hotspot page.`);
+  }
+
+  await cmd(conn, 'fetch login page', '/tool/fetch', [
+    `=url=${url}`,
+    '=dst-path=hotspot/login.html',
+    // check-certificate=no because a tenant may still be on a self-signed or
+    // freshly-issued certificate, and a captive portal that refuses to install
+    // over a certificate detail is worse than one that installs.
+    '=check-certificate=no',
+    '=mode=https',
+  ]);
+
+  // Confirm it landed and is not a truncated or empty download. RouterOS reports
+  // a failed fetch as an error, but a proxy or a redirect to a login page can
+  // produce a file that exists and is useless.
+  const files = await conn.write('/file/print', ['?name=hotspot/login.html']);
+  const size = Number(files[0]?.size ?? 0);
+  if (!size) throw new Error('The login page downloaded as an empty file.');
+
+  return { bytes: size };
+}
+
+/**
  * Physical ports worth offering as LAN members.
  *
  * Excludes the tunnel we arrived on, anything already enslaved to a bridge, and
