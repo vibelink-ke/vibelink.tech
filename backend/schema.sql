@@ -780,6 +780,32 @@ alter table subscribers add column if not exists portal_password_enc text;
 -- else, so nothing may depend on this being present.
 alter table subscribers add column if not exists email text;
 
+-- ─────────────── deleting a customer ───────────────
+-- Four tables referenced subscribers with no delete rule, so a customer who had
+-- ever paid, raised a ticket, been texted or held a session could not be
+-- deleted at all: the delete failed on a foreign key and the UI reported
+-- success, because the route did not check.
+--
+-- These detach rather than cascade. A payment is a financial record and a
+-- ticket is a support record; both must outlive the customer row, and deleting
+-- someone's account should not erase the money they paid. Losing the link is
+-- acceptable, losing the row is not.
+alter table payments drop constraint if exists payments_subscriber_id_fkey;
+alter table payments add constraint payments_subscriber_id_fkey
+  foreign key (subscriber_id) references subscribers on delete set null;
+
+alter table tickets drop constraint if exists tickets_subscriber_id_fkey;
+alter table tickets add constraint tickets_subscriber_id_fkey
+  foreign key (subscriber_id) references subscribers on delete set null;
+
+alter table messages drop constraint if exists messages_subscriber_id_fkey;
+alter table messages add constraint messages_subscriber_id_fkey
+  foreign key (subscriber_id) references subscribers on delete set null;
+
+alter table sessions drop constraint if exists sessions_subscriber_id_fkey;
+alter table sessions add constraint sessions_subscriber_id_fkey
+  foreign key (subscriber_id) references subscribers on delete set null;
+
 -- ─────────────── RADIUS tenant scoping ───────────────
 -- Which tenant a RADIUS credential belongs to.
 --

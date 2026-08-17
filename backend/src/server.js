@@ -1964,7 +1964,25 @@ app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
 }));
 
 app.delete('/api/subscribers/:id', wrap(async (req, res) => {
-  await pool.query('delete from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  // Read the username first: once the row is gone there is nothing to link the
+  // RADIUS credentials back to, and a deleted customer whose credentials still
+  // authenticate is a customer still getting free service.
+  const { rows: [s] } = await pool.query(
+    'select pppoe_user from subscribers where tenant_id=$1 and id=$2',
+    [req.tenant.id, req.params.id]);
+  if (!s) return res.status(404).json({ error: 'No such client' });
+
+  const { rowCount } = await pool.query(
+    'delete from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  // Reported rather than assumed. This route answered ok:true unconditionally,
+  // so a delete blocked by a foreign key looked like it had worked and the row
+  // reappeared on the next refresh.
+  if (!rowCount) return res.status(409).json({ error: 'Client could not be deleted' });
+
+  if (s.pppoe_user) {
+    const radius = await import('./radius.js');
+    await radius.forgetSubscriberCredentials(pool, s.pppoe_user, req.tenant.id);
+  }
   res.json({ ok: true });
 }));
 
