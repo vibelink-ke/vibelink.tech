@@ -111,6 +111,13 @@ export const api = {
   sendBulkSms: (payload) => post('/api/sms/bulk', payload),
   sendSms: (phone, body) => post('/api/sms/send', { phone, body }),
 
+  // ── email gateway ──
+  emailGateway: () => get('/api/email/gateway'),
+  saveEmailGateway: (cfg) => put('/api/email/gateway', cfg),
+  deleteEmailGateway: () => del('/api/email/gateway'),
+  sendTestEmail: (to) => post('/api/email/test', { to }),
+  emailHistory: () => get('/api/email/history'),
+
   // ── support ──
   tickets: () => get('/api/tickets'),
   createTicket: (t) => post('/api/tickets', t),

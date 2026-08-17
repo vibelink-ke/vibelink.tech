@@ -143,6 +143,68 @@ export default function Settings() {
 
   const setO = (k) => (e) => setOrg((s) => ({ ...s, [k]: e.target.value }));
   const setS = (k) => (e) => setSmtp((s) => ({ ...s, [k]: e.target.value }));
+
+  /**
+   * The SMTP form used to write into the generic settings blob, which nothing
+   * ever read — saving it looked like success and sent no mail. It now talks to
+   * tenant_email_config, which email.js actually sends through.
+   */
+  const [mailState, setMailState] = useState({ hasPassword: false, lastError: null, loaded: false });
+  const [testTo, setTestTo] = useState('');
+
+  useEffect(() => {
+    if (tab !== 'smtp' || mailState.loaded) return;
+    api.emailGateway()
+      .then(({ config: c }) => {
+        if (c) {
+          setSmtp({
+            host: c.host ?? '', port: String(c.port ?? 587),
+            security: c.secure ? SECURITY[1] : SECURITY[0],
+            user: c.username ?? '', pass: '',
+            from: c.from_email ?? '', fromName: c.from_name ?? '',
+          });
+        }
+        setMailState({ hasPassword: !!c?.has_password, lastError: c?.last_error ?? null, loaded: true });
+      })
+      .catch(() => setMailState((m) => ({ ...m, loaded: true })));
+  }, [tab, mailState.loaded]);
+
+  const saveMail = async () => {
+    setSaving(true);
+    try {
+      const saved = await api.saveEmailGateway({
+        host: smtp.host,
+        port: Number(smtp.port) || 587,
+        username: smtp.user || null,
+        // Blank means "keep the stored one" — the server treats it that way too.
+        password: smtp.pass || undefined,
+        from_email: smtp.from,
+        from_name: smtp.fromName || null,
+      });
+      setMailState((m) => ({ ...m, hasPassword: !!saved.has_password, lastError: null }));
+      setSmtp((x) => ({ ...x, pass: '' }));
+      store.toast('Email gateway saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const testMail = async () => {
+    if (!testTo.trim()) return store.toast('Enter an address to send the test to');
+    setSaving(true);
+    try {
+      await api.sendTestEmail(testTo.trim());
+      store.toast(`Test email sent to ${testTo.trim()}`);
+      setMailState((m) => ({ ...m, lastError: null }));
+    } catch (e) {
+      setMailState((m) => ({ ...m, lastError: e.message }));
+      store.toast(`Could not send: ${e.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
   const setP = (k) => (e) => setPrefs((s) => ({ ...s, [k]: e.target.value }));
   const setC = (k) => (e) => setCreds((c) => ({ ...c, [k]: e.target.value }));
 
@@ -374,10 +436,26 @@ export default function Settings() {
               <Input value={smtp.fromName} onChange={setS('fromName')} />
             </Field>
           </div>
-          <div style={{ marginTop: 14 }}>
-            <Button variant="primary" onClick={() => persist({ smtp }, 'Email settings')} disabled={saving}>
+          {mailState.hasPassword && !smtp.pass && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: color.muted }}>
+              A password is stored. Leave the field blank to keep it.
+            </div>
+          )}
+          {mailState.lastError && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: color.rust }}>
+              Last attempt failed: {mailState.lastError}
+            </div>
+          )}
+          <div style={{ marginTop: 14, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <Button variant="primary" onClick={saveMail} disabled={saving}>
               {saving ? 'Saving…' : 'Save email settings'}
             </Button>
+            <div style={{ minWidth: 220 }}>
+              <Field label="Send a test to">
+                <Input value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="you@yourdomain.co.ke" />
+              </Field>
+            </div>
+            <Button onClick={testMail} disabled={saving}>Send test</Button>
           </div>
         </Card>
       )}

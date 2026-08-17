@@ -775,6 +775,41 @@ alter table subscribers add column if not exists portal_password_hash text;
 -- weakest link, but it is a real one.
 alter table subscribers add column if not exists portal_password_enc text;
 
+-- Where invoices and notices go when the tenant has an email gateway. Optional:
+-- most residential customers in this market are reachable by SMS and nothing
+-- else, so nothing may depend on this being present.
+alter table subscribers add column if not exists email text;
+
+-- ─────────────── email gateway ───────────────
+-- SMTP per tenant, shaped like tenant_sms_config so both are managed the same
+-- way. The password inside credentials is encrypted with APP_SECRET_KEY before
+-- it is written, exactly as gateway credentials are -- an SMTP password is often
+-- the tenant's real mailbox password, so a database dump must not hand it over.
+create table if not exists tenant_email_config (
+  tenant_id   uuid primary key references tenants on delete cascade,
+  host        text not null,
+  port        int  not null default 587,
+  secure      boolean not null default false,   -- true for 465, false for 587 STARTTLS
+  username    text,
+  password_enc text,
+  from_name   text,
+  from_email  text not null,
+  enabled     boolean not null default true,
+  last_error  text,
+  last_sent_at timestamptz
+);
+
+create table if not exists email_log (
+  id        bigserial primary key,
+  tenant_id uuid not null references tenants on delete cascade,
+  to_email  text not null,
+  subject   text,
+  status    text not null,          -- sent | failed
+  error     text,
+  created_at timestamptz not null default now()
+);
+create index if not exists email_log_tenant_idx on email_log (tenant_id, created_at desc);
+
 -- ─────────────── hotspot walled garden ───────────────
 -- What a guest can reach before they have paid. Empty means nothing, which turns
 -- the hotspot into a shop locked from the inside: no credit, no way to reach

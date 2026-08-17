@@ -549,6 +549,83 @@ app.put('/api/hotspot/settings', async (req, res) => {
   res.json(s);
 });
 
+// ─────────────── email gateway ───────────────
+
+/** Config without the password, plus whether one is stored. Never returns it. */
+app.get('/api/email/gateway', wrap(async (req, res) => {
+  const mail = await import('./email.js');
+  const { rows: [c] } = await pool.query(
+    `select host, port, secure, username, from_name, from_email, enabled,
+            last_error, last_sent_at, password_enc is not null as has_password
+       from tenant_email_config where tenant_id=$1`, [req.tenant.id]);
+  res.json({ config: c ?? null, fields: mail.FIELDS });
+}));
+
+app.put('/api/email/gateway', wrap(async (req, res) => {
+  const secrets = await import('./secrets.js');
+  const mail = await import('./email.js');
+  const f = req.body ?? {};
+
+  const missing = mail.missingFields(f);
+  if (missing.length) return res.status(400).json({ error: `Missing: ${missing.join(', ')}` });
+  if (f.password && !secrets.configured())
+    return res.status(400).json({
+      error: 'APP_SECRET_KEY is not set on the server, so the SMTP password cannot be stored safely. Generate one with: openssl rand -base64 32',
+    });
+
+  // An empty password field means "leave the stored one alone", not "clear it".
+  // Re-typing the mailbox password every time the from-name changes is how
+  // operators end up disabling the gateway by accident.
+  const enc = f.password ? secrets.encrypt(String(f.password)) : null;
+  const port = Number(f.port) || 587;
+
+  const { rows: [c] } = await pool.query(
+    `insert into tenant_email_config
+       (tenant_id, host, port, secure, username, password_enc, from_name, from_email, enabled)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,coalesce($9,true))
+     on conflict (tenant_id) do update set
+       host=excluded.host, port=excluded.port, secure=excluded.secure,
+       username=excluded.username, from_name=excluded.from_name,
+       from_email=excluded.from_email, enabled=excluded.enabled,
+       password_enc=coalesce($6, tenant_email_config.password_enc),
+       last_error=null
+     returning host, port, secure, username, from_name, from_email, enabled,
+               password_enc is not null as has_password`,
+    [req.tenant.id, f.host, port, port === 465, f.username || null, enc,
+     f.from_name || null, f.from_email, f.enabled]);
+  res.json(c);
+}));
+
+app.delete('/api/email/gateway', wrap(async (req, res) => {
+  await pool.query('delete from tenant_email_config where tenant_id=$1', [req.tenant.id]);
+  res.json({ ok: true });
+}));
+
+/**
+ * Prove the settings work before anything depends on them.
+ *
+ * Sends to whoever asks rather than a fixed address: the operator testing this
+ * is the one who needs to see it arrive, and "it said OK but nothing came" is
+ * the complaint this exists to prevent.
+ */
+app.post('/api/email/test', wrap(async (req, res) => {
+  const mail = await import('./email.js');
+  const to = String(req.body?.to ?? '').trim();
+  if (!to) return res.status(400).json({ error: 'Enter an address to send the test to' });
+
+  const out = await mail.send(req.tenant.id, to, 'Vibelink test email',
+    'This is a test from your Vibelink billing system. If you are reading it, your email gateway works.');
+  if (!out.ok) return res.status(502).json({ error: out.error });
+  res.json({ ok: true, sent: to });
+}));
+
+app.get('/api/email/history', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select to_email, subject, status, error, created_at from email_log
+      where tenant_id=$1 order by created_at desc limit 50`, [req.tenant.id]);
+  res.json(rows);
+}));
+
 /** Which payment channels this tenant may choose from — drives the Preferences dropdown. */
 app.get('/api/payment-methods', async (req, res) => {
   const { rows } = await pool.query(
