@@ -43,6 +43,12 @@ function duration(min) {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
 }) {
+  // Where the page should send its purchase requests. Empty on the preview,
+  // where the page is already being served by the billing system itself.
+  const apiBase = portalUrl ?? '';
+  // Each bundle carries its own button. A single "buy" link elsewhere on the
+  // page made the guest choose twice — once here and again on another screen —
+  // and the price they had just read was no longer in front of them.
   const planCards = plans.length
     ? plans.map((p) => `
       <li class="plan">
@@ -50,16 +56,12 @@ export function loginPage({
           <strong>${esc(p.title)}</strong>
           <span class="meta">${esc(duration(p.duration_min))} · ${esc(String(p.rate_down / 1000))} Mbps</span>
         </div>
-        <span class="price">${esc(money(p.price))}</span>
+        <button type="button" class="buy" data-plan="${esc(p.id ?? '')}"
+                data-title="${esc(p.title)}">${esc(money(p.price))}</button>
       </li>`).join('')
     : '<li class="plan"><span class="meta">No bundles are on sale right now.</span></li>';
 
-  // The buy button leaves the walled garden for the tenant's own portal, which
-  // is the only place that can take a payment. Rendered only when we know that
-  // address — a dead button is worse than none.
-  const buyBlock = portalUrl ? `
-      <a class="buy" href="${esc(portalUrl)}/customer">Buy a code</a>
-      <p class="hint">No code yet? You can pay without connecting first.</p>` : '';
+  // No separate buy block: every bundle above is its own button now.
 
   // Said plainly. Someone looking at this on the root domain is evaluating the
   // product, and letting them think it is their own live page wastes their time
@@ -101,8 +103,15 @@ export function loginPage({
   .plan { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:7px 0; }
   .meta { display:block; color:var(--muted); font-size:12.5px; }
   .price { font-weight:600; white-space:nowrap; }
-  .buy { display:block; margin-top:14px; padding:11px; text-align:center; font-weight:600;
-         text-decoration:none; color:var(--green); border:1px solid var(--green); border-radius:9px; }
+  .buy { padding:7px 13px; font-size:13.5px; font-weight:600; white-space:nowrap;
+         color:#fff; background:var(--green); border:0; border-radius:8px; cursor:pointer; }
+  .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+         background:var(--bg); display:none; }
+  .pay.on { display:block; }
+  .pay h2 { margin:0 0 4px; font-size:15px; }
+  .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
+          background:#e8f3ee; border:1px solid #b9dccd; }
+  .code b { display:block; font-size:24px; letter-spacing:.12em; font-family:monospace; }
   .hint { margin:10px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:12.5px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
@@ -154,9 +163,107 @@ export function loginPage({
     </form>
 
     <ul class="plans">${planCards}</ul>
-    ${buyBlock}
+
+    <!-- Buying happens here rather than on another page. A guest on the walled
+         garden can reach this router and their own bank's USSD, and not much
+         else; sending them elsewhere to pay is where they give up. -->
+    <div class="pay" id="pay">
+      <h2 id="payTitle">Buy a bundle</h2>
+      <p class="hint" style="text-align:left;margin:0 0 8px">
+        Enter the M-Pesa number to pay from. The code arrives by SMS.
+      </p>
+      <input id="payPhone" type="tel" inputmode="tel" placeholder="07xx xxx xxx"
+             autocomplete="tel">
+      <button type="button" id="payGo">Send M-Pesa request</button>
+      <p class="hint" id="payNote"></p>
+      <div class="code" id="payCode" style="display:none">
+        Your code
+        <b id="payCodeValue"></b>
+        Type it above to get online.
+      </div>
+    </div>
     ${help}
   </div>
+
+  <script>
+  (function () {
+    // The router substitutes $(error) when it serves this page. Anywhere else --
+    // the preview on the platform domain, or a browser opening it directly --
+    // the raw token would be shown to the reader as if it were a real message.
+    var err = document.querySelector('.err');
+    if (err && err.textContent.indexOf('$(') !== -1) err.textContent = '';
+
+    var pay = document.getElementById('pay');
+    var title = document.getElementById('payTitle');
+    var phone = document.getElementById('payPhone');
+    var go = document.getElementById('payGo');
+    var note = document.getElementById('payNote');
+    var codeBox = document.getElementById('payCode');
+    var codeVal = document.getElementById('payCodeValue');
+    var planId = null;
+    var timer = null;
+
+    // Absolute, not relative. The router serves this page from wifi.local, so a
+    // relative URL would post to the router itself — which knows nothing about
+    // bundles. This host is in the walled garden, so it is reachable before the
+    // guest has paid; that is the whole point of putting it there.
+    var API = ${JSON.stringify(apiBase)};
+
+    document.querySelectorAll('.buy').forEach(function (b) {
+      b.addEventListener('click', function () {
+        planId = b.getAttribute('data-plan');
+        title.textContent = 'Buy ' + b.getAttribute('data-title');
+        pay.classList.add('on');
+        note.textContent = '';
+        codeBox.style.display = 'none';
+        phone.focus();
+      });
+    });
+
+    function poll(id) {
+      fetch(API + '/hotspot/buy/' + encodeURIComponent(id))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.code) {
+            clearInterval(timer);
+            note.textContent = 'Paid.';
+            codeVal.textContent = d.code;
+            codeBox.style.display = 'block';
+            document.getElementById('username').value = d.code;
+            return;
+          }
+          if (d.status === 'failed' || d.status === 'cancelled') {
+            clearInterval(timer);
+            note.textContent = d.detail || 'The payment did not go through.';
+          }
+        })
+        .catch(function () { /* keep polling; a dropped request is not a failure */ });
+    }
+
+    go.addEventListener('click', function () {
+      if (!planId) return;
+      go.disabled = true;
+      note.textContent = 'Sending…';
+      fetch(API + '/hotspot/buy', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ planId: planId, phone: phone.value }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          go.disabled = false;
+          if (!res.ok) { note.textContent = res.d.error || 'Could not start the payment.'; return; }
+          note.textContent = 'Check your phone and enter your M-Pesa PIN.';
+          clearInterval(timer);
+          timer = setInterval(function () { poll(res.d.checkoutId); }, 3000);
+        })
+        .catch(function () {
+          go.disabled = false;
+          note.textContent = 'Could not reach the billing system from here.';
+        });
+    });
+  }());
+  </script>
 </body>
 </html>`;
 }

@@ -320,7 +320,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   }
 
   const { rows: plans } = await pool.query(
-    `select title, price, duration_min, rate_down from plans
+    `select id, title, price, duration_min, rate_down from plans
       where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
     [tenant.id]);
 
@@ -330,6 +330,103 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     supportPhone: tenant.support_phone ?? null,
     portalUrl: tenant.subdomain ? `https://${tenant.subdomain}.${root}` : null,
   }));
+}));
+
+/**
+ * Buy a bundle from the captive portal, with no account.
+ *
+ * A hotspot guest has no login and never will — they pick a bundle, get an
+ * M-Pesa prompt, and receive a code. Public for the same reason the page is:
+ * they are standing on the walled garden with no session and no way to get one.
+ *
+ * The purchase itself goes through the same funnel as every other payment, so a
+ * voucher is issued and texted by the code that already does that. Nothing here
+ * grants access on its own — access follows the money arriving.
+ */
+app.post('/hotspot/buy', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const planId = String(req.body?.planId ?? '');
+  let phone = String(req.body?.phone ?? '').trim();
+  if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
+
+  // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  const { rows: [plan] } = await pool.query(
+    `select id, title, price from plans
+      where id=$1 and tenant_id=$2 and service='hotspot' and active`,
+    [planId, tenant.id]);
+  if (!plan) return res.status(404).json({ error: 'That bundle is no longer on sale' });
+
+  const { config } = await import('./db.js');
+  // KopoKopo first: it is the hotspot-only channel and carries the plan through
+  // to the callback, so the voucher is issued for the right bundle.
+  const kk = await config(tenant.id, 'kopokopo');
+  const daraja = kk ? null : await config(tenant.id, 'daraja');
+  if (!kk && !daraja) {
+    return res.status(503).json({ error: 'This network cannot take payments yet. Ask the operator.' });
+  }
+
+  try {
+    let checkoutId;
+    if (kk) {
+      const gw = await import('./payments/kopokopo.js');
+      checkoutId = await gw.stkPush(tenant.id, {
+        phone, amount: Number(plan.price), planId: plan.id, mac: null, service: 'hotspot',
+      });
+    } else {
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(tenant.id, {
+        phone, amount: Number(plan.price),
+        accountRef: 'HOTSPOT', description: plan.title,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      // purpose carries the plan so the callback knows which bundle to issue.
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [tenant.id, checkoutId, phone, Number(plan.price), { hotspot_plan_id: plan.id }]);
+    }
+    res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/**
+ * Has it been paid, and what is the code?
+ *
+ * Polled by the portal page while the guest is looking at their handset. Scoped
+ * to the checkout id they were given, and returns only their own voucher.
+ */
+app.get('/hotspot/buy/:checkoutId', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const { rows: [r] } = await pool.query(
+    `select checkout_id, status, result_desc from stk_requests
+      where tenant_id=$1 and checkout_id=$2`, [tenant.id, req.params.checkoutId]);
+  if (!r) return res.json({ status: 'unknown' });
+
+  // The voucher is reached through the payment the callback applied, so a code
+  // only ever appears once the money actually arrived.
+  const { rows: [v] } = await pool.query(
+    `select v.code, v.expires_at
+       from payments p join vouchers v on v.id = p.voucher_id
+      where p.tenant_id=$1 and p.provider_ref=$2`, [tenant.id, req.params.checkoutId]);
+
+  res.json({ status: r.status, detail: r.result_desc ?? null, code: v?.code ?? null });
 }));
 
 // Tenant resolution for everything else.
