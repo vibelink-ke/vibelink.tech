@@ -42,11 +42,27 @@ function duration(min) {
 
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
-  headline = null, subtext = null,
+  headline = null, subtext = null, forRouter = false,
 }) {
   // Where the page should send its purchase requests. Empty on the preview,
   // where the page is already being served by the billing system itself.
   const apiBase = portalUrl ?? '';
+
+  /**
+   * The failed-login message, and only for the copy the router will serve.
+   *
+   * `error` is defined by RouterOS only when a login has just failed. Referring
+   * to it bare stopped the template dead at that point: the header rendered and
+   * the form, the bundles and the script after it were all discarded — a page
+   * that looked deliberately minimal rather than broken.
+   *
+   * $(if ...) is the documented way to reference it and is what the stock page
+   * uses. It is omitted entirely from the copy a person opens in a browser,
+   * where nothing substitutes it and the raw markup would be shown as text.
+   */
+  const errorBlock = forRouter
+    ? '$(if error)<p class="err">$(error)</p>$(endif)'
+    : '';
   // Each bundle carries its own button. A single "buy" link elsewhere on the
   // page made the guest choose twice — once here and again on another screen —
   // and the price they had just read was no longer in front of them.
@@ -141,16 +157,7 @@ export function loginPage({
     <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
     ${previewNote}
 
-    <!--
-      No $(if ...) here on purpose. That conditional is the only RouterOS-
-      specific construct on the page, and it is the one thing that differs
-      between rendering correctly as a file and rendering blank once the router
-      is serving it. A parser that dislikes it can swallow everything after it.
-
-      Always emitting the paragraph is safe whatever the parser does: when there
-      is no error the substitution leaves it empty, and :empty hides it.
-    -->
-    <p class="err">$(error)</p>
+    ${errorBlock}
 
     <!--
       One field, not two.
@@ -202,12 +209,6 @@ export function loginPage({
 
   <script>
   (function () {
-    // The router substitutes $(error) when it serves this page. Anywhere else --
-    // the preview on the platform domain, or a browser opening it directly --
-    // the raw token would be shown to the reader as if it were a real message.
-    var err = document.querySelector('.err');
-    if (err && err.textContent.indexOf('$(') !== -1) err.textContent = '';
-
     var pay = document.getElementById('pay');
     var title = document.getElementById('payTitle');
     var phone = document.getElementById('payPhone');

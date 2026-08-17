@@ -336,6 +336,9 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     portalUrl: tenant.subdomain ? `https://${tenant.subdomain}.${root}` : null,
     headline: hs?.banner_headline ?? null,
     subtext: hs?.banner_subtext ?? null,
+    // Only the copy destined for the router carries RouterOS template syntax.
+    // A person opening this in a browser gets a page with no raw $(...) in it.
+    forRouter: req.query.router === '1',
   }));
 }));
 
@@ -1343,7 +1346,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // whole push — it should say so and leave everything else in place.
     if (portal) {
       try {
-        const url = `https://${portal}/hotspot/login.html`;
+        const url = `https://${portal}/hotspot/login.html?router=1`;
         const unreachable = await loginPageReachable(url);
         if (unreachable) throw new Error(unreachable);
 
@@ -1672,7 +1675,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
       if (tt?.subdomain) {
         try {
-          const url = `https://${tt.subdomain}.${rootDomain}/hotspot/login.html`;
+          const url = `https://${tt.subdomain}.${rootDomain}/hotspot/login.html?router=1`;
           const unreachable = await loginPageReachable(url);
           if (unreachable) throw new Error(unreachable);
 
