@@ -801,6 +801,29 @@ delete from radreply where attribute = 'Mikrotik-Group';
 -- problem and gets diagnosed as one.
 alter table routers add column if not exists pppoe_pool text;
 
+-- ─────────────── live chat ───────────────
+-- live_chats recorded that a conversation existed and never held a word of it.
+-- Support could see somebody waiting and had nothing to read or reply with.
+create table if not exists chat_messages (
+  id         bigserial primary key,
+  tenant_id  uuid not null references tenants on delete cascade,
+  chat_id    uuid not null references live_chats on delete cascade,
+  sender     text not null,                    -- visitor | staff
+  body       text not null,
+  staff_id   uuid references staff,
+  created_at timestamptz not null default now(),
+  constraint chat_sender_valid check (sender in ('visitor', 'staff'))
+);
+create index if not exists chat_messages_chat on chat_messages (chat_id, id);
+
+-- A visitor has no account and no session — a hotspot guest has not even paid
+-- yet. The token is what proves this browser started this conversation, so one
+-- guest cannot read another's by guessing an id.
+alter table live_chats add column if not exists token text;
+alter table live_chats add column if not exists display_name text;
+alter table live_chats add column if not exists last_visitor_at timestamptz;
+create index if not exists live_chats_token on live_chats (token);
+
 -- ─────────────── router downtime ───────────────
 -- When a router first stopped answering, and whether anyone has been told.
 --

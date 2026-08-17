@@ -138,6 +138,16 @@ export function loginPage({
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
   .code b { display:block; font-size:24px; letter-spacing:.12em; font-family:monospace; }
+  .chat-open { width:auto; margin:16px auto 0; display:block; padding:8px 14px; font-size:13.5px;
+               background:transparent; color:var(--green); border:1px solid var(--green); }
+  .chat { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+          background:var(--bg); display:none; }
+  .chat.on { display:block; }
+  .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
+         margin:0 0 10px; }
+  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
+  .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
+  .msg.me { background:var(--green); color:#fff; align-self:flex-end; }
   .hint { margin:10px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:12.5px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
@@ -204,6 +214,16 @@ export function loginPage({
         Type it above to get online.
       </div>
     </div>
+    <!-- Support, before paying. A guest whose code will not work cannot buy
+         their way to an answer, and the operator would rather hear it now than
+         from somebody who gave up and left. -->
+    <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
+    <div class="chat" id="chat">
+      <div class="log" id="chatLog"></div>
+      <input id="chatText" type="text" placeholder="Type your message" autocomplete="off">
+      <button type="button" id="chatSend">Send</button>
+      <p class="hint" id="chatNote"></p>
+    </div>
     ${help}
   </div>
 
@@ -268,6 +288,72 @@ export function loginPage({
         })
         .catch(function () { /* keep polling; a dropped request is not a failure */ });
     }
+
+    // ── live chat ──────────────────────────────────────────────────────
+    var chat = document.getElementById('chat');
+    var chatLog = document.getElementById('chatLog');
+    var chatText = document.getElementById('chatText');
+    var chatNote = document.getElementById('chatNote');
+    var chatId = null, chatToken = null, lastId = 0, chatTimer = null;
+
+    function append(sender, body) {
+      var el = document.createElement('div');
+      el.className = 'msg ' + (sender === 'staff' ? 'them' : 'me');
+      el.textContent = body;
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function pollChat() {
+      if (!chatId) return;
+      fetch(API + '/chat/' + chatId + '?token=' + encodeURIComponent(chatToken) + '&since=' + lastId)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          (d.messages || []).forEach(function (m) {
+            lastId = m.id;
+            // Only the other side: our own were shown the moment they were sent.
+            if (m.sender === 'staff') append('staff', m.body);
+          });
+          if (d.status === 'closed') {
+            clearInterval(chatTimer);
+            chatNote.textContent = 'Support closed this conversation.';
+          }
+        })
+        .catch(function () { /* a dropped poll is not the end of the chat */ });
+    }
+
+    document.getElementById('chatOpen').addEventListener('click', function () {
+      chat.classList.toggle('on');
+      if (!chat.classList.contains('on') || chatId) return;
+      chatNote.textContent = 'Connecting…';
+      fetch(API + '/chat/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Hotspot guest' }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.chatId) { chatNote.textContent = d.error || 'Support is not available.'; return; }
+          chatId = d.chatId; chatToken = d.token;
+          chatNote.textContent = 'Someone will reply here.';
+          chatTimer = setInterval(pollChat, 3000);
+        })
+        .catch(function () { chatNote.textContent = 'Could not reach support from here.'; });
+    });
+
+    function sendChat() {
+      var body = chatText.value.trim();
+      if (!body || !chatId) return;
+      chatText.value = '';
+      append('visitor', body);
+      fetch(API + '/chat/' + chatId + '/message', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: chatToken, body: body }),
+      }).catch(function () { chatNote.textContent = 'That message did not send.'; });
+    }
+    document.getElementById('chatSend').addEventListener('click', sendChat);
+    chatText.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
 
     go.addEventListener('click', function () {
       if (!planId) return;

@@ -439,6 +439,74 @@ app.get('/hotspot/buy/:checkoutId', wrap(async (req, res) => {
   res.json({ status: r.status, detail: r.result_desc ?? null, code: v?.code ?? null });
 }));
 
+/**
+ * Live chat for people with no account.
+ *
+ * A hotspot guest has not paid yet and a customer may not have a portal
+ * password, so neither can be asked to sign in before asking a question — and
+ * the question is often why they cannot. These routes sit beside /hotspot/* for
+ * the same reason: reachable from the walled garden, before any session exists.
+ *
+ * A token returned at the start is what proves this browser owns the
+ * conversation. Without it the chat id alone would let anyone read somebody
+ * else's by guessing.
+ */
+app.post('/chat/start', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const name = String(req.body?.name ?? '').trim().slice(0, 60) || 'Guest';
+  const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 15) || null;
+  const token = crypto.randomBytes(24).toString('base64url');
+
+  const { rows: [chat] } = await pool.query(
+    `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at)
+     values ($1,$2,'waiting',$3,$4, now()) returning id`,
+    [tenant.id, phone ?? 'anonymous', token, name]);
+
+  res.json({ chatId: chat.id, token });
+}));
+
+/** One message from the visitor. */
+app.post('/chat/:id/message', wrap(async (req, res) => {
+  const body = String(req.body?.body ?? '').trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: 'Type a message first' });
+
+  const { rows: [chat] } = await pool.query(
+    "select id, tenant_id, status from live_chats where id=$1 and token=$2",
+    [req.params.id, String(req.body?.token ?? '')]);
+  if (!chat) return res.status(404).json({ error: 'That conversation has ended' });
+  if (chat.status === 'closed') return res.status(409).json({ error: 'That conversation was closed' });
+
+  await pool.query(
+    "insert into chat_messages (tenant_id, chat_id, sender, body) values ($1,$2,'visitor',$3)",
+    [chat.tenant_id, chat.id, body]);
+  await pool.query('update live_chats set last_visitor_at=now() where id=$1', [chat.id]);
+  res.json({ ok: true });
+}));
+
+/**
+ * Everything said so far, or everything since a given id.
+ *
+ * Polled rather than pushed. A websocket would be better for a busy support
+ * desk and worse here: this has to survive a captive portal, a phone that
+ * sleeps, and a network the guest has not paid for yet.
+ */
+app.get('/chat/:id', wrap(async (req, res) => {
+  const { rows: [chat] } = await pool.query(
+    'select id, tenant_id, status from live_chats where id=$1 and token=$2',
+    [req.params.id, String(req.query.token ?? '')]);
+  if (!chat) return res.status(404).json({ error: 'That conversation has ended' });
+
+  const { rows } = await pool.query(
+    `select id, sender, body, created_at from chat_messages
+      where chat_id=$1 and id > $2 order by id limit 200`,
+    [chat.id, Number(req.query.since) || 0]);
+
+  res.json({ status: chat.status, messages: rows });
+}));
+
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
 // portal and webhooks, which have no session. DEV_TENANT lets the Vite dev server
@@ -946,6 +1014,43 @@ app.post('/api/live-chats/:id/accept', async (req, res) => {
     [req.tenant.id, req.params.id, req.body.staffId]);
   res.json(c);
 });
+
+app.get('/api/live-chats/:id/messages', wrap(async (req, res) => {
+  const { rows: [chat] } = await pool.query(
+    'select id, display_name, visitor_ref, status, started_at from live_chats where id=$1 and tenant_id=$2',
+    [req.params.id, req.tenant.id]);
+  if (!chat) return res.status(404).json({ error: 'No such conversation' });
+
+  const { rows } = await pool.query(
+    `select id, sender, body, created_at from chat_messages
+      where chat_id=$1 and id > $2 order by id limit 200`,
+    [chat.id, Number(req.query.since) || 0]);
+  res.json({ chat, messages: rows });
+}));
+
+/** A reply from support. Answering also claims the conversation. */
+app.post('/api/live-chats/:id/messages', wrap(async (req, res) => {
+  const body = String(req.body?.body ?? '').trim().slice(0, 2000);
+  if (!body) return res.status(400).json({ error: 'Type a reply first' });
+
+  const { rows: [chat] } = await pool.query(
+    `update live_chats set status = case when status='waiting' then 'active' else status end
+      where id=$1 and tenant_id=$2 returning id`,
+    [req.params.id, req.tenant.id]);
+  if (!chat) return res.status(404).json({ error: 'No such conversation' });
+
+  await pool.query(
+    "insert into chat_messages (tenant_id, chat_id, sender, body) values ($1,$2,'staff',$3)",
+    [req.tenant.id, chat.id, body]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/live-chats/:id/close', wrap(async (req, res) => {
+  await pool.query(
+    "update live_chats set status='closed', closed_at=now() where id=$1 and tenant_id=$2",
+    [req.params.id, req.tenant.id]);
+  res.json({ ok: true });
+}));
 
 app.get('/api/tariffs', async (req, res) => {
   const { rows } = await pool.query('select * from tariffs where tenant_id=$1 and active order by price', [req.tenant.id]);

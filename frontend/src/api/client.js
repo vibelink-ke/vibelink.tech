@@ -135,6 +135,9 @@ export const api = {
 
   liveChats: () => get('/api/live-chats'),
   acceptChat: (id, staffId) => post(`/api/live-chats/${id}/accept`, { staffId }),
+  chatMessages: (id, since = 0) => get(`/api/live-chats/${id}/messages?since=${since}`),
+  sendChatReply: (id, body) => post(`/api/live-chats/${id}/messages`, { body }),
+  closeChat: (id) => post(`/api/live-chats/${id}/close`, {}),
 
   outages: () => get('/api/outages'),
   createOutage: (o) => post('/api/outages', o),
