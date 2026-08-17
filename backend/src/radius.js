@@ -14,16 +14,16 @@ export async function activateSubscriber(c, tenantId, subId) {
   if (!s?.pppoe_user) return;
 
   await c.query(
-    `insert into radcheck (username, attribute, op, value)
-     values ($1,'Cleartext-Password',':=',$2)
-     on conflict (username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, s.pppoe_pass]);
+    `insert into radcheck (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Cleartext-Password',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, s.pppoe_pass, tenantId]);
 
   await c.query(
-    `insert into radreply (username, attribute, op, value)
-     values ($1,'Mikrotik-Rate-Limit',':=',$2)
-     on conflict (username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`]);
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`, tenantId]);
 
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`);
 }
@@ -49,10 +49,10 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
   if (!s?.pppoe_user || !s.pppoe_pass) return false;
 
   await c.query(
-    `insert into radcheck (username, attribute, op, value)
-     values ($1,'Cleartext-Password',':=',$2)
-     on conflict (username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, s.pppoe_pass]);
+    `insert into radcheck (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Cleartext-Password',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, s.pppoe_pass, tenantId]);
 
   /**
    * Reply attributes decide what the router does with the session. Anything not
@@ -66,14 +66,14 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
    */
   const upsert = async (attribute, value) => {
     if (value == null || value === '') {
-      await c.query('delete from radreply where username=$1 and attribute=$2',
-        [s.pppoe_user, attribute]);
+      await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+        [s.pppoe_user, attribute, tenantId]);
       return;
     }
     await c.query(
-      `insert into radreply (username, attribute, op, value) values ($1,$2,':=',$3)
-       on conflict (username, attribute) do update set value = excluded.value`,
-      [s.pppoe_user, attribute, String(value)]);
+      `insert into radreply (tenant_id, username, attribute, op, value) values ($4,$1,$2,':=',$3)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [s.pppoe_user, attribute, String(value), tenantId]);
   };
 
   // No plan yet means no rate to enforce. A "nullk/nullk" rate limit is rejected
@@ -97,10 +97,12 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
 }
 
 /** Remove a username from RADIUS entirely — used when credentials are renamed. */
-export async function forgetSubscriberCredentials(c, username) {
+export async function forgetSubscriberCredentials(c, username, tenantId) {
   if (!username) return;
-  await c.query('delete from radcheck where username=$1', [username]);
-  await c.query('delete from radreply where username=$1', [username]);
+  // Scoped: another tenant may legitimately have the same username, and
+  // renaming one customer must not sign out somebody else's.
+  await c.query('delete from radcheck where username=$1 and tenant_id=$2', [username, tenantId]);
+  await c.query('delete from radreply where username=$1 and tenant_id=$2', [username, tenantId]);
 }
 
 /**
@@ -115,9 +117,10 @@ export async function applyFupThrottle(c, tenantId, subId, downKbps, upKbps) {
   if (!s?.pppoe_user) return false;
   const rate = `${upKbps}k/${downKbps}k`;
   await c.query(
-    `insert into radreply (username, attribute, op, value) values ($1,'Mikrotik-Rate-Limit',':=',$2)
-     on conflict (username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, rate]);
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, rate, tenantId]);
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
   return true;
 }
@@ -131,9 +134,10 @@ export async function clearFupThrottle(c, tenantId, subId) {
   if (!s?.pppoe_user) return false;
   const rate = `${s.rate_up}k/${s.rate_down}k`;
   await c.query(
-    `insert into radreply (username, attribute, op, value) values ($1,'Mikrotik-Rate-Limit',':=',$2)
-     on conflict (username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, rate]);
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, rate, tenantId]);
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
   return true;
 }
@@ -144,8 +148,10 @@ export async function walledGarden(c, tenantId, subId) {
     'select s.pppoe_user, r.host, r.secret from subscribers s left join routers r on r.id=s.router_id where s.id=$1',
     [subId]);
   if (!s?.pppoe_user) return;   // nothing provisioned in RADIUS to walled-garden
-  await c.query("update radreply set value='2048k/2048k' where username=$1 and attribute='Mikrotik-Rate-Limit'",
-    [s.pppoe_user]);
+  await c.query(
+    `update radreply set value='2048k/2048k'
+      where tenant_id=$2 and username=$1 and attribute='Mikrotik-Rate-Limit'`,
+    [s.pppoe_user, tenantId]);
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, '2048k/2048k', 'walled');
 }
 
@@ -164,16 +170,17 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
     [tenantId, code, planId, phone, mac,
      fromCreation ? 'in_use' : 'unused', fromCreation ? new Date() : null, expires]);
   await c.query(
-    `insert into radcheck (username, attribute, op, value) values
-       ($1,'Cleartext-Password',':=',$1)`, [code]);
+    `insert into radcheck (tenant_id, username, attribute, op, value) values
+       ($2,$1,'Cleartext-Password',':=',$1)`, [code, tenantId]);
   if (expires) await c.query(
-    `insert into radcheck (username, attribute, op, value) values ($1,'Expiration',':=',$2)`,
-    [code, expires.toUTCString()]);
+    `insert into radcheck (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Expiration',':=',$2)`,
+    [code, expires.toUTCString(), tenantId]);
   await c.query(
-    `insert into radreply (username, attribute, op, value) values
-       ($1,'Mikrotik-Rate-Limit',':=',$2),
-       ($1,'Session-Timeout',':=',$3)`,
-    [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60]);
+    `insert into radreply (tenant_id, username, attribute, op, value) values
+       ($4,$1,'Mikrotik-Rate-Limit',':=',$2),
+       ($4,$1,'Session-Timeout',':=',$3)`,
+    [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId]);
   return v;
 }
 

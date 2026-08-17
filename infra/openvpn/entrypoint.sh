@@ -6,6 +6,13 @@
 # the tunnel itself is still TLS.
 set -euo pipefail
 
+# The status file lives here so the API can read which routers are connected.
+# Created rather than assumed: OpenVPN refuses to start at all if the directory
+# is missing ("--status fails ... No such file or directory"), which takes the
+# whole tunnel down over a diagnostic file. A compose file without the volume
+# still works; the status is just not shared.
+mkdir -p /run/openvpn
+
 PKI=/etc/openvpn/pki
 
 if [ ! -f "$PKI/server.crt" ]; then

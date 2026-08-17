@@ -42,6 +42,7 @@ sql {
 
     $INCLUDE ${modconfdir}/${.:name}/main/${dialect}/queries.conf
 
+
     pool {
         start    = 1
         min      = 1

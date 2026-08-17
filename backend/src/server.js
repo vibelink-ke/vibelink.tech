@@ -1798,7 +1798,7 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   if (touchedRadius && s.pppoe_user) {
     const radius = await import('./radius.js');
     if (previousUser && previousUser !== s.pppoe_user) {
-      await radius.forgetSubscriberCredentials(pool, previousUser);
+      await radius.forgetSubscriberCredentials(pool, previousUser, req.tenant.id);
     }
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
   }

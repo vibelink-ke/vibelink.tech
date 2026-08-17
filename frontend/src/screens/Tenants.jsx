@@ -123,6 +123,16 @@ export default function Tenants() {
           columns={[
             { key: 'name', label: 'ISP', render: (t) => <span style={{ fontWeight: 600 }}>{t.name}</span> },
             { key: 'subdomain', label: 'Subdomain', render: (t) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{t.subdomain}</span> },
+            {
+              // The handle WHMCS invoices against. The uuid is the real key
+              // everywhere internally, but nobody reads one down the phone or
+              // types one onto an invoice line.
+              key: 'billing_ref',
+              label: 'Billing ID',
+              render: (t) => (
+                <span style={{ fontFamily: font.mono, fontSize: 12 }}>{t.billing_ref ?? '—'}</span>
+              ),
+            },
             { key: 'plan_type', label: 'Plan', render: (t) => t.planType ?? t.plan_type ?? '—' },
             {
               key: 'amount',

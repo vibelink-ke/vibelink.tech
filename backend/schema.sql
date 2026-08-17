@@ -780,6 +780,53 @@ alter table subscribers add column if not exists portal_password_enc text;
 -- else, so nothing may depend on this being present.
 alter table subscribers add column if not exists email text;
 
+-- ─────────────── RADIUS tenant scoping ───────────────
+-- Which tenant a RADIUS credential belongs to.
+--
+-- Without this the lookup is by username alone, across every tenant on the
+-- platform. Two tenants that both number their customers from 10001 would share
+-- credentials, and one tenant's customer could dial in on another tenant's
+-- router. The account numbers are five digits precisely so people can read them
+-- over the phone, so collisions are not a remote possibility -- they are the
+-- expected case once there is more than one ISP here.
+--
+-- Scoping by tenant rather than by router is also what makes roaming work: a
+-- customer who moves from one of their ISP's towers to another authenticates
+-- normally, while a customer of a different ISP never does.
+alter table radcheck add column if not exists tenant_id uuid references tenants on delete cascade;
+alter table radreply add column if not exists tenant_id uuid references tenants on delete cascade;
+create index if not exists radcheck_tenant_user on radcheck (tenant_id, username);
+create index if not exists radreply_tenant_user on radreply (tenant_id, username);
+
+-- Backfill from the subscriber that owns each username, so an existing install
+-- keeps working when the scoped query below goes live. Vouchers are matched the
+-- same way. Anything still unattributed is left null and reported by
+-- scripts/sync-radius.mjs rather than being guessed at.
+update radcheck rc set tenant_id = s.tenant_id
+  from subscribers s where s.pppoe_user = rc.username and rc.tenant_id is null;
+update radreply rr set tenant_id = s.tenant_id
+  from subscribers s where s.pppoe_user = rr.username and rr.tenant_id is null;
+update radcheck rc set tenant_id = v.tenant_id
+  from vouchers v where v.code = rc.username and rc.tenant_id is null;
+update radreply rr set tenant_id = v.tenant_id
+  from vouchers v where v.code = rr.username and rr.tenant_id is null;
+
+-- A username is only unique within a tenant now, not across the platform.
+alter table radcheck drop constraint if exists radcheck_username_attribute_key;
+alter table radreply drop constraint if exists radreply_username_attribute_key;
+create unique index if not exists radcheck_tenant_user_attr
+  on radcheck (tenant_id, username, attribute);
+create unique index if not exists radreply_tenant_user_attr
+  on radreply (tenant_id, username, attribute);
+
+-- ─────────────── tenant billing reference ───────────────
+-- A short, stable, human-readable handle for each tenant, for reconciling
+-- against WHMCS. The uuid is the key everywhere internally, but nobody reads a
+-- uuid down the phone or types one into an invoice line.
+create sequence if not exists tenant_ref_seq start 1001;
+alter table tenants add column if not exists billing_ref text unique;
+update tenants set billing_ref = 'VL-' || nextval('tenant_ref_seq') where billing_ref is null;
+
 -- ─────────────── email gateway ───────────────
 -- SMTP per tenant, shaped like tenant_sms_config so both are managed the same
 -- way. The password inside credentials is encrypted with APP_SECRET_KEY before

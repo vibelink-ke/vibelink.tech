@@ -26,6 +26,7 @@ const { rows } = await pool.query(
      from subscribers s
      left join radcheck r on r.username = s.pppoe_user
                          and r.attribute = 'Cleartext-Password'
+                         and r.tenant_id = s.tenant_id
     where s.pppoe_user is not null and s.pppoe_pass is not null
     order by s.created_at`);
 

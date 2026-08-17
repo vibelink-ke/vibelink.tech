@@ -94,6 +94,8 @@ services:
       - '1813:1813/udp'   # accounting
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
+      # Status file, so the API can see which routers are actually connected.
+      - ovpn-run:/run/openvpn
 
   # Management tunnel for RouterOS 7. Each MikroTik gets a stable address in its
   # tenant's /24 so the server can reach it for CoA even behind CGNAT.
@@ -120,4 +122,5 @@ services:
 
 volumes:
   billing-pgdata:
+  ovpn-run:           # openvpn status file
   billing-ovpn-pki:   # generated on first run; keep it or every router must re-trust the CA

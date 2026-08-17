@@ -56,6 +56,37 @@ sed -i 's/^\([[:space:]]*\)destination = files/\1destination = stdout/' "$RADDB/
 # log in clear, and these logs are read casually over `docker compose logs`.
 sed -i 's/^\([[:space:]]*\)auth = no/\1auth = yes/' "$RADDB/radiusd.conf"
 
+# Scope credential lookups to the tenant that owns the router the request came
+# from. Both matching lines are the radcheck and radreply authorize queries.
+#
+# Edited here rather than overridden in mods-available/sql: FreeRADIUS keeps the
+# FIRST definition of a config item, so an assignment placed after the $INCLUDE
+# of queries.conf is silently ignored. It looks correct, starts cleanly, and
+# leaves the stock username-only query running -- which is how a cross-tenant
+# lookup can survive a test that appears to pass.
+#
+# Without the filter the match is on username alone across the whole platform.
+# Two ISPs both numbering customers from 10001 share credentials, and the row
+# with the lower id wins whichever router asked.
+#
+# An address with no router row yields no tenant, the comparison is false, and
+# nothing matches -- an unknown NAS authenticates nobody.
+QUERIES="$RADDB/mods-config/sql/main/postgresql/queries.conf"
+
+# Strip any previous patch first. queries.conf is part of the image and survives
+# a container restart, unlike the files installed from /config, so without this
+# the sed stacks another copy of the filter onto the same query every time the
+# container restarts. The count check below caught exactly that.
+sed -i '/AND tenant_id = (SELECT tenant_id FROM routers/d' "$QUERIES"
+
+sed -i "s|^\(\s*\)WHERE Username = '%{SQL-User-Name}' \\\\$|\1WHERE Username = '%{SQL-User-Name}' \\\\\n\1AND tenant_id = (SELECT tenant_id FROM routers WHERE host(host) = '%{Packet-Src-IP-Address}' LIMIT 1) \\\\|" "$QUERIES"
+
+grep -c "AND tenant_id = (SELECT tenant_id FROM routers" "$QUERIES" | {
+  read -r n
+  [ "$n" -eq 2 ] || { echo "FATAL: tenant scoping patched $n queries, expected 2"; exit 1; }
+  echo "tenant scoping applied to $n queries"
+}
+
 # Fail loudly on a bad config rather than starting half-working.
 "$RADIUSD" -CX >/tmp/radcheck.log 2>&1 || {
   echo "--- FreeRADIUS rejected the configuration ---"
