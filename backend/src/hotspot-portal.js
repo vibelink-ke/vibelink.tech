@@ -30,7 +30,9 @@ function duration(min) {
   return `${m} minutes`;
 }
 
-export function loginPage({ company = 'WiFi', plans = [], supportPhone = null, portalUrl = null }) {
+export function loginPage({
+  company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
+}) {
   const planCards = plans.length
     ? plans.map((p) => `
       <li class="plan">
@@ -48,6 +50,14 @@ export function loginPage({ company = 'WiFi', plans = [], supportPhone = null, p
   const buyBlock = portalUrl ? `
       <a class="buy" href="${esc(portalUrl)}/customer">Buy a bundle</a>
       <p class="hint">You can reach the payment page without logging in.</p>` : '';
+
+  // Said plainly. Someone looking at this on the root domain is evaluating the
+  // product, and letting them think it is their own live page wastes their time
+  // when the bundles turn out to be invented.
+  const previewNote = preview
+    ? '<p class="note">Example page. Each ISP gets this on their own subdomain, '
+      + 'with their name, their bundles and their prices.</p>'
+    : '';
 
   const help = supportPhone
     ? `<p class="hint">Need help? Call <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a></p>`
@@ -83,6 +93,8 @@ export function loginPage({ company = 'WiFi', plans = [], supportPhone = null, p
   .buy { display:block; margin-top:14px; padding:11px; text-align:center; font-weight:600;
          text-decoration:none; color:var(--green); border:1px solid var(--green); border-radius:9px; }
   .hint { margin:10px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
+  .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:12.5px;
+          color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
   .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:13px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   a { color:var(--green); }
@@ -92,6 +104,7 @@ export function loginPage({ company = 'WiFi', plans = [], supportPhone = null, p
   <div class="card">
     <h1>${esc(company)}</h1>
     <p class="sub">Sign in to use the internet</p>
+    ${previewNote}
 
     $(if error)<p class="err">$(error)</p>$(endif)
 

@@ -27,7 +27,23 @@ export async function tenantByShortcode(provider, shortcode) {
 }
 
 export async function tenantByHost(host) {
-  const sub = String(host || '').split('.')[0];
+  const name = String(host || '').toLowerCase().trim();
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+
+  /**
+   * The root domain belongs to no tenant.
+   *
+   * This matched on the first label alone, so vibelink.tech resolved to the
+   * tenant whose subdomain happens to be "vibelink" — the platform's own front
+   * door quietly served one ISP's captive portal and portal login to anyone who
+   * visited it. Any tenant named after the root domain inherits the marketing
+   * site, which is nobody's intention and not something a tenant chose.
+   *
+   * The subdomain has to be a label *under* the root, not the root itself.
+   */
+  if (!name || name === root || name === `www.${root}`) return null;
+
+  const sub = name.split('.')[0];
   const { rows } = await pool.query('select * from tenants where subdomain=$1', [sub]);
   return rows[0] ?? null;
 }

@@ -261,6 +261,63 @@ app.get('/internal/tls-check', wrap(async (req, res) => {
   return tenant ? res.status(200).end() : res.status(404).end();
 }));
 
+/**
+ * The captive-portal login page.
+ *
+ * Mounted above the tenant resolver because it must answer in two situations the
+ * resolver cannot both serve:
+ *
+ *   <tenant>.vibelink.tech/hotspot/login  the real page, as guests see it, and
+ *                                         what the router downloads
+ *   vibelink.tech/hotspot/login           the root domain, which belongs to no
+ *                                         tenant — a preview, so the page can be
+ *                                         looked at without joining a hotspot
+ *
+ * The resolver 404s anything on the root domain, which is right for tenant data
+ * and wrong here.
+ *
+ * Public by necessity: the only automated caller is a RouterOS box running
+ * /tool/fetch, which has no session and cannot acquire one. It carries a company
+ * name and prices already advertised to every guest on the network.
+ *
+ * Both /hotspot/login and /hotspot/login.html work. RouterOS fetches the second;
+ * people type the first.
+ */
+app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
+  const { loginPage } = await import('./hotspot-portal.js');
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+
+  if (!tenant) {
+    // The root domain. Nobody's hotspot, so show what one looks like rather than
+    // a 404 — this is the address an operator will try first to see the page.
+    return res.type('html').send(loginPage({
+      company: 'Vibelink',
+      preview: true,
+      plans: [
+        { title: '1 Hour', price: 20, duration_min: 60, rate_down: 3000 },
+        { title: '1 Day', price: 100, duration_min: 1440, rate_down: 5000 },
+        { title: '1 Week', price: 500, duration_min: 10080, rate_down: 8000 },
+      ],
+      portalUrl: null,
+      supportPhone: null,
+    }));
+  }
+
+  const { rows: plans } = await pool.query(
+    `select title, price, duration_min, rate_down from plans
+      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
+    [tenant.id]);
+
+  res.type('html').send(loginPage({
+    company: tenant.name ?? 'WiFi',
+    plans,
+    supportPhone: tenant.support_phone ?? null,
+    portalUrl: tenant.subdomain ? `https://${tenant.subdomain}.${root}` : null,
+  }));
+}));
+
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
 // portal and webhooks, which have no session. DEV_TENANT lets the Vite dev server
@@ -552,34 +609,6 @@ app.put('/api/hotspot/settings', async (req, res) => {
      f.hotspot_network ?? null]);
   res.json(s);
 });
-
-/**
- * The captive-portal page, as the router will store it.
- *
- * Public and above the session guard: the only thing that ever requests it is a
- * RouterOS box running /tool/fetch, which has no session and never will. It
- * carries nothing private — a company name and the prices already on display.
- *
- * Served per tenant by Host, the same as every other tenant-scoped route, so
- * each router fetches its own branding from its own subdomain.
- */
-app.get('/hotspot/login.html', wrap(async (req, res) => {
-  const { loginPage } = await import('./hotspot-portal.js');
-  const { rows: plans } = await pool.query(
-    `select title, price, duration_min, rate_down from plans
-      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
-    [req.tenant.id]);
-  const { rows: [t] } = await pool.query(
-    'select name, subdomain, support_phone from tenants where id=$1', [req.tenant.id]);
-
-  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
-  res.type('html').send(loginPage({
-    company: t?.name ?? 'WiFi',
-    plans,
-    supportPhone: t?.support_phone ?? null,
-    portalUrl: t?.subdomain ? `https://${t.subdomain}.${root}` : null,
-  }));
-}));
 
 // ─────────────── email gateway ───────────────
 
