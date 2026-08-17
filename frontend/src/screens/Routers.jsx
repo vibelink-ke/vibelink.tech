@@ -525,13 +525,25 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               render: (r) =>
                 !r.autoconfig_last_at ? (
                   <span style={{ color: color.muted }}>not yet</span>
-                ) : (
-                  <span
-                    title={r.autoconfig_last_error ?? `RouterOS ${r.ros_version ?? ''}`.trim()}
-                    style={{ color: r.autoconfig_last_ok ? color.green : color.rust }}
-                  >
-                    {r.autoconfig_last_ok ? 'yes' : 'failed'}
+                ) : r.autoconfig_last_ok ? (
+                  <span title={`RouterOS ${r.ros_version ?? ''}`.trim()} style={{ color: color.green }}>
+                    yes
                   </span>
+                ) : (
+                  /* The reason, not just the word. It was in a tooltip nobody
+                     hovers, so a router said "failed" for days while the message
+                     naming the broken step sat one pixel away, unread. */
+                  <div style={{ display: 'grid', gap: 2, maxWidth: 260 }}>
+                    <span style={{ color: color.rust, fontWeight: 600 }}>failed</span>
+                    {r.autoconfig_last_error && (
+                      <span
+                        title={r.autoconfig_last_error}
+                        style={{ fontSize: 12, color: color.muted, lineHeight: 1.35 }}
+                      >
+                        {r.autoconfig_last_error}
+                      </span>
+                    )}
+                  </div>
                 ),
             },
             {
