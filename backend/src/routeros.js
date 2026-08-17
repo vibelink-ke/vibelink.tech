@@ -219,18 +219,83 @@ export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
  * a no-op, which matters because the operator's instinct after any doubt is to
  * press the button again.
  */
+/**
+ * Run one RouterOS command and, if it fails, say which one.
+ *
+ * RouterOS errors are terse and context-free -- "invalid network", "no such
+ * item", "failure" -- and a push issues a dozen commands, so the message alone
+ * does not identify the culprit. Real example: a hotspot push failed with
+ * "invalid network" after seven successful steps, and nothing said whether that
+ * was the address, the pool, the DHCP server or its network statement.
+ */
+async function cmd(conn, label, path, args = []) {
+  try {
+    return await conn.write(path, args);
+  } catch (e) {
+    e.step = e.step ?? `${label} (${path} ${args.join(' ')})`;
+    throw e;
+  }
+}
+
+/**
+ * Turn an operator-supplied subnet into the exact values RouterOS wants.
+ *
+ * Two bugs this closes. The old code took the first three octets verbatim and
+ * appended .1/.10/.254, which is only right for a /24 and silently wrong for
+ * anything else. And it passed the string through untouched, so a value like
+ * 10.5.50.1/24 -- an address, not a network -- went to the router and came back
+ * as a bare "invalid network" with nothing to say which field was at fault.
+ *
+ * Masking to the true network address makes 10.5.50.1/24 and 10.5.50.0/24 mean
+ * the same thing, which is what the person typing it intended either way.
+ *
+ * .1 is the router and .10 upward the guests; below .10 stays free for printers
+ * and access points that people give static addresses to.
+ */
+export function planNetwork(input) {
+  const [addr, maskBits] = String(input ?? '').trim().split('/');
+  const bits = Number(maskBits);
+  const octets = String(addr).split('.').map(Number);
+
+  if (octets.length !== 4 || octets.some((o) => !Number.isInteger(o) || o < 0 || o > 255)) {
+    throw new Error(`"${input}" is not a valid IPv4 subnet. Expected something like 10.5.50.0/24.`);
+  }
+  // /30 is four addresses: network, gateway, one guest, broadcast. Below /8 is
+  // never what anyone means on a LAN.
+  if (!Number.isInteger(bits) || bits < 8 || bits > 30) {
+    throw new Error(`"${input}" needs a prefix between /8 and /30. Expected something like 10.5.50.0/24.`);
+  }
+
+  const toInt = (o) => ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
+  const toStr = (n) => [24, 16, 8, 0].map((sh) => (n >>> sh) & 255).join('.');
+
+  const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
+  const base = (toInt(octets) & mask) >>> 0;
+  const broadcast = (base | (~mask >>> 0)) >>> 0;
+
+  const gatewayInt = base + 1;
+  const firstGuest = Math.min(base + 10, broadcast - 1);
+  const lastGuest = broadcast - 1;
+
+  if (gatewayInt >= broadcast) {
+    throw new Error(`"${input}" is too small to run a hotspot on.`);
+  }
+
+  return {
+    network: `${toStr(base)}/${bits}`,
+    gateway: toStr(gatewayInt),
+    poolRange: `${toStr(firstGuest)}-${toStr(lastGuest)}`,
+    bits,
+  };
+}
+
 export async function applyHotspotServer(conn, {
   bridge = 'bridge-lan',
   network = '10.5.50.0/24',
   interimMinutes = 5,
   dnsName = 'wifi.local',
 } = {}) {
-  const [net, bits] = String(network).split('/');
-  const octets = net.split('.');
-  // .1 is the router, .10-.254 the guests. Anything below .10 is left free for
-  // printers and access points that people give static addresses to.
-  const gateway = `${octets[0]}.${octets[1]}.${octets[2]}.1`;
-  const poolRange = `${octets[0]}.${octets[1]}.${octets[2]}.10-${octets[0]}.${octets[1]}.${octets[2]}.254`;
+  const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
   const POOL = 'hotspot-pool';
   const done = [];
 
@@ -239,7 +304,7 @@ export async function applyHotspotServer(conn, {
   const addrs = await conn.write('/ip/address/print', []);
   const existing = addrs.find((a) => a.interface === bridge && String(a.address).startsWith(`${gateway}/`));
   if (!existing) {
-    await conn.write('/ip/address/add', [
+    await cmd(conn, 'gateway address', '/ip/address/add', [
       `=address=${gateway}/${bits}`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
     ]);
     done.push(`address ${gateway}/${bits} on ${bridge}`);
@@ -247,9 +312,9 @@ export async function applyHotspotServer(conn, {
 
   const pools = await conn.write('/ip/pool/print', []);
   const pool = pools.find((p) => p.name === POOL);
-  if (pool) await conn.write('/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
+  if (pool) await cmd(conn, 'address pool', '/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
   else {
-    await conn.write('/ip/pool/add', [`=name=${POOL}`, `=ranges=${poolRange}`]);
+    await cmd(conn, 'address pool', '/ip/pool/add', [`=name=${POOL}`, `=ranges=${poolRange}`]);
     done.push(`pool ${poolRange}`);
   }
 
@@ -257,21 +322,21 @@ export async function applyHotspotServer(conn, {
   const dhcp = dhcps.find((d) => d.interface === bridge);
   const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
                       `=lease-time=1h`, `=comment=${MANAGED_COMMENT}`];
-  if (dhcp) await conn.write('/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
+  if (dhcp) await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
   else {
-    await conn.write('/ip/dhcp-server/add', [`=name=hotspot-dhcp`, ...dhcpFields]);
+    await cmd(conn, 'DHCP server', '/ip/dhcp-server/add', [`=name=hotspot-dhcp`, ...dhcpFields]);
     done.push('dhcp server');
   }
 
   // The network statement is what actually gives clients a gateway and DNS. A
   // DHCP server without it leases addresses that cannot route anywhere.
   const nets = await conn.write('/ip/dhcp-server/network/print', []);
-  const netRow = nets.find((n) => String(n.address) === String(network));
-  const netFields = [`=address=${network}`, `=gateway=${gateway}`, `=dns-server=${gateway}`,
+  const netRow = nets.find((n) => String(n.address) === cidr);
+  const netFields = [`=address=${cidr}`, `=gateway=${gateway}`, `=dns-server=${gateway}`,
                      `=comment=${MANAGED_COMMENT}`];
-  if (netRow) await conn.write('/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
+  if (netRow) await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
   else {
-    await conn.write('/ip/dhcp-server/network/add', netFields);
+    await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/add', netFields);
     done.push('dhcp network');
   }
 
@@ -289,9 +354,9 @@ export async function applyHotspotServer(conn, {
     // store. Offering chap here is how you get a login page that always fails.
     '=login-by=http-pap',
   ];
-  if (profile) await conn.write('/ip/hotspot/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
+  if (profile) await cmd(conn, 'hotspot profile', '/ip/hotspot/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
   else {
-    await conn.write('/ip/hotspot/profile/add', [`=name=${PROFILE}`, ...profileFields]);
+    await cmd(conn, 'hotspot profile', '/ip/hotspot/profile/add', [`=name=${PROFILE}`, ...profileFields]);
     done.push('hotspot profile');
   }
 
@@ -299,9 +364,9 @@ export async function applyHotspotServer(conn, {
   const server = servers.find((s) => s.interface === bridge);
   const serverFields = [`=interface=${bridge}`, `=profile=${PROFILE}`,
                         `=address-pool=${POOL}`, '=disabled=no'];
-  if (server) await conn.write('/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
+  if (server) await cmd(conn, 'hotspot server', '/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
   else {
-    await conn.write('/ip/hotspot/add', [`=name=hotspot-billing`, ...serverFields]);
+    await cmd(conn, 'hotspot server', '/ip/hotspot/add', [`=name=hotspot-billing`, ...serverFields]);
     done.push('hotspot server');
   }
 
