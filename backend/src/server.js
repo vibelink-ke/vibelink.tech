@@ -1091,6 +1091,30 @@ app.get('/api/routers/tunnels', wrap(async (req, res) => {
 }));
 
 /**
+ * Check the login page is reachable and is actually ours before the router
+ * installs it.
+ *
+ * Caddy served the React bundle for /hotspot/* for a while, so the router
+ * fetched 715 bytes of index.html, installed it, reported success, and every
+ * guest got a blank white screen. The router cannot tell one HTML file from
+ * another; the server can, and it is the one issuing the instruction.
+ */
+async function loginPageReachable(url) {
+  const { MARKER } = await import('./hotspot-portal.js');
+  try {
+    const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+    if (!res.ok) return `the page returned HTTP ${res.status}`;
+    const body = await res.text();
+    if (!body.includes(MARKER)) {
+      return 'that URL does not serve the login page — check the /hotspot/* route reaches the API';
+    }
+    return null;
+  } catch (e) {
+    return `the page could not be fetched from this server (${e.message})`;
+  }
+}
+
+/**
  * Run one push step with a deadline and a name.
  *
  * Two failures this prevents. A RouterOS write that never answers hangs the
@@ -1215,11 +1239,12 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // whole push — it should say so and leave everything else in place.
     if (portal) {
       try {
+        const url = `https://${portal}/hotspot/login.html`;
+        const unreachable = await loginPageReachable(url);
+        if (unreachable) throw new Error(unreachable);
+
         const page = await step('login page', () =>
-          ros.pushHotspotPage(conn, {
-            url: `https://${portal}/hotspot/login.html`,
-            bridge: bridge.bridge,
-          }), 40000);
+          ros.pushHotspotPage(conn, { url, bridge: bridge.bridge }), 40000);
         done.push(`installed the ${portal} login page at ${page.path} (${page.bytes} bytes)`);
       } catch (e) {
         done.push(`could not install the login page (${e.message}) — the stock MikroTik page stays`);
@@ -1419,9 +1444,11 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
       if (tt?.subdomain) {
         try {
-          const page = await ros.pushHotspotPage(conn, {
-            url: `https://${tt.subdomain}.${rootDomain}/hotspot/login.html`,
-          });
+          const url = `https://${tt.subdomain}.${rootDomain}/hotspot/login.html`;
+          const unreachable = await loginPageReachable(url);
+          if (unreachable) throw new Error(unreachable);
+
+          const page = await ros.pushHotspotPage(conn, { url });
           done.push(`installed the login page at ${page.path} (${page.bytes} bytes)`);
         } catch (e) {
           done.push(`could not install the login page (${e.message}) — the stock page stays`);

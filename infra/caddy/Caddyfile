@@ -43,6 +43,14 @@
 	handle /webhooks/* {
 		reverse_proxy net:8080
 	}
+	# The captive-portal login page, which the API renders per tenant. Without
+	# this it fell through to the React bundle below, so /hotspot/login.html
+	# returned 715 bytes of index.html — and the router dutifully installed that
+	# as its login page. A React shell with no JS renders a blank white screen,
+	# which is exactly what guests saw.
+	handle /hotspot/* {
+		reverse_proxy net:8080
+	}
 
 	# /radius/* is deliberately not proxied. FreeRADIUS reaches the API over the
 	# compose network, so exposing it here would only let strangers POST to

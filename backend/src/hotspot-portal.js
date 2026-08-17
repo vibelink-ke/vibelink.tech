@@ -16,6 +16,16 @@
  * into the output untouched, which is why nothing here escapes them.
  */
 
+/**
+ * Proof that a downloaded page is this page.
+ *
+ * Caddy served the React bundle for /hotspot/* for a while, so the router
+ * fetched 715 bytes of index.html and installed it as the login page — a blank
+ * white screen for every guest, and a push that reported success. A size check
+ * cannot tell those apart; a marker can.
+ */
+export const MARKER = 'vibelink-hotspot-login';
+
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -64,6 +74,7 @@ export function loginPage({
     : '';
 
   return `<!DOCTYPE html>
+<!-- ${MARKER} -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
