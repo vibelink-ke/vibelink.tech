@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -46,6 +46,41 @@ export default function LiveSupport() {
   const current = queue.find((c) => c.id === activeId);
   const thread = chats[activeId] ?? [];
 
+  /**
+   * Load the conversation and keep it current.
+   *
+   * The thread lived only in this component's state, so a reply went nowhere
+   * and reopening a chat showed an empty window — the visitor was talking to
+   * something that recorded nothing.
+   *
+   * Three seconds, and only for the chat on screen. Polling the whole queue
+   * would grow with the number of conversations while an agent reads one.
+   */
+  useEffect(() => {
+    if (!activeId) return undefined;
+    let live = true;
+
+    const pull = async () => {
+      try {
+        const { messages } = await api.chatMessages(activeId, 0);
+        if (!live) return;
+        setChats((c) => ({
+          ...c,
+          [activeId]: messages.map((m) => ({
+            id: m.id,
+            from: m.sender === 'staff' ? 'You' : 'Client',
+            text: m.body,
+            mine: m.sender === 'staff',
+          })),
+        }));
+      } catch { /* a dropped poll is not the end of the conversation */ }
+    };
+
+    pull();
+    const id = setInterval(pull, 3000);
+    return () => { live = false; clearInterval(id); };
+  }, [activeId]);
+
   const accept = async (c) => {
     try {
       await api.acceptChat(c.id, null);
@@ -70,10 +105,34 @@ export default function LiveSupport() {
     }
   };
 
-  const send = () => {
-    if (!draft.trim() || !activeId) return;
-    setChats((c) => ({ ...c, [activeId]: [...(c[activeId] ?? []), { from: 'You', text: draft, mine: true }] }));
+  const send = async () => {
+    const body = draft.trim();
+    if (!body || !activeId) return;
+
+    // Shown immediately, then confirmed by the next poll. Waiting for the round
+    // trip makes the agent wonder whether the send worked and type it again.
+    setChats((c) => ({ ...c, [activeId]: [...(c[activeId] ?? []), { from: 'You', text: body, mine: true }] }));
     setDraft('');
+    try {
+      await api.sendChatReply(activeId, body);
+      store.setCollection('liveQueue', (q) =>
+        q.map((x) => (x.id === activeId ? { ...x, status: 'active' } : x)));
+    } catch (e) {
+      store.toast(`Not sent: ${e.message}`);
+    }
+  };
+
+  /** End the conversation, for the visitor as well as here. */
+  const closeChat = async () => {
+    if (!activeId) return;
+    try {
+      await api.closeChat(activeId);
+      store.setCollection('liveQueue', (q) => q.filter((x) => x.id !== activeId));
+      setActiveId(null);
+      store.toast('Chat closed');
+    } catch (e) {
+      store.toast(`Could not close: ${e.message}`);
+    }
   };
 
   return (
@@ -125,16 +184,10 @@ export default function LiveSupport() {
             current && (
               <>
                 <Button size="sm" onClick={() => escalate(current)}>Escalate</Button>
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    store.setCollection('liveQueue', (q) => q.filter((x) => x.id !== current.id));
-                    setActiveId(null);
-                    store.toast('Chat closed');
-                  }}
-                >
-                  Close
-                </Button>
+                {/* Closes it on the server too. This only dropped the row from
+                    the agent's own list, so the visitor sat waiting for a reply
+                    from somebody who believed the conversation was over. */}
+                <Button size="sm" onClick={closeChat}>Close</Button>
               </>
             )
           }

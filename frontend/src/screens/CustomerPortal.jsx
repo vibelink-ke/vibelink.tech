@@ -87,6 +87,17 @@ export default function CustomerPortal() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
 
+  /**
+   * Live chat, on the same endpoints the hotspot portal uses.
+   *
+   * A customer here has signed in, but the chat still runs on its own token
+   * rather than the portal cookie: it is the same conversation a hotspot guest
+   * starts, support reads it in the same queue, and giving it a second
+   * authentication path would mean two of everything for one feature.
+   */
+  const [chat, setChat] = useState(null);   // { id, token, messages, note }
+  const [chatDraft, setChatDraft] = useState('');
+
   const load = useCallback(async () => {
     try { setMe(await api.me()); } catch { setMe(null); }
   }, []);
@@ -158,6 +169,55 @@ export default function CustomerPortal() {
   }
 
   const expired = me.status !== 'active';
+  const startChat = async () => {
+    setChat({ id: null, token: null, messages: [], note: 'Connecting…' });
+    try {
+      const res = await fetch('/chat/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: me.name, phone: me.account }),
+      });
+      const d = await res.json();
+      if (!d.chatId) throw new Error(d.error ?? 'Support is not available');
+      setChat({ id: d.chatId, token: d.token, messages: [], note: 'Someone will reply here.' });
+    } catch (e) {
+      setChat({ id: null, token: null, messages: [], note: e.message });
+    }
+  };
+
+  useEffect(() => {
+    if (!chat?.id) return undefined;
+    let live = true;
+    const pull = async () => {
+      try {
+        const res = await fetch(`/chat/${chat.id}?token=${encodeURIComponent(chat.token)}&since=0`);
+        const d = await res.json();
+        if (!live || !d.messages) return;
+        setChat((c) => (c?.id === chat.id
+          ? { ...c, messages: d.messages, note: d.status === 'closed' ? 'Support closed this chat.' : c.note }
+          : c));
+      } catch { /* keep trying; a dropped poll is not a failure */ }
+    };
+    pull();
+    const id = setInterval(pull, 3000);
+    return () => { live = false; clearInterval(id); };
+  }, [chat?.id, chat?.token]);
+
+  const sendChat = async () => {
+    const body = chatDraft.trim();
+    if (!body || !chat?.id) return;
+    setChatDraft('');
+    try {
+      await fetch(`/chat/${chat.id}/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: chat.token, body }),
+      });
+    } catch {
+      setChat((c) => ({ ...c, note: 'That message did not send.' }));
+    }
+  };
+
   return (
     <div style={page}>
       <div style={{ width: '100%', maxWidth: 460, display: 'grid', gap: 14 }}>
@@ -220,7 +280,46 @@ export default function CustomerPortal() {
             </a>
           )}
           <button style={button(false)} onClick={raise}>Report a problem</button>
+          {!chat && (
+            <button style={button(false)} onClick={startChat}>Chat with support</button>
+          )}
           {note && <span style={{ fontSize: 13, color: color.green }}>{note}</span>}
+
+          {chat && (
+            <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
+              <div style={{
+                maxHeight: 180, overflowY: 'auto', display: 'flex',
+                flexDirection: 'column', gap: 6,
+              }}>
+                {chat.messages.map((m) => (
+                  <span
+                    key={m.id}
+                    style={{
+                      alignSelf: m.sender === 'staff' ? 'flex-start' : 'flex-end',
+                      maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
+                      background: m.sender === 'staff' ? '#fff' : color.green,
+                      color: m.sender === 'staff' ? color.ink : '#fff',
+                      border: m.sender === 'staff' ? `1px solid ${color.line}` : 'none',
+                    }}
+                  >
+                    {m.body}
+                  </span>
+                ))}
+              </div>
+              <input
+                value={chatDraft}
+                onChange={(e) => setChatDraft(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                placeholder="Type your message"
+                style={{
+                  padding: '10px 12px', fontSize: 15, borderRadius: 9,
+                  border: `1px solid ${color.line}`, outline: 'none',
+                }}
+              />
+              <button style={button(true)} onClick={sendChat}>Send</button>
+              {chat.note && <span style={{ fontSize: 12.5, color: color.muted }}>{chat.note}</span>}
+            </div>
+          )}
         </div>
       </div>
     </div>
