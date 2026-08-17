@@ -50,6 +50,11 @@ const greeting = (h = new Date().getHours()) =>
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export default function Dashboard() {
+  // Its own request: the dashboard should still render if the run log cannot
+  // be read, since everything else on it comes from elsewhere.
+  const [runs, setRuns] = useState(null);
+  useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
+
   const store = useStore();
   const navigate = useNavigate();
   const [range, setRange] = useState('Today');
@@ -164,7 +169,15 @@ export default function Dashboard() {
           value={active.length}
           hint={`${active.filter((c) => c.service === 'pppoe').length} PPPoE · ${active.filter((c) => c.service === 'hotspot').length} hotspot`}
         />
-        <Tile label="AUTO-ACTIONS (24H)" value={0} hint="activations, suspends, SMS, receipts" />
+        {/* From the job run log. This was a hardcoded zero, so the tile said
+            nothing had happened however much had. */}
+        <Tile
+          label="AUTO-ACTIONS (24H)"
+          value={runs?.total ?? '—'}
+          hint={runs
+            ? (runs.failures ? `${runs.failures} failed` : 'activations, suspends, SMS, receipts')
+            : 'activations, suspends, SMS, receipts'}
+        />
         <Tile
           label="NEEDS A HUMAN"
           value={store.unmatched.length}

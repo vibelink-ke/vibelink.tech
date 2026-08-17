@@ -28,6 +28,26 @@ const FEATURES = [
    'Which tower is down, who is online, what each port is carrying, and where every customer lives on a map.'],
 ];
 
+/**
+ * What Vibelink sells besides the software.
+ *
+ * An ISP evaluating a billing system is also deciding who to buy capacity
+ * from, and they are the same conversation. Kept separate from the software
+ * features so neither reads as filler for the other.
+ */
+const SERVICES = [
+  ['FTTH — homes',
+   'Fibre to the home for estates and residential clusters. We build the '
+   + 'distribution, you sell the packages and keep the customer.'],
+  ['FTTB — buildings and business',
+   'Fibre to apartment blocks, offices and business parks, with the capacity '
+   + 'and the SLA a paying tenant expects.'],
+  ['Bulk internet for ISPs',
+   'Wholesale bandwidth and IP transit by the megabit, on your own capacity '
+   + 'plan. Burst when your evening peak needs it rather than paying for peak '
+   + 'all month.'],
+];
+
 const STEPS = [
   ['Register', 'Pick your name and your subdomain. Takes a minute.'],
   ['Add a router', 'Paste one line into your MikroTik. It dials in on its own.'],
@@ -63,11 +83,12 @@ export default function Landing({ onRegister }) {
 
       <Section style={{ padding: '64px 22px 46px', textAlign: 'center' }}>
         <h1 style={{ fontSize: 40, lineHeight: 1.12, margin: '0 0 14px', letterSpacing: '-.02em' }}>
-          Billing for Kenyan ISPs,<br />without the spreadsheet
+          Billing, fibre and bandwidth<br />for Kenyan ISPs
         </h1>
         <p style={{ fontSize: 17, color: color.inkSoft, maxWidth: 640, margin: '0 auto 26px' }}>
           Run PPPoE and hotspot customers on your MikroTik, take M-Pesa, and stop
-          reconciling payments by hand. Your own portal on your own subdomain.
+          reconciling payments by hand — and buy your FTTH, FTTB and bulk capacity
+          from the same people. Your own portal on your own subdomain.
         </p>
         <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
           <button type="button" onClick={onRegister} style={{ ...solid, padding: '12px 24px', fontSize: 15 }}>
@@ -95,7 +116,36 @@ export default function Landing({ onRegister }) {
         </div>
       </Section>
 
-      <div style={{ background: color.cardBg, borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
+      <div style={{ background: color.cardBg, borderTop: `1px solid ${color.line}` }}>
+        <Section style={{ padding: '46px 22px' }}>
+          <h2 style={{ fontSize: 24, margin: '0 0 6px', textAlign: 'center' }}>
+            Capacity, not just software
+          </h2>
+          <p style={{
+            textAlign: 'center', color: color.inkSoft, maxWidth: 620,
+            margin: '0 auto 24px', fontSize: 15,
+          }}>
+            We build and sell the connectivity too, so the billing and the bandwidth
+            come from one place.
+          </p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
+            {SERVICES.map(([title, body]) => (
+              <div key={title} style={{
+                border: `1px solid ${color.line}`, borderRadius: radius.lg ?? 12,
+                padding: '18px 18px 20px', background: color.pageBg,
+              }}>
+                <h3 style={{ margin: '0 0 6px', fontSize: 15.5 }}>{title}</h3>
+                <p style={{ margin: 0, fontSize: 14, color: color.inkSoft }}>{body}</p>
+              </div>
+            ))}
+          </div>
+          <p style={{ textAlign: 'center', marginTop: 18, fontSize: 13.5, color: color.muted }}>
+            Talk to us about coverage and pricing: <a href="mailto:sales@vibelink.tech">sales@vibelink.tech</a>
+          </p>
+        </Section>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
         <Section style={{ padding: '46px 22px' }}>
           <h2 style={{ fontSize: 24, margin: '0 0 22px', textAlign: 'center' }}>Getting started</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>

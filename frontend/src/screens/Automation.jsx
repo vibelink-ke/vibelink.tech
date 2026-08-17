@@ -57,6 +57,11 @@ export default function Automation() {
   };
 
   const running = jobs.filter((j) => j.enabled).length;
+  // Loaded separately: a run log that fails to read should not stop the
+  // switches on this page from working.
+  const [runs, setRuns] = useState(null);
+  useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
+
   const stopped = jobs.length - running;
 
   return (
@@ -68,7 +73,14 @@ export default function Automation() {
         <Stat label="Running" value={running} tone={running ? color.green : undefined} hint="scheduled and active" />
         <Stat label="Stopped" value={stopped} tone={stopped ? color.amberInk : undefined} hint="switched off here" />
         <Stat label="Suggested" value={SUGGESTED.length} hint="not implemented" />
-        <Stat label="Ran in 24h" value={0} hint="no run log yet" />
+        {/* Real, from job_runs. This was a hardcoded zero, which said the
+            system was idle while it was working. */}
+        <Stat
+          label="Ran in 24h"
+          value={runs?.total ?? '—'}
+          tone={runs?.failures ? color.rust : undefined}
+          hint={runs ? (runs.failures ? `${runs.failures} failed` : 'all succeeded') : 'loading'}
+        />
       </Grid>
 
       <Card

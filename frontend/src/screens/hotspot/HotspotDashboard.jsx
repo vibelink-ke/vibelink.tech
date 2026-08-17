@@ -14,11 +14,19 @@ export default function HotspotDashboard() {
     .filter((p) => p.voucher_id && p.status === 'applied')
     .reduce((a, p) => a + Number(p.amount ?? 0), 0);
 
+  // Issued since midnight. A voucher exists because somebody paid for it, so
+  // this is the day's hotspot sales without needing a separate tally.
+  const soldToday = (store.vouchers ?? []).filter((v) => {
+    const at = v.created_at ? new Date(v.created_at) : null;
+    return at && at.toDateString() === new Date().toDateString();
+  }).length;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <Grid min={200} gap={14}>
         <Stat label="Online now" value={inUse.length} hint="active voucher sessions" />
-        <Stat label="Sold today" value={0} hint="vouchers issued" />
+        {/* Counted from the vouchers themselves rather than hardcoded. */}
+        <Stat label="Sold today" value={soldToday} hint="vouchers issued" />
         <Stat label="Revenue today" value={`KES ${kes(revenue)}`} hint="hotspot only" />
         <Stat label="Unused codes" value={unused.length} hint={`${expired.length} expired`} />
       </Grid>

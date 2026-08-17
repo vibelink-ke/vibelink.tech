@@ -829,6 +829,21 @@ select v.tenant_id, v.code, 'Mikrotik-Group', ':=', 'hs-default'
                 where rc.username = v.code and rc.tenant_id = v.tenant_id)
 on conflict (tenant_id, username, attribute) do nothing;
 
+-- ─────────────── what automation actually did ───────────────
+-- Automation and the dashboard both showed "0" for work done in the last 24
+-- hours, hardcoded, because nothing recorded a run. A number presented as data
+-- and always zero is worse than no number: it tells an operator the system is
+-- idle when it has been working all night.
+create table if not exists job_runs (
+  id         bigserial primary key,
+  job        text not null,
+  ok         boolean not null,
+  error      text,
+  ms         int,
+  ran_at     timestamptz not null default now()
+);
+create index if not exists job_runs_recent on job_runs (ran_at desc);
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.

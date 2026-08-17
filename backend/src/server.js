@@ -3617,6 +3617,37 @@ const AUTOMATION_JOBS = [
   { job: 'expireTenantLicences', name: 'Tenant licences', cron: '0 7 * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
 ];
 
+/**
+ * What automation has done lately.
+ *
+ * Both the dashboard and the Automation screen showed a hardcoded zero for the
+ * last 24 hours, which reads as "nothing is running" on a system that has been
+ * working all night.
+ *
+ * Not tenant-scoped, because the jobs are not: one run of expireAndSuspend
+ * covers every tenant at once. Only counts and job names are returned — nothing
+ * here says anything about another tenant's customers or money.
+ */
+app.get('/api/automation/runs', wrap(async (_req, res) => {
+  const { rows } = await pool.query(`
+    select job,
+           count(*)::int                             runs,
+           count(*) filter (where not ok)::int       failures,
+           max(ran_at)                               last_run,
+           round(avg(ms))::int                       avg_ms
+      from job_runs
+     where ran_at > now() - interval '24 hours'
+     group by job
+     order by job`);
+
+  res.json({
+    since: '24 hours',
+    total: rows.reduce((n, r) => n + r.runs, 0),
+    failures: rows.reduce((n, r) => n + r.failures, 0),
+    jobs: rows,
+  });
+}));
+
 app.get('/api/automation', wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select job, enabled, updated_at from automation_jobs where tenant_id=$1', [req.tenant.id]);

@@ -168,6 +168,7 @@ export const api = {
 
   // ── automation ──
   automation: () => get('/api/automation'),
+  automationRuns: () => get('/api/automation/runs'),
   setAutomation: (job, enabled) => put(`/api/automation/${job}`, { enabled }),
 
   articles: () => get('/api/kb-articles'),

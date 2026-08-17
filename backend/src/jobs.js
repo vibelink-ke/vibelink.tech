@@ -11,8 +11,31 @@ import * as bank from './payments/bankstk.js';
  * catch rejections, and an unhandled one is fatal on Node 22+. Log and let the
  * next tick retry.
  */
-const safely = (name, fn) => () =>
-  Promise.resolve(fn()).catch((e) => console.error(`job ${name} failed:`, e?.message ?? e));
+const safely = (name, fn) => async () => {
+  const started = Date.now();
+  let ok = true;
+  let error = null;
+  try {
+    await fn();
+  } catch (e) {
+    ok = false;
+    error = e?.message ?? String(e);
+    console.error(`job ${name} failed:`, error);
+  }
+  // Recorded so the dashboard can say what ran rather than showing a hardcoded
+  // zero. Failures to write the record are swallowed: bookkeeping about a job
+  // must never be the thing that breaks the job.
+  try {
+    await pool.query(
+      'insert into job_runs (job, ok, error, ms) values ($1,$2,$3,$4)',
+      [name, ok, error?.slice(0, 300) ?? null, Date.now() - started]);
+    // Kept for a week. Long enough to see a pattern, short enough that a job
+    // running every minute does not grow the table without limit.
+    if (Math.random() < 0.02) {
+      await pool.query("delete from job_runs where ran_at < now() - interval '7 days'");
+    }
+  } catch { /* bookkeeping only */ }
+};
 
 export function startJobs() {
   cron.schedule('*/5 * * * *', safely('expireAndSuspend', expireAndSuspend));

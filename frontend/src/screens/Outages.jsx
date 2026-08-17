@@ -50,6 +50,13 @@ export default function Outages() {
     }
   };
 
+  const affected = (() => {
+    const downRouters = new Set(
+      (store.outages ?? []).filter((o) => o.status !== 'resolved').map((o) => o.router_id).filter(Boolean));
+    if (!downRouters.size) return 0;
+    return (store.clients ?? []).filter((c) => downRouters.has(c.router_id)).length;
+  })();
+
   return (
     <Screen
       title="Service outages"
@@ -63,7 +70,9 @@ export default function Outages() {
       <Grid min={200} gap={14}>
         <Stat label="Active" value={outages.filter((o) => o.status === 'active').length} tone={outages.length ? color.rust : undefined} hint="ongoing incidents" />
         <Stat label="Routers down" value={routersDown.length} tone={routersDown.length ? color.rust : undefined} hint="per the watchdog" />
-        <Stat label="Clients affected" value={0} hint="on the affected NAS" />
+        {/* Customers on a router with an open outage. Hardcoded zero before,
+            which made an outage look like it affected nobody. */}
+        <Stat label="Clients affected" value={affected} hint="on the affected NAS" />
         <Stat label="Resolved this month" value={outages.filter((o) => o.status === 'resolved').length} hint="closed out" />
       </Grid>
 

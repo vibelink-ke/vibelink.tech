@@ -12,6 +12,21 @@ const CANNED = [
 ];
 
 function Bubble({ from, text, mine }) {
+  const ticketsToday = (store.tickets ?? []).filter((t) => {
+    const at = t.created_at ? new Date(t.created_at) : null;
+    return at && at.toDateString() === new Date().toDateString();
+  }).length;
+
+  // The oldest unanswered conversation, not an average: an average of two
+  // chats is meaningless, and what an agent needs to know is whether anybody
+  // has been left waiting.
+  const waitMinutes = waiting.reduce((worst, c) => {
+    const started = c.started_at ? new Date(c.started_at) : null;
+    if (!started) return worst;
+    return Math.max(worst, Math.round((Date.now() - started) / 60000));
+  }, 0);
+  const longestWait = waiting.length ? `${waitMinutes}m` : '—';
+
   return (
     <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
       <div
@@ -143,8 +158,16 @@ export default function LiveSupport() {
       <Grid min={200} gap={14}>
         <Stat label="Waiting" value={waiting.length} tone={waiting.length ? color.amberInk : undefined} hint={waiting.length ? 'needs an agent' : 'queue clear'} />
         <Stat label="Active" value={active.length} hint="being handled" />
-        <Stat label="Escalated today" value={0} hint="raised to a ticket" />
-        <Stat label="Avg. wait" value="—" hint="no data yet" />
+        {/* Both were fixed values. Tickets raised today is a real count; the
+            wait is measured from when each waiting visitor arrived, which is the
+            number an agent needs to know whether anyone is being left. */}
+        <Stat label="Tickets today" value={ticketsToday} hint="raised by support" />
+        <Stat
+          label="Longest wait"
+          value={longestWait}
+          tone={waitMinutes > 5 ? color.amberInk : undefined}
+          hint={waiting.length ? 'someone is waiting' : 'nobody waiting'}
+        />
       </Grid>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 260px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
