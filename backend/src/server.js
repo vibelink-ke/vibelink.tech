@@ -1414,12 +1414,16 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
 
     // RADIUS first: a hotspot server that comes up before the router knows where
     // to authenticate will refuse every login until the next push.
+    // 45s, not the 20s default. This lists the router's RADIUS servers, writes
+    // one, removes any duplicates and enables CoA — four round trips over a
+    // tunnel that may be on a rural link, and the flat deadline was failing a
+    // step that was working, just slowly.
     await step('RADIUS', () => ros.applyRadius(conn, {
       serverIp: SERVER_IP,
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
       services: r.role === 'both' ? 'ppp,hotspot' : 'hotspot',
-    }));
+    }), 45000);
     done.push(`RADIUS pointed at ${SERVER_IP}`);
 
     const built = await step('hotspot server, DHCP and pool', () =>
@@ -1718,7 +1722,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
       services: r.role === 'both' ? 'ppp,hotspot' : r.role,
-    }));
+    }), 45000);
     done.push(`pointed RADIUS at ${SERVER_IP} and enabled CoA`);
     if (radius.replaced) done.push(`removed ${radius.replaced} stale RADIUS entr${radius.replaced === 1 ? 'y' : 'ies'}`);
 

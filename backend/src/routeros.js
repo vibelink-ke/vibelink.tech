@@ -103,6 +103,24 @@ export async function connect({ host, port = 8728, user, password, timeoutSec = 
   return conn;
 }
 
+/**
+ * Run one RouterOS command and, if it fails, say which one.
+ *
+ * RouterOS errors are terse and context-free -- "invalid network", "no such
+ * item", "failure" -- and a push issues a dozen commands, so the message alone
+ * does not identify the culprit. Real example: a hotspot push failed with
+ * "invalid network" after seven successful steps, and nothing said whether that
+ * was the address, the pool, the DHCP server or its network statement.
+ */
+async function cmd(conn, label, path, args = []) {
+  try {
+    return await conn.write(path, args);
+  } catch (e) {
+    e.step = e.step ?? `${label} (${path} ${args.join(' ')})`;
+    throw e;
+  }
+}
+
 /** RouterOS returns the internal id as ".id"; every write that edits a row needs it. */
 const idOf = (row) => row?.['.id'];
 
@@ -150,7 +168,7 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
   // drops the request, which looks like a broken secret rather than a duplicate.
   //
   // Anything pointing at this server is ours to own, however it got there.
-  const mine = (await conn.write('/radius/print', []))
+  const mine = (await cmd(conn, 'list RADIUS servers', '/radius/print', []))
     .filter((r) => String(r.address) === String(serverIp));
 
   const fields = [
@@ -162,18 +180,20 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
   ];
 
   if (mine.length) {
-    await conn.write('/radius/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    await cmd(conn, 'update RADIUS server', '/radius/set', [`=.id=${idOf(mine[0])}`, ...fields]);
     // Any other entry for this server is debris — an interrupted run, or one
     // added by hand during setup. Leaving it means half the requests get signed
     // with a stale secret and dropped.
-    for (const dupe of mine.slice(1)) await conn.write('/radius/remove', [`=.id=${idOf(dupe)}`]);
+    for (const dupe of mine.slice(1)) {
+      await cmd(conn, 'remove duplicate RADIUS server', '/radius/remove', [`=.id=${idOf(dupe)}`]);
+    }
   } else {
-    await conn.write('/radius/add', fields);
+    await cmd(conn, 'add RADIUS server', '/radius/add', fields);
   }
 
   // Without this the router ignores CoA entirely and speed changes wait for the
   // subscriber to reconnect — the failure everyone hits first.
-  await conn.write('/radius/incoming/set', ['=accept=yes', `=port=${coaPort}`]);
+  await cmd(conn, 'enable CoA', '/radius/incoming/set', ['=accept=yes', `=port=${coaPort}`]);
 
   return { replaced: mine.length > 1 ? mine.length - 1 : 0 };
 }
@@ -219,23 +239,6 @@ export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
  * a no-op, which matters because the operator's instinct after any doubt is to
  * press the button again.
  */
-/**
- * Run one RouterOS command and, if it fails, say which one.
- *
- * RouterOS errors are terse and context-free -- "invalid network", "no such
- * item", "failure" -- and a push issues a dozen commands, so the message alone
- * does not identify the culprit. Real example: a hotspot push failed with
- * "invalid network" after seven successful steps, and nothing said whether that
- * was the address, the pool, the DHCP server or its network statement.
- */
-async function cmd(conn, label, path, args = []) {
-  try {
-    return await conn.write(path, args);
-  } catch (e) {
-    e.step = e.step ?? `${label} (${path} ${args.join(' ')})`;
-    throw e;
-  }
-}
 
 /**
  * Turn an operator-supplied subnet into the exact values RouterOS wants.
