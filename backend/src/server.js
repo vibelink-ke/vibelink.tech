@@ -1133,12 +1133,19 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
       `update routers set autoconfig_last_at=now(), autoconfig_last_ok=true,
               autoconfig_last_error=null, status='up', last_seen=now() where id=$1`, [r.id]);
 
+    console.log('hotspot push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, gateway: built.gateway });
   } catch (e) {
     const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]).catch(() => {});
+    // Logged as well as returned. This route answers its own errors instead of
+    // going through the wrap() handler, so nothing reached the container log --
+    // a failed push left `docker compose logs api` showing only the startup
+    // line, which reads as "nothing happened" rather than "it failed".
+    console.error('hotspot push', r.name, host, '→', message,
+      done.length ? `(after: ${done.join('; ')})` : '(nothing applied)');
     // The steps that did land are worth reporting: "it failed" is far less
     // useful than "it failed after the hotspot came up, at the firewall".
     res.status(502).json({ error: message, applied: done });
@@ -1302,12 +1309,15 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         where id=$1`,
       [r.id, info.version, info.identity]);
 
+    console.log('configure push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, ...info });
   } catch (e) {
     const message = describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728);
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]);
+    console.error('configure push', r.name, host, '→', message,
+      done.length ? `(after: ${done.join('; ')})` : '(nothing applied)');
     res.status(502).json({ error: message, applied: done });
   } finally {
     if (conn) ros.close(conn);
