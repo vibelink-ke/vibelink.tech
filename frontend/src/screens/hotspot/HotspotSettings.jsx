@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color } from '../../theme/tokens';
+import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Field, Input, Screen, Select, Toggle } from '../../ui/primitives';
@@ -21,6 +21,10 @@ const CODE_TYPES = [
   { value: 'words', label: 'Swahili word pairs' },
 ];
 
+// Written as a constant because the newline is the separator the textarea
+// uses, and an escaped one inside JSX is easy to mangle.
+const NL = String.fromCharCode(10);
+
 const DEFAULTS = {
   ssid: 'WiFi',
   redirect_url: '',
@@ -37,6 +41,8 @@ const DEFAULTS = {
   template: 'sleek',
   banner_headline: '',
   banner_subtext: '',
+  walled_garden: [],
+  hotspot_network: '10.5.50.0/24',
 };
 
 export default function HotspotSettings() {
@@ -45,7 +51,15 @@ export default function HotspotSettings() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setF((cur) => ({ ...DEFAULTS, ...store.hotspotSettings, ...cur }));
+    setF((cur) => {
+      const next = { ...DEFAULTS, ...store.hotspotSettings, ...cur };
+      // The textarea is the editable form of walled_garden; seed it once so the
+      // operator sees the defaults rather than an empty box that saves as empty.
+      if (next.walled_garden_text === undefined) {
+        next.walled_garden_text = (next.walled_garden ?? []).join(NL);
+      }
+      return next;
+    });
     // Only re-seed when the server payload arrives.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store.hotspotSettings]);
@@ -63,6 +77,9 @@ export default function HotspotSettings() {
         trial_minutes: Number(f.trial_minutes),
         idle_timeout_min: Number(f.idle_timeout_min),
         code_length: len,
+        // Sent as an array; the textarea edits it a line at a time.
+        walled_garden: String(f.walled_garden_text ?? '')
+          .split(NL).map((x) => x.trim()).filter(Boolean),
       });
       store.setHotspotSettings(saved ?? f);
       store.toast('Hotspot settings saved');
@@ -114,6 +131,37 @@ export default function HotspotSettings() {
             <Field label="Code length" hint="Between 4 and 12">
               <Input type="number" min={4} max={12} value={f.code_length ?? 6} onChange={set('code_length')} />
             </Field>
+          </div>
+        </Card>
+
+
+        <Card title="Walled garden" subtitle="Reachable before anyone logs in">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field
+              label="Allowed hosts"
+              hint="One per line. Wildcards allowed, e.g. *.safaricom.co.ke"
+            >
+              <textarea
+                value={f.walled_garden_text ?? ''}
+                onChange={(e) => setF((s) => ({ ...s, walled_garden_text: e.target.value }))}
+                rows={6}
+                style={{
+                  width: '100%', boxSizing: 'border-box', padding: '7px 10px',
+                  border: `1px solid ${color.line}`, borderRadius: radius.md,
+                  background: color.subtleBg, color: color.ink,
+                  fontSize: 13, fontFamily: font.mono,
+                  outline: 'none', resize: 'vertical',
+                }}
+              />
+            </Field>
+            <Field label="Hotspot LAN" hint="The subnet guests are given addresses from">
+              <Input value={f.hotspot_network ?? ''} onChange={set('hotspot_network')} placeholder="10.5.50.0/24" />
+            </Field>
+            <span style={{ fontSize: 12.5, color: color.muted }}>
+              Applied to the router the next time you configure it. A guest with no
+              credit needs M-Pesa reachable to buy any — an empty list locks the
+              shop from the inside.
+            </span>
           </div>
         </Card>
 

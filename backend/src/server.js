@@ -523,19 +523,29 @@ app.put('/api/hotspot/settings', async (req, res) => {
   const { rows: [s] } = await pool.query(`
     insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_min, bind_mac,
       payment_method, voucher_expiry, code_type, code_length, sms_voucher, auto_login, multi_device,
-      template, banner_headline, banner_subtext)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      template, banner_headline, banner_subtext, walled_garden, hotspot_network)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
+            coalesce($17, array['*.safaricom.co.ke','api.safaricom.co.ke',
+                                'sandbox.safaricom.co.ke','*.vibelink.tech']),
+            coalesce($18, '10.5.50.0/24'))
     on conflict (tenant_id) do update set
       ssid=excluded.ssid, redirect_url=excluded.redirect_url, trial_minutes=excluded.trial_minutes,
       idle_timeout_min=excluded.idle_timeout_min, bind_mac=excluded.bind_mac,
       payment_method=excluded.payment_method, voucher_expiry=excluded.voucher_expiry,
       code_type=excluded.code_type, code_length=excluded.code_length, sms_voucher=excluded.sms_voucher,
       auto_login=excluded.auto_login, multi_device=excluded.multi_device, template=excluded.template,
-      banner_headline=excluded.banner_headline, banner_subtext=excluded.banner_subtext
+      banner_headline=excluded.banner_headline, banner_subtext=excluded.banner_subtext,
+      -- Only when the caller actually sent them. Every other screen that saves
+      -- these settings posts the whole form back without these two fields, and
+      -- excluded.* would quietly wipe the walled garden each time.
+      walled_garden=coalesce($17, hotspot_settings.walled_garden),
+      hotspot_network=coalesce($18, hotspot_settings.hotspot_network)
     returning *`,
     [req.tenant.id, f.ssid, f.redirect_url, f.trial_minutes, f.idle_timeout_min, f.bind_mac,
      f.payment_method, f.voucher_expiry, f.code_type, f.code_length, f.sms_voucher, f.auto_login,
-     f.multi_device, f.template, f.banner_headline, f.banner_subtext]);
+     f.multi_device, f.template, f.banner_headline, f.banner_subtext,
+     Array.isArray(f.walled_garden) ? f.walled_garden : null,
+     f.hotspot_network ?? null]);
   res.json(s);
 });
 
@@ -1001,10 +1011,40 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       }
     }
     if (r.role === 'both' || r.role === 'hotspot') {
+      // Existing profiles first: a router that was already serving a hotspot
+      // before we arrived keeps working, just pointed at us.
       const { profiles } = await ros.applyHotspot(conn);
-      done.push(profiles
-        ? `switched ${profiles} hotspot profile${profiles === 1 ? '' : 's'} to RADIUS`
-        : 'no hotspot profiles on this router');
+      if (profiles) done.push(`switched ${profiles} hotspot profile${profiles === 1 ? '' : 's'} to RADIUS`);
+
+      const { rows: [hs] } = await pool.query(
+        'select walled_garden, hotspot_network from hotspot_settings where tenant_id=$1',
+        [req.tenant.id]);
+
+      // Building the hotspot needs a bridge to build it on. Same rule as PPPoE:
+      // only when ports were chosen, because inventing a bridge unasked can
+      // swallow the uplink and take the site off the internet.
+      const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
+      if (lanPorts?.length) {
+        const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+        const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
+        const built = await ros.applyHotspotServer(conn, {
+          bridge: bridge.bridge,
+          network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+        });
+        done.push(built.changed.length
+          ? `hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool} — created ${built.changed.join(', ')}`
+          : `hotspot on ${bridge.bridge} already set up at ${built.gateway}`);
+      } else if (!profiles) {
+        done.push('no hotspot profiles on this router, and no LAN ports chosen to build one on');
+      }
+
+      // The walled garden goes on regardless: it is what lets an unpaid guest
+      // reach M-Pesa, and it applies to a hotspot we inherited just as much as
+      // to one we built.
+      const garden = await ros.applyWalledGarden(conn, hs?.walled_garden ?? []);
+      done.push(garden.allowed
+        ? `walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'} before login`
+        : 'walled garden is empty — guests cannot reach M-Pesa before paying');
     }
 
     await pool.query(

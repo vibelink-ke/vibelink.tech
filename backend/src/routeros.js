@@ -208,6 +208,132 @@ export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
 }
 
 /**
+ * Everything a hotspot needs, on a bridge that already exists.
+ *
+ * Doing this by hand is six screens in Winbox and the usual failure is a working
+ * hotspot that hands out addresses from a pool the DHCP server does not own, so
+ * clients associate and then sit there with no lease.
+ *
+ * Idempotent throughout: each step looks for the managed object by name and
+ * updates it rather than adding a second one. Running it twice on a live site is
+ * a no-op, which matters because the operator's instinct after any doubt is to
+ * press the button again.
+ */
+export async function applyHotspotServer(conn, {
+  bridge = 'bridge-lan',
+  network = '10.5.50.0/24',
+  interimMinutes = 5,
+  dnsName = 'wifi.local',
+} = {}) {
+  const [net, bits] = String(network).split('/');
+  const octets = net.split('.');
+  // .1 is the router, .10-.254 the guests. Anything below .10 is left free for
+  // printers and access points that people give static addresses to.
+  const gateway = `${octets[0]}.${octets[1]}.${octets[2]}.1`;
+  const poolRange = `${octets[0]}.${octets[1]}.${octets[2]}.10-${octets[0]}.${octets[1]}.${octets[2]}.254`;
+  const POOL = 'hotspot-pool';
+  const done = [];
+
+  // The gateway address on the bridge. Without this the hotspot has nothing to
+  // intercept on and the server silently refuses to come up.
+  const addrs = await conn.write('/ip/address/print', []);
+  const existing = addrs.find((a) => a.interface === bridge && String(a.address).startsWith(`${gateway}/`));
+  if (!existing) {
+    await conn.write('/ip/address/add', [
+      `=address=${gateway}/${bits}`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
+    ]);
+    done.push(`address ${gateway}/${bits} on ${bridge}`);
+  }
+
+  const pools = await conn.write('/ip/pool/print', []);
+  const pool = pools.find((p) => p.name === POOL);
+  if (pool) await conn.write('/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
+  else {
+    await conn.write('/ip/pool/add', [`=name=${POOL}`, `=ranges=${poolRange}`]);
+    done.push(`pool ${poolRange}`);
+  }
+
+  const dhcps = await conn.write('/ip/dhcp-server/print', []);
+  const dhcp = dhcps.find((d) => d.interface === bridge);
+  const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
+                      `=lease-time=1h`, `=comment=${MANAGED_COMMENT}`];
+  if (dhcp) await conn.write('/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
+  else {
+    await conn.write('/ip/dhcp-server/add', [`=name=hotspot-dhcp`, ...dhcpFields]);
+    done.push('dhcp server');
+  }
+
+  // The network statement is what actually gives clients a gateway and DNS. A
+  // DHCP server without it leases addresses that cannot route anywhere.
+  const nets = await conn.write('/ip/dhcp-server/network/print', []);
+  const netRow = nets.find((n) => String(n.address) === String(network));
+  const netFields = [`=address=${network}`, `=gateway=${gateway}`, `=dns-server=${gateway}`,
+                     `=comment=${MANAGED_COMMENT}`];
+  if (netRow) await conn.write('/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
+  else {
+    await conn.write('/ip/dhcp-server/network/add', netFields);
+    done.push('dhcp network');
+  }
+
+  const mm = String(interimMinutes).padStart(2, '0');
+  const PROFILE = 'hsprof-billing';
+  const profiles = await conn.write('/ip/hotspot/profile/print', []);
+  const profile = profiles.find((p) => p.name === PROFILE);
+  const profileFields = [
+    `=hotspot-address=${gateway}`,
+    `=dns-name=${dnsName}`,
+    '=use-radius=yes',
+    `=radius-interim-update=00:${mm}:00`,
+    // http-chap needs the login page to do the hashing; plain http-pap is what
+    // actually works against a Cleartext-Password in radcheck, which is what we
+    // store. Offering chap here is how you get a login page that always fails.
+    '=login-by=http-pap',
+  ];
+  if (profile) await conn.write('/ip/hotspot/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
+  else {
+    await conn.write('/ip/hotspot/profile/add', [`=name=${PROFILE}`, ...profileFields]);
+    done.push('hotspot profile');
+  }
+
+  const servers = await conn.write('/ip/hotspot/print', []);
+  const server = servers.find((s) => s.interface === bridge);
+  const serverFields = [`=interface=${bridge}`, `=profile=${PROFILE}`,
+                        `=address-pool=${POOL}`, '=disabled=no'];
+  if (server) await conn.write('/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
+  else {
+    await conn.write('/ip/hotspot/add', [`=name=hotspot-billing`, ...serverFields]);
+    done.push('hotspot server');
+  }
+
+  return { gateway, pool: poolRange, changed: done };
+}
+
+/**
+ * Hosts reachable before anyone logs in.
+ *
+ * Without this a customer with no credit cannot reach M-Pesa to buy any, and the
+ * hotspot is a shop with the door locked from the inside. The billing portal
+ * itself has to be reachable for the same reason.
+ *
+ * Entries we manage carry MANAGED_COMMENT and are replaced wholesale on each
+ * run; anything an operator added by hand is left alone.
+ */
+export async function applyWalledGarden(conn, hosts = []) {
+  const wanted = [...new Set(hosts.map((h) => String(h).trim()).filter(Boolean))];
+
+  const current = await conn.write('/ip/hotspot/walled-garden/print', []);
+  for (const row of current.filter((r) => r.comment === MANAGED_COMMENT)) {
+    await conn.write('/ip/hotspot/walled-garden/remove', [`=.id=${idOf(row)}`]);
+  }
+  for (const host of wanted) {
+    await conn.write('/ip/hotspot/walled-garden/add', [
+      `=dst-host=${host}`, '=action=allow', `=comment=${MANAGED_COMMENT}`,
+    ]);
+  }
+  return { allowed: wanted.length };
+}
+
+/**
  * Physical ports worth offering as LAN members.
  *
  * Excludes the tunnel we arrived on, anything already enslaved to a bridge, and

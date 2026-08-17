@@ -775,6 +775,24 @@ alter table subscribers add column if not exists portal_password_hash text;
 -- weakest link, but it is a real one.
 alter table subscribers add column if not exists portal_password_enc text;
 
+-- ─────────────── hotspot walled garden ───────────────
+-- What a guest can reach before they have paid. Empty means nothing, which turns
+-- the hotspot into a shop locked from the inside: no credit, no way to reach
+-- M-Pesa to buy any. The defaults are Safaricom's endpoints and this platform,
+-- because those are the two things every customer needs on the way to paying.
+alter table hotspot_settings add column if not exists walled_garden text[]
+  not null default array[
+    '*.safaricom.co.ke',
+    'api.safaricom.co.ke',
+    'sandbox.safaricom.co.ke',
+    '*.vibelink.tech'
+  ];
+
+-- The LAN the hotspot serves. Kept per tenant because two sites behind the same
+-- platform must not be told to use the same subnet by default.
+alter table hotspot_settings add column if not exists hotspot_network text
+  not null default '10.5.50.0/24';
+
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
 -- rest of that month free, which needs no special case: billTenants only runs on
