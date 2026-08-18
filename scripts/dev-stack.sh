@@ -189,14 +189,30 @@ start_web() {
   echo "  web on ${WEB_PORT} (log: .dev-stack/web.log)"
 }
 
-stop_node() {
-  for name in api web; do
-    local pidfile="${RUN_DIR}/${name}.pid"
-    [ -f "${pidfile}" ] || continue
-    local pid; pid="$(cat "${pidfile}")"
-    kill "${pid}" >/dev/null 2>&1 && echo "  stopped ${name} (pid ${pid})"
-    rm -f "${pidfile}"
+# Kill whatever is actually listening on a port, by the Windows PID netstat
+# reports — not by the number $! recorded when the process was launched.
+#
+# Under this shell, $! from a backgrounded "nohup ... &" is unreliable: it can
+# name an intermediate wrapper rather than node.exe or esbuild itself, so
+# kill "$pid" succeeds against a process that was never the one holding the
+# port. The API and web startup logged "stopped" while both kept running,
+# still bound to the port the next "up" needed — which is why a "reset" left
+# two vite processes alive on 5173 and 5174 at once.
+#
+# netstat's PID column is a fact rather than a memory of one; killing that is
+# killing the thing that is actually there.
+kill_port() {
+  local port="$1"
+  local pid
+  for pid in $(netstat -ano 2>/dev/null | grep "LISTENING" | grep ":$port " | awk '{print $NF}' | sort -u); do
+    cmd //c "taskkill /PID $pid /F" >/dev/null 2>&1 && echo "  stopped pid ${pid} on port ${port}"
   done
+}
+
+stop_node() {
+  kill_port "${API_PORT}"
+  kill_port "${WEB_PORT}"
+  rm -f "${RUN_DIR}/api.pid" "${RUN_DIR}/web.pid"
 }
 
 case "${1:-up}" in
