@@ -92,13 +92,21 @@ export default function Tariffs() {
   };
 
   const remove = async (p) => {
+    // The server refuses while clients are on it, so this asks first rather
+    // than letting the operator press Delete into a rejection.
     const inUse = subsPerPlan[p.id] ?? 0;
-    if (inUse && !window.confirm(`${inUse} subscriber${inUse === 1 ? '' : 's'} are on ${p.title}. Retire it anyway? They keep their current speed until moved to another plan.`))
+    if (inUse) {
+      store.toast(`${inUse} client${inUse === 1 ? ' is' : 's are'} on ${p.title}. Move them first.`);
       return;
+    }
+    if (!window.confirm(`Delete ${p.title}? This removes it from the database.`)) return;
     try {
-      await api.deletePlan(p.id);
+      const res = await api.deletePlan(p.id);
       store.setCollection('plans', (ps) => ps.filter((x) => x.id !== p.id));
-      store.toast(`${p.title} retired`);
+      // A plan named on an invoice cannot be destroyed without blanking the
+      // plan on a bill already sent, so the server keeps it and says so. Report
+      // that instead of "deleted" — the row is still there.
+      store.toast(res?.kept ? res.message : `${p.title} deleted`);
     } catch (e) {
       store.toast(`Could not delete: ${e.message}`);
     }

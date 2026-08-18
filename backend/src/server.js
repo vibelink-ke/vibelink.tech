@@ -3122,9 +3122,56 @@ app.put('/api/plans/:id', wrap(async (req, res) => {
   res.json(row);
 }));
 
+/**
+ * Delete a plan for real, or say precisely why it cannot go.
+ *
+ * This flipped `active=false` and answered ok. The plan left the list, so it
+ * looked deleted, and the row stayed in the database for ever — which is not
+ * what anybody pressing Delete believes is happening.
+ *
+ * Three things reference a plan, and they are not equal. Customers on it are
+ * the operator's to move, so refuse and say how many. Invoices and vouchers are
+ * records of money: deleting the plan would blank the plan on a bill that was
+ * already sent. That row has to stay, and the honest thing is to say so rather
+ * than either lying about a delete or destroying a receipt.
+ */
 app.delete('/api/plans/:id', wrap(async (req, res) => {
-  await pool.query('update plans set active=false where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
-  res.json({ ok: true });
+  const { rows: [p] } = await pool.query(
+    'select id, title from plans where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!p) return res.status(404).json({ error: 'No such plan' });
+
+  const { rows: [use] } = await pool.query(`
+    select (select count(*) from subscribers where tenant_id=$1 and plan_id=$2)::int subs,
+           (select count(*) from vouchers    where tenant_id=$1 and plan_id=$2)::int vouchers,
+           (select count(*) from invoices    where tenant_id=$1 and plan_id=$2)::int invoices`,
+    [req.tenant.id, p.id]);
+
+  if (use.subs) {
+    return res.status(409).json({
+      error: `${use.subs} client${use.subs === 1 ? ' is' : 's are'} on "${p.title}". Move them to `
+        + 'another plan first, then delete it.',
+    });
+  }
+
+  if (use.invoices || use.vouchers) {
+    // Kept, and said so. Hiding it and reporting success is how the operator
+    // ends up believing the database is smaller than it is.
+    await pool.query('update plans set active=false where tenant_id=$1 and id=$2',
+      [req.tenant.id, p.id]);
+    return res.json({
+      ok: true,
+      kept: true,
+      message: `"${p.title}" is off the list, but the record itself has to stay: it is named on `
+        + `${use.invoices} invoice${use.invoices === 1 ? '' : 's'} and ${use.vouchers} `
+        + `voucher${use.vouchers === 1 ? '' : 's'}. Deleting it would blank the plan on bills `
+        + 'that have already been issued.',
+    });
+  }
+
+  const { rowCount } = await pool.query(
+    'delete from plans where tenant_id=$1 and id=$2', [req.tenant.id, p.id]);
+  if (!rowCount) return res.status(409).json({ error: 'The plan could not be deleted' });
+  res.json({ ok: true, deleted: 1 });
 }));
 
 app.put('/api/tariffs/:id', wrap(async (req, res) => {
@@ -3138,9 +3185,15 @@ app.put('/api/tariffs/:id', wrap(async (req, res) => {
   res.json(t);
 }));
 
+// Deleted, not deactivated. Nothing in the schema references a tariff, so
+// there is no history to protect and no reason to keep a row the operator has
+// asked to be rid of. It used to flip `active=false`, which emptied the screen
+// and left the row behind forever.
 app.delete('/api/tariffs/:id', wrap(async (req, res) => {
-  await pool.query('update tariffs set active=false where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
-  res.json({ ok: true });
+  const { rowCount } = await pool.query(
+    'delete from tariffs where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such tariff' });
+  res.json({ ok: true, deleted: rowCount });
 }));
 
 // ── vouchers (Hotspot -> Vouchers) ────────────────
@@ -3167,18 +3220,48 @@ app.post('/api/vouchers', wrap(async (req, res) => {
   res.json(made);
 }));
 
+/**
+ * Delete vouchers, and the access they carry.
+ *
+ * A voucher's code is a RADIUS username: issuing one writes radcheck and
+ * radreply rows keyed by the code. Deleting only the voucher row left those
+ * behind, so the code still authenticated — the voucher was gone from every
+ * screen and the guest holding it stayed online indefinitely, with nothing in
+ * the UI to explain who they were.
+ *
+ * The codes have to be read before the rows go, because afterwards there is
+ * nothing left to say which credentials belonged to them.
+ */
 app.post('/api/vouchers/delete', wrap(async (req, res) => {
   const { ids = [] } = req.body;
+  const { rows: doomed } = await pool.query(
+    'select code from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
+
   const { rowCount } = await pool.query(
     'delete from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
-  res.json({ deleted: rowCount });
+
+  const revoked = await forgetVoucherAccess(doomed.map((v) => v.code), req.tenant.id);
+  res.json({ deleted: rowCount, revoked });
 }));
 
 app.post('/api/vouchers/purge-expired', wrap(async (req, res) => {
+  const { rows: doomed } = await pool.query(
+    "select code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
   const { rowCount } = await pool.query(
     "delete from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
-  res.json({ deleted: rowCount });
+  const revoked = await forgetVoucherAccess(doomed.map((v) => v.code), req.tenant.id);
+  res.json({ deleted: rowCount, revoked });
 }));
+
+/** Remove the RADIUS rows a set of voucher codes authenticate against. */
+async function forgetVoucherAccess(codes, tenantId) {
+  if (!codes.length) return 0;
+  const { rowCount: check } = await pool.query(
+    'delete from radcheck where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+  await pool.query(
+    'delete from radreply where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+  return check;
+}
 
 // ── staff (Staff & roles) ─────────────────────────
 app.get('/api/staff', wrap(async (req, res) => {
