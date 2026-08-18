@@ -43,12 +43,19 @@
 	handle /webhooks/* {
 		reverse_proxy net:8080
 	}
-	# The captive-portal login page, which the API renders per tenant. Without
-	# this it fell through to the React bundle below, so /hotspot/login.html
-	# returned 715 bytes of index.html — and the router dutifully installed that
-	# as its login page. A React shell with no JS renders a blank white screen,
-	# which is exactly what guests saw.
-	handle /hotspot/* {
+	# The captive-portal endpoints only — named one by one, not /hotspot/*.
+	#
+	# The API renders the login page per tenant, and without a proxy rule it fell
+	# through to the React bundle: /hotspot/login.html returned 715 bytes of
+	# index.html, the router installed that as its login page, and guests got a
+	# blank screen.
+	#
+	# But /hotspot/* is also where the admin UI keeps its own screens, so
+	# proxying the whole prefix sent /hotspot/vouchers to Express, which answered
+	# "Cannot GET". Only these paths belong to the API; everything else under
+	# /hotspot is a page in the app.
+	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/*
+	handle @captive {
 		reverse_proxy net:8080
 	}
 
