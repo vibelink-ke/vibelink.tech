@@ -2928,23 +2928,31 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
  * The account number is allocated here rather than in the browser because it has
  * to be unique within the tenant, and only the database knows what is taken.
  */
-app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
-  const digits = (n) => {
-    const lo = 10 ** (n - 1);
-    return String(lo + crypto.randomInt(0, 9 * lo));
-  };
+const digits = (n) => {
+  const lo = 10 ** (n - 1);
+  return String(lo + crypto.randomInt(0, 9 * lo));
+};
 
-  let account = null;
-  for (let attempt = 0; attempt < 40 && !account; attempt++) {
+/**
+ * A free 5-digit account number, allocated once here so the uniqueness check
+ * and the shape of the number are never duplicated — or skipped — anywhere
+ * else that needs one.
+ */
+async function allocateAccountCode(tenantId) {
+  for (let attempt = 0; attempt < 40; attempt++) {
     const candidate = digits(5);
     const { rowCount } = await pool.query(
-      'select 1 from subscribers where tenant_id=$1 and account_code=$2', [req.tenant.id, candidate]);
-    if (!rowCount) account = candidate;
+      'select 1 from subscribers where tenant_id=$1 and account_code=$2', [tenantId, candidate]);
+    if (!rowCount) return candidate;
   }
-  // 90,000 possibilities: only an operator with most of them in use gets here,
-  // and silently handing back a duplicate would fail on insert anyway.
-  if (!account) return res.status(409).json({ error: 'Could not find a free 5-digit account number.' });
+  // 90,000 possibilities: only a tenant with most of them already in use gets
+  // here, and returning a duplicate would fail on insert anyway.
+  return null;
+}
 
+app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
+  const account = await allocateAccountCode(req.tenant.id);
+  if (!account) return res.status(409).json({ error: 'Could not find a free 5-digit account number.' });
   res.json({ account, password: digits(7) });
 }));
 
@@ -2977,7 +2985,24 @@ app.post('/api/subscribers', wrap(async (req, res) => {
    * the other quietly expires.
    */
   const label = String(lineLabel ?? '').trim() || null;
-  const account = accountCode ?? phone;
+
+  /**
+   * Fell back to the phone number once, silently, whenever the operator
+   * saved without pressing Generate — the account number field has no
+   * required attribute, and its placeholder text looks identical to a real
+   * value at a glance. That put a 10-digit phone number where the paybill
+   * account is meant to be a 5-digit code short enough to read aloud, and
+   * everything downstream that assumes that shape — the similarity match in
+   * payments/apply.js, the account-collision reasoning in schema.sql — was
+   * built on an invariant the API never actually enforced.
+   *
+   * A syntactically valid submission is trusted (an operator correcting or
+   * choosing their own number is not this bug); anything else, including no
+   * value at all, gets a real allocated code instead of the raw phone number.
+   */
+  const submitted = String(accountCode ?? '').trim();
+  const account = /^\d{4,6}$/.test(submitted) ? submitted : await allocateAccountCode(req.tenant.id);
+  if (!account) return res.status(409).json({ error: 'Could not find a free account number.' });
 
   /**
    * Several lines under one account.

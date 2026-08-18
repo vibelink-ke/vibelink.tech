@@ -86,6 +86,22 @@ export default function AddClient() {
   const [busy, setBusy] = useState(false);
   const pppoePlans = (store.plans ?? []).filter((p) => p.service === 'pppoe');
 
+  /**
+   * A real account number from the moment the form opens, not just its
+   * placeholder.
+   *
+   * The account field showed "48213" as grey placeholder text identical in
+   * style to a real generated value, and nothing required pressing Generate
+   * before Save. Saving with the field still empty put the phone number where
+   * a 5-digit paybill account belongs — the server now refuses that shape too,
+   * but the honest fix is that there is always a real number in the field, so
+   * placeholder text is never mistaken for one.
+   */
+  useEffect(() => {
+    genCredentials();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Free addresses for the chosen router, refreshed whenever it changes.
   const [freeIps, setFreeIps] = useState({ addresses: [], pools: [], loading: false });
   useEffect(() => {
