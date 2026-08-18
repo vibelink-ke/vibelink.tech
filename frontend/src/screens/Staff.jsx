@@ -143,11 +143,30 @@ export default function Staff() {
                 key: 'act',
                 label: '',
                 align: 'right',
-                render: (s) => (
-                  <span onClick={() => removeStaff(s)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-                    Remove
-                  </span>
-                ),
+                render: (s) => {
+                  /*
+                   * An owner login is not another member of staff's to remove
+                   * — the server refuses it too, but showing an active-looking
+                   * link that always fails is its own small trap. Only the
+                   * platform owner sees a working Remove here; anyone else sees
+                   * why it is not theirs to press.
+                   */
+                  if (s.role === 'owner' && !store.isPlatformOwner) {
+                    return (
+                      <span
+                        title="Only the platform owner can remove an owner login"
+                        style={{ color: color.muted, fontSize: 12.5 }}
+                      >
+                        Owner
+                      </span>
+                    );
+                  }
+                  return (
+                    <span onClick={() => removeStaff(s)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                      Remove
+                    </span>
+                  );
+                },
               },
             ]}
           />

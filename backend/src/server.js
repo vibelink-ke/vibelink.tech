@@ -3674,6 +3674,26 @@ app.delete('/api/staff/:id', wrap(async (req, res) => {
     return res.status(409).json({ error: 'You cannot delete your own login. Ask a colleague to do it.' });
   }
 
+  const { rows: [target] } = await pool.query(
+    'select role from staff where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!target) return res.status(404).json({ error: 'No such member of staff' });
+
+  /**
+   * The owner login is not another member of staff's to remove.
+   *
+   * Every other role can be deleted by an owner running their own team, but an
+   * owner account is the tenant's root of access — the one login the platform
+   * relies on to reach them at all if something goes wrong. Letting any other
+   * staff account delete it, even another owner, turns one compromised or
+   * disgruntled login into a tenant that has locked itself out. Only the
+   * platform owner, who can also reissue it, may remove one.
+   */
+  if (target.role === 'owner' && !req.session.is_super_admin) {
+    return res.status(403).json({
+      error: 'Only the platform owner can remove an owner login. Contact support if this account needs to go.',
+    });
+  }
+
   const { rowCount } = await pool.query(
     'delete from staff where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No such member of staff' });
