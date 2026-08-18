@@ -511,7 +511,7 @@ export async function applyHotspotServer(conn, {
  * next — and a masquerade rule pointed at the wrong interface silently does
  * nothing.
  */
-export async function wanInterface(conn) {
+export async function wanInterface(conn, ifaceNames = null) {
   const routes = await conn.write('/ip/route/print', ['?dst-address=0.0.0.0/0']);
   const live = routes.find((r) => r.active === 'true' && r['gateway-status']) ?? routes[0];
 
@@ -521,7 +521,12 @@ export async function wanInterface(conn) {
   // "input does not match any value of interface", taking the whole push down
   // at the firewall step. Both candidates are therefore checked against the
   // interfaces the router actually has.
-  const names = new Set((await conn.write('/interface/print', [])).map((i) => i.name));
+  //
+  // ifaceNames lets a caller that already has the list hand it in, rather than
+  // this fetching its own copy — ensureBridge calls this from inside
+  // uplinkPorts, and a second /interface/print over a slow tunnel was cheap to
+  // avoid and not free to pay for twice on every push.
+  const names = ifaceNames ?? new Set((await conn.write('/interface/print', [])).map((i) => i.name));
 
   const status = String(live?.['gateway-status'] ?? '');
   const via = status.includes(' via ') ? status.split(' via ').pop().trim() : null;
@@ -888,13 +893,13 @@ export async function bridges(conn) {
  * names before comparing — the mistake that has caused this class of bug here
  * repeatedly.
  */
-export async function uplinkPorts(conn) {
+export async function uplinkPorts(conn, ifaces = null) {
   const reasons = new Map();
-  const byId = new Map((await conn.write('/interface/print', []))
-    .map((i) => [idOf(i), i.name]));
+  const all = ifaces ?? (await conn.write('/interface/print', []));
+  const byId = new Map(all.map((i) => [idOf(i), i.name]));
   const resolve = (ref) => byId.get(String(ref)) ?? String(ref ?? '');
 
-  const wan = await wanInterface(conn);
+  const wan = await wanInterface(conn, new Set(all.map((i) => i.name)));
   if (wan) reasons.set(wan, 'your internet arrives on it — it carries the default route');
 
   for (const c of await conn.write('/ip/dhcp-client/print', [])) {
@@ -935,13 +940,35 @@ export async function uplinkPorts(conn) {
 }
 
 export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
-  const existing = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
+  /**
+   * One fetch of the interface list and one of the bridge list, not three of
+   * the latter.
+   *
+   * This used to print /interface/bridge three times — once to check the
+   * bridge existed, again after possibly creating it to get its id, a third
+   * time unfiltered to build the id→name table — plus /interface/bridge/port
+   * twice with no write between the two calls, plus /interface/print again
+   * inside uplinkPorts and again inside wanInterface underneath it. On a rural
+   * tunnel where each round trip is a second or more, that was enough on its
+   * own to blow the 20s step budget: the push failed with "bridge: no reply
+   * after 20s" on a router that was answering everything asked of it, just not
+   * fast enough to answer it twelve times.
+   *
+   * ifaces is threaded into uplinkPorts below so it does not fetch its own
+   * copy, and wanInterface inside that receives the same list rather than
+   * asking a third time.
+   */
+  const ifaces = await conn.write('/interface/print', []);
+  const bridges = await conn.write('/interface/bridge/print', []);
+  const existing = bridges.find((b) => b.name === name);
   if (!existing) {
     await cmd(conn, 'create bridge', '/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
+    bridges.push({ '.id': undefined, name });   // placeholder; re-read below only if needed
   }
 
-  // Re-read: we may have just created it, and we need its internal id.
-  const self = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
+  // Re-read only when we just created it — the id from the print above cannot
+  // be known until the add has happened.
+  const self = existing ?? (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
   const selfId = idOf(self);
 
   // A bridge port's `bridge` field comes back as the bridge's internal id
@@ -956,8 +983,7 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
 
   // Resolve ids to names so "already in ether-lan" is readable rather than
   // "already in *11", which tells an operator nothing they can act on.
-  const bridges = await conn.write('/interface/bridge/print', []);
-  const nameById = new Map(bridges.map((b) => [idOf(b), b.name]));
+  const nameById = new Map(bridges.filter((b) => b['.id']).map((b) => [idOf(b), b.name]));
   const label = (ref) => nameById.get(ref) ?? ref;
 
   const members = await conn.write('/interface/bridge/port/print', []);
@@ -976,7 +1002,7 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
    * internet comes in on", which assumes the operator knows which that is — and
    * the router does know, so it should be the one answering.
    */
-  const protectedPorts = await uplinkPorts(conn);
+  const protectedPorts = await uplinkPorts(conn, ifaces);
   const fatal = ports.filter((p) => protectedPorts.has(p));
   if (fatal.length) {
     const list = fatal.map((p) => `${p} (${protectedPorts.get(p)})`).join('; ');
@@ -999,9 +1025,12 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
    *
    * So the bridge is not usable at all while the uplink is in it, and saying so
    * is far better than building on it and losing the site.
+   *
+   * Reuses `members` from above rather than printing again: nothing has been
+   * written to the router between the two checks, so a second read would
+   * answer with the identical rows at the cost of one more round trip.
    */
-  const membersNow = await conn.write('/interface/bridge/port/print', []);
-  const inBridge = membersNow.filter(isOurs).map((m) => m.interface);
+  const inBridge = members.filter(isOurs).map((m) => m.interface);
   const poisoned = inBridge.filter((iface) => protectedPorts.has(iface));
   if (poisoned.length) {
     const list = poisoned.map((iface) => `${iface} (${protectedPorts.get(iface)})`).join('; ');

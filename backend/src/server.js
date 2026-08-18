@@ -1512,7 +1512,13 @@ async function routerLogin(r, body, secrets) {
 function lostConnection(e) {
   const code = String(e?.code ?? e?.errno ?? '');
   if (['SOCKTMOUT', 'ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'ERR_STREAM_WRITE_AFTER_END'].includes(code)) return true;
-  return /socket|closed|timed? ?out|no response/i.test(String(e?.message ?? ''));
+  // "no reply after Ns" is step()'s own deadline firing, not a socket-level
+  // exception — and it was not matched here, so the one case tryStep exists
+  // for (a redial landing mid-command) got zero retries whenever it surfaced
+  // as our timeout instead of a raw ECONNRESET. A command that is still
+  // running when we give up on it is exactly a lost connection as far as the
+  // operator is concerned.
+  return /socket|closed|timed? ?out|no response|no reply/i.test(String(e?.message ?? ''));
 }
 
 async function openRouter(ros, { host, port, login, body }) {
@@ -1809,8 +1815,13 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
       }
     };
 
+    // 40s, not the 20s default. ensureBridge now makes far fewer round trips
+    // than it used to — the uplink-safety checks were re-fetching the same
+    // bridge and port lists two and three times each — but it is still six or
+    // seven queries before anything is written, and a slow rural tunnel can
+    // still make that add up.
     const bridge = await tryStep('bridge', () =>
-      ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
+      ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }), 40000);
     if (bridge.added.length) done.push(`bridged ${bridge.added.join(', ')} into ${bridge.bridge}`);
 
     // RADIUS first: a hotspot server that comes up before the router knows where
@@ -2212,8 +2223,12 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
       if (lanPorts?.length) {
         const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+        // 40s: see the note on the same call in the hotspot push above. This is
+        // the site that actually failed — RADIUS and PPP accounting both landed,
+        // then "bridge: no reply after 20s" on a router that was fine, just slow
+        // to answer the uplink-safety checks this step now makes.
         const bridge = await tryStep('bridge', () =>
-          ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
+          ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }), 40000);
         done.push(bridge.added.length
           ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
           : `${bridge.bridge} already had those ports`);
