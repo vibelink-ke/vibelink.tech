@@ -3736,11 +3736,37 @@ app.put('/api/payment-methods/:provider', wrap(async (req, res) => {
 }));
 
 // ── OVPN clients (Routers screen) ─────────────────
+/**
+ * Tunnel credentials, and whether each one is carrying a router right now.
+ *
+ * "In use by" was worked out by matching the credential's address against the
+ * NAS address of a router row, so a credential the app had not been told about
+ * was labelled "no router — safe to revoke". That label was wrong in the one
+ * case where it matters: a router dialling in on that very credential, right
+ * then, whose row in the app happens to point at a different address. Pressing
+ * Revoke there cuts the live tunnel and the router cannot be reached to fix it.
+ *
+ * The OpenVPN status file says which addresses are actually connected. That is
+ * the fact, and it beats an inference drawn from a row someone typed.
+ */
 app.get('/api/ovpn-clients', wrap(async (req, res) => {
+  const { liveTunnels } = await import('./tunnel.js');
   const { rows } = await pool.query(
     'select id, username, assigned_ip, connected_at, created_at from ovpn_clients where tenant_id=$1 order by username',
     [req.tenant.id]);
-  res.json(rows);
+
+  let connected = new Set();
+  try {
+    connected = new Set((await liveTunnels()).map((t) => t.address));
+  } catch {
+    // No status file yet, or unreadable. Better to show the list without the
+    // live column than to fail the whole screen over a diagnostic.
+  }
+
+  res.json(rows.map((r) => ({
+    ...r,
+    connectedNow: connected.has(String(r.assigned_ip).split('/')[0]),
+  })));
 }));
 
 // ── SMS history and bulk send (Messaging screen) ──

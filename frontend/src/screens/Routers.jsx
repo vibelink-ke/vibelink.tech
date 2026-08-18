@@ -447,6 +447,17 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
    * router clears its own, but never these — nothing links them to a router.
    */
   const revokeTunnel = async (c) => {
+    // The last line of defence. The label already says it, but Revoke is one
+    // click and the consequence is a router nobody can reach.
+    if (c.connectedNow && !window.confirm(
+      `${c.username} is carrying a live tunnel on ${String(c.assigned_ip).split('/')[0]} right now.
+
+Revoking it disconnects that router, and it cannot be reconfigured remotely
+afterwards — somebody has to go to the site with the new script.
+
+Revoke anyway?`
+    )) return;
+
     // Said fully, because revoking alone fixes nothing and makes things worse
     // until the second half is done: the router keeps retrying the dead
     // credential every few seconds and stays off the tunnel meanwhile.
@@ -527,9 +538,27 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                 label: 'In use by',
                 render: (c) => {
                   const owner = routers.find((r) => String(r.host).split('/')[0] === String(c.assigned_ip).split('/')[0]);
-                  return owner
-                    ? owner.name
-                    : <span style={{ color: color.muted }}>no router — safe to revoke</span>;
+                  if (owner) return owner.name;
+                  /*
+                   * A credential with no matching router row is not
+                   * automatically spare. The server checks the OpenVPN status
+                   * file, and if a router is dialled in on this one right now,
+                   * revoking it cuts that tunnel — after which the router
+                   * cannot be reached to put it right.
+                   *
+                   * That is also the shape of the mismatch itself: a router
+                   * connected on one address while its row in the app points
+                   * at another. Saying so here is the whole diagnosis.
+                   */
+                  if (c.connectedNow) {
+                    return (
+                      <span style={{ color: color.rust, fontWeight: 600 }}>
+                        a router is connected on this now — do not revoke; point a router row at{' '}
+                        <span style={{ fontFamily: font.mono }}>{String(c.assigned_ip).split('/')[0]}</span>
+                      </span>
+                    );
+                  }
+                  return <span style={{ color: color.muted }}>no router — safe to revoke</span>;
                 },
               },
               {
