@@ -763,6 +763,10 @@ export async function pushHotspotPage(conn, { url, bridge }) {
  */
 export async function lanCandidates(conn) {
   const all = await conn.write('/interface/print', []);
+  // So the picker can say which port must not be ticked, instead of asking the
+  // operator to know. ensureBridge refuses these outright; this is the warning
+  // that arrives before the mistake rather than after it.
+  const uplinks = await uplinkPorts(conn);
 
   // Which bridge each port is already in, resolved to a name. RouterOS 7 reports
   // the bridge as an internal id here too, and "in *11" means nothing to the
@@ -783,6 +787,7 @@ export async function lanCandidates(conn) {
       running: i.running === 'true',
       comment: i.comment ?? null,
       bridge: bridgeOf.get(i.name) ?? null,
+      uplink: uplinks.get(i.name) ?? null,
     }));
 }
 
@@ -864,6 +869,43 @@ export async function bridges(conn) {
  * Ports already in another bridge are left alone rather than moved: taking a port
  * out from under an existing configuration is how you cut off a working site.
  */
+/**
+ * The ports the router's own connection depends on.
+ *
+ * Enslaving one of these to a bridge is the single most destructive thing this
+ * code can do. The port stops carrying its own IP the moment it becomes a
+ * bridge member, so the uplink dies, the tunnel dies with it, and the command
+ * that did it never gets an answer — the push reports a timeout at the bridge
+ * step and the router is off the air. No later push can undo it, because there
+ * is nothing left to push through: it is a drive to the site.
+ *
+ * Two signals, both read from the router rather than assumed. The default route
+ * says where the internet actually is. A DHCP client says the port is being
+ * given an address by an upstream network, which is the usual arrangement on a
+ * board whose WAN is not the one the manual suggests.
+ *
+ * Interfaces come back as internal ids in these menus, so they are resolved to
+ * names before comparing — the mistake that has caused this class of bug here
+ * repeatedly.
+ */
+export async function uplinkPorts(conn) {
+  const reasons = new Map();
+  const byId = new Map((await conn.write('/interface/print', []))
+    .map((i) => [idOf(i), i.name]));
+  const resolve = (ref) => byId.get(String(ref)) ?? String(ref ?? '');
+
+  const wan = await wanInterface(conn);
+  if (wan) reasons.set(wan, 'your internet arrives on it — it carries the default route');
+
+  for (const c of await conn.write('/ip/dhcp-client/print', [])) {
+    const name = resolve(c.interface);
+    if (name && !reasons.has(name)) {
+      reasons.set(name, 'it takes its address from an upstream network (it has a DHCP client)');
+    }
+  }
+  return reasons;
+}
+
 export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
   const existing = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
   if (!existing) {
@@ -894,6 +936,27 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
   const already = new Set(members.filter(isOurs).map((m) => m.interface));
   const elsewhere = new Map(
     members.filter((m) => !isOurs(m)).map((m) => [m.interface, label(m.bridge)]));
+
+  /**
+   * Refuse the uplink before touching anything.
+   *
+   * Checked up front rather than per port: half a bridge and a router off the
+   * air is worse than no bridge at all, and the operator can untick one box far
+   * more easily than they can drive to the site.
+   *
+   * A warning on the screen was not enough. It said "do not tick the port your
+   * internet comes in on", which assumes the operator knows which that is — and
+   * the router does know, so it should be the one answering.
+   */
+  const protectedPorts = await uplinkPorts(conn);
+  const fatal = ports.filter((p) => protectedPorts.has(p));
+  if (fatal.length) {
+    const list = fatal.map((p) => `${p} (${protectedPorts.get(p)})`).join('; ');
+    throw new Error(
+      `Refusing to bridge ${list}. Adding that to ${name} would take this router off the `
+      + 'network the moment it applied, and it could only be recovered on site. Untick it and '
+      + 'choose the ports your customers are on.');
+  }
 
   const added = [];
   const skipped = [];

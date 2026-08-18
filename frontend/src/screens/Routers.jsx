@@ -1098,9 +1098,21 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                   </span>
                 )}
                 {plan.lan.map((i) => (
-                  <label key={i.name} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                  <label
+                    key={i.name}
+                    title={i.uplink ? `Cannot be bridged: ${i.uplink}` : undefined}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, fontSize: 13,
+                      // The uplink is not a choice to be made carefully, it is a
+                      // choice that must not be available. The router told us
+                      // which port it is; the server refuses it too.
+                      opacity: i.uplink ? 0.55 : 1,
+                      cursor: i.uplink ? 'not-allowed' : 'pointer',
+                    }}
+                  >
                     <input
                       type="checkbox"
+                      disabled={!!i.uplink}
                       checked={plan.selected.includes(i.name)}
                       onChange={(e) =>
                         setPlan((s) => ({
@@ -1119,6 +1131,11 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                           a hotspot being built on a bridge believed to be empty. */}
                       {i.bridge ? ` · in ${i.bridge}` : ''}
                     </span>
+                    {i.uplink && (
+                      <span style={{ color: color.rust, fontSize: 12, fontWeight: 600 }}>
+                        · your internet — cannot be bridged
+                      </span>
+                    )}
                   </label>
                 ))}
               </div>
