@@ -33,3 +33,4 @@ infra/wireguard/
 # OS/editor artifacts
 Thumbs.db
 .vscode/
+.dev-stack/

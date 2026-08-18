@@ -547,6 +547,31 @@ create table if not exists radreply (
 );
 create index if not exists radreply_username on radreply (username);
 
+/*
+ * tenant_id belongs with the tables, not 500 lines further down.
+ *
+ * These columns were added late in the file, next to the backfill that
+ * explains them — which is fine for a database that already exists, and
+ * impossible for one that does not: statements above that point insert into
+ * radreply (tenant_id, ...), so applying this schema to an empty database
+ * failed with "column tenant_id of relation radreply does not exist". Every
+ * install since has worked only because the column was already there.
+ *
+ * The reasoning is unchanged and still recorded with the backfill below: the
+ * lookup would otherwise be by username alone across every tenant, and two
+ * ISPs numbering their customers from 10001 would share credentials.
+ */
+alter table radcheck add column if not exists tenant_id uuid references tenants on delete cascade;
+alter table radreply add column if not exists tenant_id uuid references tenants on delete cascade;
+
+-- A username is only unique within a tenant now, not across the platform.
+alter table radcheck drop constraint if exists radcheck_username_attribute_key;
+alter table radreply drop constraint if exists radreply_username_attribute_key;
+create unique index if not exists radcheck_tenant_user_attr
+  on radcheck (tenant_id, username, attribute);
+create unique index if not exists radreply_tenant_user_attr
+  on radreply (tenant_id, username, attribute);
+
 -- ─────────────── FreeRADIUS accounting and clients ───────────────
 -- rlm_sql writes sessions here. The app's own `sessions` table is kept in step by
 -- the trigger below, so fair-use usage counts real traffic.
@@ -1062,8 +1087,8 @@ alter table sessions add constraint sessions_subscriber_id_fkey
 -- Scoping by tenant rather than by router is also what makes roaming work: a
 -- customer who moves from one of their ISP's towers to another authenticates
 -- normally, while a customer of a different ISP never does.
-alter table radcheck add column if not exists tenant_id uuid references tenants on delete cascade;
-alter table radreply add column if not exists tenant_id uuid references tenants on delete cascade;
+-- The columns themselves are added with the tables, several hundred lines
+-- above, because statements between here and there already write to them.
 create index if not exists radcheck_tenant_user on radcheck (tenant_id, username);
 create index if not exists radreply_tenant_user on radreply (tenant_id, username);
 
@@ -1080,13 +1105,8 @@ update radcheck rc set tenant_id = v.tenant_id
 update radreply rr set tenant_id = v.tenant_id
   from vouchers v where v.code = rr.username and rr.tenant_id is null;
 
--- A username is only unique within a tenant now, not across the platform.
-alter table radcheck drop constraint if exists radcheck_username_attribute_key;
-alter table radreply drop constraint if exists radreply_username_attribute_key;
-create unique index if not exists radcheck_tenant_user_attr
-  on radcheck (tenant_id, username, attribute);
-create unique index if not exists radreply_tenant_user_attr
-  on radreply (tenant_id, username, attribute);
+-- The uniqueness rule moved up with the columns: statements above depend on
+-- it, since they upsert on (tenant_id, username, attribute).
 
 -- ─────────────── tenant billing reference ───────────────
 -- A short, stable, human-readable handle for each tenant, for reconciling
