@@ -116,6 +116,32 @@ async function cmd(conn, label, path, args = []) {
   try {
     return await conn.write(path, args);
   } catch (e) {
+    /**
+     * Some menus have no `comment` property, and which ones varies by RouterOS
+     * version and by board. We stamp MANAGED_COMMENT on everything we create so
+     * an operator can see what is ours, but on those menus the router answers
+     * "unknown parameter comment" and the whole push fails — a hotspot that is
+     * otherwise entirely configurable is reported as broken over a label.
+     *
+     * The label is a nicety; the configuration is the point. So drop it and run
+     * the command again.
+     *
+     * The cost is that rows created this way cannot later be recognised by their
+     * comment. Every matcher that could be affected also keys on something real
+     * — our own name, the address, the chain — precisely because comments have
+     * never been reliable here.
+     */
+    if (/unknown parameter.*comment/i.test(e.message ?? '')) {
+      const without = args.filter((a) => !String(a).startsWith('=comment='));
+      if (without.length !== args.length) {
+        try {
+          return await conn.write(path, without);
+        } catch (retry) {
+          retry.step = retry.step ?? `${label} (${path} ${without.join(' ')})`;
+          throw retry;
+        }
+      }
+    }
     e.step = e.step ?? `${label} (${path} ${args.join(' ')})`;
     throw e;
   }
@@ -135,7 +161,7 @@ const idOf = (row) => row?.['.id'];
 export async function ensureServiceUser(conn, { user = SERVICE_USER, password }) {
   const existing = await conn.write('/user/print', [`?name=${user}`]);
   if (existing.length) {
-    await conn.write('/user/set', [
+    await cmd(conn, 'update service user', '/user/set', [
       `=.id=${idOf(existing[0])}`,
       `=password=${password}`,
       '=group=full',
@@ -143,7 +169,7 @@ export async function ensureServiceUser(conn, { user = SERVICE_USER, password })
     ]);
     return { created: false };
   }
-  await conn.write('/user/add', [
+  await cmd(conn, 'create service user', '/user/add', [
     `=name=${user}`,
     `=password=${password}`,
     '=group=full',
@@ -555,10 +581,10 @@ export async function ensureHotspotUserProfile(conn, {
     `=comment=${MANAGED_COMMENT}`,
   ];
   if (found) {
-    await conn.write('/ip/hotspot/user/profile/set', [`=.id=${idOf(found)}`, ...fields]);
+    await cmd(conn, 'hotspot user profile', '/ip/hotspot/user/profile/set', [`=.id=${idOf(found)}`, ...fields]);
     return { profile: name, created: false };
   }
-  await conn.write('/ip/hotspot/user/profile/add', [`=name=${name}`, ...fields]);
+  await cmd(conn, 'hotspot user profile', '/ip/hotspot/user/profile/add', [`=name=${name}`, ...fields]);
   return { profile: name, created: true };
 }
 
@@ -589,7 +615,7 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
     `=comment=${MANAGED_COMMENT}`,
   ];
   if (mine.length) {
-    await conn.write('/ip/firewall/mangle/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    await cmd(conn, 'anti-sharing rule', '/ip/firewall/mangle/set', [`=.id=${idOf(mine[0])}`, ...fields]);
     // Duplicates would each rewrite the TTL; harmless but they accumulate on
     // every run and make the firewall unreadable.
     for (const dupe of mine.slice(1)) {
@@ -781,7 +807,7 @@ export async function bridges(conn) {
 export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
   const existing = (await conn.write('/interface/bridge/print', [`?name=${name}`]))[0];
   if (!existing) {
-    await conn.write('/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
+    await cmd(conn, 'create bridge', '/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
   }
 
   // Re-read: we may have just created it, and we need its internal id.

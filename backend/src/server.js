@@ -1261,6 +1261,44 @@ async function routerLogin(r, body, secrets) {
 }
 
 /**
+ * Open the API session, and do not let a stale service account become a dead end.
+ *
+ * routerLogin prefers the account we minted, which is right almost always. But
+ * the router can lose that account without us knowing — a netinstall, a restore
+ * from an old backup, an operator tidying /user, or a re-onboard after Revoke.
+ * From then on every push logs in with a password nobody accepts, and because
+ * stored credentials exist the operator is never asked for admin ones again.
+ * The screen says "the router rejected those credentials" forever, with no
+ * button that leads anywhere.
+ *
+ * So when the stored login is refused: use the admin credentials from this
+ * request if they were sent, and otherwise ask for them. The account is minted
+ * again from there, which is the same path a new router takes.
+ */
+async function openRouter(ros, { host, port, login, body }) {
+  try {
+    return { conn: await ros.connect({ host, port, user: login.user, password: login.password }), login };
+  } catch (e) {
+    const cantLogin = String(e?.code ?? e?.errno ?? '') === 'CANTLOGIN';
+    if (!cantLogin || !login.stored) throw e;
+
+    const user = String(body?.username ?? '').trim();
+    if (!user) {
+      const err = new Error(
+        `The ${login.user} account no longer works on this router — it was probably reset or `
+        + 'restored. Enter the router’s admin username and password once and it will be created again.');
+      err.needsAdmin = true;
+      throw err;
+    }
+    const fallback = { user, password: String(body?.password ?? ''), stored: false };
+    return {
+      conn: await ros.connect({ host, port, user: fallback.user, password: fallback.password }),
+      login: fallback,
+    };
+  }
+}
+
+/**
  * The tenant's own standing with the platform: licence validity, and whatever
  * they owe us.
  *
@@ -1801,7 +1839,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
   if (!r) return res.status(404).json({ error: 'No such router' });
 
   const host = String(r.host).split('/')[0];
-  const login = await routerLogin(r, req.body, secrets);
+  let login = await routerLogin(r, req.body, secrets);
   if (!login)
     return res.status(428).json({
       error: 'Enter the router’s admin username and password once. A dedicated account is created from it and used for every push after that.',
@@ -1811,8 +1849,10 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
   const done = [];
   let conn;
   try {
-    conn = await step('connect', () =>
-      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    // `login` is reassigned when the stored account turns out to be gone, so
+    // the mint step below sees that we arrived on admin credentials.
+    ({ conn, login } = await step('connect', () =>
+      openRouter(ros, { host, port: r.api_port ?? 8728, login, body: req.body })));
 
     const info = await step('identify', () => ros.identify(conn));
 
@@ -1971,6 +2011,11 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     console.log('configure push', r.name, host, '→ ok:', done.join('; '));
     res.json({ ok: true, applied: done, ...info });
   } catch (e) {
+    // 428 means "I need something from you", and the screen answers it by
+    // asking for the admin password. Reporting it as a 502 would show the same
+    // dead end this exists to remove.
+    if (e.needsAdmin) return res.status(428).json({ error: e.message, needsAdmin: true, applied: done });
+
     let message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
     if (!conn) {
       const why = await explainUnreachable(req.tenant.id, host);
