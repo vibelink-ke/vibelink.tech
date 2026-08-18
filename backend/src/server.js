@@ -1167,7 +1167,22 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   const nasIp = await nextHostIp(req.tenant.id);
   const token = crypto.randomBytes(6).toString('hex');
   // Name from the address, so it stays unique and stays put if rows are removed.
-  const username = `router-${nasIp.split('.').pop()}`;
+  /**
+   * Unique across the whole platform, not just this tenant.
+   *
+   * The name was router-<last octet>, and ovpn_clients is unique per tenant —
+   * so every tenant's first router was called "router-2". OpenVPN knows only
+   * the username when a client connects, and client-connect.sh looks the
+   * address up by that name alone, so it could return another tenant's
+   * allocation: the router dialled in, got an address from somebody else's
+   * block, and the address shown here never matched the one on the router.
+   *
+   * Each tenant owns a distinct /24, so the block and the host octet together
+   * are unique and still readable — router-3-2 is the second router in
+   * 10.50.3.0/24.
+   */
+  const octets = nasIp.split('.');
+  const username = `router-${octets[2]}-${octets[3]}`;
 
   // Stored hashed; the plaintext below is shown once, in the script, and then gone.
   await pool.query(

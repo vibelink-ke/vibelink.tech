@@ -24,7 +24,8 @@ export PGPASSWORD="${PGPASSWORD:-secret}"
 # SQL on stdin, not -c: psql substitutes :'u' only in input it reads itself.
 ip=$(/usr/bin/psql -h "${PGHOST:-db}" -p "${PGPORT:-5432}" -U "${PGUSER:-billing}" \
        -d "${PGDATABASE:-billing}" -tA -v u="$username" <<'SQL' 2>/dev/null
-select host(assigned_ip) from ovpn_clients where username = :'u' limit 1
+select host(assigned_ip) from ovpn_clients where username = :'u'
+order by created_at desc limit 1
 SQL
 )
 

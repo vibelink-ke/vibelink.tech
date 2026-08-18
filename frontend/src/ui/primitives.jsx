@@ -421,7 +421,17 @@ export function Modal({ open, title, onClose, footer, width = 520, children }) {
   );
 }
 
-export function Drawer({ open, title, onClose, children, width = 420 }) {
+/**
+ * The panel View opens.
+ *
+ * 420px was too narrow for what ended up in it — credentials, location,
+ * coordinates, plan, expiry — so everything wrapped into a column of fragments
+ * and the operator scrolled to read one customer. Wider by default, and a good
+ * share of the window on a large screen, while still stopping short of the full
+ * width: the list behind it is the context for what you are reading, and losing
+ * it entirely turns a glance into navigation.
+ */
+export function Drawer({ open, title, onClose, children, width = 'min(760px, 92vw)' }) {
   if (!open) return null;
   return (
     <div

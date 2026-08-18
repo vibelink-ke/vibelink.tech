@@ -949,6 +949,15 @@ create unique index if not exists subscribers_account_line
 create unique index if not exists subscribers_pppoe_user_unique
   on subscribers (tenant_id, pppoe_user) where pppoe_user is not null;
 
+-- A tunnel username must be unique across the platform, not per tenant.
+--
+-- OpenVPN knows only the username when a router connects, and client-connect.sh
+-- resolves the address from it with no tenant to scope by. With names unique
+-- only per tenant, two tenants both had "router-2" and a router could be pinned
+-- to another tenant's address — which is how the address on the router stopped
+-- matching the one on screen.
+create unique index if not exists ovpn_clients_username_unique on ovpn_clients (username);
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.

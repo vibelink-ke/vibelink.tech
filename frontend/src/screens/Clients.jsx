@@ -239,6 +239,10 @@ export default function Clients() {
       static_ip: editing.static_ip || null,
       plan_id: editing.plan_id || null,
       status: editing.status,
+      // Moving a customer between towers. Their credentials travel with them —
+      // RADIUS is scoped to the tenant, not the router — so this decides which
+      // pool they draw an address from and which tower an engineer is sent to.
+      router_id: editing.router_id || null,
     };
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -705,6 +709,16 @@ export default function Clients() {
             </Field>
             <Field label="Phone">
               <Input value={editing.phone ?? ''} onChange={(e) => setEditing((s) => ({ ...s, phone: e.target.value }))} />
+            </Field>
+            <Field label="Router" hint="Which tower this line is on">
+              <Select
+                value={editing.router_id ?? ''}
+                onChange={(e) => setEditing((v) => ({ ...v, router_id: e.target.value }))}
+                options={[
+                  { value: '', label: 'Not assigned' },
+                  ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name })),
+                ]}
+              />
             </Field>
             <Field label="Static IP">
               <Input

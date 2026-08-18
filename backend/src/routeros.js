@@ -392,9 +392,26 @@ export async function applyHotspotServer(conn, {
 export async function wanInterface(conn) {
   const routes = await conn.write('/ip/route/print', ['?dst-address=0.0.0.0/0']);
   const live = routes.find((r) => r.active === 'true' && r['gateway-status']) ?? routes[0];
-  // gateway-status reads like "41.90.1.1 reachable via ether1".
-  const via = String(live?.['gateway-status'] ?? '').split(' via ').pop()?.trim();
-  return via || String(live?.gateway ?? '').trim() || null;
+
+  // gateway-status reads like "41.90.1.1 reachable via ether1", so the name is
+  // after " via ". On a route with no gateway-status the `gateway` field is an
+  // address, not an interface — and feeding that to out-interface fails with
+  // "input does not match any value of interface", taking the whole push down
+  // at the firewall step. Both candidates are therefore checked against the
+  // interfaces the router actually has.
+  const names = new Set((await conn.write('/interface/print', [])).map((i) => i.name));
+
+  const status = String(live?.['gateway-status'] ?? '');
+  const via = status.includes(' via ') ? status.split(' via ').pop().trim() : null;
+  if (via && names.has(via)) return via;
+
+  const gateway = String(live?.gateway ?? '').trim();
+  if (gateway && names.has(gateway)) return gateway;   // some routes name the interface directly
+
+  // Nothing identifiable. The caller masquerades without out-interface, which
+  // is broader than ideal but gets customers online — naming a wrong interface
+  // achieves nothing and is far harder to spot.
+  return null;
 }
 
 /**
