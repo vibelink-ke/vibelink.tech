@@ -2,6 +2,7 @@ import 'dotenv/config';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import util from 'node:util';
+import dns from 'node:dns';
 import express from 'express';
 import { pool, tenantByHost } from './db.js';
 import { router as daraja } from './payments/daraja.js';
@@ -1284,6 +1285,60 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   // bench the server is just an address on the same LAN.
   const host = String(req.body?.serverHost ?? '').trim() || tunnelHost(req);
 
+  /**
+   * Dial the address, not the name.
+   *
+   * The router's own log is unambiguous about why tunnels kept dropping:
+   *
+   *   billing-ovpn: disconnected <could not resolve name>
+   *   billing-ovpn: terminating... - could not resolve name
+   *
+   * RouterOS re-resolves connect-to on every reconnect, and it treats a failed
+   * lookup as a reason to tear the tunnel down rather than retry. So the tunnel
+   * was only ever as reliable as DNS on the router — and on a mobile or CGNAT
+   * link, that is not reliable at all. Every dropped session, every push that
+   * died mid-command, traces back to it.
+   *
+   * Resolving here removes DNS from the path entirely: the router dials an
+   * address, which cannot fail to resolve.
+   *
+   * The cost is that a router pinned this way does not follow the server to a
+   * new address. That is worth stating rather than hiding — it is why the name
+   * is kept in the script as a comment, and why the fallback below keeps the
+   * hostname when resolution fails here. Moving the server means re-onboarding,
+   * which is a known day of work, against a fleet that will not stay up.
+   */
+  let dialTarget = host;
+  let pinnedNote = '';
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) {
+    try {
+      const { address } = await dns.promises.lookup(host, { family: 4 });
+      /**
+       * Only pin an address a router could actually dial.
+       *
+       * This resolves on the server, and a server's resolver does not always
+       * answer the way the internet does: a hijacking resolver hands back its
+       * own landing page, a split-horizon one hands back a private address,
+       * and a development box resolves the name to loopback. Writing any of
+       * those into the script would point the whole fleet at somewhere that
+       * cannot be reached, which is worse than the DNS problem being fixed —
+       * and it would be baked into every router until someone re-onboarded
+       * them one at a time.
+       *
+       * When the answer is not publicly routable, keep the hostname and let
+       * the router resolve it as before.
+       */
+      const priv = /^(10\.|127\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(address);
+      if (priv) throw new Error(`${host} resolves to ${address} here, which no router can dial`);
+      dialTarget = address;
+      pinnedNote = host;
+    } catch {
+      // Leave the hostname in place. A router that can resolve it still works,
+      // and a script that dials nothing at all would be worse.
+      pinnedNote = '';
+    }
+  }
+
   // RouterOS 6 and 7 spell the cipher differently, and pasting the wrong one
   // fails with a bare "syntax error" pointing at the column, which tells you
   // nothing. v6: aes256. v7: aes256-cbc. Both mean AES-256-CBC, which is what
@@ -1311,10 +1366,21 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
      *
      * `find` matches nothing on a first install, where remove is a no-op.
      */
+    /**
+     * Give the router working DNS if it has none.
+     *
+     * Only when the list is empty, so an operator's own resolvers are left
+     * alone. The tunnel no longer depends on this, but everything else the
+     * router does — fetching the hotspot login page, reaching M-Pesa through
+     * the walled garden — still needs a name to resolve.
+     */
+    ':if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=1.1.1.1,8.8.8.8}',
+    ...(pinnedNote ? [`# ${pinnedNote} resolves to ${dialTarget} — dialling the address directly,`,
+                      '# because a failed DNS lookup makes RouterOS tear the tunnel down.'] : []),
     '/interface ovpn-client remove [find name=billing-ovpn]',
     // One line per command: the backslash continuation this used to emit is
     // fragile when pasted, and it hid which parameter the parser rejected.
-    `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `
+    `/interface ovpn-client add name=billing-ovpn connect-to=${dialTarget} port=1194 `
       + `user=${username} password=${token} certificate=none cipher=${cipher} auth=${authDigest} `
       // Explicit, because a management tunnel must never carry customer traffic
       // even if the server one day pushes a route.
@@ -1331,6 +1397,8 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
     subnet,
     serverIp: SERVER_IP,
     serverHost: host,
+    // What the router will actually dial, so the screen can say so.
+    dialTarget,
     routerosVersion: v6 ? '6' : '7',
     defaultApiPort: 8728,
   });
