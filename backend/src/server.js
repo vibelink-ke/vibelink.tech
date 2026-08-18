@@ -1210,6 +1210,19 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
   const authDigest = (process.env.OVPN_AUTH_DIGEST ?? 'sha1').toLowerCase();
 
   const script = [
+    /**
+     * Remove any tunnel we set up before, then add this one.
+     *
+     * Without the remove, `add` fails on a router that already has a
+     * billing-ovpn interface — "already have interface with such name" — and
+     * RouterOS keeps the old client running with the old username. Revoking a
+     * credential and pasting a fresh script therefore changed nothing: the
+     * router went on dialling in as before, on the old address, and every
+     * attempt to fix the mismatch looked like it had simply failed again.
+     *
+     * `find` matches nothing on a first install, where remove is a no-op.
+     */
+    '/interface ovpn-client remove [find name=billing-ovpn]',
     // One line per command: the backslash continuation this used to emit is
     // fragile when pasted, and it hid which parameter the parser rejected.
     `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `

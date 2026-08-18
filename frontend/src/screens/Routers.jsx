@@ -706,7 +706,7 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               style={{ fontFamily: font.mono, fontSize: 12, background: '#12211d', color: '#eaf3ef', borderColor: '#12211d' }}
             />
             <span style={{ fontSize: 12, color: color.muted }}>
-              The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
+              Paste this even if the router already has a tunnel — the first line removes the old one, so the router reconnects with this credential and this address. Revoking alone does not change anything on the router. The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
               can always reach it. Come back here once it connects.
             </span>
           </div>
