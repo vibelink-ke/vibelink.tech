@@ -1884,18 +1884,22 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         const chosen = poolFromCidr(confPool?.cidr);
         if (chosen) done.push(`using the ${confPool.cidr} pool from Networks`);
 
-        const pppoe = await step('PPPoE server, pool and profile', () =>
+        const pppoe = await step('PPPoE server and profile', () =>
           ros.applyPppoeServer(conn, {
             bridge: bridge.bridge,
-            poolRange: req.body?.poolRange ?? chosen?.range,
             gateway: req.body?.gateway ?? chosen?.gateway,
+            // NAT covers the pool subscribers are given from here.
+            natSubnet: confPool?.cidr ?? null,
           }), 40000);
-        done.push(`PPPoE server listening on ${pppoe.bridge}, handing out ${pppoe.pool}`);
+        done.push(confPool
+          ? `PPPoE server on ${pppoe.bridge}; addresses come from ${confPool.cidr} here, not from the router`
+          : `PPPoE server on ${pppoe.bridge} — no PPPoE pool defined under Networks, so no addresses can be issued`);
 
         // Recorded so RADIUS can refuse a static IP this router cannot serve.
         // Sending one outside the pool makes the router authenticate the
         // subscriber and then drop the session a second later.
-        await pool.query('update routers set pppoe_pool=$2 where id=$1', [r.id, pppoe.nat]);
+        await pool.query('update routers set pppoe_pool=$2 where id=$1',
+          [r.id, confPool?.cidr ?? null]);
       }
     }
     if (r.role === 'both' || r.role === 'hotspot') {
@@ -2390,13 +2394,65 @@ app.get('/api/ip-pools', async (req, res) => {
      from ip_pools p left join routers r on r.id=p.router_id where p.tenant_id=$1`, [req.tenant.id]);
   res.json(rows);
 });
-app.post('/api/ip-pools', async (req, res) => {
+/**
+ * Two pools must never overlap.
+ *
+ * PPPoE addresses are allocated here and hotspot addresses by the router's own
+ * DHCP. If the ranges intersect, both can hand the same address to different
+ * customers, and the symptom is intermittent: two people work fine until they
+ * are online at once, then neither does. Nothing in either subsystem can detect
+ * that afterwards, so it is refused at the point of creation.
+ */
+function poolsOverlap(a, b) {
+  const parse = (cidr) => {
+    const [base, bits] = String(cidr).split('/');
+    const o = String(base).split('.').map(Number);
+    if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    const width = Number(bits);
+    if (!Number.isInteger(width) || width < 0 || width > 32) return null;
+    const int = ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0;
+    const mask = width === 0 ? 0 : (0xffffffff << (32 - width)) >>> 0;
+    const net = (int & mask) >>> 0;
+    return { net, bcast: (net | (~mask >>> 0)) >>> 0 };
+  };
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return false;
+  return x.net <= y.bcast && y.net <= x.bcast;
+}
+
+app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe' } = req.body;
+  if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
+
+  const { rows: existing } = await pool.query(
+    'select name, cidr, service from ip_pools where tenant_id=$1', [req.tenant.id]);
+
+  const clash = existing.find((e) => poolsOverlap(e.cidr, cidr));
+  if (clash) {
+    return res.status(409).json({
+      error: `${cidr} overlaps "${clash.name}" (${clash.cidr}, ${clash.service}). `
+        + 'PPPoE and hotspot must use separate ranges, or the same address can be given '
+        + 'to two customers.',
+    });
+  }
+
+  // Also against the hotspot LAN, which is not an ip_pools row but is handed
+  // out by the router's DHCP all the same.
+  const { rows: [hs] } = await pool.query(
+    'select hotspot_network from hotspot_settings where tenant_id=$1', [req.tenant.id]);
+  if (service === 'pppoe' && hs?.hotspot_network && poolsOverlap(hs.hotspot_network, cidr)) {
+    return res.status(409).json({
+      error: `${cidr} overlaps the hotspot LAN (${hs.hotspot_network}). `
+        + 'Change one of them so PPPoE and hotspot addresses cannot collide.',
+    });
+  }
+
   const { rows: [p] } = await pool.query(
     'insert into ip_pools (tenant_id, name, cidr, router_id, service) values ($1,$2,$3,$4,$5) returning *',
     [req.tenant.id, name, cidr, routerId ?? null, service]);
   res.json(p);
-});
+}));
 
 // ══════════════════════════════════════════════════════════════════════════
 // Everything below backs a screen in the admin UI. The original design shipped

@@ -821,17 +821,31 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
  * Speeds are deliberately absent from the profile: they come from RADIUS per
  * subscriber, and a rate limit set here would override the plan for everyone.
  */
+/**
+ * The PPPoE server, with no address pool of its own.
+ *
+ * Addresses come from here, not from the router: RADIUS sends
+ * Framed-IP-Address with every login, so the system knows which customer holds
+ * which address and can say so on the Clients page. A pool on the router hands
+ * out addresses nothing here has recorded, which is how a customer ends up on
+ * an address the operator cannot look up — and how two routers can hand the
+ * same address to different people.
+ *
+ * The profile therefore sets local-address only. remote-address is deliberately
+ * left empty so the router waits to be told.
+ */
 export async function applyPppoeServer(conn, {
   bridge = 'bridge-lan',
-  poolName = 'vibelink-pppoe',
-  poolRange = '10.100.0.2-10.100.255.254',
   gateway = '10.100.0.1',
   profileName = 'vibelink-pppoe',
   serviceName = 'vibelink',
+  natSubnet = null,
 } = {}) {
-  const pool = (await conn.write('/ip/pool/print', [`?name=${poolName}`]))[0];
-  if (pool) await conn.write('/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
-  else await conn.write('/ip/pool/add', [`=name=${poolName}`, `=ranges=${poolRange}`, `=comment=${MANAGED_COMMENT}`]);
+  // No /ip/pool for PPPoE. Any pool we created on an earlier version is removed,
+  // so the router cannot fall back to handing out addresses of its own.
+  for (const stale of await conn.write('/ip/pool/print', ['?name=vibelink-pppoe'])) {
+    await cmd(conn, 'remove the old PPPoE pool', '/ip/pool/remove', [`=.id=${idOf(stale)}`]);
+  }
 
   // The gateway address has to exist on the bridge or clients get a route to nowhere.
   const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
@@ -843,7 +857,8 @@ export async function applyPppoeServer(conn, {
 
   const profileFields = [
     `=local-address=${gateway}`,
-    `=remote-address=${poolName}`,
+    // Empty on purpose: the address arrives per login in Framed-IP-Address.
+    '=remote-address=',
     '=use-compression=no',
     '=use-encryption=no',
     '=only-one=yes',        // one session per subscriber, so a shared password is obvious
@@ -879,9 +894,11 @@ export async function applyPppoeServer(conn, {
   // runs to 10.100.255.254, so a /24 would have covered the first 253
   // subscribers and left everyone after them without internet — a fault that
   // only appears once a site grows, and looks nothing like a NAT problem.
-  const nat = await applyNat(conn, { subnet: poolRange });
+  // NAT still needs to know the range subscribers will be given, which is the
+  // pool configured under Networks rather than anything on the router.
+  const nat = natSubnet ? await applyNat(conn, { subnet: natSubnet }) : { wan: null };
 
-  return { bridge, pool: poolName, profile: profileName, nat: poolRange, wan: nat.wan };
+  return { bridge, profile: profileName, nat: natSubnet, wan: nat.wan };
 }
 
 /**

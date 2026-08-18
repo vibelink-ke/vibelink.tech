@@ -91,7 +91,19 @@ if (!apply) {
 
 let done = 0;
 let failed = 0;
-for (const r of [...missing, ...mismatch]) {
+/**
+ * Everyone, not only those whose password is wrong.
+ *
+ * The script compared passwords and skipped anything that matched, so it never
+ * refreshed the reply attributes — the rate limit and the address. After the
+ * change that allocates addresses here rather than on the router, a fleet of
+ * correctly-authenticating subscribers still had no Framed-IP-Address and this
+ * reported "synced 0" while nothing worked.
+ *
+ * syncSubscriberCredentials is idempotent, so rewriting a row that was already
+ * right costs a query and changes nothing.
+ */
+for (const r of rows) {
   try {
     // Per subscriber rather than one transaction: one bad row should not undo
     // the rest, and every row written is a customer who can get online again.

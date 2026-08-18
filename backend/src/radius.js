@@ -116,10 +116,8 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
    * host() strips any prefix length: the attribute is a bare address, and
    * "10.0.0.5/32" is discarded by the router without complaint.
    */
-  const { rows: [ip] } = s.static_ip
-    ? await c.query('select host($1::inet) as a', [s.static_ip])
-    : { rows: [{ a: null }] };
-  await upsert('Framed-IP-Address', inPool(ip?.a, s.pppoe_pool) ? ip.a : null);
+  const address = await framedAddress(c, tenantId, subId, s);
+  await upsert('Framed-IP-Address', address);
 
   /**
    * Mikrotik-Group is deliberately NOT sent.
@@ -140,6 +138,73 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
   await upsert('Mikrotik-Group', null);
 
   return true;
+}
+
+/**
+ * The address this line should be given, allocated here rather than by the router.
+ *
+ * The router no longer keeps a PPPoE pool: addresses come from the pool the
+ * operator defined under Networks, handed out one per subscriber in
+ * Framed-IP-Address. That way the system knows who holds which address — it can
+ * be shown on the Clients page and looked up when somebody rings — and two
+ * routers cannot hand the same address to different people.
+ *
+ * An address already assigned to this subscriber is kept. Renumbering a working
+ * line every time its credentials are rewritten would drop the session and
+ * break anything pointed at it.
+ */
+async function framedAddress(c, tenantId, subId, s) {
+  // Whatever they already hold, provided it is still inside the pool.
+  if (s.static_ip) {
+    const { rows: [held] } = await c.query('select host($1::inet) as a', [s.static_ip]);
+    if (inPool(held?.a, s.pppoe_pool)) return held.a;
+  }
+
+  // The tenant's PPPoE pool. Without one there is nothing to allocate from, and
+  // sending no address is correct: the router will refuse a session it cannot
+  // address, which is louder than a silent collision.
+  const { rows: [pool] } = await c.query(
+    `select cidr from ip_pools
+      where tenant_id=$1 and service='pppoe'
+      order by (router_id is not null) desc limit 1`, [tenantId]);
+  if (!pool) return null;
+
+  /**
+   * The lowest address in the pool nobody else holds.
+   *
+   * generate_series over the range, minus what is taken. Skips the first two —
+   * the network address and the gateway — and never returns the broadcast.
+   * Postgres does the set arithmetic because doing it here would mean pulling
+   * every subscriber into memory to place one customer.
+   */
+  const { rows: [free] } = await c.query(
+    `with bounds as (
+       select set_masklen($1::cidr, masklen($1::cidr)) as net,
+              broadcast($1::cidr) as bcast
+     ),
+     candidates as (
+       select (network(b.net) + n)::inet as addr
+         from bounds b,
+              generate_series(2, least(broadcast(b.net) - network(b.net) - 1, 65534)) as n
+     )
+     -- Compared as text, not as inet.
+     --
+     -- network(net) + n carries the pool's prefix, so the candidate is
+     -- 192.168.0.2/16 while the stored address is 192.168.0.2/32 — and inet
+     -- equality includes the prefix length, so the two never matched. Every
+     -- subscriber was handed 192.168.0.2, which is the one failure mode this
+     -- allocation exists to prevent.
+     select host(addr) as a from candidates
+      where host(addr) not in (
+        select host(static_ip) from subscribers
+         where tenant_id=$2 and static_ip is not null and id <> $3)
+      limit 1`, [pool.cidr, tenantId, subId]);
+  if (!free?.a) return null;
+
+  // Recorded on the subscriber, so the same line keeps the same address and the
+  // next allocation can see it is taken.
+  await c.query('update subscribers set static_ip=$2 where id=$1', [subId, free.a]);
+  return free.a;
 }
 
 /**
@@ -165,9 +230,24 @@ function inPool(address, poolRange) {
   const value = toInt(address);
   if (value === null) return false;
 
-  // A pool may list several ranges separated by commas.
+  // Two shapes reach this: a RouterOS range ("10.100.0.2-10.100.255.254") and
+  // a CIDR from the Networks page ("192.168.0.0/16"), since addresses are now
+  // allocated from the latter. Several may be listed, comma separated.
   return String(poolRange).split(',').some((part) => {
-    const [from, to] = part.split('-').map((x) => toInt(x));
+    const piece = part.trim();
+
+    if (piece.includes('/')) {
+      const [base, bits] = piece.split('/');
+      const start = toInt(base);
+      const width = Number(bits);
+      if (start === null || !Number.isInteger(width) || width < 0 || width > 32) return false;
+      const mask = width === 0 ? 0 : (0xffffffff << (32 - width)) >>> 0;
+      const net = (start & mask) >>> 0;
+      const bcast = (net | (~mask >>> 0)) >>> 0;
+      return value >= net && value <= bcast;
+    }
+
+    const [from, to] = piece.split('-').map((x) => toInt(x));
     if (from === null) return false;
     return value >= from && value <= (to ?? from);
   });
