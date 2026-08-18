@@ -304,8 +304,16 @@ export async function applyHotspotServer(conn, {
 
   // The gateway address on the bridge. Without this the hotspot has nothing to
   // intercept on and the server silently refuses to come up.
-  const addrs = await conn.write('/ip/address/print', []);
-  const existing = addrs.find((a) => a.interface === bridge && String(a.address).startsWith(`${gateway}/`));
+  /**
+   * Matched on the address, and asked for by interface rather than compared.
+   *
+   * `interface` comes back as an internal id, so comparing it to "bridge-lan"
+   * never matched and each run would have added the gateway address again —
+   * RouterOS allows duplicate addresses on an interface, so this one fails
+   * quietly rather than loudly, which is worse.
+   */
+  const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
+  const existing = addrs.find((a) => String(a.address).startsWith(`${gateway}/`));
   if (!existing) {
     await cmd(conn, 'gateway address', '/ip/address/add', [
       `=address=${gateway}/${bits}`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
@@ -321,13 +329,27 @@ export async function applyHotspotServer(conn, {
     done.push(`pool ${poolRange}`);
   }
 
-  const dhcps = await conn.write('/ip/dhcp-server/print', []);
-  const dhcp = dhcps.find((d) => d.interface === bridge);
+  /**
+   * Found by the name we give it, not by its interface.
+   *
+   * RouterOS returns a DHCP server's `interface` as an internal id — the same
+   * thing that made bridge ports look like they belonged to a bridge called
+   * "*11". Comparing it to "bridge-lan" never matched, so every re-run decided
+   * there was no server and tried to add a second one: "server with such name
+   * already exists", and a push that had fully succeeded the first time failed
+   * every time after.
+   *
+   * The name is ours and stable, so it is the reliable key. Asking RouterOS to
+   * filter (?name=) rather than filtering here also sidesteps the question of
+   * what shape any other field comes back in.
+   */
+  const DHCP = 'hotspot-dhcp';
+  const dhcp = (await conn.write('/ip/dhcp-server/print', [`?name=${DHCP}`]))[0];
   const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
                       `=lease-time=1h`, `=comment=${MANAGED_COMMENT}`];
   if (dhcp) await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
   else {
-    await cmd(conn, 'DHCP server', '/ip/dhcp-server/add', [`=name=hotspot-dhcp`, ...dhcpFields]);
+    await cmd(conn, 'DHCP server', '/ip/dhcp-server/add', [`=name=${DHCP}`, ...dhcpFields]);
     done.push('dhcp server');
   }
 
@@ -363,13 +385,15 @@ export async function applyHotspotServer(conn, {
     done.push('hotspot profile');
   }
 
-  const servers = await conn.write('/ip/hotspot/print', []);
-  const server = servers.find((s) => s.interface === bridge);
+  // Same reasoning as the DHCP server: matched on our own name, because the
+  // interface comes back as an id and a second add fails on the name clash.
+  const SERVER = 'hotspot-billing';
+  const server = (await conn.write('/ip/hotspot/print', [`?name=${SERVER}`]))[0];
   const serverFields = [`=interface=${bridge}`, `=profile=${PROFILE}`,
                         `=address-pool=${POOL}`, '=disabled=no'];
   if (server) await cmd(conn, 'hotspot server', '/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
   else {
-    await cmd(conn, 'hotspot server', '/ip/hotspot/add', [`=name=hotspot-billing`, ...serverFields]);
+    await cmd(conn, 'hotspot server', '/ip/hotspot/add', [`=name=${SERVER}`, ...serverFields]);
     done.push('hotspot server');
   }
 
@@ -591,8 +615,14 @@ export async function pushHotspotPage(conn, { url, bridge }) {
    * success, and the guest carried on seeing MikroTik's stock page. Ask the
    * profile the server is actually using instead of assuming.
    */
-  const servers = await conn.write('/ip/hotspot/print', []);
-  const server = servers.find((h) => !bridge || h.interface === bridge) ?? servers[0];
+  // Ask RouterOS to filter by interface — comparing the printed value fails,
+  // because it is returned as an id. Falling back to the only hotspot on the
+  // box when the filter finds nothing, which is the common case.
+  const servers = bridge
+    ? [...(await conn.write('/ip/hotspot/print', [`?interface=${bridge}`])),
+       ...(await conn.write('/ip/hotspot/print', []))]
+    : await conn.write('/ip/hotspot/print', []);
+  const server = servers[0];
   let dir = 'hotspot';
   if (server?.profile) {
     const profiles = await conn.write('/ip/hotspot/profile/print', [`?name=${server.profile}`]);
