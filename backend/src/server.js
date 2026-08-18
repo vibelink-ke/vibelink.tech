@@ -774,11 +774,24 @@ app.get('/api/subscribers', async (req, res) => {
            a.acctstarttime              as session_started,
            coalesce(a.acctupdatetime, a.acctstarttime, last.seen) as last_seen
       from subscribers s
-      -- The open session, if there is one.
+      /**
+       * The open session — but only if it is still being talked about.
+       *
+       * A router that loses power, reboots, or has its tunnel cut never sends
+       * Accounting-Stop, so the row stays open forever and the customer reads
+       * as online permanently. That is worse than showing nothing: an operator
+       * chasing an outage sees a screen full of connected customers.
+       *
+       * Interim updates arrive every five minutes, so fifteen is three missed
+       * in a row — long enough not to flicker on one dropped packet, short
+       * enough that a dead session is not still "online" an hour later.
+       */
       left join lateral (
         select framedipaddress, acctstarttime, acctupdatetime
           from radacct
-         where username = s.pppoe_user and acctstoptime is null
+         where username = s.pppoe_user
+           and acctstoptime is null
+           and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
          order by acctstarttime desc limit 1) a on true
       -- Otherwise when they were last seen at all, so "offline since" is
       -- answerable rather than blank.

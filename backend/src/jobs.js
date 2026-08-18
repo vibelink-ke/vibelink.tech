@@ -45,6 +45,7 @@ export function startJobs() {
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
+  cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   // Tenant billing is WHMCS's job now. Vibelink used to raise its own SaaS
   // invoices and chase them; two systems invoicing the same customer is how
@@ -251,6 +252,31 @@ export async function healRouters() {
       if (conn) ros.close(conn);
     }
   }
+}
+
+
+/**
+ * Close sessions the router stopped talking about.
+ *
+ * RADIUS accounting only closes a session when the NAS sends Accounting-Stop.
+ * A router that loses power, reboots, or has its tunnel cut never sends one, so
+ * the row stays open for ever: the customer shows as online, "who is connected"
+ * counts them, and an operator looking at an outage sees a screen full of
+ * healthy customers.
+ *
+ * Interim updates arrive every five minutes. Twenty without one is four missed
+ * in a row — not a dropped packet, a session that is gone. Stopped at the time
+ * of the last update rather than now, so the recorded duration is the truth
+ * rather than however long nobody noticed.
+ */
+async function closeStaleSessions() {
+  const { rowCount } = await pool.query(`
+    update radacct
+       set acctstoptime = coalesce(acctupdatetime, acctstarttime),
+           acctterminatecause = 'Lost-Carrier'
+     where acctstoptime is null
+       and coalesce(acctupdatetime, acctstarttime) < now() - interval '20 minutes'`);
+  if (rowCount) console.log(`closed ${rowCount} stale RADIUS session(s)`);
 }
 
 async function ping(host) {
