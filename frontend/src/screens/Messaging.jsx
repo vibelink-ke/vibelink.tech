@@ -12,6 +12,29 @@ const AUDIENCES = ['All clients', 'By router', 'By package', 'Expiring soon', 'E
 /** Shown until the server's list arrives, so the row is never empty. */
 const FALLBACK_TAGS = ['{name}', '{account}', '{expires}', '{plan}', '{amount}', '{company}'];
 
+/**
+ * One shape for a tag, whatever it arrived as.
+ *
+ * The server sends `{ token, desc }` — the list in sms.js — and this screen was
+ * reading `t.key`, which is undefined for every one of them. `t.key ?? t` then
+ * fell through to the object itself, React was handed `{token, desc}` as a
+ * child, and the whole app went blank with error #31. The strings in
+ * FALLBACK_TAGS are also still accepted, because they are what shows before the
+ * request comes back.
+ *
+ * Normalising here rather than at each use means a future third shape breaks
+ * one function instead of a screen.
+ */
+const asTag = (t) => {
+  if (typeof t === 'string') return { insert: t, label: t, hint: '' };
+  const name = t?.token ?? t?.key ?? '';
+  return {
+    insert: `{${name}}`,
+    label: `{${name}}`,
+    hint: t?.desc ?? t?.describes ?? t?.detail ?? '',
+  };
+};
+
 const TEMPLATES = {
   'Blank message': '',
   Reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
@@ -219,19 +242,19 @@ export default function Messaging() {
             — and a mistyped tag sends the customer a literal {nmae}. */}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 12, color: color.muted }}>Insert:</span>
-          {(tags.length ? tags : FALLBACK_TAGS).map((t) => (
+          {(tags.length ? tags : FALLBACK_TAGS).map(asTag).map((t) => (
             <button
-              key={t.key ?? t}
+              key={t.label}
               type="button"
-              title={t.describes ?? t.detail ?? ''}
-              onClick={() => setSms((v) => ({ ...v, body: `${v.body}${t.key ?? t}` }))}
+              title={t.hint}
+              onClick={() => setSms((v) => ({ ...v, body: `${v.body}${t.insert}` }))}
               style={{
                 font: 'inherit', fontSize: 12, fontFamily: font.mono, cursor: 'pointer',
                 border: `1px solid ${color.line}`, borderRadius: 999,
                 background: color.tileBg, color: color.inkSoft, padding: '3px 9px',
               }}
             >
-              {t.key ?? t}
+              {t.label}
             </button>
           ))}
         </div>
