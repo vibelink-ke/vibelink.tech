@@ -230,7 +230,9 @@ export default function Routers() {
    */
   useEffect(() => {
     if (result?.state !== 'ok') return undefined;
-    const id = setTimeout(() => setResult(null), 4000);
+    // Two and a half seconds: long enough to read "configured" and see the
+    // list, short enough that it does not feel like waiting on the app.
+    const id = setTimeout(() => setResult(null), 2500);
     return () => clearTimeout(id);
   }, [result?.state, result?.router?.id]);
 

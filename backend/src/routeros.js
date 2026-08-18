@@ -151,6 +151,42 @@ async function cmd(conn, label, path, args = []) {
 const idOf = (row) => row?.['.id'];
 
 /**
+ * Is this row already exactly what we are about to write?
+ *
+ * Every push is mostly a re-push — an operator presses Configure again after
+ * changing one thing, or Send again after a failure — and each write is a
+ * round trip over a tunnel to a router on a domestic connection, where the
+ * latency, not the work, is the cost. Skipping the writes that would change
+ * nothing is most of the time a second run takes.
+ *
+ * Deliberately pessimistic. A property missing from the printed row, a value
+ * RouterOS renders differently from the way it accepts it (`disabled=no` comes
+ * back as `false`), an interface returned as an internal id — all of those read
+ * as "different" and the write happens. The only outcome of being wrong here is
+ * a write we did not need; never a change we skipped.
+ */
+function unchanged(row, fields) {
+  if (!row) return false;
+  for (const field of fields) {
+    const s = String(field);
+    if (!s.startsWith('=')) return false;
+    const eq = s.indexOf('=', 1);
+    if (eq < 0) return false;
+    const key = s.slice(1, eq);
+    const value = s.slice(eq + 1);
+    if (key === '.id') continue;
+    // "=!x=" removes x, so the row matches only if x is already absent.
+    if (key.startsWith('!')) {
+      if (String(row[key.slice(1)] ?? '') !== '') return false;
+      continue;
+    }
+    if (!(key in row)) return false;
+    if (String(row[key]) !== value) return false;
+  }
+  return true;
+}
+
+/**
  * Create or refresh our own login.
  *
  * The point of this account is surviving the operator changing their own
@@ -206,7 +242,9 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
   ];
 
   if (mine.length) {
-    await cmd(conn, 'update RADIUS server', '/radius/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    if (!unchanged(mine[0], fields)) {
+      await cmd(conn, 'update RADIUS server', '/radius/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    }
     // Any other entry for this server is debris — an interrupted run, or one
     // added by hand during setup. Leaving it means half the requests get signed
     // with a stale secret and dropped.
@@ -350,8 +388,9 @@ export async function applyHotspotServer(conn, {
     done.push(`address ${gateway}/${bits} on ${bridge}`);
   }
 
-  const pools = await conn.write('/ip/pool/print', []);
-  const pool = pools.find((p) => p.name === POOL);
+  // Filtered by the router rather than printed in full and searched here: on a
+  // box with a long pool list that is a needless transfer over the tunnel.
+  const pool = (await conn.write('/ip/pool/print', [`?name=${POOL}`]))[0];
   if (pool) await cmd(conn, 'address pool', '/ip/pool/set', [`=.id=${idOf(pool)}`, `=ranges=${poolRange}`]);
   else {
     await cmd(conn, 'address pool', '/ip/pool/add', [`=name=${POOL}`, `=ranges=${poolRange}`]);
@@ -376,7 +415,11 @@ export async function applyHotspotServer(conn, {
   const dhcp = (await conn.write('/ip/dhcp-server/print', [`?name=${DHCP}`]))[0];
   const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
                       `=lease-time=1h`, `=comment=${MANAGED_COMMENT}`];
-  if (dhcp) await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
+  if (dhcp) {
+    if (!unchanged(dhcp, dhcpFields)) {
+      await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
+    }
+  }
   else {
     await cmd(conn, 'DHCP server', '/ip/dhcp-server/add', [`=name=${DHCP}`, ...dhcpFields]);
     done.push('dhcp server');
@@ -388,7 +431,11 @@ export async function applyHotspotServer(conn, {
   const netRow = nets.find((n) => String(n.address) === cidr);
   const netFields = [`=address=${cidr}`, `=gateway=${gateway}`, `=dns-server=${gateway}`,
                      `=comment=${MANAGED_COMMENT}`];
-  if (netRow) await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
+  if (netRow) {
+    if (!unchanged(netRow, netFields)) {
+      await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
+    }
+  }
   else {
     await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/add', netFields);
     done.push('dhcp network');
@@ -396,8 +443,7 @@ export async function applyHotspotServer(conn, {
 
   const mm = String(interimMinutes).padStart(2, '0');
   const PROFILE = 'hsprof-billing';
-  const profiles = await conn.write('/ip/hotspot/profile/print', []);
-  const profile = profiles.find((p) => p.name === PROFILE);
+  const profile = (await conn.write('/ip/hotspot/profile/print', [`?name=${PROFILE}`]))[0];
   const profileFields = [
     `=hotspot-address=${gateway}`,
     `=dns-name=${dnsName}`,
@@ -408,7 +454,11 @@ export async function applyHotspotServer(conn, {
     // store. Offering chap here is how you get a login page that always fails.
     '=login-by=http-pap',
   ];
-  if (profile) await cmd(conn, 'hotspot profile', '/ip/hotspot/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
+  if (profile) {
+    if (!unchanged(profile, profileFields)) {
+      await cmd(conn, 'hotspot profile', '/ip/hotspot/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
+    }
+  }
   else {
     await cmd(conn, 'hotspot profile', '/ip/hotspot/profile/add', [`=name=${PROFILE}`, ...profileFields]);
     done.push('hotspot profile');
@@ -420,7 +470,11 @@ export async function applyHotspotServer(conn, {
   const server = (await conn.write('/ip/hotspot/print', [`?name=${SERVER}`]))[0];
   const serverFields = [`=interface=${bridge}`, `=profile=${PROFILE}`,
                         `=address-pool=${POOL}`, '=disabled=no'];
-  if (server) await cmd(conn, 'hotspot server', '/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
+  if (server) {
+    if (!unchanged(server, serverFields)) {
+      await cmd(conn, 'hotspot server', '/ip/hotspot/set', [`=.id=${idOf(server)}`, ...serverFields]);
+    }
+  }
   else {
     await cmd(conn, 'hotspot server', '/ip/hotspot/add', [`=name=${SERVER}`, ...serverFields]);
     done.push('hotspot server');
@@ -516,7 +570,9 @@ export async function applyNat(conn, { subnet, wan = null }) {
   ];
 
   if (same.length) {
-    await cmd(conn, 'NAT rule', '/ip/firewall/nat/set', [`=.id=${idOf(same[0])}`, ...fields]);
+    if (!unchanged(same[0], fields)) {
+      await cmd(conn, 'NAT rule', '/ip/firewall/nat/set', [`=.id=${idOf(same[0])}`, ...fields]);
+    }
     return { created: false, wan: out };
   }
   await cmd(conn, 'NAT rule', '/ip/firewall/nat/add', fields);
@@ -581,7 +637,9 @@ export async function ensureHotspotUserProfile(conn, {
     `=comment=${MANAGED_COMMENT}`,
   ];
   if (found) {
-    await cmd(conn, 'hotspot user profile', '/ip/hotspot/user/profile/set', [`=.id=${idOf(found)}`, ...fields]);
+    if (!unchanged(found, fields)) {
+      await cmd(conn, 'hotspot user profile', '/ip/hotspot/user/profile/set', [`=.id=${idOf(found)}`, ...fields]);
+    }
     return { profile: name, created: false };
   }
   await cmd(conn, 'hotspot user profile', '/ip/hotspot/user/profile/add', [`=name=${name}`, ...fields]);
@@ -615,7 +673,9 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
     `=comment=${MANAGED_COMMENT}`,
   ];
   if (mine.length) {
-    await cmd(conn, 'anti-sharing rule', '/ip/firewall/mangle/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    if (!unchanged(mine[0], fields)) {
+      await cmd(conn, 'anti-sharing rule', '/ip/firewall/mangle/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    }
     // Duplicates would each rewrite the TTL; harmless but they accumulate on
     // every run and make the firewall unreadable.
     for (const dupe of mine.slice(1)) {
@@ -925,8 +985,10 @@ export async function applyPppoeServer(conn, {
   ];
   const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
   if (profile) {
-    await cmd(conn, 'PPP profile', '/ppp/profile/set',
-      [`=.id=${idOf(profile)}`, ...profileFields, '=!remote-address=']);
+    const want = [...profileFields, '=!remote-address='];
+    if (!unchanged(profile, want)) {
+      await cmd(conn, 'PPP profile', '/ppp/profile/set', [`=.id=${idOf(profile)}`, ...want]);
+    }
   } else {
     await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...profileFields]);
   }
@@ -948,8 +1010,10 @@ export async function applyPppoeServer(conn, {
   ];
   const server = (await conn.write('/interface/pppoe-server/server/print', [`?interface=${bridge}`]))[0];
   if (server) {
-    await cmd(conn, 'PPPoE server', '/interface/pppoe-server/server/set',
-      [`=.id=${idOf(server)}`, ...serverFields]);
+    if (!unchanged(server, serverFields)) {
+      await cmd(conn, 'PPPoE server', '/interface/pppoe-server/server/set',
+        [`=.id=${idOf(server)}`, ...serverFields]);
+    }
   } else {
     await cmd(conn, 'PPPoE server', '/interface/pppoe-server/server/add', serverFields);
   }

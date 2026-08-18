@@ -195,7 +195,7 @@ export function StoreProvider({ children }) {
   }, [toast]);
 
   /**
-   * Sign out after three minutes with nobody at the keyboard.
+   * Sign out after six minutes with nobody at the keyboard.
    *
    * This screen is usually open on a shared machine at a shop counter, and it
    * shows every customer's phone number and can cut anyone off. Walking away
@@ -213,8 +213,8 @@ export function StoreProvider({ children }) {
     const arm = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        signOut('Signed out after 3 minutes of inactivity');
-      }, 3 * 60 * 1000);
+        signOut('Signed out after 6 minutes of inactivity');
+      }, 6 * 60 * 1000);
     };
 
     const events = ['mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'];
