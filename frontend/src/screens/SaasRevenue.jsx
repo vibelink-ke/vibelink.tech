@@ -20,6 +20,22 @@ export default function SaasRevenue() {
   const store = useStore();
   const [pricing, setPricing] = useState(DEFAULT_PRICING);
 
+  /**
+   * Above the early return, because hooks cannot be skipped.
+   *
+   * This sat below it. On the first render the session is still resolving, so
+   * isPlatformOwner is false, the component returns early and React counts one
+   * hook. A moment later the session arrives, the guard falls through to the
+   * rest of the screen, and React counts two — "Rendered more hooks than during
+   * the previous render", and the page dies. It failed for exactly the person
+   * the screen is for, every time they opened it.
+   */
+  const tenants = store.tenants ?? [];
+  const rows = useMemo(
+    () => tenants.map((t) => ({ ...t, fee: feeFor(t, pricing) })),
+    [tenants, pricing]
+  );
+
   if (!store.isPlatformOwner) {
     return (
       <Screen title="SaaS revenue">
@@ -30,13 +46,7 @@ export default function SaasRevenue() {
     );
   }
 
-  const tenants = store.tenants ?? [];
   const set = (k) => (e) => setPricing((p) => ({ ...p, [k]: e.target.value }));
-
-  const rows = useMemo(
-    () => tenants.map((t) => ({ ...t, fee: feeFor(t, pricing) })),
-    [tenants, pricing]
-  );
 
   const mrr = rows.reduce((a, r) => a + r.fee, 0);
   const billable = rows.filter((r) => r.status === 'active' || r.status === 'readonly').length;

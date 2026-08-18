@@ -7,7 +7,18 @@ import { api } from '../api/client';
  * loaded from the backend instead of being a literal.
  */
 
-const StoreContext = createContext(null);
+/**
+ * Exported so a harness can supply the whole store directly.
+ *
+ * scripts/check-screens-live.mjs renders every screen against realistic rows,
+ * which is the only way to catch the faults that matter here: a screen reading
+ * a field the API does not send, or handing React an object. Both look perfect
+ * against an empty store, and both have reached production — a blank Hotspot
+ * page and a blank Messaging page.
+ *
+ * The provider below is unchanged and is still the only thing the app uses.
+ */
+export const StoreContext = createContext(null);
 
 /** Collections fetched once on mount, keyed by the name the screens use. */
 const COLLECTIONS = {

@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/check-screens.mjs && vite build",
+    "build": "npm run check && vite build",
     "preview": "vite preview",
-    "check": "node scripts/check-screens.mjs"
+    "check": "node scripts/check-screens.mjs && node scripts/check-contracts.mjs && vite-node scripts/check-screens-live.mjs"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
@@ -17,6 +17,8 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.8"
+    "jsdom": "^30.0.1",
+    "vite": "^5.4.8",
+    "vite-node": "^6.0.0"
   }
 }

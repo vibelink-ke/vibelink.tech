@@ -601,7 +601,10 @@ Revoke anyway?`
       {/* The mismatch that cost days: the router dials in on one address while
           the row says another, every push times out, and it reads as "the
           router is down" rather than "we are calling the wrong number". */}
-      {tunnels.stale.filter((r) => r.suggestion).map((r) => (
+      {/* Optional chaining, because a reply that omits `stale` — an older API
+          behind a half-finished deploy, or an error body — would otherwise take
+          the whole Routers page down rather than hiding one banner. */}
+      {(tunnels.stale ?? []).filter((r) => r.suggestion).map((r) => (
         <div
           key={r.id}
           style={{
