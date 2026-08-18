@@ -53,9 +53,26 @@ const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
 
 export default function App() {
-  const { dark, session, signIn } = useStore();
+  const { dark, session, signIn, reload } = useStore();
   const isMobile = useMediaQuery('(max-width: 900px)');
   const { pathname } = useLocation();
+
+  /**
+   * Fetch again whenever a screen is opened.
+   *
+   * Screens read from one store that was loaded when the app started, so
+   * opening Clients after taking a payment showed the figures as they were
+   * however long ago — correct at the time, wrong now, and indistinguishable
+   * from the two. The periodic refresh closed that to thirty seconds; landing
+   * on a screen closes it to nothing, which is when it matters, because opening
+   * a page is exactly the moment somebody wants to know what it says.
+   *
+   * Quiet, so screens do not flash their skeletons on every navigation, and
+   * keyed on the path so it fires once per screen rather than on every render.
+   */
+  useEffect(() => {
+    if (session) reload({ quiet: true });
+  }, [pathname, session, reload]);
 
   // Browser tab shows the tenant's own company, so someone running two ISPs in
   // two tabs can tell them apart.

@@ -13,7 +13,10 @@ import { color, font, radius } from '../theme/tokens';
  * This page is read once by each visitor and needs no framework of its own.
  */
 
-const PHONE = '0723 295 762';
+// The phone number was removed at the owner's request. Email carries the same
+// "talk to a person" intent without publishing a number that rings one handset.
+const SALES_EMAIL = 'sales@vibelink.co.ke';
+const SUPPORT_EMAIL = 'support@vibelink.co.ke';
 
 const FEATURES = [
   ['M-Pesa that reconciles itself',
@@ -80,11 +83,10 @@ export default function Landing({ onRegister }) {
               subdomain. A sign-in button invites people to try signing in
               somewhere that cannot authenticate them. */}
           <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            {/* A phone number, because most of this market would rather ring
-                somebody than fill in a form — and an ISP buying capacity is
-                making a relationship decision, not a checkout one. */}
-            <a href={`tel:${PHONE.replace(/\s/g, '')}`} style={{ ...ghost, textDecoration: 'none' }}>
-              Call {PHONE}
+            {/* An ISP buying capacity is making a relationship decision, not a
+                checkout one, so there is a way to reach a person here. */}
+            <a href={`mailto:${SALES_EMAIL}`} style={{ ...ghost, textDecoration: 'none' }}>
+              Talk to sales
             </a>
             <button type="button" onClick={onRegister} style={solid}>Register</button>
           </div>
@@ -104,9 +106,9 @@ export default function Landing({ onRegister }) {
           <button type="button" onClick={onRegister} style={{ ...solid, padding: '12px 24px', fontSize: 15 }}>
             Start free
           </button>
-          <a href={`tel:${PHONE.replace(/\s/g, '')}`}
+          <a href={`mailto:${SALES_EMAIL}`}
              style={{ ...ghost, padding: '12px 24px', fontSize: 15, textDecoration: 'none' }}>
-            Call {PHONE}
+            Talk to sales
           </a>
         </div>
         <p style={{ fontSize: 13, color: color.muted, marginTop: 12 }}>
@@ -155,8 +157,7 @@ export default function Landing({ onRegister }) {
           </div>
           <p style={{ textAlign: 'center', marginTop: 18, fontSize: 13.5, color: color.muted }}>
             Talk to us about coverage and pricing:{' '}
-            <a href={`tel:${PHONE.replace(/\s/g, '')}`}>{PHONE}</a>
-            {' · '}<a href="mailto:sales@vibelink.co.ke">sales@vibelink.co.ke</a>
+            <a href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a>
           </p>
         </Section>
       </div>
@@ -195,7 +196,7 @@ export default function Landing({ onRegister }) {
           flexWrap: 'wrap', gap: 10, fontSize: 13, color: color.muted,
         }}>
           <span>© {new Date().getFullYear()} Vibelink</span>
-          <span>Nairobi, Kenya · {PHONE} · support@vibelink.co.ke</span>
+          <span>Nairobi, Kenya · {SUPPORT_EMAIL}</span>
         </Section>
       </footer>
     </div>

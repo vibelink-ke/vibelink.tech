@@ -5,6 +5,7 @@ import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
+import ExpiryCalendar from './clients/ExpiryCalendar';
 import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
 const FILTERS = [
@@ -89,6 +90,9 @@ export default function Clients() {
   const navigate = useNavigate();
   const [filter, setFilter] = useState('all');
   const [checking, setChecking] = useState(false);
+  // 'list' or 'calendar'. The list answers "who is next"; the calendar answers
+  // "what does this week look like".
+  const [view, setView] = useState('list');
   const [selected, setSelected] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -389,6 +393,12 @@ export default function Clients() {
           >
             {checking ? 'Asking routers…' : 'Check who is online'}
           </Button>
+          <Button
+            onClick={() => setView((v) => (v === 'list' ? 'calendar' : 'list'))}
+            title="See when every line runs out, by month"
+          >
+            {view === 'list' ? 'Expiry calendar' : 'Back to list'}
+          </Button>
           <Button onClick={importCsv} title="CSV headers: name, phone, account_code, plan, service, static_ip">
             Bulk import CSV
           </Button>
@@ -398,6 +408,16 @@ export default function Clients() {
         </>
       }
     >
+      {view === 'calendar' && (
+        <div style={{
+          background: '#fff', border: `1px solid ${color.line}`,
+          borderRadius: radius.lg, padding: 18,
+        }}>
+          <ExpiryCalendar clients={clients} onOpen={(c) => { closeCreds(); setDetail(c); }} />
+        </div>
+      )}
+
+      {view === 'list' && (
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {FILTERS.map((f) => {
           const on = f.key === filter;
@@ -421,8 +441,9 @@ export default function Clients() {
           );
         })}
       </div>
+      )}
 
-      {count > 0 && (
+      {view === 'list' && count > 0 && (
         <div
           style={{
             background: '#fff',
@@ -457,6 +478,7 @@ export default function Clients() {
         </div>
       )}
 
+      {view === 'list' && (
       <div style={{ background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 8px' }} className="scroll-x">
         {visible.length === 0 ? (
           <Empty action={<Button variant="primary" onClick={() => navigate('/clients/new')}>+ Add your first client</Button>}>
@@ -610,6 +632,7 @@ export default function Clients() {
           </table>
         )}
       </div>
+      )}
 
       <Drawer open={!!detail} title={detail?.name} onClose={() => { setDetail(null); closeCreds(); }}>
         {detail && (
