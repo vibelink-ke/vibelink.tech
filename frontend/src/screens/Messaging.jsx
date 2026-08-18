@@ -259,6 +259,29 @@ export default function Messaging() {
           ))}
         </div>
 
+        {/* What each one means, on the page rather than in a tooltip nobody
+            hovers. The tags only earn their keep if the operator knows which
+            to reach for, and a hover hint is invisible on a phone. */}
+        {tags.length > 0 && (
+          <details style={{ fontSize: 12.5, color: color.muted }}>
+            <summary style={{ cursor: 'pointer' }}>What each tag means</summary>
+            <div style={{ display: 'grid', gap: 4, marginTop: 8 }}>
+              {tags.map(asTag).map((t) => (
+                <div key={t.label} style={{ display: 'flex', gap: 10 }}>
+                  <span style={{ fontFamily: font.mono, minWidth: 130, color: color.inkSoft }}>{t.label}</span>
+                  <span>{t.hint}</span>
+                </div>
+              ))}
+              <span style={{ marginTop: 6 }}>
+                Each one is replaced with that customer's own value as the message is sent, so
+                one sentence reaches everybody with their own name, account and dates in it. A
+                tag with nothing behind it — no expiry set, no router — comes out empty rather
+                than as braces.
+              </span>
+            </div>
+          </details>
+        )}
+
         {/* Saving the wording, so it is theirs rather than ours. */}
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Button onClick={saveTemplate} disabled={busy}>

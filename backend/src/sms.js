@@ -126,6 +126,26 @@ export const DEFAULTS = {
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 
 /**
+ * Fill the tags in a message an operator wrote.
+ *
+ * Separate from `render`, and used before it, because the two run at different
+ * moments and conflating them is what sent customers the literal text
+ * "{name}{account}{phone}...".
+ *
+ * The custom template is `{body}`, and render makes a single pass: it replaced
+ * {body} with whatever was typed and stopped. Every tag inside that text
+ * survived untouched and went out over the wire exactly as written. The tags
+ * were listed in the composer, insertable by clicking, documented — and never
+ * substituted by anything.
+ *
+ * So the operator's text is expanded here first, against that recipient's own
+ * values, and the finished sentence is what {body} then receives. Doing it in
+ * this order also means a customer whose name happens to contain braces cannot
+ * have it expanded as though it were a tag of ours.
+ */
+export const fill = (text, vars) => render(text ?? '', vars);
+
+/**
  * Every token a template may use, for the UI to list.
  *
  * The point is that one written message reaches each customer with their own

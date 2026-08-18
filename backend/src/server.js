@@ -3780,9 +3780,29 @@ app.get('/api/sms/history', wrap(async (req, res) => {
 app.post('/api/sms/send', wrap(async (req, res) => {
   const { phone, body } = req.body;
   if (!phone || !body?.trim()) return res.status(400).json({ error: 'phone and body are required' });
-  const { send } = await import('./sms.js');
-  await send(req.tenant.id, phone, 'custom', { body });
-  res.json({ ok: true });
+  const sms = await import('./sms.js');
+
+  /**
+   * Tags work here too, when the number belongs to somebody we know.
+   *
+   * A one-off to an arbitrary number can still fill the company details, and
+   * looking the number up means resending a reminder by hand produces the same
+   * message the automatic one would. Unmatched numbers get the org tags filled
+   * and the rest emptied, which is the existing behaviour for a token with no
+   * value — never the literal braces.
+   */
+  const org = await sms.orgVars(req.tenant.id);
+  const { rows: [s] } = await pool.query(
+    `select ${sms.SUBSCRIBER_VARS_SQL}
+       from subscribers s
+       left join plans p on p.id = s.plan_id
+       left join routers r on r.id = s.router_id
+      where s.tenant_id=$1 and (s.phone=$2 or s.phone_alt=$2) limit 1`,
+    [req.tenant.id, phone]);
+
+  const vars = s ? sms.subscriberVars(s, org) : { ...org };
+  await sms.send(req.tenant.id, phone, 'custom', { ...vars, body: sms.fill(body, vars) });
+  res.json({ ok: true, personalised: !!s });
 }));
 
 /** Bulk SMS. Audience is resolved server-side so the browser never sends a phone list. */
@@ -3814,7 +3834,10 @@ app.post('/api/sms/bulk', wrap(async (req, res) => {
   // One lookup for the whole run rather than per recipient.
   const org = await sms.orgVars(req.tenant.id);
   for (const s of rows) {
-    const vars = { ...sms.subscriberVars(s, org), body };
+    // Expanded per recipient — the whole point of the tags is that each person
+    // gets their own name, account and expiry rather than a form letter.
+    const vars = sms.subscriberVars(s, org);
+    vars.body = sms.fill(body, vars);
     for (const n of [...new Set([s.phone, s.phone_alt].filter(Boolean))]) {
       await sms.send(req.tenant.id, n, 'custom', vars).catch(() => {});
     }
