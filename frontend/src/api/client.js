@@ -181,6 +181,7 @@ export const api = {
   routers: () => get('/api/routers'),
   createRouter: (r) => post('/api/routers', r),
   ovpnScript: (opts = {}) => post('/api/routers/ovpn-script', opts),
+  wgPeer: (opts = {}) => post('/api/routers/wg-peer', opts),
   tunnelInfo: () => get('/api/routers/tunnel-info'),
   licence: () => get('/api/licence'),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),

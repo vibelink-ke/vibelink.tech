@@ -73,6 +73,42 @@ export default function Routers() {
     }
   };
 
+  /**
+   * The other tunnel, which this screen has been recommending without offering.
+   *
+   * The subtitle has said "use WireGuard on RouterOS 7" since the beginning and
+   * there was no button for it, so every router went onto OVPN including the
+   * ones that should not have. It matters more than a preference: OpenVPN here
+   * is TCP, single-threaded in RouterOS, and rebuilds a TLS session from scratch
+   * every time the path blinks. WireGuard is in-kernel and stateless — a
+   * changed address or a NAT timeout costs one keepalive rather than a redial,
+   * which is exactly the failure filling the tunnel log.
+   *
+   * The private key is generated on the router's side of the exchange and shown
+   * once. We keep only the public key, so a lost script means a new peer rather
+   * than a recovered one — said plainly in the dialog.
+   */
+  const mintWireguard = async () => {
+    const name = window.prompt('Name this router (for the peer list)');
+    if (!name?.trim()) return;
+    setBusy(true);
+    try {
+      const res = await api.wgPeer({ name: name.trim() });
+      setOvpn({
+        kind: 'wireguard',
+        script: res.script,
+        username: name.trim(),
+        nasIp: res.assignedIp,
+        defaultApiPort: 8728,
+      });
+      setDial((d) => ({ ...d, open: false }));
+    } catch (e) {
+      store.toast(`Could not mint the WireGuard peer: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyScript = async () => {
     try {
       await navigator.clipboard.writeText(ovpn.script);
@@ -86,7 +122,7 @@ export default function Routers() {
     const blob = new Blob([ovpn.script], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${ovpn.username}.rsc`;
+    a.download = `${ovpn.username.replace(/[^\w.-]+/g, '-')}.rsc`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -460,8 +496,10 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
       actions={
         <>
           <Button onClick={() => setForm(blankRouter())}>Add manually</Button>
-          <Button variant="primary" onClick={openDialog}>
-            + Onboard via OVPN
+          <Button onClick={openDialog}>+ Onboard via OVPN</Button>
+          <Button variant="primary" onClick={mintWireguard} disabled={busy}
+                  title="RouterOS 7 only. Survives a changing address far better than OVPN.">
+            + Onboard via WireGuard
           </Button>
         </>
       }
@@ -736,7 +774,9 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
       {/* Step 1 — the generated RouterOS script */}
       <Modal
         open={!!ovpn && !form}
-        title="Paste this into the MikroTik terminal"
+        title={ovpn?.kind === 'wireguard'
+          ? 'Paste this into the MikroTik terminal (WireGuard)'
+          : 'Paste this into the MikroTik terminal'}
         width={640}
         onClose={() => setOvpn(null)}
         footer={
@@ -753,7 +793,8 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', gap: 16, fontSize: 12.5, flexWrap: 'wrap' }}>
               <span>
-                Username <strong style={{ fontFamily: font.mono }}>{ovpn.username}</strong>
+                {ovpn.kind === 'wireguard' ? 'Peer' : 'Username'}{' '}
+                <strong style={{ fontFamily: font.mono }}>{ovpn.username}</strong>
               </span>
               <span>
                 Tunnel IP <strong style={{ fontFamily: font.mono }}>{ovpn.nasIp}</strong>
@@ -766,8 +807,19 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               style={{ fontFamily: font.mono, fontSize: 12, background: '#12211d', color: '#eaf3ef', borderColor: '#12211d' }}
             />
             <span style={{ fontSize: 12, color: color.muted }}>
-              Paste this even if the router already has a tunnel — the first line removes the old one, so the router reconnects with this credential and this address. Revoking alone does not change anything on the router. The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
-              can always reach it. Come back here once it connects.
+              {ovpn.kind === 'wireguard' ? (
+                <>
+                  RouterOS 7 only. The private key in this script is shown once and is not
+                  stored here — if you lose it, make a new peer rather than looking for it.
+                  The router keeps a stable address in your tunnel range, so RADIUS CoA can
+                  always reach it. Come back here once the handshake completes.
+                </>
+              ) : (
+                <>
+                  Paste this even if the router already has a tunnel — the first line removes the old one, so the router reconnects with this credential and this address. Revoking alone does not change anything on the router. The tunnel gives the router a stable address in your own {ovpn.subnet ?? 'tunnel'} range, so CoA
+                  can always reach it. Come back here once it connects.
+                </>
+              )}
             </span>
           </div>
         )}
