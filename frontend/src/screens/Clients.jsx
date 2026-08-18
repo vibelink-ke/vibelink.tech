@@ -88,6 +88,7 @@ export default function Clients() {
   const store = useStore();
   const navigate = useNavigate();
   const [filter, setFilter] = useState('all');
+  const [checking, setChecking] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
@@ -349,12 +350,45 @@ export default function Clients() {
     }
   };
 
+  /**
+   * Ask the routers directly.
+   *
+   * Presence normally comes from RADIUS accounting, which is silent whenever
+   * the tunnel is down or accounting was never enabled — and a customer who is
+   * plainly connected then reads as offline with no way to argue. This asks the
+   * router itself and says what came back, including which sites could not be
+   * reached, because "0 online" means something quite different when half the
+   * routers did not answer.
+   */
+  const checkOnline = async () => {
+    setChecking(true);
+    try {
+      const res = await api.refreshPresence();
+      await store.reload({ quiet: true });
+      const parts = [`${res.online} connected on ${res.asked} router${res.asked === 1 ? '' : 's'}`];
+      if (res.unreachable?.length) parts.push(`could not reach ${res.unreachable.join(', ')}`);
+      if (res.noCredentials) parts.push(`${res.noCredentials} not configured yet`);
+      store.toast(parts.join(' — '));
+    } catch (e) {
+      store.toast(`Could not ask the routers: ${e.message}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   return (
     <Screen
       title="Clients"
       subtitle="PPPoE only — monthly home & business lines. Hotspot pay-as-you-go users live under Hotspot → Vouchers."
       actions={
         <>
+          <Button
+            onClick={checkOnline}
+            disabled={checking}
+            title="Ask each router who is connected, instead of waiting for RADIUS accounting"
+          >
+            {checking ? 'Asking routers…' : 'Check who is online'}
+          </Button>
           <Button onClick={importCsv} title="CSV headers: name, phone, account_code, plan, service, static_ip">
             Bulk import CSV
           </Button>

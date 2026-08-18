@@ -227,4 +227,5 @@ export const api = {
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
   deleteTenant: (id) => del(`/api/tenants/${id}`),
+  refreshPresence: () => post('/api/presence/refresh', {}),
 };

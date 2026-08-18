@@ -1302,3 +1302,36 @@ begin
       using (tenant_id = current_setting('app.tenant_id', true)::uuid)$f$, t);
   end loop;
 end $$;
+
+-- ─────────────── who is connected, according to the router ───────────────
+-- Presence was read from radacct alone, which is right only while RADIUS
+-- accounting is arriving. It stops arriving for reasons that have nothing to do
+-- with the customer: the tunnel drops, the router reboots, accounting was never
+-- enabled because Configure failed. The customer stays connected throughout,
+-- and the screen calls them offline — then closeStaleSessions stamps a stop
+-- time and even "last seen" becomes a fiction.
+--
+-- This is the router's own answer to the same question, filled in on demand by
+-- reading /ppp/active and /ip/hotspot/active. Kept apart from radacct on
+-- purpose: radacct is billing data and must only ever hold what the router
+-- actually accounted for. Nothing here is billed from.
+create table if not exists live_sessions (
+  tenant_id  uuid not null references tenants on delete cascade,
+  router_id  uuid references routers on delete cascade,
+  username   text not null,
+  address    inet,
+  service    text,                       -- pppoe | hotspot
+  seen_at    timestamptz not null default now(),
+  primary key (tenant_id, username)
+);
+create index if not exists live_sessions_seen on live_sessions (seen_at);
+
+alter table live_sessions enable row level security;
+do $$
+begin
+  if not exists (select 1 from pg_policies
+                  where tablename='live_sessions' and policyname='tenant_isolation') then
+    create policy tenant_isolation on live_sessions
+      using (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  end if;
+end $$;

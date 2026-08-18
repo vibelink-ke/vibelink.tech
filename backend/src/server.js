@@ -769,10 +769,13 @@ app.post('/portal/verify-code', async (req, res) => {
 app.get('/api/subscribers', async (req, res) => {
   const { rows } = await pool.query(`
     select s.*,
-           a.framedipaddress            is not null as online,
-           host(a.framedipaddress)      as current_ip,
+           (a.framedipaddress is not null or live.username is not null) as online,
+           -- The router's own answer first when we have a fresh one: if
+           -- accounting is silent, radacct's address is stale by definition.
+           coalesce(host(live.address), host(a.framedipaddress)) as current_ip,
+           live.username is not null    as online_from_router,
            a.acctstarttime              as session_started,
-           coalesce(a.acctupdatetime, a.acctstarttime, last.seen) as last_seen
+           coalesce(a.acctupdatetime, a.acctstarttime, live.seen_at, last.seen) as last_seen
       from subscribers s
       /**
        * The open session — but only if it is still being talked about.
@@ -798,11 +801,97 @@ app.get('/api/subscribers', async (req, res) => {
       left join lateral (
         select max(coalesce(acctstoptime, acctupdatetime)) seen
           from radacct where username = s.pppoe_user) last on true
+      /**
+       * What the router said when it was last asked.
+       *
+       * Five minutes, because this is refreshed on demand rather than pushed:
+       * an answer older than that is a memory, not a reading, and a customer
+       * shown as online on the strength of it is the fault this was added to
+       * fix, only slower.
+       */
+      left join lateral (
+        select username, address, seen_at
+          from live_sessions
+         where tenant_id = s.tenant_id
+           and username = s.pppoe_user
+           and seen_at > now() - interval '5 minutes') live on true
      where s.tenant_id = $1
      order by s.created_at desc
      limit 200`, [req.tenant.id]);
   res.json(rows);
 });
+
+/**
+ * Ask every reachable router who is connected, and record the answers.
+ *
+ * On demand rather than on a timer. Opening an API session to every router on a
+ * schedule is a standing cost on hardware that is often a small home board on a
+ * domestic line, and the question is only interesting when somebody is looking
+ * at the screen.
+ *
+ * Routers are polled together and a failure on one is just that one: a site
+ * whose tunnel is down must not stop the others from being counted, which is
+ * precisely the situation this exists for.
+ */
+app.post('/api/presence/refresh', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: routers } = await pool.query(
+    `select id, name, host, api_port, service_user, service_password_enc
+       from routers where tenant_id=$1`, [req.tenant.id]);
+
+  const reachable = routers.filter((r) => r.service_user && r.service_password_enc);
+  const results = await Promise.allSettled(reachable.map(async (r) => {
+    const password = secrets.decrypt(r.service_password_enc);
+    if (!password) throw new Error('no stored password');
+    const conn = await ros.connect({
+      host: String(r.host).split('/')[0],
+      port: r.api_port ?? 8728,
+      user: r.service_user,
+      password,
+      timeoutSec: 8,
+    });
+    try {
+      return { router: r, sessions: await ros.activeSessions(conn) };
+    } finally {
+      ros.close(conn);
+    }
+  }));
+
+  let seen = 0;
+  const unreachable = [];
+  for (let i = 0; i < results.length; i++) {
+    const r = results[i];
+    if (r.status !== 'fulfilled') {
+      unreachable.push(reachable[i].name);
+      continue;
+    }
+    for (const sess of r.value.sessions) {
+      await pool.query(
+        `insert into live_sessions (tenant_id, router_id, username, address, service, seen_at)
+              values ($1,$2,$3,$4::inet,$5, now())
+         on conflict (tenant_id, username) do update
+            set router_id = excluded.router_id, address = excluded.address,
+                service = excluded.service, seen_at = now()`,
+        [req.tenant.id, r.value.router.id, sess.username, sess.address, sess.service]);
+      seen++;
+    }
+  }
+
+  // Old rows go rather than linger: a stale row here would claim somebody is
+  // online on the strength of a reading taken hours ago.
+  await pool.query(
+    "delete from live_sessions where tenant_id=$1 and seen_at < now() - interval '30 minutes'",
+    [req.tenant.id]);
+
+  res.json({
+    online: seen,
+    asked: reachable.length,
+    unreachable,
+    noCredentials: routers.length - reachable.length,
+  });
+}));
 
 app.get('/api/payments/unmatched', async (req, res) => {
   const { rows } = await pool.query(

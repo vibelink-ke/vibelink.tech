@@ -1033,6 +1033,40 @@ export async function applyPppoeServer(conn, {
 }
 
 /**
+ * Who is connected right now, asked of the router rather than inferred.
+ *
+ * The authoritative answer to "is this customer online". RADIUS accounting is
+ * the usual source and is better when it works — it arrives by itself — but it
+ * is silent whenever the tunnel is down or accounting was never enabled, and
+ * silence there is indistinguishable from everybody being offline.
+ *
+ * Both services, because a router commonly serves both and the operator asked
+ * one question. A missing menu is not an error: a PPPoE-only box has no
+ * /ip/hotspot/active and should still report its PPPoE sessions.
+ */
+export async function activeSessions(conn) {
+  const out = [];
+
+  const read = async (path, service) => {
+    try {
+      return (await conn.write(path, [])).map((row) => ({
+        service,
+        username: String(row.name ?? row.user ?? '').trim(),
+        // PPP calls it address, hotspot calls it address too, but a hotspot row
+        // may carry only a MAC — an entry with no username is no use to us.
+        address: String(row.address ?? '').trim() || null,
+      })).filter((r) => r.username);
+    } catch {
+      return [];
+    }
+  };
+
+  out.push(...await read('/ppp/active/print', 'pppoe'));
+  out.push(...await read('/ip/hotspot/active/print', 'hotspot'));
+  return out;
+}
+
+/**
  * Read back what the router actually believes about RADIUS.
  *
  * Pushing configuration and assuming it took is how the last few days went. This
