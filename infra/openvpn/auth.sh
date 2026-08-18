@@ -53,5 +53,12 @@ SQL
   exit 0
 fi
 
+# Recorded, not just logged. A revoked or mistyped credential makes RouterOS
+# retry for ever, and until this existed the only trace was a line in a
+# container log nobody reads — the router just showed as down with no reason.
+psql_q -q -v u="$username" >/dev/null 2>&1 <<'SQL'
+insert into ovpn_auth_failures (username) values (:'u')
+SQL
+
 echo "openvpn-auth: rejected $username" >&2
 exit 1

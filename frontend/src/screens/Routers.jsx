@@ -383,8 +383,16 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
    * router clears its own, but never these — nothing links them to a router.
    */
   const revokeTunnel = async (c) => {
-    if (!window.confirm(`Revoke ${c.username}? Any router still using it loses the tunnel, and ${c.assigned_ip} is freed.`))
-      return;
+    // Said fully, because revoking alone fixes nothing and makes things worse
+    // until the second half is done: the router keeps retrying the dead
+    // credential every few seconds and stays off the tunnel meanwhile.
+    if (!window.confirm(
+      `Revoke ${c.username}?
+
+`
+      + `The router using it goes offline and keeps retrying every few seconds until you `
+      + `press "+ Onboard via OVPN" and paste the new script into it. ${c.assigned_ip} is freed.`
+    )) return;
     try {
       const res = await api.revokeOvpnClient(c.id);
       store.setCollection('ovpnClients', (cs) => cs.filter((x) => x.id !== c.id));
@@ -472,6 +480,27 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
             ]}
           />
         </Card>
+      )}
+
+      {/* A router hammering the tunnel with a credential we no longer have.
+          Revoking does not stop it trying — RouterOS retries every few seconds
+          for ever — so without this the fleet reads as down and nothing says
+          why. */}
+      {tunnels.rejected?.length > 0 && (
+        <div style={{
+          fontSize: 13, color: color.rust, background: '#fdece5',
+          border: '1px solid #f3c7b6', borderRadius: radius.md,
+          padding: '10px 13px', marginBottom: 12,
+        }}>
+          {tunnels.rejected.map((r) => (
+            <div key={r.username}>
+              <strong>{r.username}</strong> is trying to connect with a credential that no longer
+              exists — {r.tries} attempt{r.tries === 1 ? '' : 's'} in the last ten minutes. Press{' '}
+              <strong>+ Onboard via OVPN</strong> and paste the new script into that router; the
+              first line removes the old tunnel.
+            </div>
+          ))}
+        </div>
       )}
 
       {/* The mismatch that cost days: the router dials in on one address while

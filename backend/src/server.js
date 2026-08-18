@@ -1375,8 +1375,31 @@ app.get('/api/routers/tunnels', wrap(async (req, res) => {
     .map((t) => ({ ...t, router: byHost.get(t.address) ?? null }));
 
   const live = new Set(tunnels.map((t) => t.address));
+
+  /**
+   * Routers being turned away right now.
+   *
+   * A revoked credential does not stop the router using it — RouterOS retries
+   * every few seconds indefinitely — so the fleet looks down and nothing says
+   * why. Ten minutes is recent enough to mean "happening now" rather than
+   * "happened once last week".
+   *
+   * Matched to this tenant by the username, which carries the tenant's tunnel
+   * block: router-3-2 is in 10.50.3.0/24. A name from before that scheme is
+   * shown to nobody rather than to the wrong tenant.
+   */
+  const { rows: rejected } = await pool.query(
+    `select username, count(*)::int tries, max(at) last_try
+       from ovpn_auth_failures
+      where at > now() - interval '10 minutes'
+      group by username order by last_try desc`);
+  const mineRejected = mine
+    ? rejected.filter((r) => new RegExp(`^router-${mine.split('.')[2]}-`).test(r.username))
+    : [];
+
   res.json({
     tunnels,
+    rejected: mineRejected,
     // A router whose address is not connected, when some other address is. That
     // pairing is what makes it a mismatch rather than simply being offline.
     stale: routers

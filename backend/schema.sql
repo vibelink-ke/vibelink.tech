@@ -958,6 +958,20 @@ create unique index if not exists subscribers_pppoe_user_unique
 -- matching the one on screen.
 create unique index if not exists ovpn_clients_username_unique on ovpn_clients (username);
 
+-- Tunnel logins that were turned away.
+--
+-- A revoked credential does not stop the router using it: RouterOS retries
+-- every few seconds for ever, the log fills with AUTH_FAILED, and nothing in
+-- the product says why — the router simply reads as down. Recording the
+-- attempt lets the Routers page say "a router is dialling in with a credential
+-- that no longer exists", which is a sentence an operator can act on.
+create table if not exists ovpn_auth_failures (
+  id       bigserial primary key,
+  username text not null,
+  at       timestamptz not null default now()
+);
+create index if not exists ovpn_auth_failures_recent on ovpn_auth_failures (at desc);
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.
