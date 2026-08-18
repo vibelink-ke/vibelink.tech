@@ -903,6 +903,34 @@ export async function uplinkPorts(conn) {
       reasons.set(name, 'it takes its address from an upstream network (it has a DHCP client)');
     }
   }
+
+  /**
+   * The port underneath the uplink, not only the uplink itself.
+   *
+   * A router whose internet arrives over PPPoE has its default route on
+   * "pppoe-out1", which is not a port anyone can tick — but that client runs on
+   * ether1, and bridging ether1 kills it just as surely. Checking only the
+   * route's own interface therefore declared the real uplink safe. The same
+   * applies to a board fed by a wireless link in station mode, which is a
+   * common arrangement at a tower site.
+   */
+  for (const c of await conn.write('/interface/pppoe-client/print', [])) {
+    const name = resolve(c.interface);
+    if (name && !reasons.has(name)) {
+      reasons.set(name, `your internet arrives over the PPPoE client ${c.name ?? ''} running on it`.replace('  ', ' '));
+    }
+  }
+  try {
+    for (const w of await conn.write('/interface/wireless/print', [])) {
+      if (!/station/i.test(String(w.mode ?? ''))) continue;
+      const name = String(w.name ?? '');
+      if (name && !reasons.has(name)) {
+        reasons.set(name, 'it is a wireless station, so it is how this router reaches the network');
+      }
+    }
+  } catch {
+    // No wireless package, or a board with no radio. Not an error.
+  }
   return reasons;
 }
 
@@ -956,6 +984,32 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
       `Refusing to bridge ${list}. Adding that to ${name} would take this router off the `
       + 'network the moment it applied, and it could only be recovered on site. Untick it and '
       + 'choose the ports your customers are on.');
+  }
+
+  /**
+   * And the ports already in the bridge, which is the harder case.
+   *
+   * Refusing to *add* the uplink does nothing about a bridge that already
+   * contains it — put there by hand, or by this code before the check existed.
+   * Everything built on such a bridge afterwards lands on the uplink: the
+   * gateway address, the DHCP server, the hotspot. Each of those is a command
+   * that can cut the router's own connection, which is exactly the failure
+   * being seen — a push that stops dead at the first write against the bridge,
+   * with no answer and no explanation.
+   *
+   * So the bridge is not usable at all while the uplink is in it, and saying so
+   * is far better than building on it and losing the site.
+   */
+  const membersNow = await conn.write('/interface/bridge/port/print', []);
+  const inBridge = membersNow.filter(isOurs).map((m) => m.interface);
+  const poisoned = inBridge.filter((iface) => protectedPorts.has(iface));
+  if (poisoned.length) {
+    const list = poisoned.map((iface) => `${iface} (${protectedPorts.get(iface)})`).join('; ');
+    throw new Error(
+      `${name} already contains ${list}. Anything built on this bridge would be built on the `
+      + `port carrying this router's internet, which is what has been cutting the tunnel `
+      + `mid-push. Remove it first — on the router: /interface bridge port remove `
+      + `[find interface=${poisoned[0]}] — then run this again.`);
   }
 
   const added = [];
