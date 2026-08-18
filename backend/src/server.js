@@ -1140,12 +1140,48 @@ app.get('/api/messages/:subscriberId', async (req, res) => {
 });
 app.post('/api/messages', async (req, res) => {
   const { subscriberId, body, channel = 'sms' } = req.body;
+
+  /**
+   * A third path to the same bug.
+   *
+   * /api/sms/send and /api/sms/bulk were fixed to expand an operator's tags
+   * before sending, and this route — the one the Messaging screen's own
+   * "Send message" button actually calls for a single client — was not. It
+   * sent `body` untouched, so a message composed with {name}{account} on
+   * this screen went out as the literal text "{name}{account}", to a real
+   * customer, from this exact button.
+   *
+   * subscriberVars needs the same join sms.SUBSCRIBER_VARS_SQL uses elsewhere
+   * — plan, price and router live on other tables — or {plan} and {speed}
+   * would come back empty for every customer instead of only the ones with
+   * nothing to report.
+   */
+  let filled = body;
+  let phone = null;
+  if (channel !== 'live_chat') {
+    const sms = await import('./sms.js');
+    const { rows: [s] } = await pool.query(
+      `select ${sms.SUBSCRIBER_VARS_SQL}
+         from subscribers s
+         left join plans p on p.id = s.plan_id
+         left join routers r on r.id = s.router_id
+        where s.id=$1 and s.tenant_id=$2`,
+      [subscriberId, req.tenant.id]);
+    phone = s?.phone ?? null;
+    if (s) {
+      const org = await sms.orgVars(req.tenant.id);
+      filled = sms.fill(body, sms.subscriberVars(s, org));
+    }
+  }
+
   const { rows: [m] } = await pool.query(
     "insert into messages (tenant_id, subscriber_id, direction, channel, body) values ($1,$2,'out',$3,$4) returning *",
-    [req.tenant.id, subscriberId, channel, body]);
-  if (channel !== 'live_chat') { const { send } = await import('./sms.js');
-    const { rows: [s] } = await pool.query('select phone from subscribers where id=$1', [subscriberId]);
-    await send(req.tenant.id, s?.phone, 'custom', { body }); }
+    [req.tenant.id, subscriberId, channel, filled]);
+
+  if (channel !== 'live_chat') {
+    const { send } = await import('./sms.js');
+    await send(req.tenant.id, phone, 'custom', { body: filled });
+  }
   res.json(m);
 });
 
