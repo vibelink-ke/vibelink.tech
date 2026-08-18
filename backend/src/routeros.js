@@ -151,29 +151,48 @@ async function cmd(conn, label, path, args = []) {
       throw err;
     }
     /**
-     * Some menus have no `comment` property, and which ones varies by RouterOS
-     * version and by board. We stamp MANAGED_COMMENT on everything we create so
-     * an operator can see what is ours, but on those menus the router answers
-     * "unknown parameter comment" and the whole push fails — a hotspot that is
-     * otherwise entirely configurable is reported as broken over a label.
+     * A property this menu does not accept — because the menu is on an older
+     * RouterOS, on a different board, or simply predates the property — is not
+     * a reason to fail the whole push over it. RouterOS names the exact
+     * argument it rejected ("unknown parameter comment", "unknown parameter
+     * one-session-per-host"), so it can be dropped and the command sent again
+     * rather than treating every optional refinement as load-bearing.
      *
-     * The label is a nicety; the configuration is the point. So drop it and run
-     * the command again.
+     * This started narrower — comment alone, because that was the property
+     * caught failing a push in practice. Generalising it is what "support
+     * RouterOS 6+" has to mean in code that cannot enumerate, from memory,
+     * every property RouterOS 6 lacks that a later RouterOS 7 added: PPPoE's
+     * one-session-per-host, MAC-cookie fields on older hotspot builds, and
+     * whatever the next board turns out to be missing. Guessing that list
+     * and hardcoding it would be confidently wrong the first time a board
+     * disagreed; asking the router what it just rejected is never wrong.
      *
-     * The cost is that rows created this way cannot later be recognised by their
-     * comment. Every matcher that could be affected also keys on something real
-     * — our own name, the address, the chain — precisely because comments have
-     * never been reliable here.
+     * Looped rather than tried once: a router can reject more than one
+     * property in the same command, and each retry can only remove the one
+     * RouterOS names this time. Capped at four rounds so a router that is
+     * rejecting everything about a command — the wrong menu entirely, not an
+     * unsupported property — fails with its real error rather than looping
+     * silently.
+     *
+     * The cost is the same one comment-stripping always had: a row written
+     * this way cannot be found again by the property that was dropped. Every
+     * matcher elsewhere already keys on something the router is guaranteed to
+     * accept — a name, an address, a chain — for exactly this reason.
      */
-    if (/unknown parameter.*comment/i.test(e.message ?? '')) {
-      const without = args.filter((a) => !String(a).startsWith('=comment='));
-      if (without.length !== args.length) {
-        try {
-          return await conn.write(path, without);
-        } catch (retry) {
-          retry.step = retry.step ?? `${label} (${path} ${without.join(' ')})`;
-          throw retry;
-        }
+    let current = args;
+    for (let round = 0; round < 4; round++) {
+      // Trailing punctuation trimmed defensively — RouterOS's own wording has
+      // never carried any in what has actually been seen, but matching one
+      // extra character would silently fail to strip anything.
+      const bad = /unknown parameter\s+(\S+)/i.exec(String(e?.message ?? ''))?.[1]?.replace(/[.,;:]+$/, '');
+      if (!bad) break;
+      const without = current.filter((a) => !String(a).startsWith(`=${bad}=`) && String(a) !== `=!${bad}=`);
+      if (without.length === current.length) break;   // the named property was not actually in this call
+      current = without;
+      try {
+        return await conn.write(path, current);
+      } catch (retry) {
+        e = retry;   // try again with whatever RouterOS objects to next
       }
     }
     e.step = e.step ?? `${label} (${path} ${args.join(' ')})`;

@@ -2576,6 +2576,33 @@ app.post('/api/routers/wg-peer', wrap(async (req, res) => {
       error: 'WG_ENDPOINT and WG_SERVER_PUBLIC_KEY are not set. See docs/NETWORK-SETUP.md.',
     });
 
+  /**
+   * Refused up front for a router already known to be on RouterOS 6.
+   *
+   * WireGuard genuinely does not exist on RouterOS 6 — there is no version of
+   * the script that would work there, unlike the other RouterOS-6-shaped
+   * failures in this file, which are a missing property to work around rather
+   * than a missing feature. Minting a peer and a script the router cannot use
+   * costs a wasted key and a confusing failure on the router end for nothing
+   * this side could not have known in advance, for any router whose version we
+   * have already recorded from a previous Configure push.
+   *
+   * A router being onboarded for the first time has no recorded version yet —
+   * there is nothing to check, so nothing is refused, and the script's own
+   * "RouterOS 7 only — check with /system resource print" comment is what
+   * carries the warning until the router has actually identified itself.
+   */
+  if (routerId) {
+    const { rows: [existing] } = await pool.query(
+      'select ros_version from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
+    if (existing?.ros_version && /^6\b/.test(existing.ros_version)) {
+      return res.status(409).json({
+        error: `This router last identified itself as RouterOS ${existing.ros_version}, which has `
+          + 'no WireGuard. Use "+ Onboard via OVPN" for it instead.',
+      });
+    }
+  }
+
   const { peer, privateKey, presharedKey, assignedIp } =
     await wg.createPeer(req.tenant.id, { name, routerId: routerId ?? null });
 
