@@ -54,6 +54,9 @@ export default function Dashboard() {
   // be read, since everything else on it comes from elsewhere.
   const [runs, setRuns] = useState(null);
   useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
+  // Null until the first answer, so "reading" and "nothing ran" stay distinct.
+  const [recent, setRecent] = useState(null);
+  useEffect(() => { api.automationRecent().then(setRecent).catch(() => setRecent([])); }, []);
 
   const store = useStore();
   const navigate = useNavigate();
@@ -82,6 +85,13 @@ export default function Dashboard() {
 
   const clients = store.clients ?? [];
   const active = clients.filter((c) => c.status === 'active');
+  /*
+   * Connected right now, which is not the same as having an active
+   * subscription — and the tile said ONLINE NOW while counting the latter. One
+   * customer with a paid-up line read as one customer online, on a night when
+   * the router was not even reachable.
+   */
+  const online = clients.filter((c) => c.online);
 
   // "Collected" comes from applied payments; the backend exposes only the
   // unmatched queue today, so anything not returned stays at zero.
@@ -166,17 +176,25 @@ export default function Dashboard() {
         />
         <Tile
           label="ONLINE NOW"
-          value={active.length}
-          hint={`${active.filter((c) => c.service === 'pppoe').length} PPPoE · ${active.filter((c) => c.service === 'hotspot').length} hotspot`}
+          value={online.length}
+          hint={online.length
+            ? `${online.filter((c) => c.service === 'pppoe').length} PPPoE · ${online.filter((c) => c.service === 'hotspot').length} hotspot`
+            : `nobody connected · ${active.length} active account${active.length === 1 ? '' : 's'}`}
         />
         {/* From the job run log. This was a hardcoded zero, so the tile said
             nothing had happened however much had. */}
+        {/* Job runs, said plainly. This counted background executions — the
+            watchdog alone is 1,440 a day — under a label promising
+            "activations, suspends, SMS, receipts", so the number looked like
+            work done for customers when it is the scheduler ticking. */}
         <Tile
-          label="AUTO-ACTIONS (24H)"
+          label="AUTOMATION RUNS (24H)"
           value={runs?.total ?? '—'}
+          valueColor={runs?.failures ? color.rust : undefined}
           hint={runs
-            ? (runs.failures ? `${runs.failures} failed` : 'activations, suspends, SMS, receipts')
-            : 'activations, suspends, SMS, receipts'}
+            ? (runs.failures ? `${runs.failures} failed` : 'background jobs, all succeeded')
+            : 'background jobs'}
+          onClick={() => navigate('/automation')}
         />
         <Tile
           label="NEEDS A HUMAN"
@@ -213,9 +231,39 @@ export default function Dashboard() {
 
         <div style={{ ...card, gap: 14 }}>
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Live automation feed</span>
-          <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
-            Nothing has run yet — activity appears here automatically
-          </div>
+          {/* Real rows from job_runs. This was a fixed sentence saying nothing
+              had run yet, on a system where a job fires every minute — which
+              reads as automation having been switched off or taken away. */}
+          {recent === null ? (
+            <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
+              Reading the log…
+            </div>
+          ) : recent.length === 0 ? (
+            <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
+              Nothing has run in the last day. If that is unexpected, the API container may have
+              restarted recently — the schedule starts with it.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+              {recent.map((r, i) => (
+                <div
+                  key={`${r.job}-${r.ran_at}-${i}`}
+                  style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12.5 }}
+                >
+                  <span style={{ color: r.ok ? color.green : color.rust, fontWeight: 700 }}>
+                    {r.ok ? '✓' : '✕'}
+                  </span>
+                  <span style={{ fontWeight: 600 }}>{r.job}</span>
+                  <span style={{ color: color.muted }}>
+                    {r.error ? r.error.slice(0, 60) : `${r.ms ?? 0} ms`}
+                  </span>
+                  <span style={{ marginLeft: 'auto', color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}>
+                    {new Date(r.ran_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 

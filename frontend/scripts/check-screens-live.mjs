@@ -115,6 +115,10 @@ const ROUTES = [
   [/\/api\/sms\/gateways$/, { available: ['hostpinnacle', 'africastalking'], configured: [{ provider: 'hostpinnacle', enabled: true, priority: 1, credentialKeys: ['user', 'password'] }] }],
   [/\/api\/email\/gateway$/, { config: { host: 'smtp.example.com', port: 587, secure: true, username: 'u', from_name: 'Vibelink', from_email: 'no-reply@vibelink.co.ke', enabled: true }, fields: [{ key: 'host', label: 'Host' }, { key: 'password', label: 'Password', secret: true }] }],
   [/\/api\/automation\/runs$/, { since: '24 hours', total: 42, failures: 0, jobs: [{ job: 'watchdog', runs: 24, failures: 0, last_run: iso(0), avg_ms: 120 }] }],
+  [/\/api\/automation\/recent$/, [
+    { job: 'watchdog', ok: true, error: null, ms: 118, ran_at: iso(-0.001) },
+    { job: 'expireAndSuspend', ok: false, error: 'connect ETIMEDOUT', ms: 20000, ran_at: iso(-0.01) },
+  ]],
   [/\/api\/automation$/, [{ job: 'watchdog', label: 'Router watchdog', enabled: true, updated_at: iso(-1) }]],
   [/\/api\/fup-usage$/, [{ subscriberId: 'c1', name: 'Peter Kandie', policy: 'Fair use', windowPeriod: 'monthly', usedMb: 51200, capMb: 102400, pct: 50, throttled: false, warned: false, throttleDown: 1000 }]],
   // A bare array — the route is `res.json(rows)`. An object here reported a

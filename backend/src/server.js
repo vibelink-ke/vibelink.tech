@@ -1425,6 +1425,18 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
 }));
 
 /**
+ * The tunnel username an address implies: 10.50.2.3 is router-2-3.
+ *
+ * The minting route builds it from the address octets, so the same rule
+ * recovers it — which is how a credential whose address has since moved on is
+ * still recognised as belonging to this router.
+ */
+function ovpnUsernameFor(host) {
+  const o = String(host).split('/')[0].split('.');
+  return o.length === 4 ? `router-${o[2]}-${o[3]}` : '';
+}
+
+/**
  * Which login to use for a router: our own account if we have one, otherwise the
  * admin credentials supplied with this request. Shared by every route that talks
  * to a MikroTik, so they cannot drift apart on which takes precedence.
@@ -2455,8 +2467,39 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
     await pool.query('update subscribers set router_id=null where router_id=$1', [r.id]);
   }
 
-  await pool.query('delete from ovpn_clients where tenant_id=$1 and assigned_ip=$2',
-    [req.tenant.id, r.host]);
+  /**
+   * Take the tunnel credential with the router, including a stale one.
+   *
+   * Deleting matched the router's current NAS address only, so a credential
+   * minted for it earlier — after an address change, or a re-onboard that moved
+   * it from .2 to .3 — was left behind holding an address and appearing in the
+   * list under a router that no longer exists. That is how the screen came to
+   * show router-2-3 as issued with no routers at all.
+   *
+   * A credential carrying a live tunnel is never touched, whatever the router
+   * rows say. Revoking one disconnects a router that cannot then be reached to
+   * put it right, and a delete in the UI should not be able to cause a site
+   * visit. Those are reported instead.
+   */
+  const { rows: mine } = await pool.query(
+    `select id, username, host(assigned_ip) ip from ovpn_clients
+      where tenant_id=$1 and (assigned_ip = $2 or username = $3)`,
+    [req.tenant.id, r.host, ovpnUsernameFor(r.host)]);
+
+  let connected = new Set();
+  try {
+    const { liveTunnels } = await import('./tunnel.js');
+    connected = new Set((await liveTunnels()).map((t) => t.address));
+  } catch { /* no status file — treat nothing as live rather than guessing */ }
+
+  const revoked = [];
+  const kept = [];
+  for (const c of mine) {
+    if (connected.has(c.ip)) { kept.push(c.username); continue; }
+    await pool.query('delete from ovpn_clients where id=$1 and tenant_id=$2', [c.id, req.tenant.id]);
+    revoked.push(c.username);
+  }
+
   await pool.query('delete from wg_peers where tenant_id=$1 and router_id=$2', [req.tenant.id, r.id]);
   // ip_pools.router_id has no ON DELETE, so a pool assigned to this router blocked
   // the delete outright with a raw foreign-key error. Detach rather than drop: the
@@ -2464,7 +2507,7 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
   await pool.query('update ip_pools set router_id=null where tenant_id=$1 and router_id=$2',
     [req.tenant.id, r.id]);
   await pool.query('delete from routers where id=$1 and tenant_id=$2', [r.id, req.tenant.id]);
-  res.json({ ok: true, freed: r.host, detached: count });
+  res.json({ ok: true, freed: r.host, detached: count, revoked, kept });
 }));
 
 // ── router onboarding via WireGuard ───────────────
@@ -3688,6 +3731,28 @@ app.post('/api/kb-articles', wrap(async (req, res) => {
   res.json(a);
 }));
 
+/**
+ * Edit an article.
+ *
+ * There was create and delete and nothing in between, so correcting a typo
+ * meant deleting the article and writing it again — losing its id, and with it
+ * any link a customer or the support bot had to it.
+ */
+app.put('/api/kb-articles/:id', wrap(async (req, res) => {
+  const { title, category, body, published } = req.body ?? {};
+  const { rows: [a] } = await pool.query(
+    `update kb_articles set
+       title     = coalesce(nullif($3,''), title),
+       category  = coalesce(nullif($4,''), category),
+       body      = coalesce($5, body),
+       published = coalesce($6, published)
+     where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, title ?? '', category ?? '', body ?? null,
+     typeof published === 'boolean' ? published : null]);
+  if (!a) return res.status(404).json({ error: 'No such article' });
+  res.json(a);
+}));
+
 app.delete('/api/kb-articles/:id', wrap(async (req, res) => {
   await pool.query('delete from kb_articles where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
@@ -4503,6 +4568,19 @@ app.get('/api/automation/runs', wrap(async (_req, res) => {
     failures: rows.reduce((n, r) => n + r.failures, 0),
     jobs: rows,
   });
+}));
+
+/**
+ * The last few job runs, newest first.
+ *
+ * The dashboard had a "Live automation feed" that was a hardcoded sentence
+ * saying nothing had run yet — on a system where a job fires every minute. It
+ * read as though automation had been switched off, or removed.
+ */
+app.get('/api/automation/recent', wrap(async (_req, res) => {
+  const { rows } = await pool.query(
+    `select job, ok, error, ms, ran_at from job_runs order by ran_at desc limit 40`);
+  res.json(rows);
 }));
 
 app.get('/api/automation', wrap(async (req, res) => {

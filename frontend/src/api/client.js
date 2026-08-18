@@ -171,10 +171,12 @@ export const api = {
   // ── automation ──
   automation: () => get('/api/automation'),
   automationRuns: () => get('/api/automation/runs'),
+  automationRecent: () => get('/api/automation/recent'),
   setAutomation: (job, enabled) => put(`/api/automation/${job}`, { enabled }),
 
   articles: () => get('/api/kb-articles'),
   createArticle: (a) => post('/api/kb-articles', a),
+  updateArticle: (id, a) => put(`/api/kb-articles/${id}`, a),
   deleteArticle: (id) => del(`/api/kb-articles/${id}`),
 
   // ── network ──

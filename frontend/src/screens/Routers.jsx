@@ -351,6 +351,7 @@ export default function Routers() {
    * search somewhere else entirely.
    */
   const [radiusReport, setRadiusReport] = useState(null);
+  const [showCredentials, setShowCredentials] = useState(false);
   const checkRadius = async (r) => {
     setRadiusReport({ router: r, kind: 'RADIUS', state: 'running' });
     try {
@@ -506,6 +507,14 @@ Revoke anyway?`
       subtitle="MikroTiks reach us over a tunnel, so you need no port-forwarding and no static public IP. Use WireGuard on RouterOS 7; RouterOS 6 has no WireGuard, so use OVPN there."
       actions={
         <>
+          {(store.ovpnClients ?? []).length > 0 && (
+            <Button
+              onClick={() => setShowCredentials((v) => !v)}
+              title="Usernames and tunnel addresses. Only needed when a router dials in on an address no row mentions."
+            >
+              {showCredentials ? 'Hide tunnel credentials' : 'Tunnel credentials'}
+            </Button>
+          )}
           <Button onClick={() => setForm(blankRouter())}>Add manually</Button>
           <Button onClick={openDialog}>+ Onboard via OVPN</Button>
           <Button variant="primary" onClick={mintWireguard} disabled={busy}
@@ -522,9 +531,19 @@ Revoke anyway?`
         <Stat label="OVPN clients" value={(store.ovpnClients ?? []).length} hint="tunnels issued" />
       </Grid>
 
-      {/* Only worth showing when some credential is not backing a live router:
-          those are the ones holding an address for no reason. */}
-      {(store.ovpnClients ?? []).length > 0 && (
+      /*
+       * Behind a toggle now, at the owner's request.
+       *
+       * This was on screen permanently, and for an operator running a fleet it
+       * is plumbing: usernames and tunnel addresses that mean nothing next to
+       * the router list. Deleting a router takes its credential with it now, so
+       * the list mostly holds nothing worth looking at.
+       *
+       * Kept rather than removed, because when a router dials in on an address
+       * no router row mentions, this table is the only place that fact is
+       * visible — and that mismatch has cost days more than once.
+       */
+      {showCredentials && (store.ovpnClients ?? []).length > 0 && (
         <Card title="Tunnel credentials">
           <Table
             rowKey={(c) => c.id}

@@ -10,6 +10,10 @@ const BLANK = { title: '', category: 'Getting connected', body: '', published: t
 export default function KnowledgeBase() {
   const store = useStore();
   const [open, setOpen] = useState(false);
+  // The id being edited, or null when writing a new one. One form serves both:
+  // an article that cannot be corrected has to be deleted and rewritten, which
+  // loses its id and every link a customer or the support bot had to it.
+  const [editingId, setEditingId] = useState(null);
   const [f, setF] = useState(BLANK);
   const [q, setQ] = useState('');
   const [reading, setReading] = useState(null);
@@ -25,14 +29,29 @@ export default function KnowledgeBase() {
 
   const [busy, setBusy] = useState(false);
 
+  const startNew = () => { setEditingId(null); setF(BLANK); setOpen(true); };
+  const startEdit = (a) => {
+    setEditingId(a.id);
+    setF({ title: a.title ?? '', category: a.category ?? CATEGORIES[0], body: a.body ?? '', published: !!a.published });
+    setReading(null);
+    setOpen(true);
+  };
+
   const save = async () => {
     if (!f.title.trim()) return store.toast('Give the article a title');
     setBusy(true);
     try {
-      const created = await api.createArticle(f);
-      store.setCollection('articles', (as) => [created, ...as]);
-      store.toast(`"${created.title}" saved`);
+      if (editingId) {
+        const saved = await api.updateArticle(editingId, f);
+        store.setCollection('articles', (as) => as.map((a) => (a.id === editingId ? saved : a)));
+        store.toast(`"${saved.title}" updated`);
+      } else {
+        const created = await api.createArticle(f);
+        store.setCollection('articles', (as) => [created, ...as]);
+        store.toast(`"${created.title}" saved`);
+      }
       setOpen(false);
+      setEditingId(null);
       setF(BLANK);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
@@ -41,12 +60,34 @@ export default function KnowledgeBase() {
     }
   };
 
+  const remove = async (a) => {
+    if (!window.confirm(`Delete "${a.title}"? This removes it from the database.`)) return;
+    try {
+      await api.deleteArticle(a.id);
+      store.setCollection('articles', (as) => as.filter((x) => x.id !== a.id));
+      setReading(null);
+      store.toast('Article deleted');
+    } catch (e) {
+      store.toast(`Could not delete: ${e.message}`);
+    }
+  };
+
+  const togglePublished = async (a) => {
+    try {
+      const saved = await api.updateArticle(a.id, { published: !a.published });
+      store.setCollection('articles', (as) => as.map((x) => (x.id === a.id ? saved : x)));
+      store.toast(saved.published ? 'Published' : 'Moved to drafts');
+    } catch (e) {
+      store.toast(`Could not change: ${e.message}`);
+    }
+  };
+
   return (
     <Screen
       title="Knowledge base"
       subtitle="Self-serve help. The support bot answers from these before handing a chat to a person."
       actions={
-        <Button variant="primary" onClick={() => setOpen(true)}>
+        <Button variant="primary" onClick={startNew}>
           + Write article
         </Button>
       }
@@ -91,6 +132,21 @@ export default function KnowledgeBase() {
                   {String(a.body ?? '').slice(0, 110)}
                   {String(a.body ?? '').length > 110 ? '…' : ''}
                 </span>
+                {/* stopPropagation, or the card's own click opens the reader
+                    over the top of whatever was just pressed. */}
+                <div style={{ display: 'flex', gap: 8, marginTop: 2 }} onClick={(e) => e.stopPropagation()}>
+                  <Button size="sm" onClick={() => startEdit(a)}>Edit</Button>
+                  <Button size="sm" onClick={() => togglePublished(a)}>
+                    {a.published ? 'Unpublish' : 'Publish'}
+                  </Button>
+                  <Button
+                    size="sm"
+                    style={{ color: color.rust, borderColor: color.rust }}
+                    onClick={() => remove(a)}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
@@ -99,14 +155,14 @@ export default function KnowledgeBase() {
 
       <Modal
         open={open}
-        title="Write article"
+        title={editingId ? 'Edit article' : 'Write article'}
         width={620}
         onClose={() => setOpen(false)}
         footer={
           <>
-            <Button onClick={() => setOpen(false)}>Cancel</Button>
+            <Button onClick={() => { setOpen(false); setEditingId(null); }}>Cancel</Button>
             <Button variant="primary" onClick={save} disabled={busy}>
-              {busy ? 'Saving…' : 'Save article'}
+              {busy ? 'Saving…' : editingId ? 'Save changes' : 'Save article'}
             </Button>
           </>
         }
