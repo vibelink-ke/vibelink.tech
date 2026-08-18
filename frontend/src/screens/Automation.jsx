@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { color, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Badge, Button, Card, Grid, Screen, Stat, Toggle } from '../ui/primitives';
+import { Badge, Button, Card, Field, Grid, Input, Screen, Stat, Toggle } from '../ui/primitives';
 
 /**
  * The live jobs come from GET /api/automation, which reports each cron in
@@ -46,6 +46,19 @@ export default function Automation() {
   // Loaded separately: a run log that fails to read should not stop the
   // switches on this page from working.
   const [runs, setRuns] = useState(null);
+  const [alertPhone, setAlertPhone] = useState('');
+  useEffect(() => {
+    api.settings().then((d) => setAlertPhone(d.alertPhone ?? '')).catch(() => {});
+  }, []);
+
+  const saveAlertPhone = async () => {
+    try {
+      await api.saveSettings({ alertPhone });
+      store.toast(alertPhone ? `Router alerts go to ${alertPhone}` : 'Router alerts go to the owner');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
   useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
 
   const stopped = jobs.length - running;
@@ -67,6 +80,23 @@ export default function Automation() {
           hint={runs ? (runs.failures ? `${runs.failures} failed` : 'all succeeded') : 'loading'}
         />
       </Grid>
+
+      {/* Who hears about a router going down. The watchdog texts whoever is
+          recorded as the owner, who is not necessarily the person on call. */}
+      <Card title="Alerts" subtitle="Where router offline and back-online messages go">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 220 }}>
+            <Field label="Phone for router alerts" hint="Blank uses the owner's number">
+              <Input
+                value={alertPhone}
+                onChange={(e) => setAlertPhone(e.target.value)}
+                placeholder="07xx xxx xxx"
+              />
+            </Field>
+          </div>
+          <Button variant="primary" onClick={saveAlertPhone}>Save</Button>
+        </div>
+      </Card>
 
       <Card
         title="Running now"

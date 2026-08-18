@@ -497,7 +497,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
         </div>
 
         <span style={{ fontSize: 11.5, color: color.muted, textAlign: 'center', lineHeight: 1.6 }}>
-          Support: support@vibelink.tech
+          Support: support@vibelink.co.ke
         </span>
       </div>
     </div>

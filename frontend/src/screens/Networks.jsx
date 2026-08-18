@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
+import { Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, RowAction, RowActions, Screen, Select, Stat, Table } from '../ui/primitives';
 
 const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe' };
 
@@ -150,9 +150,13 @@ export default function Networks() {
               align: 'right',
               render: (p) => (
                 <span style={{ whiteSpace: 'nowrap' }}>
-                  <span onClick={() => viewPool(p)} style={act('#4a524c')}>View</span>
-                  <span onClick={() => setEditing({ ...p, routerId: p.router_id ?? '' })} style={act(color.green)}>Edit</span>
-                  <span onClick={() => removePool(p)} style={{ ...act(color.rust), marginRight: 0 }}>Delete</span>
+                  <RowActions>
+                    <RowAction onClick={() => viewPool(p)}>View</RowAction>
+                    <RowAction tone={color.green} onClick={() => setEditing({ ...p, routerId: p.router_id ?? '' })}>
+                      Edit
+                    </RowAction>
+                    <RowAction tone={color.rust} onClick={() => removePool(p)}>Delete</RowAction>
+                  </RowActions>
                 </span>
               ),
             },

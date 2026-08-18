@@ -844,6 +844,85 @@ create table if not exists job_runs (
 );
 create index if not exists job_runs_recent on job_runs (ran_at desc);
 
+-- Where router alerts go.
+--
+-- The watchdog texts whoever is recorded as the owner in staff, which is not
+-- necessarily the person on call at 2am. A number set here takes precedence.
+alter table app_settings add column if not exists alert_phone text;
+
+-- One person, several lines.
+--
+-- A household or a business commonly takes a second connection, and the phone
+-- number is how M-Pesa payments are matched — so the number has to be allowed
+-- to repeat while still catching the far more common case of an operator
+-- creating the same customer twice by accident. Unique on (tenant, phone,
+-- account) rather than (tenant, phone): a second line needs its own account
+-- number anyway, and that is what the customer types when paying.
+create unique index if not exists subscribers_phone_account
+  on subscribers (tenant_id, phone, account_code);
+
+-- Starter knowledge base.
+--
+-- A support team with an empty knowledge base writes the same four answers
+-- every week by hand. These are the questions every WISP in this market
+-- actually gets, seeded per tenant so they can be edited rather than written
+-- from nothing. Only added where a tenant has none, so an operator's own
+-- articles are never overwritten.
+insert into kb_articles (tenant_id, title, category, body, published)
+select t.id, a.title, a.category, a.body, true
+  from tenants t
+  cross join (values
+    ('My internet is slow',
+     'Connection',
+     E'Restart the router first: unplug it, wait ten seconds, plug it back in. It fixes most slowdowns.
+
+'
+     'If it is still slow, check how many devices are connected — a package shared across a full house behaves like a slower one.
+
+'
+     'If you have passed your fair-use allowance for the month your speed is reduced until the allowance resets. Your remaining allowance is on your customer portal.
+
+'
+     'Still slow after that? Send us your account number and roughly when it started, and we will check the tower.'),
+    ('I have paid but I am still disconnected',
+     'Payments',
+     E'Payments usually reconnect the line within a minute or two.
+
+'
+     'If it has been longer, check the M-Pesa message: the account number you typed has to match your account number exactly. A payment sent with the wrong account cannot match itself to you automatically.
+
+'
+     'Send us the M-Pesa confirmation code and we will apply it by hand. Nothing is lost — a payment that did not match is held, not returned.'),
+    ('How do I pay',
+     'Payments',
+     E'Pay by M-Pesa to the paybill on your invoice, using your account number as the account.
+
+'
+     'The account number is the important part: it is how the payment finds you. It is on your invoice, in your welcome SMS, and on your customer portal.
+
+'
+     'You can also pay from the portal, which sends the M-Pesa prompt to your phone so there is nothing to type.'),
+    ('WiFi is connected but there is no internet',
+     'Connection',
+     E'This usually means the line is up to the router but not past it.
+
+'
+     'Check whether other devices in the house have the same problem. If only one device is affected, forget the network on that device and join it again.
+
+'
+     'If every device is affected, restart the router. If that does not fix it, your account may have expired — check the portal.'),
+    ('Using a hotspot voucher',
+     'Hotspot',
+     E'Connect to the WiFi and a login page opens by itself. If it does not, open a browser and go to any http page.
+
+'
+     'Type the code from your voucher and press Connect. There is no username — the code is all you need.
+
+'
+     'Your device is remembered for the life of the bundle, so switching WiFi off and on will reconnect you without typing it again.')
+  ) as a(title, category, body)
+ where not exists (select 1 from kb_articles k where k.tenant_id = t.id);
+
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.
 -- Support could see somebody waiting and had nothing to read or reply with.

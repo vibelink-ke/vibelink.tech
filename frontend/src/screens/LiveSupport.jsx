@@ -172,8 +172,18 @@ export default function LiveSupport() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 260px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
         <Card title="Queue" subtitle={`${queue.length} open`}>
+          {/* An empty page with one word on it reads as broken. Say where
+              conversations come from, so an operator knows whether to wait or
+              to go and turn something on. */}
           {queue.length === 0 ? (
-            <Empty>Nobody is waiting</Empty>
+            <div style={{ display: 'grid', gap: 6, padding: '6px 2px' }}>
+              <span style={{ fontSize: 13, fontWeight: 600 }}>Nobody is waiting</span>
+              <span style={{ fontSize: 12.5, color: color.muted, lineHeight: 1.5 }}>
+                Chats start when a customer presses <strong>Chat with support</strong> on their
+                portal, or a guest presses <strong>Talk to support</strong> on the hotspot login
+                page. They appear here the moment they do — this list refreshes on its own.
+              </span>
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {queue.map((c) => (

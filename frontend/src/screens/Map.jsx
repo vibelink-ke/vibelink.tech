@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
-import { Card, Empty, Screen } from '../ui/primitives';
+import { Button, Card, Empty, Screen } from '../ui/primitives';
 
 /**
  * Where the customers and towers actually are.
@@ -47,6 +47,22 @@ export default function MapScreen() {
   const map = useRef(null);
   const layer = useRef(null);
   const [tilesFailed, setTilesFailed] = useState(false);
+
+  /**
+   * Live view: refresh the pins, and colour by who is connected right now.
+   *
+   * The map drew whatever the store happened to hold, so it aged as soon as it
+   * was opened. On a wall screen during an outage the useful question is which
+   * pins have gone dark, and that only works if it keeps up.
+   */
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    if (!live) return undefined;
+    const tick = () => store.reload?.();
+    tick();
+    const id = setInterval(tick, 30000);
+    return () => clearInterval(id);
+  }, [live, store]);
 
   const clients = store.clients ?? [];
   const routers = store.routers ?? [];
@@ -94,7 +110,11 @@ export default function MapScreen() {
         .addTo(layer.current);
     }
     for (const c of placed) {
-      L.marker([c._lat, c._lng], { icon: dot(STATUS_COLOUR[c.status] ?? color.muted, '#fff') })
+      // In live view the question is who is connected, not who has paid.
+      const fill = live
+        ? (c.online ? color.green : '#9aa39c')
+        : (STATUS_COLOUR[c.status] ?? color.muted);
+      L.marker([c._lat, c._lng], { icon: dot(fill, '#fff') })
         .bindPopup(
           `<strong>${c.name}</strong><br>${c.account_code ?? ''}<br>`
           + `${c.location ?? ''}<br>${c.status ?? ''}`)
@@ -106,12 +126,21 @@ export default function MapScreen() {
     const points = [...placed, ...placedRouters].map((p) => [p._lat, p._lng]);
     if (points.length === 1) map.current.setView(points[0], 15);
     else if (points.length > 1) map.current.fitBounds(points, { padding: [40, 40] });
-  }, [placed, placedRouters]);
+  }, [placed, placedRouters, live]);
 
   return (
     <Screen
       title="Map"
       subtitle="Customers and towers, from the location saved when each was added"
+      actions={
+        <Button
+          variant={live ? 'primary' : undefined}
+          onClick={() => setLive((v) => !v)}
+          title="Refresh every 30 seconds and colour by who is connected"
+        >
+          {live ? 'Live · on' : 'Live view'}
+        </Button>
+      }
     >
       {tilesFailed && (
         <div style={{

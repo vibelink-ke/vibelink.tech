@@ -165,11 +165,15 @@ async function watchdog() {
  */
 async function notifyOwner(tenantId, body) {
   try {
-    const { rows: [owner] } = await pool.query(
-      "select phone from staff where tenant_id=$1 and role='owner' and phone is not null limit 1",
-      [tenantId]);
-    if (!owner?.phone) return;
-    await send(tenantId, owner.phone, 'custom', { body });
+    // The rota number if one is set, otherwise the owner. A tenant with an
+    // on-call phone should not have alerts going to whoever signed up.
+    const { rows: [pick] } = await pool.query(
+      `select coalesce(
+                (select nullif(alert_phone,'') from app_settings where tenant_id=$1),
+                (select phone from staff where tenant_id=$1 and role='owner'
+                  and phone is not null limit 1)) as phone`, [tenantId]);
+    if (!pick?.phone) return;
+    await send(tenantId, pick.phone, 'custom', { body });
   } catch (e) {
     console.error('watchdog notify failed', tenantId, e.message);
   }

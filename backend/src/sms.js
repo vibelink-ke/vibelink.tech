@@ -54,10 +54,37 @@ const PROVIDERS = {
  * Anything we have no rule for falls back to the HTTP status.
  */
 const ACCEPTED = {
+  /**
+   * HostPinnacle answers in more than one shape.
+   *
+   * Sometimes a word — "success" — and sometimes a numeric gateway code, where
+   * 1701 means the message was accepted. The check only recognised the words,
+   * so a perfectly delivered message came back as "rejected" while the balance
+   * went down: the operator sees a failure, the customer gets the text, and
+   * nobody can reconcile the two.
+   *
+   * Accepting on the absence of an error rather than the presence of one exact
+   * word, since the failure shapes are far better signposted than the successes.
+   */
   hostpinnacle: (d) => {
-    const status = String(d?.response?.status ?? d?.status ?? '').toLowerCase();
-    if (status) return status === 'success' || status === 'queued' || status === 'sent';
-    return !d?.errorCode && !d?.error;
+    const raw = d?.response ?? d ?? {};
+    const status = String(raw.status ?? raw.code ?? raw.statusCode ?? '').toLowerCase();
+    const message = String(raw.message ?? raw.description ?? '').toLowerCase();
+
+    // Their documented success codes, plus the plain words.
+    const SUCCESS_CODES = ['1701', '200', '0', '100'];
+    if (SUCCESS_CODES.includes(status)) return true;
+    if (/success|queued|sent|submitted|accepted/.test(status)) return true;
+    if (/success|queued|sent|submitted|accepted/.test(message)) return true;
+
+    // Anything that names itself an error is a rejection.
+    if (raw.errorCode || raw.error || /fail|error|invalid|insufficient|denied/.test(status + ' ' + message)) {
+      return false;
+    }
+    // No verdict either way: treat as sent. A message that arrived and was
+    // logged as rejected is worse than the reverse — it hides a working
+    // gateway and sends the operator looking for a fault that is not there.
+    return true;
   },
   africastalking: (d) => {
     const r = d?.SMSMessageData?.Recipients ?? [];
@@ -82,7 +109,7 @@ const accepted = (provider, res) => {
   return check ? check(res?.data) : true;
 };
 
-const DEFAULTS = {
+export const DEFAULTS = {
   receipt:  'Thank you. KES {amount} received, ref {code}. Active until {expires}.',
   voucher:  'Your code is {code}. Valid until {expires}. Connect to {ssid} and enter it.',
   reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
@@ -207,7 +234,8 @@ export async function send(tenantId, phone, template, vars = {}) {
           JSON.stringify(res?.data ?? '').slice(0, 300));
         continue;
       }
-      await log(tenantId, g.provider, to, body, 'sent', res.status);
+      await log(tenantId, g.provider, to, body, 'sent',
+        `HTTP ${res.status} ${JSON.stringify(res?.data ?? '').slice(0, 200)}`);
       // A credit has just been spent, so the cached balance is now wrong. Dropping
       // it here means the dashboard can poll cheaply and still see the change
       // immediately, without asking the provider every few seconds.

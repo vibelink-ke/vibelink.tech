@@ -106,6 +106,18 @@ export default function HotspotSettings() {
             </Field>
             {/* What a guest reads at the top of the captive portal. Blank falls
                 back to the company name and a plain instruction. */}
+            <Field label="Portal look" hint="Colour scheme of the captive portal">
+              <Select
+                value={f.template ?? 'sleek'}
+                onChange={set('template')}
+                options={[
+                  { value: 'sleek', label: 'Sleek — light, green' },
+                  { value: 'dark', label: 'Dark' },
+                  { value: 'bold', label: 'Bold — coloured background' },
+                  { value: 'plain', label: 'Plain — maximum contrast' },
+                ]}
+              />
+            </Field>
             <Field label="Portal headline" hint="Shown large on the login page. Blank uses your company name">
               <Input value={f.banner_headline ?? ''} onChange={set('banner_headline')} placeholder={f.ssid || 'Your company'} />
             </Field>

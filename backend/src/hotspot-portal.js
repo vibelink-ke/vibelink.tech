@@ -40,10 +40,25 @@ function duration(min) {
   return `${m} minutes`;
 }
 
+/**
+ * Look, chosen in Hotspot -> Settings.
+ *
+ * Only colour and weight change — the layout is the same everywhere because it
+ * has to work on a cracked phone screen in daylight, and that constrains it far
+ * more than taste does.
+ */
+const TEMPLATES = {
+  sleek:  { bg: '#f5f6f3', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
+  dark:   { bg: '#12171a', card: '#1b2227', ink: '#eef2f0', accent: '#2fbf8f', radius: '14px' },
+  bold:   { bg: '#0f7a5f', card: '#ffffff', ink: '#161a17', accent: '#0b5c47', radius: '18px' },
+  plain:  { bg: '#ffffff', card: '#ffffff', ink: '#111111', accent: '#1b6fd6', radius: '6px' },
+};
+
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
-  headline = null, subtext = null, forRouter = false,
+  headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
 }) {
+  const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
   // where the page is already being served by the billing system itself.
   const apiBase = portalUrl ?? '';
@@ -98,14 +113,28 @@ export function loginPage({
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(company)} WiFi</title>
 <style>
-  :root { --ink:#161a17; --muted:#6b736c; --line:#e4e6e1; --green:#0f7a5f;
-          --greenDark:#0b5c47; --bg:#f5f6f3; }
+  :root { --ink:${t.ink}; --muted:#8a9186; --line:rgba(128,128,128,.25);
+          --green:${t.accent}; --greenDark:${t.accent}; --bg:${t.bg};
+          --card:${t.card}; --rad:${t.radius}; }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
          font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { width:100%; max-width:380px; background:#fff; border:1px solid var(--line);
-          border-radius:14px; padding:26px 22px; }
+  .card { width:100%; max-width:${tvMode ? '620px' : '380px'}; background:var(--card);
+          border:1px solid var(--line); border-radius:var(--rad);
+          padding:${tvMode ? '40px 34px' : '26px 22px'}; }
+  /* Television: read from a sofa, and typed with a remote. Everything scales up
+     and the code box gets wide, spaced characters so a wrong digit is obvious
+     from across the room. */
+  ${tvMode ? `
+  body { font-size:20px; }
+  h1 { font-size:34px !important; }
+  .sub { font-size:19px !important; }
+  input { font-size:30px !important; letter-spacing:.35em; text-align:center; padding:18px !important; }
+  button { font-size:22px !important; padding:18px !important; }
+  .plan strong { font-size:21px; }
+  .meta, .hint { font-size:16px !important; }
+  ` : ''}
   h1 { margin:0 0 2px; font-size:21px; }
   .sub { margin:0 0 20px; color:var(--muted); font-size:13.5px; }
   label { display:block; font-size:12.5px; color:var(--muted); margin:12px 0 5px; }
@@ -225,6 +254,11 @@ export function loginPage({
       <p class="hint" id="chatNote"></p>
     </div>
     ${help}
+    ${tvMode ? '' : `
+    <!-- Smart TVs and set-top boxes: same page, sized to be read from a sofa
+         and typed with a remote. A link rather than sniffing the user agent,
+         which gets it wrong on exactly the devices that matter. -->
+    <p class="hint"><a href="?tv=1">Using a TV or set-top box?</a></p>`}
   </div>
 
   <script>

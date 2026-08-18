@@ -5,7 +5,7 @@ import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
-import { Button, Drawer, Empty, Field, Input, KV, Modal, Screen, Select } from '../ui/primitives';
+import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -529,26 +529,28 @@ export default function Clients() {
                         );
                       })()}
                     </td>
-                    <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                      <span onClick={() => { closeCreds(); setDetail(c); }} style={{ ...action, color: '#4a524c' }}>View</span>
-                      <span onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')} style={{ ...action, color: color.amberInk }}>
+                    <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right' }}>
+                      <RowActions>
+                      <RowAction onClick={() => { closeCreds(); setDetail(c); }}>View</RowAction>
+                      <RowAction tone={color.amberInk} onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')}>
                         {c.status === 'active' ? 'Pause' : 'Resume'}
-                      </span>
+                      </RowAction>
                       {/* Distinct from Pause: this is a block, and only an admin
                           sees it. Hidden once they are already suspended. */}
                       {store.isAdmin && c.status !== 'suspended' && (
-                        <span
+                        <RowAction
+                          tone={color.rust}
                           onClick={() => setAccess(c, 'suspend')}
                           title="Block this customer — a payment clears it"
-                          style={{ ...action, color: color.rust }}
                         >
                           Suspend
-                        </span>
+                        </RowAction>
                       )}
-                      <span onClick={() => setEditing({ ...c })} style={{ ...action, color: color.green }}>Edit</span>
-                      <span onClick={() => removeClient(c)} style={{ ...action, color: color.rust, marginRight: 0 }}>
+                      <RowAction tone={color.green} onClick={() => setEditing({ ...c })}>Edit</RowAction>
+                      <RowAction tone={color.rust} onClick={() => removeClient(c)}>
                         Delete
-                      </span>
+                      </RowAction>
+                      </RowActions>
                     </td>
                   </tr>
                 );

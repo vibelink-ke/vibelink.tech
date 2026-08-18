@@ -60,6 +60,8 @@ export const api = {
     password ? { password } : {}),
   subscriberCredentials: (id) => get(`/api/subscribers/${id}/credentials`),
   smsPlaceholders: () => get('/api/sms/placeholders'),
+  smsTemplates: () => get('/api/sms/templates'),
+  saveSmsTemplates: (templates) => put('/api/sms/templates', { templates }),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),
 
   // ── money ──
@@ -221,6 +223,7 @@ export const api = {
   tenants: () => get('/api/tenants'),
   platformOverview: () => get('/api/platform/overview'),
   platformHealth: () => get('/api/platform/health'),
+  restartApi: () => post('/api/platform/restart', {}),
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
   deleteTenant: (id) => del(`/api/tenants/${id}`),

@@ -472,7 +472,7 @@ export async function applyWalledGarden(conn, hosts = []) {
  * built-in one, which we would otherwise be editing on a box we do not own.
  */
 export async function ensureHotspotUserProfile(conn, {
-  name = 'hs-default', sharedUsers = 1, idleMinutes = 10,
+  name = 'hs-default', sharedUsers = 1, idleMinutes = 10, bindMac = true,
 } = {}) {
   const rows = await conn.write('/ip/hotspot/user/profile/print', []);
   const found = rows.find((p) => p.name === name);
@@ -480,6 +480,19 @@ export async function ensureHotspotUserProfile(conn, {
     `=shared-users=${sharedUsers}`,
     `=idle-timeout=00:${String(idleMinutes).padStart(2, '0')}:00`,
     '=status-autorefresh=1m',
+    /**
+     * MAC cookie: the device is remembered and logged back in by itself.
+     *
+     * Without it a guest who pays, then walks out of range or switches WiFi
+     * off and on, is met by the login page again and has to find the code they
+     * were sent. With it the router recognises the handset and reconnects it
+     * for as long as the bundle lasts, which is what somebody who has already
+     * paid expects to happen.
+     *
+     * add-mac-cookie writes the cookie; mac-cookie-timeout is how long it is
+     * honoured. A day covers the common bundles and expires on its own.
+     */
+    ...(bindMac ? ['=add-mac-cookie=yes', '=mac-cookie-timeout=1d'] : ['=add-mac-cookie=no']),
     `=comment=${MANAGED_COMMENT}`,
   ];
   if (found) {

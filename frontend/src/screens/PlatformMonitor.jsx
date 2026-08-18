@@ -76,6 +76,29 @@ export default function PlatformMonitor() {
   const [error, setError] = useState(null);
   const [at, setAt] = useState(null);
   const [health, setHealth] = useState(null);
+  const [restarting, setRestarting] = useState(false);
+
+  /**
+   * Restart the API, not the machine.
+   *
+   * A VPS reboot from a web page takes down the database, the tunnel and every
+   * router session, and the one thing the operator cannot then do is read
+   * whether it came back. This fixes the case a reboot is usually reached for —
+   * a wedged API — and leaves everything else running.
+   */
+  const restart = async () => {
+    if (!window.confirm('Restart the API? Screens will reconnect in a few seconds. '
+      + 'Routers and customer sessions are not affected.')) return;
+    setRestarting(true);
+    try {
+      await api.restartApi();
+      store.toast('Restarting — this page will reconnect shortly');
+      setTimeout(() => { setRestarting(false); load(); }, 6000);
+    } catch (e) {
+      setRestarting(false);
+      store.toast(`Could not restart: ${e.message}`);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -150,7 +173,15 @@ export default function PlatformMonitor() {
           look like unrelated faults — payments not landing, pushes timing out —
           and nobody thinks to check the host until late. */}
       {health && (
-        <Card title="This server" subtitle="The VPS running Vibelink">
+        <Card
+          title="This server"
+          subtitle="The VPS running Vibelink"
+          actions={
+            <Button onClick={restart} disabled={restarting}>
+              {restarting ? 'Restarting…' : 'Restart API'}
+            </Button>
+          }
+        >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14 }}>
             {(() => {
               const gb = (b) => `${(b / 1e9).toFixed(1)} GB`;
@@ -177,6 +208,19 @@ export default function PlatformMonitor() {
                  `${health.load.cores} core(s)`, loadPer > 1 ? color.amberInk : null],
                 ['Tunnels', health.tunnels ?? '—', 'routers dialled in', null],
                 ['Uptime', days ? `${days}d ${hours}h` : `${hours}h`, 'since last reboot', null],
+                // The two services whose failure is invisible from the app:
+                // routers quietly stop dialling in, customers quietly stop
+                // authenticating, and every screen keeps working.
+                ['OpenVPN',
+                 health.services?.openvpn?.ok === false ? 'down' : 'up',
+                 health.services?.openvpn?.detail ?? '',
+                 health.services?.openvpn?.ok === false ? color.rust : null],
+                ['RADIUS',
+                 health.services?.radius?.ok === false ? 'down'
+                   : health.services?.radius?.ok === null ? 'quiet' : 'up',
+                 health.services?.radius?.detail ?? '',
+                 health.services?.radius?.ok === false ? color.rust
+                   : health.services?.radius?.ok === null ? color.amberInk : null],
               ];
 
               return tiles.map(([label, value, note, tone]) => (

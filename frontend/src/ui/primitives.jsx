@@ -478,3 +478,39 @@ export const Bar = ({ pct = 0, tone = color.green }) => (
     <div style={{ width: `${Math.max(0, Math.min(100, pct))}%`, height: '100%', background: tone }} />
   </div>
 );
+
+/**
+ * The actions at the end of a table row.
+ *
+ * These were bare text spans with a right margin, which rendered as one run of
+ * words — "ViewPauseSuspendEditDelete" — with no gap between the tap targets.
+ * On a phone that is unhittable, and on a laptop it reads as a single label
+ * rather than five things you can do.
+ *
+ * A flex row with a real gap, each action padded to a size a thumb can find,
+ * and allowed to wrap rather than pushing the table sideways.
+ */
+export const RowActions = ({ children }) => (
+  <div style={{
+    display: 'flex', gap: 6, justifyContent: 'flex-end',
+    flexWrap: 'wrap', alignItems: 'center',
+  }}>
+    {children}
+  </div>
+);
+
+export const RowAction = ({ tone, onClick, title, children }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    title={title}
+    style={{
+      font: 'inherit', fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+      color: tone ?? color.inkSoft, background: 'transparent',
+      border: `1px solid ${color.line}`, borderRadius: radius.md,
+      padding: '5px 10px', whiteSpace: 'nowrap', lineHeight: 1.2,
+    }}
+  >
+    {children}
+  </button>
+);

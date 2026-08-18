@@ -9,6 +9,9 @@ import { Button, Card, Field, Input, Screen, Select, Table, Tabs, Textarea } fro
 // schema.sql, so the server could not narrow the audience and would silently
 // message everyone. Add the column first, then the option.
 const AUDIENCES = ['All clients', 'By router', 'By package', 'Expiring soon', 'Expired'];
+/** Shown until the server's list arrives, so the row is never empty. */
+const FALLBACK_TAGS = ['{name}', '{account}', '{expires}', '{plan}', '{amount}', '{company}'];
+
 const TEMPLATES = {
   'Blank message': '',
   Reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
@@ -72,10 +75,38 @@ export default function Messaging() {
 
   const pickTemplate = (e) => {
     const t = e.target.value;
-    setSms((s) => ({ ...s, template: t, body: TEMPLATES[t] ?? s.body }));
+    setSms((s) => ({ ...s, template: t, body: saved[t] ?? TEMPLATES[t] ?? s.body }));
   };
 
   const action = useAction();
+
+  /**
+   * Tags and saved wording come from the server.
+   *
+   * The templates were a constant in this file, so an ISP could not change what
+   * their own customers receive without us shipping a release, and the tag list
+   * existed only in a sentence of hint text.
+   */
+  const [tags, setTags] = useState([]);
+  const [saved, setSaved] = useState({});
+  useEffect(() => {
+    api.smsTemplates()
+      .then((d) => {
+        setTags(d.placeholders ?? []);
+        setSaved({ ...(d.defaults ?? {}), ...(d.templates ?? {}) });
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveTemplate = async () => {
+    try {
+      await api.saveSmsTemplates({ ...saved, [sms.template]: sms.body });
+      setSaved((v) => ({ ...v, [sms.template]: sms.body }));
+      store.toast(`Saved the "${sms.template}" wording`);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
 
   const send = async () => {
     if (!sms.body.trim()) return store.toast('Write a message first');
@@ -179,9 +210,41 @@ export default function Messaging() {
           <Select value={sms.template} onChange={pickTemplate} options={Object.keys(TEMPLATES)} />
         </Field>
 
-        <Field label="Message" hint="Placeholders like {name}, {expires}, {account} are filled per recipient">
+        <Field label="Message" hint="Click a tag below to insert it">
           <Textarea value={sms.body} onChange={set('body')} rows={5} />
         </Field>
+
+        {/* The tags, visible and clickable. They were mentioned in a hint and
+            listed nowhere, so an operator had to already know them to use them
+            — and a mistyped tag sends the customer a literal {nmae}. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: color.muted }}>Insert:</span>
+          {(tags.length ? tags : FALLBACK_TAGS).map((t) => (
+            <button
+              key={t.key ?? t}
+              type="button"
+              title={t.describes ?? t.detail ?? ''}
+              onClick={() => setSms((v) => ({ ...v, body: `${v.body}${t.key ?? t}` }))}
+              style={{
+                font: 'inherit', fontSize: 12, fontFamily: font.mono, cursor: 'pointer',
+                border: `1px solid ${color.line}`, borderRadius: 999,
+                background: color.tileBg, color: color.inkSoft, padding: '3px 9px',
+              }}
+            >
+              {t.key ?? t}
+            </button>
+          ))}
+        </div>
+
+        {/* Saving the wording, so it is theirs rather than ours. */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <Button onClick={saveTemplate} disabled={busy}>
+            Save as the "{sms.template}" template
+          </Button>
+          <span style={{ fontSize: 12, color: color.muted }}>
+            Used automatically for {sms.template} messages from now on.
+          </span>
+        </div>
 
         <div
           style={{

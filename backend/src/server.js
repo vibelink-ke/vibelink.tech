@@ -136,7 +136,7 @@ app.post('/api/auth/login', wrap(async (req, res) => {
   if (!(await auth.verifyPassword(password, acct.password_hash)))
     return res.status(401).json({ error: 'That password is not correct.' });
   if (acct.tenant_status === 'suspended')
-    return res.status(402).json({ error: 'This account is suspended. Contact support@vibelink.tech.' });
+    return res.status(402).json({ error: 'This account is suspended. Contact support@vibelink.co.ke.' });
 
   const { token, expiresAt } = await auth.createSession(acct.id, acct.tenant_id, { remember });
   auth.setSessionCookie(res, token, expiresAt);
@@ -186,6 +186,12 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
       [tenant.id, name, phone ?? sub, String(email).trim(), user, password_hash]));
     await c.query('insert into hotspot_settings (tenant_id) values ($1) on conflict do nothing', [tenant.id]);
     await c.query('commit');
+
+    // Starter help articles, after the commit and never fatal: a new ISP should
+    // not be turned away because seeding content failed, and the account is
+    // already theirs by this point.
+    const { seedTenant } = await import('./seed-tenant.js');
+    await seedTenant(tenant.id).catch((e) => console.error('seedTenant', tenant.id, e.message));
   } catch (e) {
     await c.query('rollback');
     throw e;
@@ -326,7 +332,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
 
   // Branding the operator controls from Hotspot -> Settings.
   const { rows: [hs] } = await pool.query(
-    'select banner_headline, banner_subtext from hotspot_settings where tenant_id=$1',
+    'select banner_headline, banner_subtext, template from hotspot_settings where tenant_id=$1',
     [tenant.id]);
 
   res.type('html').send(loginPage({
@@ -336,6 +342,10 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     portalUrl: tenant.subdomain ? `https://${tenant.subdomain}.${root}` : null,
     headline: hs?.banner_headline ?? null,
     subtext: hs?.banner_subtext ?? null,
+    template: hs?.template ?? 'sleek',
+    // ?tv=1 for a set-top box or smart TV: same page, sized to be read from a
+    // sofa and typed with a remote.
+    tvMode: req.query.tv === '1',
     // Only the copy destined for the router carries RouterOS template syntax.
     // A person opening this in a browser gets a page with no raw $(...) in it.
     forRouter: req.query.router === '1',
@@ -1469,6 +1479,9 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     const prof = await step('hotspot user profile', () => ros.ensureHotspotUserProfile(conn, {
       sharedUsers: hs?.multi_device ? 3 : 1,
       idleMinutes: hs?.idle_timeout_min ?? 10,
+      // Hotspot → Settings → "Bind to MAC on first login" decides whether a
+      // paid device is reconnected without typing the code again.
+      bindMac: hs?.bind_mac ?? true,
     }));
     done.push(`user profile ${prof.profile} (${hs?.multi_device ? 3 : 1} device${hs?.multi_device ? 's' : ''} per code)`);
 
@@ -1774,11 +1787,44 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
           : `${bridge.bridge} already had those ports`);
         if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
 
+        /**
+         * The pool the operator configured under Networks, not a built-in one.
+         *
+         * A tenant who defines 192.168.0.0/16 there and then finds their
+         * subscribers on 10.100.x has been ignored — the page exists to decide
+         * this and the push was not reading it. Prefer a pool tied to this
+         * router, then any pool for the service, and fall back to the default
+         * only when they have defined none.
+         */
+        const { rows: [confPool] } = await pool.query(
+          `select cidr from ip_pools
+            where tenant_id=$1 and service='pppoe'
+              and (router_id = $2 or router_id is null)
+            order by (router_id = $2) desc
+            limit 1`, [req.tenant.id, r.id]);
+
+        // A cidr has to become a usable range: .1 is the gateway, and the
+        // broadcast address cannot be handed to a subscriber.
+        const poolFromCidr = (cidr) => {
+          if (!cidr) return null;
+          const [base, bits] = String(cidr).split('/');
+          const o = base.split('.').map(Number);
+          const toInt = (a) => ((a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]) >>> 0;
+          const toStr = (n) => [24, 16, 8, 0].map((sh) => (n >>> sh) & 255).join('.');
+          const mask = (0xffffffff << (32 - Number(bits))) >>> 0;
+          const net = (toInt(o) & mask) >>> 0;
+          const broadcast = (net | (~mask >>> 0)) >>> 0;
+          if (broadcast - net < 3) return null;
+          return { gateway: toStr(net + 1), range: `${toStr(net + 2)}-${toStr(broadcast - 1)}` };
+        };
+        const chosen = poolFromCidr(confPool?.cidr);
+        if (chosen) done.push(`using the ${confPool.cidr} pool from Networks`);
+
         const pppoe = await step('PPPoE server, pool and profile', () =>
           ros.applyPppoeServer(conn, {
             bridge: bridge.bridge,
-            poolRange: req.body?.poolRange,
-            gateway: req.body?.gateway,
+            poolRange: req.body?.poolRange ?? chosen?.range,
+            gateway: req.body?.gateway ?? chosen?.gateway,
           }), 40000);
         done.push(`PPPoE server listening on ${pppoe.bridge}, handing out ${pppoe.pool}`);
 
@@ -2343,6 +2389,28 @@ app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay, location, lat, lng } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
+
+  /**
+   * Catch the same customer being added twice.
+   *
+   * A number may legitimately hold several lines — a household taking a second
+   * connection, a business with two sites — so this is a warning with a way
+   * past it rather than a prohibition. Refusing outright makes a real case
+   * impossible; allowing it silently is how a customer pays one account while
+   * the other quietly expires.
+   */
+  if (!req.body?.allowDuplicatePhone) {
+    const { rows: existing } = await pool.query(
+      'select name, account_code from subscribers where tenant_id=$1 and phone=$2',
+      [req.tenant.id, phone]);
+    if (existing.length) {
+      return res.status(409).json({
+        error: `${phone} already belongs to ${existing.map((x) => `${x.name} (${x.account_code})`).join(', ')}. `
+          + 'Tick "same person, another line" to add a second account.',
+        duplicatePhone: true,
+      });
+    }
+  }
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
        router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng)
@@ -2886,7 +2954,16 @@ app.post('/api/staff', wrap(async (req, res) => {
 }));
 
 app.delete('/api/staff/:id', wrap(async (req, res) => {
-  await pool.query('delete from staff where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  // Never your own login. An owner who deletes it locks the tenant out of its
+  // own portal, and the only way back is through us — nothing the person who
+  // did it can undo. Refused rather than confirmed.
+  if (req.params.id === req.session.staff_id) {
+    return res.status(409).json({ error: 'You cannot delete your own login. Ask a colleague to do it.' });
+  }
+
+  const { rowCount } = await pool.query(
+    'delete from staff where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such member of staff' });
   res.json({ ok: true });
 }));
 
@@ -3110,6 +3187,41 @@ app.post('/api/sms/bulk', wrap(async (req, res) => {
 }));
 
 /** The tokens a template may contain, for the message composer to offer. */
+/**
+ * The message templates this tenant sends.
+ *
+ * Editing them was impossible: the wording lived in a constant in the browser
+ * bundle, so an ISP could not change what their own customers receive without
+ * us shipping a release. The defaults stay as the fallback for anything they
+ * have not overridden.
+ */
+app.get('/api/sms/templates', wrap(async (req, res) => {
+  const { DEFAULTS, PLACEHOLDERS } = await import('./sms.js');
+  const { rows } = await pool.query(
+    'select templates from tenant_sms_config where tenant_id=$1 order by priority limit 1',
+    [req.tenant.id]);
+  res.json({
+    defaults: DEFAULTS,
+    templates: rows[0]?.templates ?? {},
+    placeholders: PLACEHOLDERS,
+  });
+}));
+
+app.put('/api/sms/templates', wrap(async (req, res) => {
+  const templates = req.body?.templates;
+  if (!templates || typeof templates !== 'object') {
+    return res.status(400).json({ error: 'Nothing to save' });
+  }
+  // Written to every gateway this tenant has: the wording is theirs, not the
+  // provider's, and a message should not change because a gateway failed over.
+  const { rowCount } = await pool.query(
+    'update tenant_sms_config set templates=$2 where tenant_id=$1', [req.tenant.id, templates]);
+  if (!rowCount) {
+    return res.status(400).json({ error: 'Add an SMS gateway first — templates are stored against it.' });
+  }
+  res.json({ ok: true, templates });
+}));
+
 app.get('/api/sms/placeholders', wrap(async (_req, res) => {
   const { PLACEHOLDERS } = await import('./sms.js');
   res.json(PLACEHOLDERS);
@@ -3234,6 +3346,35 @@ app.get('/api/platform/health', superAdminOnly, wrap(async (_req, res) => {
     tunnels = (await liveTunnels()).length;
   } catch { tunnels = null; }
 
+  /**
+   * OpenVPN and FreeRADIUS, checked rather than assumed.
+   *
+   * These are the two services whose failure is invisible from the app: routers
+   * quietly stop dialling in, customers quietly stop authenticating, and every
+   * screen keeps working. OpenVPN is judged by whether it is still writing its
+   * status file; RADIUS by whether anything has authenticated recently, which
+   * is the only signal available from here without speaking the protocol.
+   */
+  const services = {};
+  try {
+    const fsp2 = await import('node:fs/promises');
+    const st = await fsp2.stat(process.env.OVPN_STATUS_FILE ?? '/run/openvpn/status.log');
+    const ageSec = Math.round((Date.now() - st.mtimeMs) / 1000);
+    // OpenVPN rewrites it every 10 seconds; a minute stale means it has stopped.
+    services.openvpn = { ok: ageSec < 60, detail: `status file ${ageSec}s old` };
+  } catch (e) {
+    services.openvpn = { ok: false, detail: 'no status file — the tunnel service may be down' };
+  }
+  try {
+    const { rows: [r] } = await pool.query(
+      "select max(authdate) last from radpostauth where authdate > now() - interval '24 hours'");
+    services.radius = r?.last
+      ? { ok: true, detail: `last authentication ${new Date(r.last).toISOString()}` }
+      : { ok: null, detail: 'no authentications in 24h — quiet, or not reaching us' };
+  } catch (e) {
+    services.radius = { ok: false, detail: e.message };
+  }
+
   res.json({
     at: new Date().toISOString(),
     uptimeSeconds: Math.round(process.uptime()),
@@ -3245,8 +3386,27 @@ app.get('/api/platform/health', superAdminOnly, wrap(async (_req, res) => {
     disk,
     db,
     tunnels,
+    services,
     counts,
   });
+}));
+
+/**
+ * Restart the API, which is as far as a reboot button should go.
+ *
+ * Deliberately not the machine. A VPS reboot from inside a web request takes
+ * down the database, the tunnel and every router session with no way to report
+ * whether it came back — and the one thing an operator cannot do after pressing
+ * it is read the result. Restarting this process fixes the case a reboot is
+ * usually reached for (a wedged API) and leaves the rest running.
+ *
+ * Docker's restart policy brings the process straight back.
+ */
+app.post('/api/platform/restart', superAdminOnly, wrap(async (_req, res) => {
+  console.warn('restart requested from the platform monitor');
+  res.json({ ok: true, note: 'The API is restarting. This page will reconnect in a few seconds.' });
+  // After the response, so the caller is told before the process goes.
+  setTimeout(() => process.exit(0), 250);
 }));
 
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
@@ -3256,6 +3416,13 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
     `insert into tenants (name, subdomain, plan_type, plan_amount, revshare_pct, support_phone)
      values ($1,$2,$3,$4,$5,$6) returning *`,
     [name, subdomain, planType, planAmount ?? null, revsharePct ?? null, supportPhone ?? null]);
+
+  // Starter help articles, so a new ISP is not answering the same four
+  // questions from an empty page. Non-fatal: failing to seed content must not
+  // fail creating the tenant.
+  const { seedTenant } = await import('./seed-tenant.js');
+  await seedTenant(t.id).catch((e) => console.error('seedTenant', t.id, e.message));
+
   res.json(t);
 }));
 
@@ -3771,11 +3938,21 @@ app.get('/api/settings', wrap(async (req, res) => {
     org: { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status },
     smtp: extra?.smtp ?? {},
     prefs: extra?.prefs ?? {},
+    alertPhone: extra?.alert_phone ?? null,
   });
 }));
 
 app.put('/api/settings', wrap(async (req, res) => {
-  const { org, smtp, prefs } = req.body;
+  const { org, smtp, prefs, alertPhone } = req.body;
+
+  // Where router alerts go. Stored on app_settings rather than staff, because
+  // it is a rota decision, not a person's contact detail.
+  if (alertPhone !== undefined) {
+    await pool.query(
+      `insert into app_settings (tenant_id, alert_phone) values ($1, nullif($2,''))
+       on conflict (tenant_id) do update set alert_phone = excluded.alert_phone`,
+      [req.tenant.id, String(alertPhone ?? '').trim()]);
+  }
   if (org) {
     await pool.query(
       `update tenants set name=coalesce($2,name), currency=coalesce($3,currency),
