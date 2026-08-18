@@ -117,6 +117,34 @@ async function cmd(conn, label, path, args = []) {
     return await conn.write(path, args);
   } catch (e) {
     /**
+     * "no such command or directory" names a missing menu, not a missing item.
+     *
+     * RouterOS uses that exact wording only when a whole submenu does not
+     * exist — "no such item" is the answer for an empty or absent row inside a
+     * menu that is really there. /ip/hotspot and /ip/dhcp-server/... only exist
+     * when the matching package is installed and enabled, and MikroTik ships
+     * several of them as separate, removable packages on current builds. A
+     * router that served a hotspot minutes earlier can still land here: an
+     * operator clearing out a hotspot by hand in Winbox, or a package disabled
+     * while tidying up, produces the identical raw sentence on every command
+     * that follows — which told an operator "no such command or directory
+     * (hotspot)" and nothing about what that meant or how to fix it.
+     */
+    // RouterOS names the missing segment itself, in parentheses — reading it
+    // from the message rather than guessing from `path` matters because the
+    // failing segment is rarely the first one: /ip/hotspot/profile/print fails
+    // on "hotspot", not "ip", and picking the wrong word here failed silently,
+    // falling through to the raw, unexplained RouterOS sentence exactly as
+    // before.
+    const missing = /^no such command.*\(([\w-]+)\)/i.exec(String(e.message ?? ''))?.[1];
+    if (missing) {
+      const err = new Error(
+        `The "${missing}" package is not installed or is disabled on this router. Enable it with `
+        + `/system package enable ${missing}, then reboot.`);
+      err.step = label;
+      throw err;
+    }
+    /**
      * Some menus have no `comment` property, and which ones varies by RouterOS
      * version and by board. We stamp MANAGED_COMMENT on everything we create so
      * an operator can see what is ours, but on those menus the router answers
@@ -277,9 +305,15 @@ export async function applyPpp(conn, { interimMinutes = 5 } = {}) {
   ]);
 }
 
-/** Same for hotspot: every profile on the box, since a router may serve several sites. */
+/**
+ * Same for hotspot: every profile on the box, since a router may serve several
+ * sites. Routed through cmd() rather than a bare read, purely so a router
+ * with no hotspot package gets the same translated message as every write
+ * below — "the hotspot package is not installed" — instead of RouterOS's raw
+ * "no such command or directory (hotspot)".
+ */
 export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
-  const profiles = await conn.write('/ip/hotspot/profile/print', []);
+  const profiles = await cmd(conn, 'read hotspot profiles', '/ip/hotspot/profile/print', []);
   const mm = String(interimMinutes).padStart(2, '0');
   for (const p of profiles) {
     await conn.write('/ip/hotspot/profile/set', [
