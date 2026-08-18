@@ -20,6 +20,7 @@ import Tickets from './screens/Tickets';
 import Payments from './screens/Payments';
 import PaymentMethods from './screens/PaymentMethods';
 import Settings from './screens/Settings';
+import ErrorBoundary from './ui/boundary';
 
 /**
  * Screens fetched when first opened, not on every load.
@@ -139,6 +140,8 @@ export default function App() {
               downloads. Deliberately blank rather than a spinner: on a fast
               connection the chunk arrives in a frame or two and a spinner that
               flashes reads as jank. */}
+          {/* Keyed on the path so navigating away clears a previous crash. */}
+          <ErrorBoundary resetKey={pathname}>
           <Suspense fallback={null}>
             <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -175,6 +178,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
       <Toast />
