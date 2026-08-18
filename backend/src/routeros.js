@@ -591,6 +591,24 @@ export async function wanInterface(conn, ifaceNames = null) {
   const via = status.includes(' via ') ? status.split(' via ').pop().trim() : null;
   if (via && names.has(via)) return via;
 
+  /**
+   * `immediate-gw`, for the route gateway-status never has an answer for.
+   *
+   * A static or PPPoE-assigned default route carries gateway-status —
+   * "41.90.1.1 reachable via ether1" — and the check above reads it. A
+   * DHCP-client-installed default route does not: RouterOS names the
+   * interface a different way instead, as a %-suffix on immediate-gw itself
+   * — immediate-gw=192.168.1.1%ether1 — confirmed from a router this failed
+   * on, whose uplink is fed by DHCP from an upstream router rather than a
+   * static gateway. Nothing here read that field before, so a router shaped
+   * exactly like that one always fell through every check below and reported
+   * no identifiable uplink — safe, since nothing was opened unprotected, but
+   * wrong: the uplink was knowable, this just never asked the right field.
+   */
+  const immediate = String(live?.['immediate-gw'] ?? '');
+  const viaImmediate = immediate.includes('%') ? immediate.split('%').pop().trim() : null;
+  if (viaImmediate && names.has(viaImmediate)) return viaImmediate;
+
   const gateway = String(live?.gateway ?? '').trim();
   if (gateway && names.has(gateway)) return gateway;   // some routes name the interface directly
 
