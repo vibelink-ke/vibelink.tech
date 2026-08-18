@@ -122,13 +122,17 @@ async function cmd(conn, label, path, args = []) {
      * RouterOS uses that exact wording only when a whole submenu does not
      * exist — "no such item" is the answer for an empty or absent row inside a
      * menu that is really there. /ip/hotspot and /ip/dhcp-server/... only exist
-     * when the matching package is installed and enabled, and MikroTik ships
-     * several of them as separate, removable packages on current builds. A
-     * router that served a hotspot minutes earlier can still land here: an
-     * operator clearing out a hotspot by hand in Winbox, or a package disabled
-     * while tidying up, produces the identical raw sentence on every command
-     * that follows — which told an operator "no such command or directory
-     * (hotspot)" and nothing about what that meant or how to fix it.
+     * when the matching package is installed, enabled, and at the same version
+     * as the base system, and MikroTik ships several of them as separate
+     * packages that update independently. A router that served a hotspot
+     * minutes earlier can still land here without the package ever being
+     * disabled: `/system package print` on the router that produced this had
+     * hotspot sitting at 7.21.5 against routeros and wireless at 7.24, built
+     * over a month apart — a routeros upgrade that installed but has not been
+     * rebooted into yet, leaving the older hotspot build unable to answer
+     * anything under /ip/hotspot until the reboot reconciles the versions.
+     * "Enable the package" would have been the wrong advice for exactly that
+     * router, so the message covers both causes rather than guessing which.
      */
     // RouterOS names the missing segment itself, in parentheses — reading it
     // from the message rather than guessing from `path` matters because the
@@ -139,8 +143,10 @@ async function cmd(conn, label, path, args = []) {
     const missing = /^no such command.*\(([\w-]+)\)/i.exec(String(e.message ?? ''))?.[1];
     if (missing) {
       const err = new Error(
-        `The "${missing}" package is not installed or is disabled on this router. Enable it with `
-        + `/system package enable ${missing}, then reboot.`);
+        `The router says the "${missing}" package is unavailable. Check /system package print: `
+        + `if it is marked X, enable it with /system package enable ${missing} and reboot; if it `
+        + `is present but its version and build date do not match routeros, an upgrade is `
+        + `installed but not yet applied — reboot to bring it in line.`);
       err.step = label;
       throw err;
     }
