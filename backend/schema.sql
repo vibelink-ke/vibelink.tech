@@ -858,8 +858,10 @@ alter table app_settings add column if not exists alert_phone text;
 -- creating the same customer twice by accident. Unique on (tenant, phone,
 -- account) rather than (tenant, phone): a second line needs its own account
 -- number anyway, and that is what the customer types when paying.
-create unique index if not exists subscribers_phone_account
-  on subscribers (tenant_id, phone, account_code);
+-- Superseded by (tenant_id, account_code, line_label) below. Keeping it would
+-- block the very thing several lines on one account is for: the same person,
+-- the same number, the same account, two connections.
+drop index if exists subscribers_phone_account;
 
 -- Starter knowledge base.
 --
@@ -922,6 +924,30 @@ select t.id, a.title, a.category, a.body, true
      'Your device is remembered for the life of the bundle, so switching WiFi off and on will reconnect you without typing it again.')
   ) as a(title, category, body)
  where not exists (select 1 from kb_articles k where k.tenant_id = t.id);
+
+-- ─────────────── several lines on one account ───────────────
+-- A customer with two connections — a house and a shop, a landlord with three
+-- flats — is one person paying one account number, not three strangers who
+-- happen to share a phone.
+--
+-- Rather than a parent table, which every query and every payment path would
+-- have to learn, a line is still a subscriber row and the account number is
+-- what ties them together. The tag says which one it is, so an operator sending
+-- a technician knows whether it is the shop or the house.
+alter table subscribers add column if not exists line_label text;
+
+-- account_code stops being unique on its own and becomes unique per line.
+-- Without this a second line cannot be created at all; with it, two lines on
+-- one account must still be told apart by their tag.
+alter table subscribers drop constraint if exists subscribers_tenant_id_account_code_key;
+create unique index if not exists subscribers_account_line
+  on subscribers (tenant_id, account_code, coalesce(line_label, ''));
+
+-- The PPPoE username has to stay unique regardless: it is what the router
+-- authenticates, and two lines answering to one name is a collision, not a
+-- feature.
+create unique index if not exists subscribers_pppoe_user_unique
+  on subscribers (tenant_id, pppoe_user) where pppoe_user is not null;
 
 -- ─────────────── live chat ───────────────
 -- live_chats recorded that a conversation existed and never held a word of it.

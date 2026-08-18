@@ -462,7 +462,20 @@ export default function Clients() {
                           {c.name}
                         </span>
                         <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>
-                          {c.account_code} · {c.phone}
+                          {c.account_code}
+                          {/* The tag, where there is one. Two rows with the same
+                              account number and no way to tell them apart is
+                              worse than not supporting several lines at all. */}
+                          {c.line_label && (
+                            <span style={{
+                              marginLeft: 6, padding: '1px 7px', borderRadius: 999,
+                              background: color.tileBg, border: `1px solid ${color.line}`,
+                              fontSize: 11, fontWeight: 600, color: color.inkSoft,
+                            }}>
+                              {c.line_label}
+                            </span>
+                          )}
+                          {' · '}{c.phone}
                         </span>
                       </div>
                     </td>
@@ -564,6 +577,7 @@ export default function Clients() {
         {detail && (
           <>
             <KV k="Account" v={detail.account_code} />
+            {detail.line_label && <KV k="Line" v={detail.line_label} />}
             <KV k="Phone" v={detail.phone} />
             <KV k="Service" v={detail.service} />
             <KV k="PPPoE user" v={detail.pppoe_user ?? '—'} />

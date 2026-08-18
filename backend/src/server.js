@@ -2387,7 +2387,7 @@ function coord(value, limit) {
 
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
-          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng } = req.body;
+          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
 
   /**
@@ -2399,25 +2399,53 @@ app.post('/api/subscribers', wrap(async (req, res) => {
    * impossible; allowing it silently is how a customer pays one account while
    * the other quietly expires.
    */
-  if (!req.body?.allowDuplicatePhone) {
+  const label = String(lineLabel ?? '').trim() || null;
+  const account = accountCode ?? phone;
+
+  /**
+   * Several lines under one account.
+   *
+   * A customer with two connections is one person paying one account number,
+   * not two strangers who share a phone. The tag is what tells them apart —
+   * "Shop", "Flat 3" — so it is required for the second and later lines and
+   * pointless on the first.
+   */
+  const { rows: sameAccount } = await pool.query(
+    'select line_label from subscribers where tenant_id=$1 and account_code=$2',
+    [req.tenant.id, account]);
+
+  if (sameAccount.length && !label) {
+    return res.status(409).json({
+      error: `Account ${account} already has a line. Give this one a tag — "Shop", "Flat 3" — `
+        + 'so the two can be told apart.',
+      needsLineLabel: true,
+    });
+  }
+  if (label && sameAccount.some((x) => (x.line_label ?? '') === label)) {
+    return res.status(409).json({ error: `Account ${account} already has a line tagged "${label}".` });
+  }
+
+  // A repeated phone on a *different* account is still worth querying: that is
+  // the same customer entered twice, which is the mistake this catches.
+  if (!sameAccount.length && !req.body?.allowDuplicatePhone) {
     const { rows: existing } = await pool.query(
       'select name, account_code from subscribers where tenant_id=$1 and phone=$2',
       [req.tenant.id, phone]);
     if (existing.length) {
       return res.status(409).json({
         error: `${phone} already belongs to ${existing.map((x) => `${x.name} (${x.account_code})`).join(', ')}. `
-          + 'Tick "same person, another line" to add a second account.',
+          + 'Use that account number to add another line to them, or tick "different customer".',
         duplicatePhone: true,
       });
     }
   }
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
-       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) returning *`,
-    [req.tenant.id, accountCode ?? phone, name, phone, phoneAlt || null, service, planId ?? null,
+       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`,
+    [req.tenant.id, account, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
-     location || null, coord(lat, 90), coord(lng, 180)]);
+     location || null, coord(lat, 90), coord(lng, 180), label]);
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.

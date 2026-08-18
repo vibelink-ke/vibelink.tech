@@ -20,6 +20,7 @@ const BLANK = {
   birthday: '',
   identification: '',
   location: '',
+  lineLabel: '',
   // Blank, not a default. These shipped filled in with one spot in Eldoret, so
   // every client saved without touching the field would have claimed to live
   // there — a map full of confident wrong pins is worse than an empty one.
@@ -145,6 +146,7 @@ export default function AddClient() {
         pppoeUser: f.login || f.account || null,
         pppoePass: f.password || null,
         staticIp: f.assignedIp || null,
+        lineLabel: f.lineLabel || null,
         location: f.location || null,
         lat: f.lat,
         lng: f.lng,
@@ -214,6 +216,15 @@ export default function AddClient() {
                 />
                 <Button onClick={genCredentials}>Generate</Button>
               </div>
+            </Field>
+            {/* One customer, several connections: a house and a shop, or a
+                landlord's flats. Same account number, one tag each, so the
+                person sending a technician knows which line is which. */}
+            <Field
+              label="Line tag"
+              hint="Only for a second or third line on the same account — Shop, Flat 3, Warehouse"
+            >
+              <Input value={f.lineLabel} onChange={set('lineLabel')} placeholder="Leave blank for their only line" />
             </Field>
             <Field label="Category">
               <Select value={f.category} onChange={set('category')} options={CATEGORIES} />

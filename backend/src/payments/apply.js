@@ -77,15 +77,30 @@ async function match(c, tenantId, tx) {
   if (tx.rawAccount) {
     const norm = String(tx.rawAccount).toUpperCase().replace(/[^A-Z0-9]/g, '')
       .replace(/O/g, '0').replace(/[IL]/g, '1');
+    /**
+     * One account number can now carry several lines — a house and a shop, or
+     * a landlord's flats. M-Pesa gives us the account number and nothing else,
+     * so the payment cannot say which line it is for.
+     *
+     * It goes to the one expiring soonest. That is what the customer almost
+     * always means: the line that is about to go off, or already has. Paying
+     * for a line that still has three weeks while another sits expired would
+     * be the wrong guess every time.
+     */
     const { rows } = await c.query(
-      `select id, similarity(upper(replace(account_code,'-','')), $2) as score
-       from subscribers where tenant_id=$1 order by score desc limit 1`,
+      `select id, expires_at, similarity(upper(replace(account_code,'-','')), $2) as score
+       from subscribers where tenant_id=$1
+       order by score desc, expires_at asc nulls first
+       limit 1`,
       [tenantId, norm]
     );
     if (rows[0] && rows[0].score > 0.75) return { type: 'subscriber', id: rows[0].id };
   }
   if (tx.phone) {
-    const { rows } = await c.query('select id from subscribers where tenant_id=$1 and phone=$2 limit 1',
+    // Same rule when matching on the payer's number: the soonest to expire.
+    const { rows } = await c.query(
+      `select id from subscribers where tenant_id=$1 and phone=$2
+        order by expires_at asc nulls first limit 1`,
       [tenantId, tx.phone]);
     if (rows[0]) return { type: 'subscriber', id: rows[0].id };
   }
