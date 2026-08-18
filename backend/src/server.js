@@ -1375,6 +1375,26 @@ app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
      * the walled garden — still needs a name to resolve.
      */
     ':if ([:len [/ip dns get servers]] = 0) do={/ip dns set servers=1.1.1.1,8.8.8.8}',
+
+    /**
+     * Keep the clock right, because a clock that jumps restarts the tunnel.
+     *
+     * A router with no NTP boots at whatever time it last remembered, and is
+     * then corrected — by MikroTik Cloud, or by the first NTP reply it gets —
+     * in one jump. Seen in the field as a 3m37s correction, and the tunnel
+     * redialled at exactly that moment: RouterOS restarts timed services when
+     * the clock moves. The server logs it as a fresh connection dropping the
+     * previous session, and any push in flight dies with no explanation at
+     * either end.
+     *
+     * With NTP running the clock is set once, early, and stays right, so there
+     * is no jump to restart anything. It also makes the router's own log
+     * timestamps comparable with the server's, which is the difference between
+     * diagnosing this in one reading and guessing at it for a day.
+     */
+    ...(v6
+      ? ['/system ntp client set enabled=yes primary-ntp=216.239.35.0 secondary-ntp=162.159.200.1']
+      : ['/system ntp client set enabled=yes servers=time.google.com,time.cloudflare.com']),
     ...(pinnedNote ? [`# ${pinnedNote} resolves to ${dialTarget} — dialling the address directly,`,
                       '# because a failed DNS lookup makes RouterOS tear the tunnel down.'] : []),
     '/interface ovpn-client remove [find name=billing-ovpn]',
