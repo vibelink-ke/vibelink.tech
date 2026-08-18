@@ -22,7 +22,22 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const client = fs.readFileSync(path.join(here, '..', 'src', 'api', 'client.js'), 'utf8');
-const server = fs.readFileSync(path.join(here, '..', '..', 'backend', 'src', 'server.js'), 'utf8');
+
+/*
+ * Both halves have to be present, and in one place they are not.
+ *
+ * The web image is built from frontend/ alone — the backend is a separate
+ * image — so this file has nothing to compare against there. Failing would
+ * block a deploy over a check that cannot be performed, which is exactly what
+ * it did the first time. Skipping says so and moves on; the check still runs
+ * wherever the whole repository exists, which is where it is any use.
+ */
+const serverPath = path.join(here, '..', '..', 'backend', 'src', 'server.js');
+if (!fs.existsSync(serverPath)) {
+  console.log('skipped: backend/src/server.js is not present (building from frontend/ alone)');
+  process.exit(0);
+}
+const server = fs.readFileSync(serverPath, 'utf8');
 
 /**
  * Reduce both sides to one shape. `/api/routers/${id}/traffic` on the calling
