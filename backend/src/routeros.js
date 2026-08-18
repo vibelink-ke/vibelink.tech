@@ -1371,13 +1371,14 @@ function fingerprint(v) {
  * Reads only. Nothing here changes the router.
  */
 export async function hotspotCheck(conn, { bridge = null } = {}) {
-  const [servers, profiles, dhcpServers, addresses, ifaces, walled] = await Promise.all([
+  const [servers, profiles, dhcpServers, addresses, ifaces, walled, dns] = await Promise.all([
     conn.write('/ip/hotspot/print', []),
     conn.write('/ip/hotspot/profile/print', []),
     conn.write('/ip/dhcp-server/print', []),
     conn.write('/ip/address/print', []),
     conn.write('/interface/print', []),
     conn.write('/ip/hotspot/walled-garden/print', []),
+    conn.write('/ip/dns/print', []),
   ]);
 
   // Addresses and DHCP servers report `interface` as an internal id, so every
@@ -1454,6 +1455,25 @@ export async function hotspotCheck(conn, { bridge = null } = {}) {
     walled.length
       ? `${walled.length} rule(s)`
       : 'empty — a guest cannot reach M-Pesa before paying, so nobody can buy anything');
+
+  /**
+   * Whether a guest can resolve a name at all — checked here because it is
+   * the single most common reason "the popup does not appear" turns out to
+   * have nothing to do with the portal page, the walled garden, or anything
+   * else this function already checks. The OS shows the captive-portal
+   * prompt only after its own connectivity-check request fails in a
+   * particular way; a DNS server that refuses to answer produces "no
+   * internet" instead, silently, with every other setting here perfectly
+   * correct.
+   */
+  const remote = dns[0]?.['allow-remote-requests'];
+  add('the DNS proxy will answer guests',
+    remote === 'true' || remote === 'yes',
+    remote === 'true' || remote === 'yes'
+      ? 'guests can resolve names through the router'
+      : `allow-remote-requests=${remote ?? '(unset)'} — a phone handed this router as its DNS `
+        + 'server cannot resolve anything at all, including the check the OS uses to decide '
+        + 'whether to show the login prompt. Press Hotspot or Configure again to fix this.');
 
   return { checks, ok: checks.every((c) => c.ok), interface: iface, htmlDirectory: dir };
 }
