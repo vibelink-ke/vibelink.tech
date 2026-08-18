@@ -894,23 +894,42 @@ export async function applyPppoeServer(conn, {
   // The gateway address has to exist on the bridge or clients get a route to nowhere.
   const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
   if (!addrs.some((a) => String(a.address).startsWith(`${gateway}/`))) {
-    await conn.write('/ip/address/add', [
+    await cmd(conn, 'gateway address for PPPoE', '/ip/address/add', [
       `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
     ]);
   }
 
+  /**
+   * No remote-address at all, rather than an empty one.
+   *
+   * Subscribers are addressed from here — the address arrives per login in
+   * Framed-IP-Address — so the profile must not name a pool. Sending
+   * `remote-address=` to say "none" looked like the way to express that, and
+   * RouterOS 7 rejects it: it tries the value as a pool name, then as an
+   * address, and fails both, which is why one empty argument produced
+   * "input does not match any value of pool invalid value for argument
+   * address" and stopped the whole push.
+   *
+   * An absent property is unset, which is what we wanted. On a profile that
+   * already exists the property has to be actively cleared, and `!name` is the
+   * API's way of removing a value — otherwise a profile left over from the
+   * version that did create a pool would keep handing out its own addresses,
+   * which is the bug this whole approach exists to prevent.
+   */
   const profileFields = [
     `=local-address=${gateway}`,
-    // Empty on purpose: the address arrives per login in Framed-IP-Address.
-    '=remote-address=',
     '=use-compression=no',
     '=use-encryption=no',
     '=only-one=yes',        // one session per subscriber, so a shared password is obvious
     `=comment=${MANAGED_COMMENT}`,
   ];
   const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
-  if (profile) await conn.write('/ppp/profile/set', [`=.id=${idOf(profile)}`, ...profileFields]);
-  else await conn.write('/ppp/profile/add', [`=name=${profileName}`, ...profileFields]);
+  if (profile) {
+    await cmd(conn, 'PPP profile', '/ppp/profile/set',
+      [`=.id=${idOf(profile)}`, ...profileFields, '=!remote-address=']);
+  } else {
+    await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...profileFields]);
+  }
 
   const serverFields = [
     `=interface=${bridge}`,
@@ -928,8 +947,12 @@ export async function applyPppoeServer(conn, {
     '=authentication=pap,chap,mschap1,mschap2',
   ];
   const server = (await conn.write('/interface/pppoe-server/server/print', [`?interface=${bridge}`]))[0];
-  if (server) await conn.write('/interface/pppoe-server/server/set', [`=.id=${idOf(server)}`, ...serverFields]);
-  else await conn.write('/interface/pppoe-server/server/add', serverFields);
+  if (server) {
+    await cmd(conn, 'PPPoE server', '/interface/pppoe-server/server/set',
+      [`=.id=${idOf(server)}`, ...serverFields]);
+  } else {
+    await cmd(conn, 'PPPoE server', '/interface/pppoe-server/server/add', serverFields);
+  }
 
   // Same reason as the hotspot: a subscriber given an address out of a private
   // pool with no NAT connects, authenticates, and reaches nothing.
