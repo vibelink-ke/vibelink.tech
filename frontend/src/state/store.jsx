@@ -88,9 +88,15 @@ export function StoreProvider({ children }) {
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
 
-  /** Fetch everything in parallel; a failing slice stays empty and is recorded. */
-  const reload = useCallback(async () => {
-    setLoading(true);
+  /**
+   * Fetch everything in parallel; a failing slice stays empty and is recorded.
+   *
+   * `quiet` skips the loading flag. The periodic refresh below uses it: without
+   * it every screen would drop to its skeleton on a timer, which looks like the
+   * app breaking rather than keeping itself current.
+   */
+  const reload = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
     const entries = Object.entries(COLLECTIONS);
     const settled = await Promise.allSettled(entries.map(([, fn]) => fn()));
     const next = {};
@@ -125,6 +131,32 @@ export function StoreProvider({ children }) {
     setLoading(false);
   }, []);
 
+  /**
+   * Keep every screen current without anyone pressing anything.
+   *
+   * Screens read from this one store, so a single refresh updates all of them:
+   * a payment that lands, a router that drops, a session that ends. Thirty
+   * seconds is frequent enough that a wall display is worth looking at, and
+   * slow enough that it costs one request set per screen per minute.
+   *
+   * Paused while the tab is hidden. A dozen forgotten tabs polling all day is
+   * how a small VPS ends up with a load average nobody can explain.
+   */
+  useEffect(() => {
+    if (!session) return undefined;
+    const tick = () => {
+      if (document.visibilityState === 'visible') reload({ quiet: true });
+    };
+    const id = setInterval(tick, 30000);
+    // Catch up immediately on returning to the tab rather than waiting out the
+    // rest of the interval on stale figures.
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [session, reload]);
+
   // Resolve the session first; only load tenant data once we know who is asking.
   useEffect(() => {
     let cancelled = false;
@@ -150,16 +182,51 @@ export function StoreProvider({ children }) {
     [toast]
   );
 
-  const signOut = useCallback(async () => {
+  const signOut = useCallback(async (reason) => {
     try {
       await api.logout();
     } finally {
       setSession(null);
       setData(EMPTY);
       setUnmatched([]);
-      toast('Signed out');
+      // A string, not the click event a button handler would pass.
+      toast(typeof reason === 'string' && reason ? reason : 'Signed out');
     }
   }, [toast]);
+
+  /**
+   * Sign out after three minutes with nobody at the keyboard.
+   *
+   * This screen is usually open on a shared machine at a shop counter, and it
+   * shows every customer's phone number and can cut anyone off. Walking away
+   * from it should not leave that open to whoever sits down next.
+   *
+   * Real activity only: a keystroke, a click, a scroll, a touch. The periodic
+   * refresh above deliberately does not count — a tab left open on a shelf
+   * would otherwise keep itself signed in forever, which is the exact case
+   * this is for.
+   */
+  useEffect(() => {
+    if (!session) return undefined;
+
+    let timer;
+    const arm = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        signOut('Signed out after 3 minutes of inactivity');
+      }, 3 * 60 * 1000);
+    };
+
+    const events = ['mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'];
+    // passive: these fire constantly during a scroll and must never delay it.
+    for (const e of events) window.addEventListener(e, arm, { passive: true });
+    arm();
+
+    return () => {
+      clearTimeout(timer);
+      for (const e of events) window.removeEventListener(e, arm);
+    };
+  }, [session, signOut]);
 
   /**
    * Live SMS credits. Polls our own API every 3s; the server answers from a cache

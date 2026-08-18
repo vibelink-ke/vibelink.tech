@@ -236,11 +236,18 @@ export default function Routers() {
 
   const runAutoconfig = async (r, opts) => {
     setConfiguring(r.id);
+    // The port picker has served its purpose the moment Apply is pressed, and
+    // leaving it up stacks two dialogs: a dead form on top, the live progress
+    // behind it. The result dialog takes over from here and reports running,
+    // succeeded or failed.
+    //
+    // Safe to discard the selection: if the push stops to ask for the admin
+    // password, that path reopens Configure, which reads the ports again.
+    setPlan(null);
     setResult({ router: r, state: 'running', opts });
     try {
       const res = await api.autoconfigRouter(r.id, opts ?? {});
       setAdminPrompt(null);
-      setPlan(null);
       setResult({ router: r, state: 'ok', applied: res.applied ?? [], version: res.version, opts });
       store.setCollection('routers', (rs) =>
         rs.map((x) => (x.id === r.id
