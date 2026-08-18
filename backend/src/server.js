@@ -1867,6 +1867,18 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
       ? `masquerading guests out ${nat.wan}`
       : 'masquerading guests (uplink not identified, so out of every interface)');
 
+    // Before the walled garden: a guest who cannot resolve a single hostname
+    // never gets as far as needing one allowed. This is the usual reason the
+    // captive-portal popup does not appear at all — not a page problem, a DNS
+    // problem, and one indistinguishable from "nothing is wrong here" by
+    // reading the walled garden or the login page alone.
+    const dnsProxy = await tryStep('DNS proxy', () => ros.applyDnsProxy(conn), 40000);
+    done.push(dnsProxy.protected
+      ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}`
+      : dnsProxy.enabled
+        ? `DNS proxy open to guests — could not confirm the uplink to firewall it, so check this by hand`
+        : `could not enable the DNS proxy safely (no uplink identified) — guests will not be able to resolve names, and the popup will not appear`);
+
     // The tenant's own portal must be reachable before login or a guest cannot
     // buy anything — that is the entire point of the walled garden here.
     const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
@@ -2327,6 +2339,18 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       } else if (!profiles) {
         done.push('no hotspot profiles on this router, and no LAN ports chosen to build one on');
       }
+
+      // Also goes on regardless, and before the walled garden: a guest who
+      // cannot resolve a hostname at all never gets far enough to need one
+      // allowed. This is usually why the captive-portal popup does not
+      // appear — a DNS problem, not a page problem, and one that reading the
+      // walled garden or the login page alone will not show.
+      const dnsProxy = await ros.applyDnsProxy(conn);
+      done.push(dnsProxy.protected
+        ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}`
+        : dnsProxy.enabled
+          ? 'DNS proxy open to guests — could not confirm the uplink to firewall it, so check this by hand'
+          : 'could not enable the DNS proxy safely (no uplink identified) — guests will not be able to resolve names, and the popup will not appear');
 
       // The walled garden goes on regardless: it is what lets an unpaid guest
       // reach M-Pesa, and it applies to a hotspot we inherited just as much as

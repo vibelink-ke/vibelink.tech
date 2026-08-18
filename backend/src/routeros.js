@@ -601,6 +601,75 @@ export async function wanInterface(conn, ifaceNames = null) {
 }
 
 /**
+ * Let hotspot guests resolve a name at all — which the captive-portal popup
+ * depends on entirely, not just on being reachable once it appears.
+ *
+ * applyHotspotServer hands guests the gateway as their DNS server, but a fresh
+ * RouterOS refuses queries from anyone but itself until told otherwise:
+ * `/ip dns` ships with `allow-remote-requests=no`. A phone given a DNS server
+ * that refuses to answer cannot resolve anything — not Apple's or Google's
+ * connectivity-check host, which is what triggers the OS's own captive-portal
+ * popup, and not the tenant's own domain for the login page either. The guest
+ * sees "no internet" and never gets the prompt; RouterOS's own redirect never
+ * gets a chance to run, because the browser never manages to open a
+ * connection to redirect. This is indistinguishable from "the popup is not
+ * working" and is a more common cause of it than anything in the portal page
+ * itself.
+ *
+ * Turning `allow-remote-requests` on is not free, and MikroTik says so in its
+ * own documentation: an open resolver reachable from the WAN is a standing
+ * invitation to DNS amplification abuse. So this does not merely flip the
+ * setting — it also blocks port 53 on the WAN interface specifically, which
+ * nothing in this file has touched before. Narrow on purpose: it drops only
+ * DNS queries arriving from the internet side, and nothing else — nothing
+ * touches winbox, ssh, the API, or the RADIUS/OpenVPN/WireGuard traffic this
+ * whole system depends on, all of which arrive on other interfaces or other
+ * ports. If the uplink cannot be identified, the DNS proxy is left exactly as
+ * it was found: no resolution for guests is the honest fallback next to
+ * accidentally opening a resolver to the internet, the same choice applyNat
+ * already makes when it cannot name an interface.
+ */
+export async function applyDnsProxy(conn) {
+  const [dns] = await conn.write('/ip/dns/print', []);
+  const already = dns?.['allow-remote-requests'] === 'true' || dns?.['allow-remote-requests'] === 'yes';
+
+  const wan = await wanInterface(conn);
+  if (!wan) {
+    return already
+      ? { enabled: true, protected: false, note: 'DNS proxy was already open; could not confirm the uplink to firewall it' }
+      : { enabled: false, protected: false, note: 'could not identify the uplink, so the DNS proxy was left off rather than opened unprotected' };
+  }
+
+  if (!already) {
+    await cmd(conn, 'DNS proxy', '/ip/dns/set', ['=allow-remote-requests=yes']);
+  }
+
+  const rules = await conn.write('/ip/firewall/filter/print', []);
+  const mine = rules.filter((r) => r.comment === MANAGED_COMMENT
+    && String(r.chain) === 'input' && String(r['dst-port']) === '53');
+  const fields = [
+    '=chain=input', `=in-interface=${wan}`, '=protocol=udp', '=dst-port=53',
+    '=action=drop', `=comment=${MANAGED_COMMENT}`,
+  ];
+  if (mine.length) {
+    if (!unchanged(mine[0], fields)) {
+      await cmd(conn, 'block WAN DNS', '/ip/firewall/filter/set', [`=.id=${idOf(mine[0])}`, ...fields]);
+    }
+  } else {
+    // place-before=0: a filter rule added at the end only takes effect after
+    // whatever earlier rule already accepts the traffic in question, and an
+    // established/related accept near the top of a typical input chain would
+    // otherwise let a DNS reply through before this rule is ever reached.
+    await cmd(conn, 'block WAN DNS', '/ip/firewall/filter/add', [...fields, '=place-before=0']);
+  }
+  for (const dupe of mine.slice(1)) {
+    await cmd(conn, 'remove duplicate WAN DNS block', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
+  }
+
+  return { enabled: true, protected: true, wan };
+}
+
+/**
  * Let a subnet reach the internet.
  *
  * Nothing here created a NAT rule, so a hotspot or PPPoE client got an address,
