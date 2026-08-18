@@ -12,21 +12,6 @@ const CANNED = [
 ];
 
 function Bubble({ from, text, mine }) {
-  const ticketsToday = (store.tickets ?? []).filter((t) => {
-    const at = t.created_at ? new Date(t.created_at) : null;
-    return at && at.toDateString() === new Date().toDateString();
-  }).length;
-
-  // The oldest unanswered conversation, not an average: an average of two
-  // chats is meaningless, and what an agent needs to know is whether anybody
-  // has been left waiting.
-  const waitMinutes = waiting.reduce((worst, c) => {
-    const started = c.started_at ? new Date(c.started_at) : null;
-    if (!started) return worst;
-    return Math.max(worst, Math.round((Date.now() - started) / 60000));
-  }, 0);
-  const longestWait = waiting.length ? `${waitMinutes}m` : '—';
-
   return (
     <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
       <div
@@ -59,6 +44,22 @@ export default function LiveSupport() {
   const waiting = queue.filter((c) => c.status === 'waiting');
   const active = queue.filter((c) => c.status === 'active');
   const current = queue.find((c) => c.id === activeId);
+
+  const ticketsToday = (store.tickets ?? []).filter((t) => {
+    const at = t.created_at ? new Date(t.created_at) : null;
+    return at && at.toDateString() === new Date().toDateString();
+  }).length;
+
+  // The oldest unanswered conversation, not an average: an average of two
+  // chats is meaningless, and what an agent needs to know is whether anybody
+  // has been left waiting.
+  const waitMinutes = waiting.reduce((worst, c) => {
+    const started = c.started_at ? new Date(c.started_at) : null;
+    if (!started) return worst;
+    return Math.max(worst, Math.round((Date.now() - started) / 60000));
+  }, 0);
+  const longestWait = waiting.length ? `${waitMinutes}m` : '—';
+
   const thread = chats[activeId] ?? [];
 
   /**
