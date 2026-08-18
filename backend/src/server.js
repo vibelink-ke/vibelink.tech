@@ -1364,6 +1364,21 @@ async function routerLogin(r, body, secrets) {
  * request if they were sent, and otherwise ask for them. The account is minted
  * again from there, which is the same path a new router takes.
  */
+/**
+ * Does this error mean the socket went away, rather than the router objecting?
+ *
+ * A push takes tens of seconds and the tunnel does not always survive it: the
+ * router redials, the server drops the previous session, and every in-flight
+ * connection dies with it. RouterOS never answered, so what surfaces is a
+ * timeout or a reset — the same shape as an unreachable router, but recoverable
+ * in a way that a rejected command is not.
+ */
+function lostConnection(e) {
+  const code = String(e?.code ?? e?.errno ?? '');
+  if (['SOCKTMOUT', 'ETIMEDOUT', 'ECONNRESET', 'EPIPE', 'ERR_STREAM_WRITE_AFTER_END'].includes(code)) return true;
+  return /socket|closed|timed? ?out|no response/i.test(String(e?.message ?? ''));
+}
+
 async function openRouter(ros, { host, port, login, body }) {
   try {
     return { conn: await ros.connect({ host, port, user: login.user, password: login.password }), login };
@@ -1641,7 +1656,24 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     conn = await step('connect', () =>
       ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
 
-    const bridge = await step('bridge', () =>
+    // Same reconnect-once wrapper as Configure. A hotspot push is the longer of
+    // the two — it fetches the login page over the tunnel as well — so it is the
+    // more likely of the two to have a redial land in the middle of it.
+    const tryStep = async (label, fn, ms) => {
+      try {
+        return await step(label, fn, ms);
+      } catch (e) {
+        if (!lostConnection(e)) throw e;
+        try { ros.close(conn); } catch { /* already gone */ }
+        conn = await ros.connect({
+          host, port: r.api_port ?? 8728, user: login.user, password: login.password,
+        });
+        done.push(`the tunnel dropped during ${label} — reconnected and carried on`);
+        return await step(label, fn, ms);
+      }
+    };
+
+    const bridge = await tryStep('bridge', () =>
       ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
     if (bridge.added.length) done.push(`bridged ${bridge.added.join(', ')} into ${bridge.bridge}`);
 
@@ -1651,7 +1683,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // one, removes any duplicates and enables CoA — four round trips over a
     // tunnel that may be on a rural link, and the flat deadline was failing a
     // step that was working, just slowly.
-    await step('RADIUS', () => ros.applyRadius(conn, {
+    await tryStep('RADIUS', () => ros.applyRadius(conn, {
       serverIp: SERVER_IP,
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
@@ -1659,7 +1691,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     }), 45000);
     done.push(`RADIUS pointed at ${SERVER_IP}`);
 
-    const built = await step('hotspot server, DHCP and pool', () =>
+    const built = await tryStep('hotspot server, DHCP and pool', () =>
       ros.applyHotspotServer(conn, {
         bridge: bridge.bridge,
         network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
@@ -1681,7 +1713,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // hotspot. It is the difference between guests having an address and guests
     // having internet, and when it is missing nobody can tell from the result
     // that it was ever meant to happen.
-    const nat = await step('NAT', () => ros.applyNat(conn, {
+    const nat = await tryStep('NAT', () => ros.applyNat(conn, {
       subnet: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
     }));
     done.push(nat.wan
@@ -1693,7 +1725,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
     const portal = t?.subdomain ? `${t.subdomain}.${root}` : null;
     const gardenHosts = [...(hs?.walled_garden ?? []), portal].filter(Boolean);
-    const garden = await step('walled garden', () => ros.applyWalledGarden(conn, gardenHosts), 40000);
+    const garden = await tryStep('walled garden', () => ros.applyWalledGarden(conn, gardenHosts), 40000);
     done.push(`walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'}`
       + (portal ? `, including ${portal}` : ''));
 
@@ -1707,7 +1739,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
         const unreachable = await loginPageReachable(url);
         if (unreachable) throw new Error(unreachable);
 
-        const page = await step('login page', () =>
+        const page = await tryStep('login page', () =>
           ros.pushHotspotPage(conn, { url, bridge: bridge.bridge }), 40000);
         done.push(`installed the ${portal} login page at ${page.path} (${page.bytes} bytes)`);
       } catch (e) {
@@ -1715,7 +1747,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
       }
     }
 
-    const ttl = await step('anti-sharing rule', () => ros.applyAntiSharing(conn, { bridge: bridge.bridge }));
+    const ttl = await tryStep('anti-sharing rule', () => ros.applyAntiSharing(conn, { bridge: bridge.bridge }));
     done.push(ttl.created
       ? 'anti-sharing TTL rule added'
       : 'anti-sharing TTL rule already in place');
@@ -1943,7 +1975,40 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     ({ conn, login } = await step('connect', () =>
       openRouter(ros, { host, port: r.api_port ?? 8728, login, body: req.body })));
 
-    const info = await step('identify', () => ros.identify(conn));
+    /**
+     * Every step, with one reconnect if the tunnel drops under it.
+     *
+     * The OpenVPN log shows the router redialling every few minutes, and the
+     * server drops the previous session when it does: "new connection by client
+     * router-2-2 will cause previous active sessions to be dropped". Whatever
+     * command was in flight at that moment gets no answer, so the push failed at
+     * RADIUS one time, the bridge the next, the hotspot the time after —
+     * wherever the reconnect happened to land. Nothing was wrong with the step
+     * that got the blame.
+     *
+     * Reopening and running it again is safe because every step here is
+     * idempotent by design; that property was built for the operator pressing
+     * Send again and serves just as well here. One retry, not a loop — a router
+     * that is genuinely gone should fail quickly and say so.
+     *
+     * The steps close over `conn`, so reassigning it is all the retry needs to
+     * pick up the new socket.
+     */
+    const tryStep = async (label, fn, ms) => {
+      try {
+        return await step(label, fn, ms);
+      } catch (e) {
+        if (!lostConnection(e)) throw e;
+        try { ros.close(conn); } catch { /* already gone */ }
+        conn = await ros.connect({
+          host, port: r.api_port ?? 8728, user: login.user, password: login.password,
+        });
+        done.push(`the tunnel dropped during ${label} — reconnected and carried on`);
+        return await step(label, fn, ms);
+      }
+    };
+
+    const info = await tryStep('identify', () => ros.identify(conn));
 
     // Mint our own account if we arrived on someone else's credentials.
     if (!login.stored) {
@@ -1956,7 +2021,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       done.push(created ? `created the ${ros.SERVICE_USER} account` : `took over the existing ${ros.SERVICE_USER} account`);
     }
 
-    const radius = await step('RADIUS', () => ros.applyRadius(conn, {
+    const radius = await tryStep('RADIUS', () => ros.applyRadius(conn, {
       serverIp: SERVER_IP,
       secret: r.secret,
       coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
@@ -1966,7 +2031,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
     if (radius.replaced) done.push(`removed ${radius.replaced} stale RADIUS entr${radius.replaced === 1 ? 'y' : 'ies'}`);
 
     if (r.role === 'both' || r.role === 'pppoe') {
-      await step('PPP accounting', () => ros.applyPpp(conn));
+      await tryStep('PPP accounting', () => ros.applyPpp(conn));
       done.push('enabled PPPoE accounting with 5-minute interim updates');
 
       // Only when ports were chosen. Building a bridge unasked could swallow the
@@ -1974,7 +2039,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
       if (lanPorts?.length) {
         const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
-        const bridge = await step('bridge', () =>
+        const bridge = await tryStep('bridge', () =>
           ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }));
         done.push(bridge.added.length
           ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
@@ -2020,7 +2085,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         const chosen = poolFromCidr(confPool?.cidr);
         if (chosen) done.push(`using the ${confPool.cidr} pool from Networks`);
 
-        const pppoe = await step('PPPoE server and profile', () =>
+        const pppoe = await tryStep('PPPoE server and profile', () =>
           ros.applyPppoeServer(conn, {
             bridge: bridge.bridge,
             gateway: req.body?.gateway ?? chosen?.gateway,
