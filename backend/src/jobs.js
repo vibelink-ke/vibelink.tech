@@ -235,7 +235,26 @@ export async function healRouters() {
       // Accounting travels with it: RADIUS without interim updates reports usage
       // only when a session ends, so fair use sees nothing all day.
       if (r.role === 'both' || r.role === 'pppoe') await ros.applyPpp(conn);
-      if (r.role === 'both' || r.role === 'hotspot') await ros.applyHotspot(conn);
+      if (r.role === 'both' || r.role === 'hotspot') {
+        await ros.applyHotspot(conn);
+        /**
+         * The profile every voucher names.
+         *
+         * A router configured before this profile was created rejects each
+         * voucher with "unknown user profile <hs-default>" — the code is right,
+         * the password is right, and the guest is refused. Rebuilding it here
+         * means a router repairs itself rather than waiting for somebody to
+         * notice and press Configure.
+         */
+        const { rows: [hs] } = await pool.query(
+          'select multi_device, idle_timeout_min, bind_mac from hotspot_settings where tenant_id=$1',
+          [r.tenant_id]);
+        await ros.ensureHotspotUserProfile(conn, {
+          sharedUsers: hs?.multi_device ? 3 : 1,
+          idleMinutes: hs?.idle_timeout_min ?? 10,
+          bindMac: hs?.bind_mac ?? true,
+        });
+      }
 
       await pool.query(
         `update routers set autoconfig_last_at = now(), autoconfig_last_ok = true,

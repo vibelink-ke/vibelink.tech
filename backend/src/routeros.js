@@ -297,6 +297,9 @@ export async function applyHotspotServer(conn, {
   network = '10.5.50.0/24',
   interimMinutes = 5,
   dnsName = 'wifi.local',
+  sharedUsers = 1,
+  idleMinutes = 10,
+  bindMac = true,
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
   const POOL = 'hotspot-pool';
@@ -396,6 +399,21 @@ export async function applyHotspotServer(conn, {
     await cmd(conn, 'hotspot server', '/ip/hotspot/add', [`=name=${SERVER}`, ...serverFields]);
     done.push('hotspot server');
   }
+
+  /**
+   * The user profile every voucher names.
+   *
+   * Created here, not only behind the Hotspot button, because vouchers carry
+   * Mikrotik-Group=hs-default and a router that has been through Configure but
+   * not Hotspot does not have it. The login then fails with "unknown user
+   * profile <hs-default>" — the code and the password are perfect and the guest
+   * is refused, which is the same trap that Mikrotik-Group set for PPPoE.
+   *
+   * Anything that builds a hotspot must build the profile its sessions will ask
+   * for, or the two can drift apart again.
+   */
+  const profileResult = await ensureHotspotUserProfile(conn, { sharedUsers, idleMinutes, bindMac });
+  if (profileResult.created) done.push(`user profile ${profileResult.profile}`);
 
   // Without this the guests have a lease and no internet, which is the single
   // most common "the hotspot does not work" report.
