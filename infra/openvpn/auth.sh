@@ -35,14 +35,37 @@ psql_q() {
        -d "${PGDATABASE:-billing}" -tA -v ON_ERROR_STOP=1 "$@"
 }
 
-ok=$(psql_q -v u="$username" -v p="$password" <<'SQL' 2>/dev/null
+# Two attempts, because "the database did not answer" and "that password is
+# wrong" produced the same outcome here: the router was disconnected and a row
+# was written to ovpn_auth_failures blaming its credentials. A restarting
+# database or a moment of load therefore looked exactly like a revoked
+# credential, and sent whoever was diagnosing it to re-onboard a router whose
+# credentials were perfectly good.
+check() {
+  psql_q -v u="$username" -v p="$password" <<'SQL' 2>/dev/null
 select 1 from ovpn_clients
  where username = :'u'
    and password_hash is not null
    and password_hash = crypt(:'p', password_hash)
  limit 1
 SQL
-)
+}
+
+ok=$(check)
+rc=$?
+if [ "$rc" -ne 0 ]; then
+  sleep 1
+  ok=$(check)
+  rc=$?
+fi
+
+# Still no answer from the database. The credential has not been rejected — it
+# has not been read. Say that, and do not record an authentication failure the
+# router did not cause.
+if [ "$rc" -ne 0 ]; then
+  echo "openvpn-auth: cannot reach the database to verify $username - refusing this attempt only" >&2
+  exit 1
+fi
 
 if [ "$ok" = "1" ]; then
   # Note the connection; the Routers screen shows it as last seen.
