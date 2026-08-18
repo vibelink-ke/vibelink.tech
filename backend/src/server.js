@@ -1873,6 +1873,43 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
 }));
 
 /**
+ * Ask the router why the captive portal is not appearing.
+ *
+ * Read-only. Every cause of "the login page does not pop" is visible on the
+ * router, so this reports them all at once instead of the operator and I
+ * eliminating them one round trip at a time.
+ */
+app.post('/api/routers/:id/hotspot-check', wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const report = await step('read the hotspot', () => ros.hotspotCheck(conn), 30000);
+
+    // What the guest's phone would have to fetch, so a wrong or unreachable
+    // page can be told apart from a hotspot that is not running at all.
+    const { rows: [t] } = await pool.query('select subdomain from tenants where id=$1', [req.tenant.id]);
+    const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    res.json({ ...report, pageUrl: t?.subdomain ? `https://${t.subdomain}.${rootDomain}/hotspot/login.html` : null });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/**
  * Live throughput per port.
  *
  * Polled by the browser rather than pushed, and each poll opens and closes its

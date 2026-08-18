@@ -1203,6 +1203,104 @@ function fingerprint(v) {
   return `${s.length} chars #${hash}${padded}`;
 }
 
+/**
+ * Why the login page is not appearing.
+ *
+ * A captive portal that does not pop has half a dozen causes that all look
+ * identical from the guest's phone: they associate, they get an address, and
+ * nothing happens. Every one of them is visible on the router, so guessing at
+ * them one at a time — which is how this has been going — is unnecessary.
+ *
+ * Reads only. Nothing here changes the router.
+ */
+export async function hotspotCheck(conn, { bridge = null } = {}) {
+  const [servers, profiles, dhcpServers, addresses, ifaces, walled] = await Promise.all([
+    conn.write('/ip/hotspot/print', []),
+    conn.write('/ip/hotspot/profile/print', []),
+    conn.write('/ip/dhcp-server/print', []),
+    conn.write('/ip/address/print', []),
+    conn.write('/interface/print', []),
+    conn.write('/ip/hotspot/walled-garden/print', []),
+  ]);
+
+  // Addresses and DHCP servers report `interface` as an internal id, so every
+  // comparison here goes through the name. This has caught us out repeatedly.
+  const nameById = new Map(ifaces.map((i) => [idOf(i), i.name]));
+  const ifName = (ref) => nameById.get(String(ref)) ?? String(ref ?? '');
+
+  const yes = (v) => v === 'true' || v === 'yes';
+  const enabled = servers.filter((h) => !yes(h.disabled));
+  const server = (bridge && enabled.find((h) => ifName(h.interface) === bridge)) ?? enabled[0];
+  const iface = server ? ifName(server.interface) : null;
+
+  const profile = server
+    ? profiles.find((p) => p.name === server.profile)
+    : null;
+
+  const checks = [];
+  const add = (name, ok, detail) => checks.push({ name, ok, detail });
+
+  add('a hotspot server exists and is enabled',
+    !!server,
+    servers.length
+      ? `${servers.length} defined, ${enabled.length} enabled`
+      : 'none on this router — press Hotspot and pick the LAN ports to build one');
+
+  if (!server) return { checks, ok: false, interface: null };
+
+  add(`it is running on ${iface}`, !!iface,
+    `guests must be on ${iface || 'that interface'}; anyone on another port is never intercepted`);
+
+  const addr = addresses.find((a) => ifName(a.interface) === iface
+    && String(a.address).split('/')[0] === String(profile?.['hotspot-address'] ?? ''));
+  add('the gateway address is on that interface',
+    !!addr,
+    addr ? `${addr.address}`
+      : `the profile says hotspot-address=${profile?.['hotspot-address'] ?? '(unset)'}, `
+        + `which is not an address on ${iface} — the portal has nothing to answer on`);
+
+  const dhcp = dhcpServers.find((d) => ifName(d.interface) === iface && !yes(d.disabled));
+  add('a DHCP server hands out addresses there',
+    !!dhcp,
+    dhcp ? `${dhcp.name}, pool ${dhcp['address-pool']}`
+      : `no enabled DHCP server on ${iface} — a guest with no address never reaches the portal, `
+        + 'and a phone that self-assigns shows "connected, no internet"');
+
+  add('login is by http-pap',
+    String(profile?.['login-by'] ?? '').includes('http-pap'),
+    `login-by=${profile?.['login-by'] ?? '(unset)'} — http-chap needs the page to hash the `
+      + 'password, and ours does not, so every voucher is refused');
+
+  add('RADIUS is on for the hotspot',
+    yes(profile?.['use-radius']),
+    `use-radius=${profile?.['use-radius'] ?? 'no'} — without it vouchers are checked against `
+      + 'the user list on the router itself, which is empty');
+
+  /**
+   * The page itself, in the directory the profile actually uses.
+   *
+   * html-directory varies between builds — "hotspot" on some, "flash/hotspot"
+   * on others — and a login.html written to the wrong one leaves MikroTik's
+   * stock page in place while every push reports success.
+   */
+  const dir = String(profile?.['html-directory'] ?? 'hotspot').replace(/\/+$/, '');
+  const files = await conn.write('/file/print', [`?name=${dir}/login.html`]);
+  const size = Number(files[0]?.size ?? 0);
+  add('our login page is installed',
+    size > 1000,
+    size
+      ? `${dir}/login.html is ${size} bytes`
+      : `${dir}/login.html is missing — guests get MikroTik's stock page, or none`);
+
+  add('the walled garden lets payment through',
+    walled.length > 0,
+    walled.length
+      ? `${walled.length} rule(s)`
+      : 'empty — a guest cannot reach M-Pesa before paying, so nobody can buy anything');
+
+  return { checks, ok: checks.every((c) => c.ok), interface: iface, htmlDirectory: dir };
+}
+
 export async function radiusCheck(conn, { serverIp, secret, coaPort = 3799 }) {
   const [servers, incoming, aaa] = await Promise.all([
     conn.write('/radius/print', []),

@@ -187,6 +187,7 @@ export const api = {
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
   radiusCheck: (id) => post(`/api/routers/${id}/radius-check`, {}),
+  hotspotCheck: (id) => post(`/api/routers/${id}/hotspot-check`, {}),
   pushHotspot: (id, opts = {}) => post(`/api/routers/${id}/hotspot`, opts),
   routerTunnels: () => get('/api/routers/tunnels'),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),

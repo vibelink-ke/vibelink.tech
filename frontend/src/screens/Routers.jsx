@@ -316,12 +316,31 @@ export default function Routers() {
    */
   const [radiusReport, setRadiusReport] = useState(null);
   const checkRadius = async (r) => {
-    setRadiusReport({ router: r, state: 'running' });
+    setRadiusReport({ router: r, kind: 'RADIUS', state: 'running' });
     try {
       const res = await api.radiusCheck(r.id);
-      setRadiusReport({ router: r, state: 'done', ...res });
+      setRadiusReport({ router: r, kind: 'RADIUS', state: 'done', ...res });
     } catch (e) {
-      setRadiusReport({ router: r, state: 'done', error: e.message, ...(e.body ?? {}) });
+      setRadiusReport({ router: r, kind: 'RADIUS', state: 'done', error: e.message, ...(e.body ?? {}) });
+    }
+  };
+
+  /**
+   * Why the captive portal is not appearing.
+   *
+   * Shares the report dialog with Check RADIUS, because the shape of the
+   * answer is the same: a list of things that must all be true, with the ones
+   * that are not explained. "The login page does not pop" has half a dozen
+   * causes that look identical from a guest's phone, and every one of them is
+   * readable on the router.
+   */
+  const checkHotspot = async (r) => {
+    setRadiusReport({ router: r, kind: 'Hotspot', state: 'running' });
+    try {
+      const res = await api.hotspotCheck(r.id);
+      setRadiusReport({ router: r, kind: 'Hotspot', state: 'done', ...res });
+    } catch (e) {
+      setRadiusReport({ router: r, kind: 'Hotspot', state: 'done', error: e.message, ...(e.body ?? {}) });
     }
   };
 
@@ -646,6 +665,9 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                     Edit
                   </Button>
                   <Button onClick={() => checkRadius(r)}>Check RADIUS</Button>
+                  <Button onClick={() => checkHotspot(r)} title="Ask the router why the login page is not appearing">
+                    Check hotspot
+                  </Button>
                   <Button onClick={() => removeRouter(r)}>Delete</Button>
                 </div>
               ),
@@ -1008,7 +1030,7 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
       {/* Both sides of the RADIUS setup, side by side. */}
       <Modal
         open={!!radiusReport}
-        title={`RADIUS · ${radiusReport?.router?.name ?? ''}`}
+        title={`${radiusReport?.kind ?? 'RADIUS'} · ${radiusReport?.router?.name ?? ''}`}
         width={560}
         onClose={() => setRadiusReport(null)}
         footer={<Button onClick={() => setRadiusReport(null)}>Close</Button>}
@@ -1036,6 +1058,14 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
               <span style={{ fontSize: 12.5, color: color.rust }}>{radiusReport.error}</span>
             )}
 
+            {radiusReport.pageUrl && (
+              <span style={{ fontSize: 12.5, color: color.muted }}>
+                Guests should be served{' '}
+                <strong style={{ fontFamily: font.mono }}>{radiusReport.pageUrl}</strong>
+                {radiusReport.interface ? <> on <strong style={{ fontFamily: font.mono }}>{radiusReport.interface}</strong></> : null}
+              </span>
+            )}
+
             {radiusReport.checks && (
               <div style={{ display: 'grid', gap: 6 }}>
                 <span style={{ fontSize: 12.5, fontWeight: 600 }}>What the router actually says</span>
@@ -1048,7 +1078,9 @@ Delete anyway? ${n} customer${n === 1 ? '' : 's'} stay, but lose their router. `
                 ))}
                 {!radiusReport.ok && (
                   <span style={{ fontSize: 12, color: color.muted, marginTop: 4 }}>
-                    Press Configure to push the correct values, or Refresh to re-send them.
+                    {radiusReport.kind === 'Hotspot'
+                      ? 'Press Hotspot and choose the LAN ports to build what is missing.'
+                      : 'Press Configure to push the correct values, or Refresh to re-send them.'}
                   </span>
                 )}
               </div>
