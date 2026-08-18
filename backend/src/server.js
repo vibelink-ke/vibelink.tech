@@ -411,12 +411,34 @@ app.post('/hotspot/buy', wrap(async (req, res) => {
       if (!checkoutId) {
         return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
       }
-      // purpose carries the plan so the callback knows which bundle to issue.
+      /**
+       * `plan_id`, not `hotspot_plan_id` — handleStkResult in daraja.js reads
+       * `p.plan_id` off this row (`target: ... : { type: 'hotspot',
+       * planId: p.plan_id, mac: p.mac }`), and the two names never matched.
+       *
+       * Every guest who paid a tenant's hotspot through Daraja — anyone
+       * without KopoKopo configured, since that is the only other channel
+       * this route offers — was charged, the callback found this row, and
+       * `issueVoucherAccess` was then called with planId=undefined. No
+       * voucher, no SMS, and the only trace was a caught, unlogged-to-anyone
+       * exception: handleStkResult's caller only does `.catch(console.error)`.
+       * The portal page kept polling forever, because the status it read back
+       * was 'success' with no code — which the page's own JS does not
+       * recognise as either finished or failed, so it just sits on "Check
+       * your phone and enter your M-Pesa PIN" after the phone has already
+       * been charged. That is what "the popup does not work, on payment"
+       * actually was: not the popup, and not KopoKopo — Daraja hotspot sales,
+       * silently, for as long as this key mismatch existed.
+       *
+       * KopoKopo's own stkPush already writes `plan_id` correctly, which is
+       * how this was found: the two gateways' inserts sat a few lines apart
+       * using different names for the same thing.
+       */
       await pool.query(
         `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
          values ($1,'daraja',$2,$3,$4,$5)
          on conflict (tenant_id, provider, checkout_id) do nothing`,
-        [tenant.id, checkoutId, phone, Number(plan.price), { hotspot_plan_id: plan.id }]);
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id }]);
     }
     res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
   } catch (e) {

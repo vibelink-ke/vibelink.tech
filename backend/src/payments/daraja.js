@@ -158,12 +158,39 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
     [req.id, ok ? 'success' : 'failed', String(code), desc]);
   if (!ok) return;
   const p = req.purpose;
-  await applyPayment(req.tenant_id, {
-    provider, ref: tx.ref, amount: Number(tx.amount), phone: tx.phone, name: null,
-    rawAccount: null, payload: { checkoutId },
-    target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id }
-                            : { type: 'hotspot', planId: p.plan_id, mac: p.mac }
-  });
+
+  /**
+   * A thrown applyPayment must never leave this row saying "success" with
+   * nothing behind it.
+   *
+   * That is exactly the shape a stale or malformed `purpose` produced here
+   * once — Safaricom had been paid, this row said status='success', and there
+   * was no payments row and no voucher, because issueVoucherAccess rejected
+   * a plan id that turned out to be undefined. The caller of this function
+   * only ever does `.catch(console.error)`, so the guest's own poll of
+   * /hotspot/buy/:checkoutId kept reading a status its page does not treat
+   * as either finished or failed — it sat on "check your phone" forever,
+   * silently, for money already taken, with nothing an operator could see
+   * short of reading a container log nobody was watching.
+   *
+   * Whatever caused it, that failure belongs on this row where the guest's
+   * own poll and an operator looking at stk_requests can both see it, not
+   * only in a log. The guest's page already handles status='failed' with a
+   * message; this is what gives it one.
+   */
+  try {
+    await applyPayment(req.tenant_id, {
+      provider, ref: tx.ref, amount: Number(tx.amount), phone: tx.phone, name: null,
+      rawAccount: null, payload: { checkoutId },
+      target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id }
+                              : { type: 'hotspot', planId: p.plan_id, mac: p.mac }
+    });
+  } catch (e) {
+    await pool.query(
+      "update stk_requests set status='failed', result_desc=$2 where id=$1",
+      [req.id, `paid, but could not be applied: ${String(e.message ?? e).slice(0, 200)}`]);
+    throw e;
+  }
 }
 
 export const normalise = (m) => String(m).replace(/^\+?(?:254)?0?/, '254');
