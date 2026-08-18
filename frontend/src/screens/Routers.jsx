@@ -531,18 +531,6 @@ Revoke anyway?`
         <Stat label="OVPN clients" value={(store.ovpnClients ?? []).length} hint="tunnels issued" />
       </Grid>
 
-      /*
-       * Behind a toggle now, at the owner's request.
-       *
-       * This was on screen permanently, and for an operator running a fleet it
-       * is plumbing: usernames and tunnel addresses that mean nothing next to
-       * the router list. Deleting a router takes its credential with it now, so
-       * the list mostly holds nothing worth looking at.
-       *
-       * Kept rather than removed, because when a router dials in on an address
-       * no router row mentions, this table is the only place that fact is
-       * visible — and that mismatch has cost days more than once.
-       */
       {showCredentials && (store.ovpnClients ?? []).length > 0 && (
         <Card title="Tunnel credentials">
           <Table
