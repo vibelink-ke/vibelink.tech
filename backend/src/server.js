@@ -4537,6 +4537,21 @@ const AUTOMATION_JOBS = [
   { job: 'watchdog', name: 'Router watchdog', cron: '*/1 * * * *', detail: 'Pings every NAS and flags the ones that stop answering' },
   { job: 'ownerBrief', name: 'Owner brief', cron: '0 20 * * *', detail: 'Evening SMS: collected, new clients, routers down' },
   { job: 'expireTenantLicences', name: 'Tenant licences', cron: '0 7 * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
+  /**
+   * Two jobs that have been running all along without appearing here.
+   *
+   * Both were added after this list was written and never added to it, so the
+   * screen showed eight of the ten that run. Work was happening that the
+   * operator could neither see nor stop — and when the list later looked
+   * shorter than remembered, it read as automation having been taken away.
+   *
+   * healRouters is per tenant and switches off like the rest. closeStaleSessions
+   * works on radacct, which has no tenant column, so one run covers the whole
+   * platform: it is shown with what it does and no switch, rather than a switch
+   * that would quietly do nothing.
+   */
+  { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
+  { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
 ];
 
 /**
@@ -4595,8 +4610,16 @@ app.get('/api/automation', wrap(async (req, res) => {
 }));
 
 app.put('/api/automation/:job', wrap(async (req, res) => {
-  if (!AUTOMATION_JOBS.some((j) => j.job === req.params.job))
-    return res.status(404).json({ error: 'unknown job' });
+  const known = AUTOMATION_JOBS.find((j) => j.job === req.params.job);
+  if (!known) return res.status(404).json({ error: 'unknown job' });
+  // A platform-wide job cannot be switched off by one tenant. Refusing is
+  // honest; storing the flag would leave a switch that reads "stopped" while
+  // the job carries on.
+  if (known.system) {
+    return res.status(409).json({
+      error: `${known.name} runs for the whole platform, so it cannot be switched off for one account.`,
+    });
+  }
   const enabled = req.body.enabled !== false;
   await pool.query(
     `insert into automation_jobs (tenant_id, job, enabled) values ($1,$2,$3)

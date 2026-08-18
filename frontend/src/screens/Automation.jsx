@@ -123,17 +123,27 @@ export default function Automation() {
                 <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5, fontWeight: 600 }}>
                   {j.name}
                   <Badge tone={j.enabled ? 'active' : 'unused'}>{j.enabled ? 'live' : 'stopped'}</Badge>
+                  {j.system && <Badge tone="unused">platform-wide</Badge>}
                 </span>
                 <span style={{ fontSize: 12, color: color.neutralInk }}>{j.detail}</span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0 }}>
                 <code style={{ fontSize: 11.5, color: color.muted }}>{j.cron}</code>
-                <Toggle
-                  checked={j.enabled}
-                  onChange={() => toggleJob(j)}
-                  label=""
-                  detail=""
-                />
+                {/* A job that runs for the whole platform gets no switch. One
+                    that read "stopped" while the job carried on would be worse
+                    than none at all. */}
+                {j.system ? (
+                  <span style={{ fontSize: 11.5, color: color.muted, whiteSpace: 'nowrap' }}>
+                    always on
+                  </span>
+                ) : (
+                  <Toggle
+                    checked={j.enabled}
+                    onChange={() => toggleJob(j)}
+                    label=""
+                    detail=""
+                  />
+                )}
               </div>
             </div>
           ))}
