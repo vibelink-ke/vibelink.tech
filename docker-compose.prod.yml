@@ -86,6 +86,12 @@ services:
       # Read-only: the API only needs to see which tunnels are up and on what
       # address. Anything that can write here could redirect a router.
       - ovpn-run:/run/openvpn:ro
+      # The WireGuard server config, which is rendered from wg_peers by
+      # scripts/wg-sync.mjs. It has to be mounted here rather than only on the
+      # wireguard container: the database lives on this side, the file is read
+      # on that side, and until both met in one place the documented setup
+      # could not be run at all. Writable, because writing it is the point.
+      - ./infra/wireguard/wg_confs:/config/wg_confs
     # No `ports`: the namespace belongs to `net`. Caddy reaches it as net:8080.
 
   web:

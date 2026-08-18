@@ -56,8 +56,19 @@ try {
   await run('wg', ['syncconf', 'wg0', CONFIG]);
   console.log('reloaded wg0');
 } catch (e) {
-  console.log(`could not reload automatically (${e.message.split('\n')[0]})`);
-  console.log('apply it manually with:  wg syncconf wg0 ' + CONFIG);
+  /*
+   * Expected under Docker, and not a failure.
+   *
+   * This runs in the API container, which is where the database is. wg lives
+   * in the wireguard container, which owns the interface. The file has been
+   * written to the directory they share, so all that is left is asking the
+   * other side to read it, and printing the command that does that is more
+   * use than reporting that this one could not.
+   */
+  const why = String(e.message ?? '').trim().slice(0, 120);
+  console.log(`not reloaded from here (${why})`);
+  console.log('The config is written. Apply it with:');
+  console.log(`  docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 ${CONFIG}`);
 }
 
 await pool.end();

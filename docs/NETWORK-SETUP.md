@@ -182,11 +182,16 @@ FreeRADIUS dynamic clients, which look up an unknown NAS in SQL on first sight.
 
 ### Generate the server keypair
 
+Under Docker, run it in the API container — that is where the database and
+these scripts live:
+
 ```bash
-cd backend && node scripts/wg-sync.mjs --init
+docker compose -f docker-compose.prod.yml exec api node scripts/wg-sync.mjs --init
 ```
 
-Put the output in `backend/.env`:
+Put the output in the `.env` beside `docker-compose.prod.yml`, not in
+`backend/.env`: compose reads that file and passes `WG_ENDPOINT` and
+`WG_SERVER_PUBLIC_KEY` through to the API.
 
 ```
 WG_SERVER_PRIVATE_KEY=<private>
@@ -194,14 +199,35 @@ WG_SERVER_PUBLIC_KEY=<public>
 WG_ENDPOINT=your.public.ip.or.hostname
 ```
 
+Then `docker compose -f docker-compose.prod.yml up -d` so the API sees them.
+
 The private key never leaves the server. The public key is what routers are told
 to trust.
 
 ### Write the config
 
+`/config/wg_confs/wg0.conf` does not exist until this writes it — the
+wireguard container reads that file, it does not generate it.
+
 ```bash
-node scripts/wg-sync.mjs --print   # inspect first
-node scripts/wg-sync.mjs           # write and reload
+docker compose -f docker-compose.prod.yml exec api node scripts/wg-sync.mjs --print
+docker compose -f docker-compose.prod.yml exec api node scripts/wg-sync.mjs
+```
+
+The API container holds the database and writes the file; the wireguard
+container owns the interface. They share the directory but not the `wg`
+command, so the reload is one more step, which the script prints:
+
+```bash
+docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 /config/wg_confs/wg0.conf
+```
+
+On the very first run there is no `wg0` to sync yet — restart the container
+instead, and use `syncconf` from then on, since it applies changes without
+dropping established tunnels:
+
+```bash
+docker compose -f docker-compose.prod.yml restart wireguard
 ```
 
 The database is the source of truth. Peers live in `wg_peers`; this renders
