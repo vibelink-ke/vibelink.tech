@@ -1922,6 +1922,12 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
           if (broadcast - net < 3) return null;
           return { gateway: toStr(net + 1), range: `${toStr(net + 2)}-${toStr(broadcast - 1)}` };
         };
+        // Checked here as well as when the pool is saved: pools created before
+        // that check existed are still in the database, and this is the last
+        // point at which the range can be stopped from reaching a router.
+        const unsafe = tunnelConflict(confPool?.cidr, req.tenant.tunnel_subnet, SERVER_IP);
+        if (unsafe) throw new Error(unsafe);
+
         const chosen = poolFromCidr(confPool?.cidr);
         if (chosen) done.push(`using the ${confPool.cidr} pool from Networks`);
 
@@ -1959,10 +1965,16 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
       if (lanPorts?.length) {
         const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+        const hotspotNet = req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24';
+        // Same guard as the PPPoE pool: this address lands on a bridge, and a
+        // bridge route that covers the tunnel takes the router off the air.
+        const unsafeHs = tunnelConflict(hotspotNet, req.tenant.tunnel_subnet, SERVER_IP);
+        if (unsafeHs) throw new Error(unsafeHs);
+
         const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
         const built = await ros.applyHotspotServer(conn, {
           bridge: bridge.bridge,
-          network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+          network: hotspotNet,
           sharedUsers: hs?.multi_device ? 3 : 1,
           idleMinutes: hs?.idle_timeout_min ?? 10,
           bindMac: hs?.bind_mac ?? true,
@@ -2470,6 +2482,34 @@ function poolsOverlap(a, b) {
   return x.net <= y.bcast && y.net <= x.bcast;
 }
 
+/**
+ * A range that would swallow the management tunnel.
+ *
+ * Every one of these ranges ends up as an address on a bridge, and an address
+ * on a bridge creates a connected route. If that route covers the router's own
+ * tunnel address or this server's, it beats the tunnel's own route: the router
+ * stops being able to reach us the instant the push lands, and no later push
+ * can undo it because there is nothing left to push through. Recovering it
+ * means someone standing in front of the router.
+ *
+ * Worth refusing outright rather than warning about. The operator loses a
+ * range they can trivially change; the alternative is a site off the air and a
+ * drive out to it.
+ */
+function tunnelConflict(cidr, tunnelSubnet, serverIp) {
+  if (!cidr) return null;
+  if (tunnelSubnet && poolsOverlap(cidr, tunnelSubnet)) {
+    return `${cidr} covers the management tunnel (${tunnelSubnet}). Putting that address on a `
+      + 'router would cut its connection to this server, and it could only be fixed on site. '
+      + 'Pick a range outside the tunnel.';
+  }
+  if (serverIp && poolsOverlap(cidr, `${serverIp}/32`)) {
+    return `${cidr} covers this server's own tunnel address (${serverIp}). A router given that `
+      + 'range would lose contact with us and could only be fixed on site.';
+  }
+  return null;
+}
+
 app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
@@ -2484,6 +2524,16 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
         + 'PPPoE and hotspot must use separate ranges, or the same address can be given '
         + 'to two customers.',
     });
+  }
+
+  // And against the tunnel, which is not a pool at all but is the one range
+  // that must never appear on a router's bridge.
+  {
+    const { SERVER_IP } = await import('./tunnel.js');
+    const { rows: [t] } = await pool.query(
+      'select tunnel_subnet from tenants where id=$1', [req.tenant.id]);
+    const clashes = tunnelConflict(cidr, t?.tunnel_subnet, SERVER_IP);
+    if (clashes) return res.status(409).json({ error: clashes });
   }
 
   // Also against the hotspot LAN, which is not an ip_pools row but is handed
