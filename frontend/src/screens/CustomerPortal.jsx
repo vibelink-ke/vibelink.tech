@@ -25,6 +25,7 @@ const api = {
   login: (account, password) => api.call('POST', '/portal/login', { account, password }),
   logout: () => api.call('POST', '/portal/logout', {}),
   support: (subject) => api.call('POST', '/portal/support', { subject }),
+  recover: (phone) => api.call('POST', '/portal/recover', { phone }),
 };
 
 const page = {
@@ -87,6 +88,14 @@ export default function CustomerPortal() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState('');
 
+  // "Get my login details": a customer who forgot both the account number
+  // and the password has nothing else to sign in with, so this asks for the
+  // one thing they still have — the phone the account is registered on.
+  const [recoverOpen, setRecoverOpen] = useState(false);
+  const [recoverPhone, setRecoverPhone] = useState('');
+  const [recoverBusy, setRecoverBusy] = useState(false);
+  const [recoverMsg, setRecoverMsg] = useState('');
+
   /**
    * Live chat, on the same endpoints the hotspot portal uses.
    *
@@ -114,6 +123,21 @@ export default function CustomerPortal() {
       setNote(err.message);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const requestRecovery = async (e) => {
+    e.preventDefault();
+    setRecoverBusy(true);
+    try {
+      const res = await api.recover(recoverPhone.trim());
+      setRecoverMsg(res.message);
+    } catch (err) {
+      // The endpoint itself never returns an error for "not found" — only a
+      // real failure (network, rate limit) reaches here.
+      setRecoverMsg(err.message);
+    } finally {
+      setRecoverBusy(false);
     }
   };
 
@@ -160,9 +184,40 @@ export default function CustomerPortal() {
           <button type="submit" style={button(true)} disabled={busy}>
             {busy ? 'Checking…' : 'Sign in'}
           </button>
-          <span style={{ fontSize: 12, color: color.muted }}>
-            Lost your password? Ask your provider to send a new one — they can generate it for you.
-          </span>
+
+          {!recoverOpen ? (
+            <span
+              onClick={() => setRecoverOpen(true)}
+              style={{ fontSize: 12, color: color.green, cursor: 'pointer', textDecoration: 'underline' }}
+            >
+              Forgot your account number or password? Get your login details
+            </span>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4, borderTop: `1px solid ${color.line}` }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>
+                Enter the phone number registered on your account. We will text and email your
+                account number and a new password to it.
+              </span>
+              <input
+                style={input}
+                value={recoverPhone}
+                onChange={(e) => setRecoverPhone(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && requestRecovery(e)}
+                inputMode="tel"
+                placeholder="07xx xxx xxx"
+                aria-label="Registered phone number"
+              />
+              {recoverMsg && <span style={{ fontSize: 12.5, color: color.ink }}>{recoverMsg}</span>}
+              <button
+                type="button"
+                onClick={requestRecovery}
+                style={button(false)}
+                disabled={recoverBusy || !recoverPhone.trim()}
+              >
+                {recoverBusy ? 'Sending…' : 'Send my login details'}
+              </button>
+            </div>
+          )}
         </form>
       </div>
     );

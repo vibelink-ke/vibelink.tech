@@ -764,6 +764,46 @@ app.post('/portal/logout', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/**
+ * "I forgot my login" — self-service, no account number needed, since
+ * forgetting the account number too is exactly the situation this exists
+ * for. A registered phone is the one thing a customer reliably still has.
+ *
+ * Always answers the same way regardless of whether the phone matched
+ * anything — the account-number lookup right above this one already treats
+ * "which numbers exist" as a free customer list not to hand out, and a
+ * distinct response here would leak the same thing through a different door.
+ */
+app.post('/portal/recover', loginLimiter, wrap(async (req, res) => {
+  const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '');
+  const generic = { ok: true, message: 'If that number is on an account, new login details have been sent to it.' };
+  if (!phone) return res.json(generic);
+
+  const normalised = phone.replace(/^\+?(?:254)?0?/, '254');
+  const { rows: [s] } = await pool.query(
+    `select id, account_code, phone, email from subscribers
+      where tenant_id=$1 and (phone=$2 or phone_alt=$2)`, [req.tenant.id, normalised]);
+  if (!s) return res.json(generic);
+
+  const password = String(100000 + crypto.randomInt(0, 900000));
+  const secrets = await import('./secrets.js');
+  await pool.query(
+    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+    [s.id, await auth.hashPassword(password),
+     secrets.configured() ? secrets.encrypt(password) : null]);
+
+  const sms = await import('./sms.js');
+  const body = `Your portal login: account ${s.account_code}, password ${password}.`;
+  sms.send(req.tenant.id, s.phone, 'custom', { body }).catch(() => {});
+  if (s.email) {
+    const email = await import('./email.js');
+    email.send(req.tenant.id, s.email, 'Your account login details',
+      `Account number: ${s.account_code}\nPassword: ${password}`).catch(() => {});
+  }
+
+  res.json(generic);
+}));
+
 /** Everything the customer's own page shows. Their row only — never a list. */
 app.get('/portal/me', wrap(async (req, res) => {
   const s = await portalSession(req);
