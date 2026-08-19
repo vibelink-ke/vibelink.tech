@@ -51,7 +51,30 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, service })
 export const router = express.Router();
 
 router.post('/stk', async (req, res) => {
-  if (!verify(req)) {
+  const checkoutId = req.body?.data?.id;
+  /**
+   * KopoKopo signs with the tenant's own OAuth client secret, not a secret we
+   * pick — "Kopo Kopo signs each webhook request with the api_key you got
+   * when creating an oauth application. The signature ... is a SHA256 HMAC
+   * hash of the request body with the key being your client secret."
+   * (https://developers.kopokopo.com/guides/webhooks/validating-webhooks.html)
+   *
+   * This verified against a single KOPOKOPO_WEBHOOK_SECRET env var instead —
+   * a value with no relationship to any tenant's real client secret, so the
+   * computed HMAC could never match what KopoKopo actually sent. Every
+   * callback failed closed and was rejected, silently, for every tenant:
+   * paid, SMS'd or not depending on which gateway a stray earlier request
+   * matched, but never turned into a voucher, because the one message that
+   * would have done that never got past this check.
+   *
+   * The checkout's own stk_requests row says which tenant it belongs to —
+   * looking that up before verifying (not after) means the signature is
+   * checked against the secret that could actually have produced it, and a
+   * forged checkout_id for someone else's tenant still fails verification
+   * with that tenant's real secret.
+   */
+  const tenantId = checkoutId ? await tenantForCheckout(checkoutId) : null;
+  if (!tenantId || !(await verify(req, tenantId))) {
     console.error(`kopokopo webhook: rejected unsigned/invalid request from ${req.ip}`);
     return res.status(401).end();
   }
@@ -69,31 +92,28 @@ router.post('/stk', async (req, res) => {
    * anyone who found it later.
    * https://developers.kopokopo.com/guides/receive-money/mpesa-stk.html
    */
-  await handleStkResult('kopokopo', req.body?.data?.id,
+  await handleStkResult('kopokopo', checkoutId,
     d.status === 'Success' ? 0 : 1, d.status,
     { ref: ev.reference, amount: ev.amount, phone: ev.sender_phone_number }
   ).catch(console.error);
 });
 
-let warnedNoSecret = false;
+async function tenantForCheckout(checkoutId) {
+  const { rows: [r] } = await pool.query(
+    "select tenant_id from stk_requests where provider='kopokopo' and checkout_id=$1", [checkoutId]);
+  return r?.tenant_id ?? null;
+}
 
-// Fails closed: no secret configured means every callback is rejected, not
-// silently trusted. An unset secret used to make this return true
-// unconditionally, which is indistinguishable from "no verification at all."
-function verify(req) {
-  const secret = process.env.KOPOKOPO_WEBHOOK_SECRET;
-  if (!secret) {
-    if (!warnedNoSecret) {
-      console.error('KOPOKOPO_WEBHOOK_SECRET is not set — /webhooks/kopokopo/stk will reject '
-        + 'all requests until it is.');
-      warnedNoSecret = true;
-    }
-    return false;
-  }
+// Fails closed: a missing secret or unmatched signature rejects the request,
+// not silently trusts it.
+async function verify(req, tenantId) {
   // rawBody is attacker-influenceable (it is the webhook body itself) and
   // must never be able to throw its way into an unhandled rejection — that
   // takes the whole process down for every tenant, not just this request.
   if (!Buffer.isBuffer(req.rawBody)) return false;
+  const cfg = await config(tenantId, 'kopokopo');
+  const secret = cfg?.credentials?.client_secret;
+  if (!secret) return false;
   const sig = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'));
   const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
   return sig.length === given.length && crypto.timingSafeEqual(sig, given);
