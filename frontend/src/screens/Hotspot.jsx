@@ -8,13 +8,23 @@ import PortalDesign from './hotspot/PortalDesign';
 import HotspotRevenue from './hotspot/HotspotRevenue';
 import HotspotSettings from './hotspot/HotspotSettings';
 
+/**
+ * Absolute paths, deliberately — not "plans", "vouchers" etc. relative to
+ * this route. React Router 7 changed how a relative path resolves inside a
+ * route matched by a wildcard (an opt-in future flag in v6, on by default
+ * in v7): a relative link clicked while already on /hotspot/plans resolved
+ * against the current path instead of the route's own base, landing on
+ * /hotspot/plans/plans — which matches nothing, and rendered a blank page
+ * with the tabs still showing (they are outside the <Routes> that failed
+ * to match). Absolute paths have no ambiguity to resolve either way.
+ */
 const TABS = [
-  { to: '', label: 'Dashboard', end: true },
-  { to: 'plans', label: 'Plans' },
-  { to: 'vouchers', label: 'Vouchers' },
-  { to: 'design', label: 'Portal design' },
-  { to: 'revenue', label: 'Revenue' },
-  { to: 'settings', label: 'Settings' },
+  { to: '/hotspot', label: 'Dashboard', end: true },
+  { to: '/hotspot/plans', label: 'Plans' },
+  { to: '/hotspot/vouchers', label: 'Vouchers' },
+  { to: '/hotspot/design', label: 'Portal design' },
+  { to: '/hotspot/revenue', label: 'Revenue' },
+  { to: '/hotspot/settings', label: 'Settings' },
 ];
 
 export default function Hotspot() {
@@ -67,7 +77,11 @@ export default function Hotspot() {
         <Route path="design" element={<PortalDesign />} />
         <Route path="revenue" element={<HotspotRevenue />} />
         <Route path="settings" element={<HotspotSettings />} />
-        <Route path="*" element={<Navigate to="" replace />} />
+        {/* Absolute for the same reason the tabs above are: this is what
+            recovers a URL already stuck on a bad relative path like
+            /hotspot/plans/plans, and a relative "" here is exactly as
+            exposed to v7's relative-splat resolution as a Link's to is. */}
+        <Route path="*" element={<Navigate to="/hotspot" replace />} />
       </Routes>
     </div>
   );
