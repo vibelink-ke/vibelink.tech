@@ -32,6 +32,12 @@ function verifyWebhook(req, res, next) {
   const given = Buffer.from(String(req.query.k ?? ''));
   const expected = Buffer.from(WEBHOOK_SECRET ?? '');
   if (!WEBHOOK_SECRET || given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
+    // Distinct from applyPayment failures below: this is a request that never
+    // proved it came from Safaricom at all. Before this existed, a forged
+    // webhook and a real one that happened to fail downstream looked
+    // identical in the logs — this line is what makes "someone tried to
+    // forge a payment" a thing an operator can actually go find.
+    console.error(`daraja webhook: rejected unsigned/invalid request to ${req.path} from ${req.ip}`);
     return res.status(401).end();
   }
   next();

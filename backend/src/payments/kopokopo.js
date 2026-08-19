@@ -40,12 +40,26 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, service })
 export const router = express.Router();
 
 router.post('/stk', express.json({ verify: keepRaw }), async (req, res) => {
-  if (!verify(req)) return res.status(401).end();
+  if (!verify(req)) {
+    console.error(`kopokopo webhook: rejected unsigned/invalid request from ${req.ip}`);
+    return res.status(401).end();
+  }
   res.status(200).end();
   const d = req.body?.data?.attributes ?? {};
   const ev = d.event?.resource ?? {};
+  /**
+   * `d.status` is KopoKopo's top-level request outcome — "Success" or
+   * "Failed" — not the nested `event.resource.status` ("Received", present
+   * only on success). Comparing the top-level field against the nested
+   * field's value meant this never matched: every real payment came back
+   * "Success" here, failed this check, and was written to stk_requests as
+   * status='failed' with result_desc='Success' — a paid customer with
+   * nothing to show for it, and a row that looked self-contradictory to
+   * anyone who found it later.
+   * https://developers.kopokopo.com/guides/receive-money/mpesa-stk.html
+   */
   await handleStkResult('kopokopo', req.body?.data?.id,
-    d.status === 'Received' ? 0 : 1, d.status,
+    d.status === 'Success' ? 0 : 1, d.status,
     { ref: ev.reference, amount: ev.amount, phone: ev.sender_phone_number }
   ).catch(console.error);
 });

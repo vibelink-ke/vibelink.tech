@@ -46,6 +46,13 @@ const stkLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many payment attempts. Try again in a few minutes.' },
 });
+// The guest's own page polls this every few seconds while waiting on M-Pesa,
+// so the ceiling is generous — this exists to stop someone using the poll
+// endpoint to brute-force checkoutId values, not to slow down a real wait.
+const pollLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many status checks. Try again shortly.' },
+});
 
 /**
  * Which build is actually running.
@@ -469,7 +476,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
  * Polled by the portal page while the guest is looking at their handset. Scoped
  * to the checkout id they were given, and returns only their own voucher.
  */
-app.get('/hotspot/buy/:checkoutId', wrap(async (req, res) => {
+app.get('/hotspot/buy/:checkoutId', pollLimiter, wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
@@ -793,7 +800,7 @@ app.post('/portal/buy', stkLimiter, async (req, res) => {
   }
 });
 
-app.get('/portal/status/:checkoutId', async (req, res) => {
+app.get('/portal/status/:checkoutId', pollLimiter, async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select status, result_desc from stk_requests where tenant_id=$1 and checkout_id=$2',
     [req.tenant.id, req.params.checkoutId]);
@@ -1152,8 +1159,21 @@ app.post('/api/sms/test', async (req, res) => {
   res.json({ ok: true });
 });
 
-/** FreeRADIUS post-auth hook: starts the clock when voucher_expiry = 'login'. */
+/**
+ * FreeRADIUS post-auth hook: starts the clock when voucher_expiry = 'login'.
+ *
+ * The only thing stopping a stranger from hitting this today is Caddy simply
+ * never proxying /radius/* from the public listener — correct, but a single
+ * point of failure: one wildcard `handle` block in the Caddyfile and this
+ * becomes a public "start any voucher's clock" endpoint with no auth of its
+ * own. RADIUS_INTERNAL_SECRET is a second, independent layer: set it and
+ * configure FreeRADIUS's post-auth call to send it as X-Internal-Secret, and
+ * a Caddy misconfiguration alone is no longer enough. Left optional so this
+ * does not silently break an existing FreeRADIUS deployment that predates it.
+ */
 app.post('/radius/post-auth', async (req, res) => {
+  const secret = process.env.RADIUS_INTERNAL_SECRET;
+  if (secret && req.get('X-Internal-Secret') !== secret) return res.status(403).end();
   const { startVoucherClock } = await import('./radius.js');
   const { withTenant } = await import('./db.js');
   await withTenant(req.tenant.id, (c) => startVoucherClock(c, req.tenant.id, req.body.username));

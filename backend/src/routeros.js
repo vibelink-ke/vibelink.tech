@@ -189,6 +189,12 @@ async function cmd(conn, label, path, args = []) {
       const without = current.filter((a) => !String(a).startsWith(`=${bad}=`) && String(a) !== `=!${bad}=`);
       if (without.length === current.length) break;   // the named property was not actually in this call
       current = without;
+      // Silent until now — a write that got quietly narrowed left no trace
+      // an operator could ever find without reading this file. Worth knowing
+      // about even though it is usually harmless (an older board lacking an
+      // optional property), because "harmless" stops being true the day a
+      // call site passes something that mattered.
+      console.warn(`routeros: ${label} — RouterOS rejected "${bad}" as unknown, retrying without it`);
       try {
         return await conn.write(path, current);
       } catch (retry) {

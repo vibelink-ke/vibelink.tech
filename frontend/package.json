@@ -14,11 +14,11 @@
     "leaflet": "^1.9.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2",
-    "vite": "^5.4.8"
+    "react-router-dom": "^7.18.2"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",
+    "vite": "^6.4.3",
     "vite-node": "^6.0.0"
   }
 }
