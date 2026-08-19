@@ -878,10 +878,20 @@ app.get('/portal/me', wrap(async (req, res) => {
 
   const { rows: [org] } = await pool.query(
     'select name, support_phone from tenants where id=$1', [s.tenant_id]);
+  // site_profiles overrides the tenant-wide default per router — a multi-site
+  // operator can run a different paybill per site, and this was picking the
+  // tenant's first default gateway regardless of which router the customer is
+  // actually on, showing the wrong paybill for anyone not on that one site.
   const { rows: [gw] } = await pool.query(
-    `select shortcode from tenant_payment_config
-      where tenant_id=$1 and shortcode is not null
-      order by is_default desc nulls last limit 1`, [s.tenant_id]).catch(() => ({ rows: [] }));
+    `select coalesce(sp.shortcode, tpc.shortcode) as shortcode
+       from subscribers sub
+       left join site_profiles sp on sp.router_id = sub.router_id and sp.tenant_id = sub.tenant_id
+       left join lateral (
+         select shortcode from tenant_payment_config
+          where tenant_id=sub.tenant_id and shortcode is not null
+          order by is_default desc nulls last limit 1
+       ) tpc on true
+      where sub.id=$1`, [s.subscriber_id]).catch(() => ({ rows: [] }));
 
   /**
    * Invoices, tickets and outages, added alongside payments the portal
@@ -904,6 +914,16 @@ app.get('/portal/me', wrap(async (req, res) => {
       where tenant_id=$1 and status='active' and router_id=$2`,
     [s.tenant_id, s.router_id]).catch(() => ({ rows: [] }));
 
+  // Unlimited, unlike the 10-row invoices list above: credit alone (what
+  // "balance" used to show) is only ever overpayment carried forward — it
+  // resets to 0 on any partial payment (settleSubscriber in apply.js) and
+  // never represented money owed, which is why the figure looked static or
+  // wrong regardless of what a customer actually owed on an open invoice.
+  const { rows: [owed] } = await pool.query(
+    `select coalesce(sum(amount - paid), 0) as amount from invoices
+      where tenant_id=$1 and subscriber_id=$2 and status in ('open','partial')`,
+    [s.tenant_id, s.subscriber_id]);
+
   // Same source FUP enforcement sums from — sessions mirrors radacct via a
   // trigger, so this is real traffic, not a stored counter that only some
   // paths update. Calendar month rather than a billing-cycle date this
@@ -923,7 +943,7 @@ app.get('/portal/me', wrap(async (req, res) => {
     service: s.service,
     expiresAt: s.expires_at,
     daysLeft: days == null ? null : Math.max(0, days),
-    balance: Number(s.credit ?? 0),
+    balance: Number(s.credit ?? 0) - Number(owed.amount ?? 0),
     usageMb: Math.round(Number(usage.bytes) / (1024 * 1024)),
     plan: s.plan_title ? {
       title: s.plan_title,
@@ -1039,8 +1059,30 @@ app.get('/api/subscribers', async (req, res) => {
            coalesce(host(live.address), host(a.framedipaddress)) as current_ip,
            live.username is not null    as online_from_router,
            a.acctstarttime              as session_started,
-           coalesce(a.acctupdatetime, a.acctstarttime, live.seen_at, last.seen) as last_seen
+           coalesce(a.acctupdatetime, a.acctstarttime, live.seen_at, last.seen) as last_seen,
+           -- Per-router override from site_profiles, falling back to the
+           -- tenant's default gateway — this used to be picked purely
+           -- client-side from the tenant default alone, showing the wrong
+           -- paybill for anyone not on the site that default belongs to.
+           coalesce(sp.shortcode, tpc.shortcode) as paybill,
+           -- credit is only ever overpayment carried forward — it resets to
+           -- 0 on any partial payment (settleSubscriber in apply.js) and was
+           -- never meant to represent money owed. What a customer actually
+           -- owes lives on their open/partial invoices, which nothing here
+           -- surfaced, so "balance" looked static or wrong regardless of
+           -- what they actually owed. net_balance is credit minus that.
+           s.credit - coalesce(owed.amount, 0) as net_balance
       from subscribers s
+      left join site_profiles sp on sp.router_id = s.router_id and sp.tenant_id = s.tenant_id
+      left join lateral (
+        select shortcode from tenant_payment_config
+         where tenant_id=s.tenant_id and shortcode is not null
+         order by is_default desc nulls last limit 1
+      ) tpc on true
+      left join lateral (
+        select sum(amount - paid) amount from invoices
+         where subscriber_id = s.id and status in ('open','partial')
+      ) owed on true
       /**
        * The open session — but only if it is still being talked about.
        *

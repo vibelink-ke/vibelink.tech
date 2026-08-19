@@ -107,12 +107,6 @@ export default function Clients() {
     () => Object.fromEntries((store.routers ?? []).map((r) => [r.id, r])),
     [store.routers]
   );
-  // The paybill a PPPoE customer's payment actually lands on — Daraja only,
-  // matching the same restriction the Send STK button enforces.
-  const pppoePaybill = useMemo(
-    () => (store.paymentMethods ?? []).find((g) => g.provider === 'daraja' && g.enabled_pppoe)?.shortcode ?? null,
-    [store.paymentMethods]
-  );
 
   const counts = useMemo(
     () =>
@@ -695,11 +689,23 @@ export default function Clients() {
             <KV k="Plan" v={planById[detail.plan_id]?.title ?? '—'} />
             <KV k="Router" v={routerById[detail.router_id]?.name ?? '—'} />
             <KV k="Status" v={detail.status} />
-            <KV k="Credit" v={`KES ${kes(detail.credit)}`} />
+            {/* credit alone is only ever overpayment carried forward — it resets to
+                0 on any partial payment and never represented what they owe. Balance
+                nets that against open/partial invoices, which is what "do they owe
+                us anything" actually means. */}
+            <KV
+              k="Balance"
+              v={
+                <span style={{ color: Number(detail.net_balance ?? detail.credit) < 0 ? color.rust : undefined, fontWeight: 600 }}>
+                  KES {kes(detail.net_balance ?? detail.credit)}
+                </span>
+              }
+            />
+            <KV k="Credit (overpayment on file)" v={`KES ${kes(detail.credit)}`} />
             <KV k="Expires" v={detail.expires_at ? new Date(detail.expires_at).toLocaleString('en-KE') : '—'} />
             <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
             {detail.service === 'pppoe' && (
-              <KV k="Pay to paybill" v={pppoePaybill ?? 'Not configured — see Settings → Payment gateways'} />
+              <KV k="Pay to paybill" v={detail.paybill ?? 'Not configured — see Settings → Payment gateways'} />
             )}
             {detail.service === 'pppoe' && detail.phone && (
               <Button size="sm" onClick={() => stkPush(detail)} style={{ alignSelf: 'flex-start' }}>

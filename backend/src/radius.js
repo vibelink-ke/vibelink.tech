@@ -370,7 +370,10 @@ async function uniqueCode(c, tenantId, prefs) {
 }
 
 /**
- * Called on the first successful RADIUS auth when voucher_expiry = 'login'.
+ * Called on the first successful RADIUS auth when voucher_expiry = 'login',
+ * and on every /api/presence/refresh for a voucher already seen active — the
+ * second path exists to backfill vouchers whose clock started before this
+ * function wrote Expiration at all.
  *
  * Session-Timeout is already set on every voucher at creation (issueVoucherAccess,
  * above) and cuts a session off after plan.duration_min — but only *that one
@@ -388,6 +391,16 @@ async function uniqueCode(c, tenantId, prefs) {
  * attempt and rejects one made after this timestamp, voucher code correct or
  * not. 'login' mode could not set this at creation because the clock had not
  * started yet; now that it has, the same guarantee applies from here on.
+ *
+ * A voucher whose clock already started before this fix existed would never
+ * hit the branch below that writes it — starts_at was already set, so the
+ * "first auth" UPDATE never matched again, and the guest that voucher
+ * belongs to would keep the reconnect loophole open forever, deploy or not.
+ * So this also runs for any 'in_use' voucher missing Expiration regardless
+ * of whether its clock is new, using its *existing* expires_at rather than
+ * recomputing one — recomputing here would silently give them a fresh full
+ * duration on every presence check, which is the exact bug this exists to
+ * close, not reopen.
  */
 export async function startVoucherClock(c, tenantId, code) {
   const { rows: [v] } = await c.query(
@@ -397,7 +410,17 @@ export async function startVoucherClock(c, tenantId, code) {
      where p.id = v.plan_id and v.tenant_id=$1 and v.code=$2 and v.starts_at is null
      returning v.expires_at`,
     [tenantId, code]);
-  if (!v) return;   // already started — a second auth on the same voucher, not a new clock
+
+  // Either the clock just started (v is the row above), or it was already
+  // running — in which case use its existing expiry rather than inventing
+  // one, and skip entirely if it has none (voucher_expiry='creation' already
+  // wrote Expiration at issue, or the code does not exist / is not active).
+  const expiresAt = v?.expires_at ?? (
+    await c.query(
+      "select expires_at from vouchers where tenant_id=$1 and code=$2 and status='in_use' and expires_at is not null",
+      [tenantId, code])
+  ).rows[0]?.expires_at;
+  if (!expiresAt) return;
 
   const { rowCount } = await c.query(
     "select 1 from radcheck where tenant_id=$1 and username=$2 and attribute='Expiration'",
@@ -406,7 +429,7 @@ export async function startVoucherClock(c, tenantId, code) {
     await c.query(
       `insert into radcheck (tenant_id, username, attribute, op, value) values
          ($1,$2,'Expiration',':=',$3)`,
-      [tenantId, code, new Date(v.expires_at).toUTCString()]);
+      [tenantId, code, new Date(expiresAt).toUTCString()]);
   }
 }
 
