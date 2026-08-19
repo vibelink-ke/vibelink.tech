@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font, radius } from '../theme/tokens';
+import { color, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Empty, Grid, Input, Screen, Stat } from '../ui/primitives';
@@ -280,9 +280,6 @@ export default function LiveSupport() {
                   Send
                 </Button>
               </div>
-              <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>
-                Replies are local — POST /api/messages with channel=live_chat to persist them.
-              </span>
             </div>
           )}
         </Card>
