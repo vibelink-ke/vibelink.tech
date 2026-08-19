@@ -88,10 +88,23 @@ export async function stkPush(tenantId, { phone, amount, accountRef, description
   return data;   // CheckoutRequestID -> store in stk_requests
 }
 
-/** One-time: point Safaricom at our C2B URLs. */
+/**
+ * One-time: point Safaricom at our C2B URLs.
+ *
+ * v2, not v1. Safaricom's v1 registerurl endpoint rejects production
+ * shortcodes with "Invalid Access Token" — a message that reads exactly
+ * like a bad Consumer Key/Secret, even though the same token authenticates
+ * every other call (STK push, a plain OAuth check) just fine. The
+ * credentials were never the problem; only v2 accepts a production
+ * shortcode's registration. Confirmed against this project's own gateway:
+ * Test (a bare OAuth check) passed, Register URLs failed on v1 with this
+ * exact error, and the product list on Safaricom's portal already showed
+ * "C2B V2" enabled — the token was good, the endpoint version was not.
+ * https://github.com/safaricom/mpesa-node-library/issues/56
+ */
 export async function registerC2B(tenantId) {
   const cfg = await config(tenantId, 'daraja');
-  const { data } = await axios.post(`${BASE}/mpesa/c2b/v1/registerurl`, {
+  const { data } = await axios.post(`${BASE}/mpesa/c2b/v2/registerurl`, {
     ShortCode: cfg.shortcode,
     ResponseType: 'Completed',
     ConfirmationURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/confirm`),
