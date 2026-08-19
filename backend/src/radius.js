@@ -369,14 +369,45 @@ async function uniqueCode(c, tenantId, prefs) {
   }
 }
 
-/** Called on the first successful RADIUS auth when voucher_expiry = 'login'. */
+/**
+ * Called on the first successful RADIUS auth when voucher_expiry = 'login'.
+ *
+ * Session-Timeout is already set on every voucher at creation (issueVoucherAccess,
+ * above) and cuts a session off after plan.duration_min — but only *that one
+ * session*. It does not stop a re-authentication: nothing here checked an
+ * absolute expiry before now, so a guest whose Wi-Fi dropped and reconnected —
+ * a sleeping phone waking up, walking out of range and back, a manual toggle —
+ * got a brand new full-duration Session-Timeout window, indefinitely, on the
+ * same voucher. "This voucher shows expired but is still online" was that:
+ * our own status was accurate, RouterOS's per-session cutoff was doing its
+ * job, and the gap was that nothing stopped the *next* login from succeeding.
+ *
+ * Writing Expiration here — the same absolute-timestamp attribute
+ * issueVoucherAccess already writes for voucher_expiry='creation' vouchers —
+ * closes it: FreeRADIUS's `expiration` module runs in authorize{} on every
+ * attempt and rejects one made after this timestamp, voucher code correct or
+ * not. 'login' mode could not set this at creation because the clock had not
+ * started yet; now that it has, the same guarantee applies from here on.
+ */
 export async function startVoucherClock(c, tenantId, code) {
-  await c.query(
+  const { rows: [v] } = await c.query(
     `update vouchers v set status='in_use', starts_at=now(),
             expires_at = now() + (p.duration_min || ' minutes')::interval
      from plans p
-     where p.id = v.plan_id and v.tenant_id=$1 and v.code=$2 and v.starts_at is null`,
+     where p.id = v.plan_id and v.tenant_id=$1 and v.code=$2 and v.starts_at is null
+     returning v.expires_at`,
     [tenantId, code]);
+  if (!v) return;   // already started — a second auth on the same voucher, not a new clock
+
+  const { rowCount } = await c.query(
+    "select 1 from radcheck where tenant_id=$1 and username=$2 and attribute='Expiration'",
+    [tenantId, code]);
+  if (!rowCount) {
+    await c.query(
+      `insert into radcheck (tenant_id, username, attribute, op, value) values
+         ($1,$2,'Expiration',':=',$3)`,
+      [tenantId, code, new Date(v.expires_at).toUTCString()]);
+  }
 }
 
 /**
