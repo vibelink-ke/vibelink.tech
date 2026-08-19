@@ -967,7 +967,12 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
     }
   }));
 
-  let seen = 0;
+  // A set, not a running total: RouterOS can report the same username in
+  // more than one active-session row (a stale entry lingering alongside a
+  // fresh one is a real thing it does, not hypothetical), and live_sessions
+  // itself dedupes on (tenant_id, username) — so a plain per-row counter
+  // told an operator "2 connected" for one guest who reconnected once.
+  const seenUsers = new Set();
   const unreachable = [];
   for (let i = 0; i < results.length; i++) {
     const r = results[i];
@@ -983,7 +988,7 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
             set router_id = excluded.router_id, address = excluded.address,
                 service = excluded.service, seen_at = now()`,
         [req.tenant.id, r.value.router.id, sess.username, sess.address, sess.service]);
-      seen++;
+      seenUsers.add(sess.username);
 
       /**
        * A hotspot username on the router is the voucher code, and seeing it
@@ -1011,7 +1016,7 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
     [req.tenant.id]);
 
   res.json({
-    online: seen,
+    online: seenUsers.size,
     asked: reachable.length,
     unreachable,
     noCredentials: routers.length - reachable.length,
