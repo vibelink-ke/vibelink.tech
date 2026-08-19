@@ -712,7 +712,7 @@ async function portalSession(req) {
   if (!token) return null;
   const { rows: [row] } = await pool.query(
     `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
-            sub.status, sub.expires_at, sub.credit, sub.service,
+            sub.status, sub.expires_at, sub.credit, sub.service, sub.router_id,
             p.title as plan_title, p.price as plan_price, p.rate_down, p.rate_up
        from portal_sessions s
        join subscribers sub on sub.id = s.subscriber_id
@@ -822,6 +822,37 @@ app.get('/portal/me', wrap(async (req, res) => {
       where tenant_id=$1 and shortcode is not null
       order by is_default desc nulls last limit 1`, [s.tenant_id]).catch(() => ({ rows: [] }));
 
+  /**
+   * Invoices, tickets and outages, added alongside payments the portal
+   * already showed — a customer previously had to call in to ask "do I owe
+   * anything," "did you get my ticket," or "is this outage why I'm down."
+   * Outages match by router_id: it is the physical link between a customer
+   * and a site, unlike the free-text location field, which nothing else
+   * validates against an outage's own free-text site name.
+   */
+  const { rows: invoices } = await pool.query(
+    `select number, amount, paid, due_date, status from invoices
+      where tenant_id=$1 and subscriber_id=$2
+      order by due_date desc limit 10`, [s.tenant_id, s.subscriber_id]);
+  const { rows: tickets } = await pool.query(
+    `select number, subject, priority, status, created_at from tickets
+      where tenant_id=$1 and subscriber_id=$2
+      order by created_at desc limit 10`, [s.tenant_id, s.subscriber_id]);
+  const { rows: outages } = await pool.query(
+    `select site, cause, eta, started_at from outages
+      where tenant_id=$1 and status='active' and router_id=$2`,
+    [s.tenant_id, s.router_id]).catch(() => ({ rows: [] }));
+
+  // Same source FUP enforcement sums from — sessions mirrors radacct via a
+  // trigger, so this is real traffic, not a stored counter that only some
+  // paths update. Calendar month rather than a billing-cycle date this
+  // query has no way to know, same as fup.js's own 'monthly' window.
+  const { rows: [usage] } = await pool.query(
+    `select coalesce(sum(coalesce(bytes_in,0) + coalesce(bytes_out,0)), 0) as bytes
+       from sessions
+      where tenant_id=$1 and subscriber_id=$2
+        and started_at >= date_trunc('month', now())`, [s.tenant_id, s.subscriber_id]);
+
   const days = s.expires_at ? Math.ceil((new Date(s.expires_at) - Date.now()) / 86400000) : null;
   res.json({
     name: s.name,
@@ -832,6 +863,7 @@ app.get('/portal/me', wrap(async (req, res) => {
     expiresAt: s.expires_at,
     daysLeft: days == null ? null : Math.max(0, days),
     balance: Number(s.credit ?? 0),
+    usageMb: Math.round(Number(usage.bytes) / (1024 * 1024)),
     plan: s.plan_title ? {
       title: s.plan_title,
       price: Number(s.plan_price),
@@ -841,6 +873,9 @@ app.get('/portal/me', wrap(async (req, res) => {
     supportPhone: org?.support_phone ?? '',
     paybill: gw?.shortcode ?? '',
     payments,
+    invoices,
+    tickets,
+    outages,
   });
 }));
 
@@ -3376,9 +3411,16 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
-                   'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng'];
+                   'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
+                   'credit'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  if ('credit' in req.body) {
+    const c = Number(req.body.credit);
+    if (!Number.isFinite(c)) return res.status(400).json({ error: 'Balance must be a number' });
+    req.body.credit = c;
+  }
 
   // Same rule as on create: an unusable coordinate becomes null rather than a
   // numeric cast error, or a pin somewhere out at sea.

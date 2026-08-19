@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { color, font, radius } from '../theme/tokens';
+import { font } from '../theme/tokens';
 
 /**
  * The customer's own page, at /customer.
@@ -28,45 +28,69 @@ const api = {
   recover: (phone) => api.call('POST', '/portal/recover', { phone }),
 };
 
+/**
+ * A palette of its own, deliberately not the admin app's green — a customer
+ * here shares nothing with the admin app but a hostname, and reusing its
+ * exact branding made this page look like an unfinished corner of the admin
+ * tool rather than something built for the person actually using it.
+ */
+const pc = {
+  bg0: '#f2f0ff',
+  bg1: '#eef4ff',
+  ink: '#211f3d',
+  muted: '#6d6a95',
+  line: 'rgba(91, 75, 255, .14)',
+  card: '#ffffff',
+  accent: '#5b4bff',
+  accentDark: '#4636dd',
+  teal: '#0fb8a3',
+  amber: '#dd9a1f',
+  rust: '#e0475a',
+};
+
 const page = {
   minHeight: '100vh',
-  background: '#f4f6f3',
+  background: `linear-gradient(160deg, ${pc.bg0} 0%, ${pc.bg1} 55%, #ffffff 100%)`,
   fontFamily: font.sans,
-  color: color.ink,
+  color: pc.ink,
   display: 'flex',
   flexDirection: 'column',
   alignItems: 'center',
-  padding: '32px 16px',
+  padding: '0 16px 40px',
 };
 
 const card = {
-  background: '#fff',
-  border: `1px solid ${color.line}`,
-  borderRadius: radius.lg,
-  padding: 22,
+  boxSizing: 'border-box',
+  background: pc.card,
+  border: `1px solid ${pc.line}`,
+  borderRadius: 18,
+  padding: 20,
   width: '100%',
   maxWidth: 460,
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  gap: 12,
+  boxShadow: '0 8px 24px rgba(91, 75, 255, .07)',
 };
 
 const input = {
   padding: '10px 12px',
-  border: `1px solid ${color.line}`,
-  borderRadius: radius.md,
+  border: `1px solid ${pc.line}`,
+  borderRadius: 12,
   fontSize: 15,
   fontFamily: font.mono,
   width: '100%',
   boxSizing: 'border-box',
+  background: '#fbfaff',
+  color: pc.ink,
 };
 
 const button = (primary) => ({
   padding: '10px 16px',
-  border: primary ? 'none' : `1px solid ${color.line}`,
-  borderRadius: radius.md,
-  background: primary ? color.green : '#fff',
-  color: primary ? '#fff' : color.ink,
+  border: primary ? 'none' : `1px solid ${pc.line}`,
+  borderRadius: 12,
+  background: primary ? `linear-gradient(135deg, ${pc.accent}, ${pc.accentDark})` : '#fff',
+  color: primary ? '#fff' : pc.ink,
   fontSize: 14,
   fontWeight: 600,
   cursor: 'pointer',
@@ -75,8 +99,51 @@ const button = (primary) => ({
 function Row({ k, v, tone }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 14 }}>
-      <span style={{ color: color.muted }}>{k}</span>
+      <span style={{ color: pc.muted }}>{k}</span>
       <span style={{ fontWeight: 600, color: tone, textAlign: 'right' }}>{v}</span>
+    </div>
+  );
+}
+
+/** Data used, in whichever unit reads naturally at that size. */
+function formatUsage(mb) {
+  const n = Number(mb) || 0;
+  return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${n} MB`;
+}
+
+const INVOICE_TONE = { paid: pc.teal, open: pc.amber, partial: pc.amber, void: pc.muted };
+const TICKET_TONE = { resolved: pc.teal, in_progress: pc.amber, open: pc.rust };
+
+function Badge({ text, tone }) {
+  return (
+    <span
+      style={{
+        fontSize: 11.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em',
+        padding: '3px 9px', borderRadius: 999, color: '#fff', background: tone ?? pc.muted,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {text}
+    </span>
+  );
+}
+
+/** A tile in the stats grid — the wallet, usage, plan price, at a glance. */
+function Stat({ label, value, sub }) {
+  return (
+    <div
+      style={{
+        boxSizing: 'border-box',
+        background: pc.card, border: `1px solid ${pc.line}`, borderRadius: 16,
+        padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 3,
+        boxShadow: '0 6px 18px rgba(91, 75, 255, .06)',
+      }}
+    >
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: pc.muted, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+        {label}
+      </span>
+      <span style={{ fontSize: 19, fontWeight: 700, color: pc.ink }}>{value}</span>
+      {sub && <span style={{ fontSize: 12, color: pc.muted }}>{sub}</span>}
     </div>
   );
 }
@@ -187,68 +254,80 @@ export default function CustomerPortal() {
   if (me === null) {
     return (
       <div style={page}>
-        <form style={{ ...card, marginTop: '8vh' }} onSubmit={signIn}>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>My account</h1>
-          <p style={{ margin: 0, fontSize: 13.5, color: color.muted }}>
-            Sign in with your account number — the one you quote when you pay — and the password
-            your provider sent you.
-          </p>
-          <input
-            style={input}
-            value={account}
-            onChange={(e) => setAccount(e.target.value.replace(/\D/g, '').slice(0, 5))}
-            inputMode="numeric"
-            placeholder="Account number"
-            aria-label="Account number"
-          />
-          <input
-            style={input}
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            inputMode="numeric"
-            placeholder="Password"
-            aria-label="Password"
-          />
-          {note && <span style={{ fontSize: 13, color: color.rust }}>{note}</span>}
-          <button type="submit" style={button(true)} disabled={busy}>
-            {busy ? 'Checking…' : 'Sign in'}
-          </button>
+        <div style={{ marginTop: '8vh', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, width: '100%' }}>
+          <div
+            style={{
+              width: 52, height: 52, borderRadius: 16, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', fontSize: 24,
+              background: `linear-gradient(135deg, ${pc.accent}, ${pc.teal})`,
+              boxShadow: '0 10px 24px rgba(91, 75, 255, .28)',
+            }}
+          >
+            📶
+          </div>
+          <form style={card} onSubmit={signIn}>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>My account</h1>
+            <p style={{ margin: 0, fontSize: 13.5, color: pc.muted }}>
+              Sign in with your account number — the one you quote when you pay — and the password
+              your provider sent you.
+            </p>
+            <input
+              style={input}
+              value={account}
+              onChange={(e) => setAccount(e.target.value.replace(/\D/g, '').slice(0, 5))}
+              inputMode="numeric"
+              placeholder="Account number"
+              aria-label="Account number"
+            />
+            <input
+              style={input}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              inputMode="numeric"
+              placeholder="Password"
+              aria-label="Password"
+            />
+            {note && <span style={{ fontSize: 13, color: pc.rust }}>{note}</span>}
+            <button type="submit" style={button(true)} disabled={busy}>
+              {busy ? 'Checking…' : 'Sign in'}
+            </button>
 
-          {!recoverOpen ? (
-            <span
-              onClick={() => setRecoverOpen(true)}
-              style={{ fontSize: 12, color: color.green, cursor: 'pointer', textDecoration: 'underline' }}
-            >
-              Forgot your account number or password? Get your login details
-            </span>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4, borderTop: `1px solid ${color.line}` }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>
-                Enter the phone number registered on your account. We will text and email your
-                account number and a new password to it.
-              </span>
-              <input
-                style={input}
-                value={recoverPhone}
-                onChange={(e) => setRecoverPhone(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && requestRecovery(e)}
-                inputMode="tel"
-                placeholder="07xx xxx xxx"
-                aria-label="Registered phone number"
-              />
-              {recoverMsg && <span style={{ fontSize: 12.5, color: color.ink }}>{recoverMsg}</span>}
-              <button
-                type="button"
-                onClick={requestRecovery}
-                style={button(false)}
-                disabled={recoverBusy || !recoverPhone.trim()}
+            {!recoverOpen ? (
+              <span
+                onClick={() => setRecoverOpen(true)}
+                style={{ fontSize: 12, color: pc.accent, cursor: 'pointer', textDecoration: 'underline', fontWeight: 600 }}
               >
-                {recoverBusy ? 'Sending…' : 'Send my login details'}
-              </button>
-            </div>
-          )}
-        </form>
+                Forgot your account number or password? Get your login details
+              </span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 4, borderTop: `1px solid ${pc.line}` }}>
+                <span style={{ fontSize: 12.5, color: pc.muted }}>
+                  Enter the phone number registered on your account. We will text and email your
+                  account number and a new password to it.
+                </span>
+                <input
+                  style={input}
+                  value={recoverPhone}
+                  onChange={(e) => setRecoverPhone(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && requestRecovery(e)}
+                  inputMode="tel"
+                  placeholder="07xx xxx xxx"
+                  aria-label="Registered phone number"
+                />
+                {recoverMsg && <span style={{ fontSize: 12.5, color: pc.ink }}>{recoverMsg}</span>}
+                <button
+                  type="button"
+                  onClick={requestRecovery}
+                  style={button(false)}
+                  disabled={recoverBusy || !recoverPhone.trim()}
+                >
+                  {recoverBusy ? 'Sending…' : 'Send my login details'}
+                </button>
+              </div>
+            )}
+          </form>
+        </div>
       </div>
     );
   }
@@ -287,47 +366,128 @@ export default function CustomerPortal() {
 
   return (
     <div style={page}>
-      <div style={{ width: '100%', maxWidth: 460, display: 'grid', gap: 14 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 600 }}>{me.company}</h1>
+      <div style={{ width: '100%', maxWidth: 480, display: 'grid', gap: 14, paddingTop: 22 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div
+              style={{
+                width: 34, height: 34, borderRadius: 10, display: 'flex', alignItems: 'center',
+                justifyContent: 'center', fontSize: 16,
+                background: `linear-gradient(135deg, ${pc.accent}, ${pc.teal})`,
+              }}
+            >
+              📶
+            </div>
+            <h1 style={{ margin: 0, fontSize: 19, fontWeight: 700 }}>{me.company}</h1>
+          </div>
           <span
             onClick={async () => { await api.logout(); setMe(null); }}
-            style={{ fontSize: 13, color: color.muted, cursor: 'pointer' }}
+            style={{ fontSize: 13, color: pc.muted, cursor: 'pointer', fontWeight: 600 }}
           >
             Sign out
           </span>
         </div>
 
-        <div style={card}>
-          <span style={{ fontSize: 13, color: color.muted }}>{me.name} · {me.account}</span>
-          <span
+        {/* A live outage on their own router, shown before anything else — this is
+            the one thing that answers "why is my internet down" without a call. */}
+        {me.outages?.length > 0 && (
+          <div
             style={{
-              fontSize: 26, fontWeight: 600,
-              color: expired ? color.rust : color.green,
+              boxSizing: 'border-box',
+              background: `linear-gradient(135deg, ${pc.rust}, #ff7a59)`, color: '#fff',
+              borderRadius: 16, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 4,
             }}
           >
+            <span style={{ fontSize: 13.5, fontWeight: 700 }}>⚠ Outage affecting your site — {me.outages[0].site}</span>
+            <span style={{ fontSize: 12.5, opacity: 0.92 }}>
+              {me.outages[0].cause ?? 'Engineers are aware and working on it.'}
+              {me.outages[0].eta ? ` ETA: ${me.outages[0].eta}.` : ''}
+            </span>
+          </div>
+        )}
+
+        {/* Hero: status, gradient, front and centre — the one thing every visit is really for. */}
+        <div
+          style={{
+            boxSizing: 'border-box',
+            background: `linear-gradient(135deg, ${pc.accent} 0%, ${pc.accentDark} 100%)`,
+            borderRadius: 20, padding: 22, color: '#fff', display: 'flex', flexDirection: 'column', gap: 6,
+            boxShadow: '0 14px 30px rgba(91, 75, 255, .25)',
+          }}
+        >
+          <span style={{ fontSize: 13, opacity: 0.85 }}>{me.name} · {me.account}</span>
+          <span style={{ fontSize: 28, fontWeight: 800, color: expired ? '#ffd7d7' : '#fff' }}>
             {expired ? me.status : `${me.daysLeft} day${me.daysLeft === 1 ? '' : 's'} left`}
           </span>
           {me.expiresAt && (
-            <span style={{ fontSize: 13, color: color.muted }}>
+            <span style={{ fontSize: 13, opacity: 0.85 }}>
               {expired ? 'Ended' : 'Runs until'}{' '}
               {new Date(me.expiresAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'long', year: 'numeric' })}
             </span>
           )}
+          {me.plan && (
+            <span style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
+              {me.plan.title}{me.plan.speed ? ` · ${me.plan.speed}` : ''} · KES {me.plan.price}/mo
+            </span>
+          )}
         </div>
 
+        {/* Stat tiles: the wallet and usage a customer actually checks in on. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Stat
+            label="Wallet balance"
+            value={`KES ${me.balance}`}
+            sub={me.balance < 0 ? 'You owe this much' : 'Credit on file'}
+          />
+          <Stat label="Data used" value={formatUsage(me.usageMb)} sub="This billing cycle" />
+        </div>
+
+        {me.invoices?.length > 0 && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Invoices</span>
+            {me.invoices.map((inv) => (
+              <div key={inv.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{inv.number}</span>
+                  <span style={{ fontSize: 12, color: pc.muted }}>
+                    Due {new Date(inv.due_date).toLocaleDateString('en-KE')} · KES {inv.amount}
+                    {Number(inv.paid) > 0 ? ` (KES ${inv.paid} paid)` : ''}
+                  </span>
+                </div>
+                <Badge text={inv.status} tone={INVOICE_TONE[inv.status]} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {me.tickets?.length > 0 && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Your support tickets</span>
+            {me.tickets.map((t) => (
+              <div key={t.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {t.subject}
+                  </span>
+                  <span style={{ fontSize: 12, color: pc.muted }}>
+                    {t.number} · {new Date(t.created_at).toLocaleDateString('en-KE')}
+                  </span>
+                </div>
+                <Badge text={t.status.replace('_', ' ')} tone={TICKET_TONE[t.status]} />
+              </div>
+            ))}
+          </div>
+        )}
+
         <div style={card}>
-          {me.plan && <Row k="Plan" v={`${me.plan.title}${me.plan.speed ? ` · ${me.plan.speed}` : ''}`} />}
-          {me.plan && <Row k="Price" v={`KES ${me.plan.price}`} />}
-          <Row k="Balance" v={`KES ${me.balance}`} tone={me.balance < 0 ? color.rust : undefined} />
           {me.paybill && <Row k="Pay to paybill" v={me.paybill} />}
           <Row k="Your account number" v={me.account} />
         </div>
 
         <div style={card}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Recent payments</span>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Recent payments</span>
           {me.payments.length === 0 ? (
-            <span style={{ fontSize: 13, color: color.muted }}>Nothing yet.</span>
+            <span style={{ fontSize: 13, color: pc.muted }}>Nothing yet.</span>
           ) : (
             me.payments.map((p) => (
               <Row
@@ -340,7 +500,7 @@ export default function CustomerPortal() {
         </div>
 
         <div style={card}>
-          <span style={{ fontSize: 14, fontWeight: 600 }}>Need help?</span>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Need help?</span>
           {me.supportPhone && (
             <a href={`tel:${me.supportPhone}`} style={{ ...button(false), textAlign: 'center', textDecoration: 'none' }}>
               Call {me.supportPhone}
@@ -350,7 +510,7 @@ export default function CustomerPortal() {
           {!chat && (
             <button style={button(false)} onClick={startChat}>Chat with support</button>
           )}
-          {note && <span style={{ fontSize: 13, color: color.green }}>{note}</span>}
+          {note && <span style={{ fontSize: 13, color: pc.teal }}>{note}</span>}
 
           {chat && (
             <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
@@ -364,9 +524,9 @@ export default function CustomerPortal() {
                     style={{
                       alignSelf: m.sender === 'staff' ? 'flex-start' : 'flex-end',
                       maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
-                      background: m.sender === 'staff' ? '#fff' : color.green,
-                      color: m.sender === 'staff' ? color.ink : '#fff',
-                      border: m.sender === 'staff' ? `1px solid ${color.line}` : 'none',
+                      background: m.sender === 'staff' ? '#fff' : pc.accent,
+                      color: m.sender === 'staff' ? pc.ink : '#fff',
+                      border: m.sender === 'staff' ? `1px solid ${pc.line}` : 'none',
                     }}
                   >
                     {m.body}
@@ -380,11 +540,11 @@ export default function CustomerPortal() {
                 placeholder="Type your message"
                 style={{
                   padding: '10px 12px', fontSize: 15, borderRadius: 9,
-                  border: `1px solid ${color.line}`, outline: 'none',
+                  border: `1px solid ${pc.line}`, outline: 'none',
                 }}
               />
               <button style={button(true)} onClick={sendChat}>Send</button>
-              {chat.note && <span style={{ fontSize: 12.5, color: color.muted }}>{chat.note}</span>}
+              {chat.note && <span style={{ fontSize: 12.5, color: pc.muted }}>{chat.note}</span>}
             </div>
           )}
         </div>

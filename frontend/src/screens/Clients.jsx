@@ -248,6 +248,8 @@ export default function Clients() {
       // RADIUS is scoped to the tenant, not the router — so this decides which
       // pool they draw an address from and which tower an engineer is sent to.
       router_id: editing.router_id || null,
+      credit: editing.credit === '' || editing.credit == null ? 0 : Number(editing.credit),
+      expires_at: editing.expires_at || null,
     };
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -797,6 +799,38 @@ export default function Clients() {
                 onChange={(e) => setEditing((s) => ({ ...s, status: e.target.value }))}
                 options={['active', 'grace', 'expired', 'suspended']}
               />
+            </Field>
+            <Field label="Balance (KES)" hint="Positive credits the account; negative is what they still owe">
+              <Input
+                type="number"
+                value={editing.credit ?? 0}
+                onChange={(e) => setEditing((s) => ({ ...s, credit: e.target.value }))}
+              />
+            </Field>
+            <Field label="Expires" span={2} hint="When this line stops working without a payment">
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Input
+                  type="date"
+                  value={editing.expires_at ? new Date(editing.expires_at).toISOString().slice(0, 10) : ''}
+                  onChange={(e) => setEditing((s) => ({ ...s, expires_at: e.target.value || null }))}
+                  style={{ maxWidth: 170 }}
+                />
+                {/* Extend from today rather than the current expiry, which may already
+                    be in the past — "give them 7 more days" should mean 7 days from now,
+                    not 7 days past an expiry that already lapsed. */}
+                {[7, 30].map((days) => (
+                  <Button
+                    key={days}
+                    size="sm"
+                    onClick={() => setEditing((s) => ({
+                      ...s,
+                      expires_at: new Date(Date.now() + days * 864e5).toISOString().slice(0, 10),
+                    }))}
+                  >
+                    +{days}d from today
+                  </Button>
+                ))}
+              </div>
             </Field>
           </div>
         )}
