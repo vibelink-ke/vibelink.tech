@@ -97,8 +97,8 @@ create table subscribers (
   created_at   timestamptz not null default now(),
   unique (tenant_id, account_code)
 );
-create index on subscribers (tenant_id, expires_at);
-create index on subscribers using gin (phone gin_trgm_ops);
+create index if not exists subscribers_tenant_id_expires_at_idx on subscribers (tenant_id, expires_at);
+create index if not exists subscribers_phone_idx on subscribers using gin (phone gin_trgm_ops);
 
 create table vouchers (
   id          uuid primary key default gen_random_uuid(),
@@ -115,7 +115,7 @@ create table vouchers (
   created_at  timestamptz not null default now(),
   unique (tenant_id, code)
 );
-create index on vouchers (tenant_id, status, expires_at);
+create index if not exists vouchers_tenant_id_status_expires_at_idx on vouchers (tenant_id, status, expires_at);
 
 -- ─────────────── money ───────────────
 create table invoices (
@@ -151,7 +151,7 @@ create table payments (
   payload       jsonb,
   unique (tenant_id, provider, provider_ref)
 );
-create index on payments (tenant_id, status, received_at desc);
+create index if not exists payments_tenant_id_status_received_at_idx on payments (tenant_id, status, received_at desc);
 
 create table stk_requests (
   id           uuid primary key default gen_random_uuid(),
@@ -195,7 +195,7 @@ create table sessions (
   bytes_in     bigint not null default 0,
   bytes_out    bigint not null default 0
 );
-create index on sessions (tenant_id, stopped_at) where stopped_at is null;
+create index if not exists sessions_tenant_id_stopped_at_idx on sessions (tenant_id, stopped_at) where stopped_at is null;
 
 create table audit_log (
   id        bigserial primary key,
@@ -268,7 +268,7 @@ create table sms_log (
   detail    text,
   at        timestamptz not null default now()
 );
-create index on sms_log (tenant_id, at desc);
+create index if not exists sms_log_tenant_id_at_idx on sms_log (tenant_id, at desc);
 
 -- KopoKopo is hotspot-only by policy; enforce it in the database too.
 alter table tenant_payment_config
@@ -384,7 +384,7 @@ create table outages (
   resolved_at timestamptz,
   constraint outage_status_valid check (status in ('active','resolved'))
 );
-create index on outages (tenant_id, status, started_at desc);
+create index if not exists outages_tenant_id_status_started_at_idx on outages (tenant_id, status, started_at desc);
 
 create table sla_policies (
   id           uuid primary key default gen_random_uuid(),
@@ -407,7 +407,7 @@ create table kb_articles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
-create index on kb_articles using gin (title gin_trgm_ops);
+create index if not exists kb_articles_title_idx on kb_articles using gin (title gin_trgm_ops);
 
 -- Which paybill/till the customers at a given site pay into. Only needed when a
 -- tenant runs more than one shortcode.
@@ -1290,7 +1290,7 @@ create table if not exists admin_sessions (
   created_at timestamptz not null default now(),
   expires_at timestamptz not null
 );
-create index on admin_sessions (expires_at);
+create index if not exists admin_sessions_expires_at_idx on admin_sessions (expires_at);
 
 -- ─────────────── signing in across subdomains ───────────────
 -- Signup happens on the apex, but a tenant's portal lives at its own subdomain,
