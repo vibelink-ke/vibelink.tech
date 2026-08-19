@@ -29,7 +29,22 @@ process.on('unhandledRejection', (e) => {
 });
 
 const app = express();
-app.use(express.json());
+// KopoKopo's webhook needs the exact raw bytes to verify its HMAC signature
+// against — capturing it here, once, for every request is cheap and correct.
+// It used to be captured by a second express.json({verify}) mounted only on
+// that router, but this global parser runs first and already consumes the
+// body stream, so that second parser's verify callback never fired and
+// req.rawBody was always undefined — which crashed the whole process the
+// moment KOPOKOPO_WEBHOOK_SECRET was actually set (crypto.Hmac.update()
+// does not accept undefined) and took every tenant down with it, not just
+// that one webhook.
+app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
+
+// Caddy is the only thing in front of this process; without this, IP-based
+// rate limiting keys on Caddy's own address instead of the real client, and
+// express-rate-limit refuses to run at all once it sees X-Forwarded-For
+// without a trust setting — logging a warning on every single request.
+app.set('trust proxy', 1);
 
 /**
  * Nothing in the stack previously bounded request rate anywhere, so a login
@@ -3603,14 +3618,28 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
   const creds = cfg.credentials ?? {};
   const missing = required.filter((k) => !String(creds[k] ?? '').trim());
   if (!cfg.shortcode) missing.unshift('shortcode');
-  res.json({
-    ok: missing.length === 0,
-    shortcode: cfg.shortcode,
-    missing,
-    // Deliberately does not call the provider: a live STK push would charge a real
-    // customer. This confirms the config is complete, nothing more.
-    note: missing.length ? 'Incomplete configuration' : 'All required credentials present',
-  });
+  if (missing.length) {
+    return res.json({ ok: false, shortcode: cfg.shortcode, missing, note: 'Incomplete configuration' });
+  }
+
+  /**
+   * Fields being present is not the same as Safaricom/KopoKopo accepting
+   * them — this used to be the whole test, and a paybill could show
+   * "complete" for weeks with consumer credentials that were simply wrong,
+   * only surfacing at Register URLs with a bare "Invalid Access Token" and
+   * no earlier warning. An OAuth token request costs nothing and touches no
+   * real customer, unlike an STK push, so it is safe to do live here.
+   */
+  if (req.params.provider === 'daraja' || req.params.provider === 'kopokopo') {
+    const mod = req.params.provider === 'daraja' ? mpesa : kk;
+    const auth = await mod.testAuth(req.tenant.id);
+    return res.json({
+      ok: auth.ok, shortcode: cfg.shortcode, missing: [],
+      note: auth.ok ? 'Credentials accepted' : `Safaricom/KopoKopo rejected these credentials: ${JSON.stringify(auth.error)}`,
+    });
+  }
+
+  res.json({ ok: true, shortcode: cfg.shortcode, missing: [], note: 'All required credentials present' });
 }));
 
 app.get('/api/settlements', wrap(async (req, res) => {

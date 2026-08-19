@@ -15,6 +15,17 @@ async function token(cfg) {
   return data.access_token;
 }
 
+/** Same rationale as daraja.js's testAuth: an OAuth token request is free. */
+export async function testAuth(tenantId) {
+  const cfg = await config(tenantId, 'kopokopo');
+  try {
+    await token(cfg);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.response?.data?.error_description ?? e?.response?.data ?? e.message };
+  }
+}
+
 /** HOTSPOT ONLY. Guarded here so a misconfiguration can't route PPPoE through KopoKopo. */
 export async function stkPush(tenantId, { phone, amount, planId, mac, service }) {
   if (service !== 'hotspot') throw new Error('KopoKopo STK is enabled for hotspot only');
@@ -39,7 +50,7 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, service })
 
 export const router = express.Router();
 
-router.post('/stk', express.json({ verify: keepRaw }), async (req, res) => {
+router.post('/stk', async (req, res) => {
   if (!verify(req)) {
     console.error(`kopokopo webhook: rejected unsigned/invalid request from ${req.ip}`);
     return res.status(401).end();
@@ -64,8 +75,6 @@ router.post('/stk', express.json({ verify: keepRaw }), async (req, res) => {
   ).catch(console.error);
 });
 
-function keepRaw(req, _res, buf) { req.rawBody = buf; }
-
 let warnedNoSecret = false;
 
 // Fails closed: no secret configured means every callback is rejected, not
@@ -81,6 +90,10 @@ function verify(req) {
     }
     return false;
   }
+  // rawBody is attacker-influenceable (it is the webhook body itself) and
+  // must never be able to throw its way into an unhandled rejection — that
+  // takes the whole process down for every tenant, not just this request.
+  if (!Buffer.isBuffer(req.rawBody)) return false;
   const sig = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'));
   const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
   return sig.length === given.length && crypto.timingSafeEqual(sig, given);

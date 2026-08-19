@@ -52,6 +52,25 @@ async function token(cfg) {
 
 const stamp = () => new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
 
+/**
+ * Confirms the consumer key/secret actually work, without spending anything —
+ * an OAuth token request is free and does not touch a real customer, unlike
+ * an STK push. This is what the "Test" button on payment gateways is missing:
+ * it only checks that the fields are filled in, never that Safaricom accepts
+ * them, so credentials that were always wrong looked "complete" right up
+ * until someone tried Register URLs and hit "Invalid Access Token" with no
+ * earlier warning.
+ */
+export async function testAuth(tenantId) {
+  const cfg = await config(tenantId, 'daraja');
+  try {
+    await token(cfg);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.response?.data?.errorMessage ?? e?.response?.data ?? e.message };
+  }
+}
+
 /** STK push on a paybill — used for PPPoE auto-charge and portal payments. */
 export async function stkPush(tenantId, { phone, amount, accountRef, description }) {
   const cfg = await config(tenantId, 'daraja');
