@@ -57,6 +57,7 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
+  redirectUrl = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
@@ -213,7 +214,15 @@ export function loginPage({
       else; an external file would simply not load.
     -->
     <form action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
-      <input type="hidden" name="dst" value="$(link-orig)">
+      <!--
+        Where the guest lands once connected. An operator's configured
+        redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
+        destination they chose, so it wins when set; $(link-orig) — RouterOS's
+        own placeholder for "wherever the guest was originally headed" — is
+        the fallback, and was previously the only behavior this ever had,
+        with the setting saved to the database but never once read.
+      -->
+      <input type="hidden" name="dst" value="${redirectUrl ? esc(redirectUrl) : '$(link-orig)'}">
       <label for="username">Voucher code</label>
       <input id="username" name="username" type="text" inputmode="numeric"
              autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"

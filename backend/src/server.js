@@ -395,9 +395,11 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
       where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
     [tenant.id]);
 
-  // Branding the operator controls from Hotspot -> Settings.
+  // Branding and behaviour the operator controls from Hotspot -> Settings.
+  // redirect_url was configurable there but never read here — set, saved,
+  // and silently ignored by the page it was meant to change.
   const { rows: [hs] } = await pool.query(
-    'select banner_headline, banner_subtext, template from hotspot_settings where tenant_id=$1',
+    'select banner_headline, banner_subtext, template, redirect_url from hotspot_settings where tenant_id=$1',
     [tenant.id]);
 
   res.type('html').send(loginPage({
@@ -408,6 +410,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     headline: hs?.banner_headline ?? null,
     subtext: hs?.banner_subtext ?? null,
     template: hs?.template ?? 'sleek',
+    redirectUrl: hs?.redirect_url ?? null,
     // ?tv=1 for a set-top box or smart TV: same page, sized to be read from a
     // sofa and typed with a remote.
     tvMode: req.query.tv === '1',
