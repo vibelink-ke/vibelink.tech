@@ -1992,17 +1992,10 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     }), 45000);
     done.push(`RADIUS pointed at ${SERVER_IP}`);
 
-    // Computed here, before the push, so applyHotspotServer can tell RouterOS
-    // to redirect guests straight to this address rather than depend on a
-    // locally cached file surviving whatever this router's own quirks are.
-    const rootForHs = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
-    const hsLoginUrl = t?.subdomain ? `https://${t.subdomain}.${rootForHs}/hotspot/login.html?router=1` : null;
-
     const built = await tryStep('hotspot server, DHCP and pool', () =>
       ros.applyHotspotServer(conn, {
         bridge: bridge.bridge,
         network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
-        loginUrl: hsLoginUrl,
         // The profile a voucher will name, built with the same hotspot.
         sharedUsers: hs?.multi_device ? 3 : 1,
         idleMinutes: hs?.idle_timeout_min ?? 10,
@@ -2474,9 +2467,8 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         'select walled_garden, hotspot_network from hotspot_settings where tenant_id=$1',
         [req.tenant.id]);
 
-      // Fetched once, up front, so both the profile's redirect-to-live-page
-      // setting and the local-copy install below use the same URL rather than
-      // two separate queries computing it two different times.
+      // Fetched once, up front, so the reachability check and the local-copy
+      // install below use the same URL rather than computing it twice.
       const { rows: [tt] } = await pool.query(
         'select subdomain from tenants where id=$1', [req.tenant.id]);
       const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
@@ -2498,7 +2490,6 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         const built = await ros.applyHotspotServer(conn, {
           bridge: bridge.bridge,
           network: hotspotNet,
-          loginUrl: hsLoginUrl,
           sharedUsers: hs?.multi_device ? 3 : 1,
           idleMinutes: hs?.idle_timeout_min ?? 10,
           bindMac: hs?.bind_mac ?? true,

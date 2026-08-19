@@ -429,7 +429,6 @@ export async function applyHotspotServer(conn, {
   sharedUsers = 1,
   idleMinutes = 10,
   bindMac = true,
-  loginUrl = null,
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
   const POOL = 'hotspot-pool';
@@ -520,34 +519,30 @@ export async function applyHotspotServer(conn, {
     // store. Offering chap here is how you get a login page that always fails.
     '=login-by=http-pap',
     /**
-     * Redirect to the real, live page instead of relying on a locally cached
-     * copy at all.
+     * Deliberately always cleared, never set.
      *
-     * pushHotspotPage's /tool/fetch approach writes login.html to whatever
-     * directory the profile names, and that has been the source of more than
-     * one hard-to-diagnose failure in this project already — a wrong
-     * directory on one board, and on another, a router whose own
-     * /file/print confirmed the file existed at the exact expected path
-     * while its hotspot web server still answered every request for it with
-     * a bare 404, for a reason nothing short of the router's own internal
-     * logs would explain. That is not a bug this code can reliably detect or
-     * recover from — it has no way to ask RouterOS why its own file server
-     * disagrees with its own file listing.
+     * This used to redirect guests to the live page instead of a locally
+     * cached copy — a real fix for pushHotspotPage's /tool/fetch approach
+     * having its own hard-to-diagnose failures on some boards. It does not
+     * work: RouterOS's own CLI and API both collapse the "//" in the https://
+     * scheme down to a single slash when this property is stored (confirmed
+     * against a live router — the profile came back with
+     * "html-directory-override=https:/vibelink.vibelink.tech/..."), and a
+     * redirect to a malformed URL does not serve a working page. Worse, a
+     * value set here silently takes priority over html-directory, so once
+     * it is set — including from a push made before this was understood —
+     * every subsequent guest keeps getting redirected to a broken URL until
+     * something explicitly clears it. That is not hypothetical: it happened
+     * on this project's own router and looked like the login page itself
+     * had broken, when the actual page and its styling were fine and simply
+     * never being served.
      *
-     * html-directory-override sidesteps the entire question: RouterOS is
-     * told to redirect an unauthenticated guest straight to this URL rather
-     * than serve anything from local storage. The walled garden already has
-     * to let this exact domain through for the buy flow's own AJAX calls to
-     * work, so nothing new is being asked of the network path — this is
-     * strictly less than what already had to work for a sale to complete.
-     *
-     * The local copy from pushHotspotPage is left in place rather than
-     * removed. html-directory-override takes priority when set, so the local
-     * file becomes inert, not wrong — and if a guest's tunnel to this server
-     * is ever down for some other reason, a cached copy sitting there costs
-     * nothing and asks nothing extra of the router to maintain.
+     * Explicitly clearing it (rather than only setting it when a value is
+     * given) is what makes a push self-healing: any router still carrying a
+     * stale value from before this was understood gets fixed by the next
+     * ordinary Hotspot or Configure push, with no manual CLI step required.
      */
-    ...(loginUrl ? [`=html-directory-override=${loginUrl}`] : []),
+    '=html-directory-override=',
   ];
   if (profile) {
     if (!unchanged(profile, profileFields)) {

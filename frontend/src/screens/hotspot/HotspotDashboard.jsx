@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, kes } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
@@ -44,6 +44,12 @@ export default function HotspotDashboard() {
       setChecking(false);
     }
   };
+
+  // Asked once on arrival rather than only on a manual click — an operator
+  // opening this screen wants to know who is on right now, not the state
+  // from whenever somebody last happened to press the button.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { checkOnline(); }, []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
