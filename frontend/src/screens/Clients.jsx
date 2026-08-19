@@ -346,6 +346,23 @@ export default function Clients() {
     }
   };
 
+  /**
+   * Push an M-Pesa prompt to their own phone — for a customer paying over
+   * the phone, or one whose portal login isn't working. Daraja only: this
+   * hits the same admin route that refuses KopoKopo for a PPPoE line.
+   */
+  const stkPush = async (c) => {
+    const ask = window.prompt(
+      `Send an M-Pesa prompt to ${c.phone}?\nAmount (KES), or leave blank for their plan price:`, '');
+    if (ask === null) return;
+    try {
+      const res = await api.stkPushSubscriber(c.id, ask.trim() ? Number(ask) : null);
+      store.toast(`Sent — KES ${res.amount} to ${res.phone}`);
+    } catch (e) {
+      store.toast(`Could not send: ${e.message}`);
+    }
+  };
+
   const removeClient = async (c) => {
     try {
       await api.deleteSubscriber(c.id);
@@ -619,6 +636,11 @@ export default function Clients() {
                           title="Block this customer — a payment clears it"
                         >
                           Suspend
+                        </RowAction>
+                      )}
+                      {c.service === 'pppoe' && c.phone && (
+                        <RowAction onClick={() => stkPush(c)} title="Send an M-Pesa STK prompt to their phone">
+                          Send STK
                         </RowAction>
                       )}
                       <RowAction tone={color.green} onClick={() => setEditing({ ...c })}>Edit</RowAction>

@@ -713,6 +713,7 @@ async function portalSession(req) {
   const { rows: [row] } = await pool.query(
     `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
             sub.status, sub.expires_at, sub.credit, sub.service, sub.router_id,
+            sub.portal_password_hash,
             p.title as plan_title, p.price as plan_price, p.rate_down, p.rate_up
        from portal_sessions s
        join subscribers sub on sub.id = s.subscriber_id
@@ -804,6 +805,37 @@ app.post('/portal/recover', loginLimiter, wrap(async (req, res) => {
   res.json(generic);
 }));
 
+/**
+ * A signed-in customer changing their own portal password.
+ *
+ * portal_password_hash/portal_password_enc are their own columns, entirely
+ * separate from pppoe_user/pppoe_pass — the credentials their router
+ * actually authenticates with. This can only ever touch the portal pair;
+ * there is no path from here to the PPPoE ones, deliberately, since a
+ * customer resetting a forgotten portal password must never be able to
+ * change what their router logs in with.
+ */
+app.post('/portal/change-password', loginLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+
+  const current = String(req.body?.currentPassword ?? '');
+  const next = String(req.body?.newPassword ?? '');
+  if (!s.portal_password_hash || !(await auth.verifyPassword(current, s.portal_password_hash))) {
+    return res.status(401).json({ error: 'Current password is not correct.' });
+  }
+  if (!/^\d{6,12}$/.test(next)) {
+    return res.status(400).json({ error: 'New password must be 6-12 digits.' });
+  }
+
+  const secrets = await import('./secrets.js');
+  await pool.query(
+    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+    [s.subscriber_id, await auth.hashPassword(next),
+     secrets.configured() ? secrets.encrypt(next) : null]);
+  res.json({ ok: true });
+}));
+
 /** Everything the customer's own page shows. Their row only — never a list. */
 app.get('/portal/me', wrap(async (req, res) => {
   const s = await portalSession(req);
@@ -877,6 +909,28 @@ app.get('/portal/me', wrap(async (req, res) => {
     tickets,
     outages,
   });
+}));
+
+/**
+ * Data used per day, for the last 30 days — the same sessions table the
+ * headline usage figure sums, broken out by day instead of collapsed into
+ * one number, for the customer who wants to see which day their month
+ * actually went.
+ */
+app.get('/portal/usage', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+
+  const { rows } = await pool.query(
+    `select date(started_at) as day,
+            sum(coalesce(bytes_in,0) + coalesce(bytes_out,0)) as bytes
+       from sessions
+      where tenant_id=$1 and subscriber_id=$2
+        and started_at >= now() - interval '30 days'
+      group by date(started_at)
+      order by day`, [s.tenant_id, s.subscriber_id]);
+
+  res.json(rows.map((r) => ({ day: r.day, mb: Math.round(Number(r.bytes) / (1024 * 1024)) })));
 }));
 
 /** Raise a support request from the portal, which the Tickets screen picks up. */
@@ -3730,6 +3784,40 @@ app.post('/api/payments/reconcile', wrap(async (req, res) => {
     else if (out.applied) results.applied++;
   }
   res.json(results);
+}));
+
+/**
+ * Push an M-Pesa STK prompt to a PPPoE customer's own phone, from the admin
+ * side — for the customer who calls in to pay but has no working portal, or
+ * an operator collecting on the spot.
+ *
+ * Daraja (paybill) only, deliberately — never KopoKopo. KopoKopo is gated
+ * to hotspot everywhere else in this codebase (the till-based flow, the
+ * settings screen's own "hotspot only" note, the database's
+ * kopokopo_hotspot_only constraint); this is the same rule applied to the
+ * one place a PPPoE STK push is actually initiated by staff rather than
+ * the customer's own payment-method choice.
+ */
+app.post('/api/subscribers/:id/stk', wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select s.name, s.phone, s.account_code, p.price as plan_price
+       from subscribers s left join plans p on p.id = s.plan_id
+      where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+  if (!s.phone) return res.status(400).json({ error: 'This customer has no phone number on file.' });
+
+  const amount = Number(req.body?.amount) || Number(s.plan_price);
+  if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount, or set a plan for this customer first.' });
+
+  try {
+    const data = await mpesa.stkPush(req.tenant.id, {
+      phone: s.phone, amount, accountRef: s.account_code,
+      description: `${s.name} — ${s.account_code}`,
+    });
+    res.json({ ok: true, phone: s.phone, amount, checkoutId: data?.CheckoutRequestID ?? null });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
 }));
 
 /** Give affected subscribers free days back after an outage. */

@@ -170,6 +170,7 @@ export const PLACEHOLDERS = [
   { token: 'support_email', desc: 'Your support email' },
   { token: 'paybill',       desc: 'Your default paybill or till' },
   { token: 'router',        desc: 'Router they are connected to' },
+  { token: 'portal',        desc: 'Link to their customer portal sign-in page' },
 ];
 
 /** The joins a row needs before subscriberVars can fill every token. */
@@ -200,13 +201,14 @@ export function subscriberVars(s, org = {}) {
     support_phone: org.supportPhone ?? '',
     support_email: org.supportEmail ?? '',
     paybill: org.paybill ?? '',
+    portal: org.portal ?? '',
   };
 }
 
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
 export async function orgVars(tenantId) {
   const { rows: [t] } = await pool.query(
-    'select name, support_phone from tenants where id=$1', [tenantId]);
+    'select name, support_phone, subdomain from tenants where id=$1', [tenantId]);
   const { rows: [gw] } = await pool.query(
     `select shortcode from tenant_payment_config
       where tenant_id=$1 and shortcode is not null
@@ -215,6 +217,7 @@ export async function orgVars(tenantId) {
   const { rows: [cfg] } = await pool.query(
     "select prefs->>'supportEmail' as email, smtp->>'from' as smtp_from from app_settings where tenant_id=$1",
     [tenantId]).catch(() => ({ rows: [] }));
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   return {
     company: t?.name ?? '',
     supportPhone: t?.support_phone ?? '',
@@ -222,6 +225,9 @@ export async function orgVars(tenantId) {
     // address customers would reply to anyway.
     supportEmail: cfg?.email ?? cfg?.smtp_from ?? '',
     paybill: gw?.shortcode ?? '',
+    // {portal} in a welcome message or reminder — a link a new customer can
+    // tap straight to sign-in, instead of typing the subdomain from memory.
+    portal: t?.subdomain ? `https://${t.subdomain}.${root}/customer` : '',
   };
 }
 

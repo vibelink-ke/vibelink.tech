@@ -26,6 +26,9 @@ const api = {
   logout: () => api.call('POST', '/portal/logout', {}),
   support: (subject) => api.call('POST', '/portal/support', { subject }),
   recover: (phone) => api.call('POST', '/portal/recover', { phone }),
+  changePassword: (currentPassword, newPassword) =>
+    api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
+  usage: () => api.call('GET', '/portal/usage'),
 };
 
 /**
@@ -174,6 +177,17 @@ export default function CustomerPortal() {
   const [chat, setChat] = useState(null);   // { id, token, messages, note }
   const [chatDraft, setChatDraft] = useState('');
 
+  // Changing the portal password, once signed in — separate state from the
+  // signed-out "forgot it" flow above, and separate columns server-side from
+  // pppoe_pass, which this can never touch.
+  const [pwOpen, setPwOpen] = useState(false);
+  const [currentPw, setCurrentPw] = useState('');
+  const [newPw, setNewPw] = useState('');
+  const [pwMsg, setPwMsg] = useState('');
+  const [pwBusy, setPwBusy] = useState(false);
+
+  const [usage, setUsage] = useState(null);   // [{ day, mb }], fetched once signed in
+
   const load = useCallback(async () => {
     try { setMe(await api.me()); } catch { setMe(null); }
   }, []);
@@ -246,6 +260,80 @@ export default function CustomerPortal() {
       setNote(`Logged as ${ticket}. Support will be in touch.`);
     } catch (err) {
       setNote(err.message);
+    }
+  };
+
+  // Fetched once a real session exists — a no-op every render before that,
+  // same shape as every other effect here that only matters once signed in.
+  useEffect(() => {
+    if (!me) return;
+    api.usage().then(setUsage).catch(() => setUsage([]));
+  }, [me]);
+
+  const changePassword = async (e) => {
+    e.preventDefault();
+    setPwBusy(true);
+    setPwMsg('');
+    try {
+      await api.changePassword(currentPw, newPw);
+      setPwMsg('Password changed.');
+      setCurrentPw('');
+      setNewPw('');
+    } catch (err) {
+      setPwMsg(err.message);
+    } finally {
+      setPwBusy(false);
+    }
+  };
+
+  /**
+   * Parses the same way api.call() above does — text first, JSON.parse only
+   * if there is a body — instead of res.json() directly. res.json() on an
+   * empty or non-JSON body (a proxy timeout, a 204, a network hiccup) throws
+   * "Unexpected end of JSON input", which is a real error but a useless one
+   * to show a customer trying to reach support; this turns that into
+   * whatever text actually came back, or a plain "try again."
+   */
+  const safeJson = async (res) => {
+    const text = await res.text();
+    if (!text) return { error: `Support did not respond (${res.status}). Try again in a moment.` };
+    try { return JSON.parse(text); } catch { return { error: 'Support did not respond. Try again in a moment.' }; }
+  };
+
+  /**
+   * Usable signed out as well as signed in — a visitor who can't sign in at
+   * all still needs a way to reach a person, which is the point of putting
+   * this on the sign-in page too. `me` is null there, so name/phone fall
+   * back to something support can still work with.
+   */
+  const startChat = async () => {
+    setChat({ id: null, token: null, messages: [], note: 'Connecting…' });
+    try {
+      const res = await fetch('/chat/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: me?.name ?? 'Guest', phone: me?.account ?? account }),
+      });
+      const d = await safeJson(res);
+      if (!d.chatId) throw new Error(d.error ?? 'Support is not available');
+      setChat({ id: d.chatId, token: d.token, messages: [], note: 'Someone will reply here.' });
+    } catch (e) {
+      setChat({ id: null, token: null, messages: [], note: e.message });
+    }
+  };
+
+  const sendChat = async () => {
+    const body = chatDraft.trim();
+    if (!body || !chat?.id) return;
+    setChatDraft('');
+    try {
+      await fetch(`/chat/${chat.id}/message`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: chat.token, body }),
+      });
+    } catch {
+      setChat((c) => ({ ...c, note: 'That message did not send.' }));
     }
   };
 
@@ -327,42 +415,50 @@ export default function CustomerPortal() {
               </div>
             )}
           </form>
+
+          {/* Chat, reachable without signing in — for a visitor who can't get in at
+              all and needs a person rather than another self-service form. */}
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Still stuck?</span>
+            {!chat && (
+              <button style={button(false)} onClick={startChat}>Chat with support to request your login</button>
+            )}
+            {chat && (
+              <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
+                <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {chat.messages.map((m) => (
+                    <span
+                      key={m.id}
+                      style={{
+                        alignSelf: m.sender === 'staff' ? 'flex-start' : 'flex-end',
+                        maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
+                        background: m.sender === 'staff' ? '#fff' : pc.accent,
+                        color: m.sender === 'staff' ? pc.ink : '#fff',
+                        border: m.sender === 'staff' ? `1px solid ${pc.line}` : 'none',
+                      }}
+                    >
+                      {m.body}
+                    </span>
+                  ))}
+                </div>
+                <input
+                  value={chatDraft}
+                  onChange={(e) => setChatDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && sendChat()}
+                  placeholder="Type your message"
+                  style={input}
+                />
+                <button style={button(true)} onClick={sendChat}>Send</button>
+              </div>
+            )}
+            {chat?.note && <span style={{ fontSize: 12.5, color: pc.muted }}>{chat.note}</span>}
+          </div>
         </div>
       </div>
     );
   }
 
   const expired = me.status !== 'active';
-  const startChat = async () => {
-    setChat({ id: null, token: null, messages: [], note: 'Connecting…' });
-    try {
-      const res = await fetch('/chat/start', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: me.name, phone: me.account }),
-      });
-      const d = await res.json();
-      if (!d.chatId) throw new Error(d.error ?? 'Support is not available');
-      setChat({ id: d.chatId, token: d.token, messages: [], note: 'Someone will reply here.' });
-    } catch (e) {
-      setChat({ id: null, token: null, messages: [], note: e.message });
-    }
-  };
-
-  const sendChat = async () => {
-    const body = chatDraft.trim();
-    if (!body || !chat?.id) return;
-    setChatDraft('');
-    try {
-      await fetch(`/chat/${chat.id}/message`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ token: chat.token, body }),
-      });
-    } catch {
-      setChat((c) => ({ ...c, note: 'That message did not send.' }));
-    }
-  };
 
   return (
     <div style={page}>
@@ -442,6 +538,30 @@ export default function CustomerPortal() {
           <Stat label="Data used" value={formatUsage(me.usageMb)} sub="This billing cycle" />
         </div>
 
+        {usage?.length > 0 && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Data used, last 30 days</span>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 70, overflowX: 'auto' }}>
+              {(() => {
+                const max = Math.max(1, ...usage.map((u) => u.mb));
+                return usage.map((u) => (
+                  <div
+                    key={u.day}
+                    title={`${new Date(u.day).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}: ${formatUsage(u.mb)}`}
+                    style={{
+                      flex: '0 0 8px', height: `${Math.max(3, (u.mb / max) * 100)}%`,
+                      background: `linear-gradient(180deg, ${pc.accent}, ${pc.teal})`, borderRadius: 3,
+                    }}
+                  />
+                ));
+              })()}
+            </div>
+            <span style={{ fontSize: 11.5, color: pc.muted }}>
+              Bars are days — taller means more data that day. Hover a bar for the exact figure.
+            </span>
+          </div>
+        )}
+
         {me.invoices?.length > 0 && (
           <div style={card}>
             <span style={{ fontSize: 14, fontWeight: 700 }}>Invoices</span>
@@ -482,6 +602,32 @@ export default function CustomerPortal() {
         <div style={card}>
           {me.paybill && <Row k="Pay to paybill" v={me.paybill} />}
           <Row k="Your account number" v={me.account} />
+        </div>
+
+        <div style={card}>
+          {/* Portal password only — never pppoe_pass, which is what the router
+              actually authenticates a line with and has no path from here. */}
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Change your password</span>
+          {!pwOpen ? (
+            <button style={button(false)} onClick={() => setPwOpen(true)}>Change password</button>
+          ) : (
+            <form onSubmit={changePassword} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                style={input} type="password" value={currentPw}
+                onChange={(e) => setCurrentPw(e.target.value)}
+                inputMode="numeric" placeholder="Current password" aria-label="Current password"
+              />
+              <input
+                style={input} type="password" value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
+                inputMode="numeric" placeholder="New password (6-12 digits)" aria-label="New password"
+              />
+              {pwMsg && <span style={{ fontSize: 12.5, color: pwMsg === 'Password changed.' ? pc.teal : pc.rust }}>{pwMsg}</span>}
+              <button type="submit" style={button(true)} disabled={pwBusy || !currentPw || !newPw}>
+                {pwBusy ? 'Saving…' : 'Save new password'}
+              </button>
+            </form>
+          )}
         </div>
 
         <div style={card}>

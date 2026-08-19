@@ -55,6 +55,7 @@ export const api = {
   updateSubscriber: (id, patchBody) => patch(`/api/subscribers/${id}`, patchBody),
   deleteSubscriber: (id) => del(`/api/subscribers/${id}`),
   setSubscriberAccess: (id, action) => post(`/api/subscribers/${id}/access`, { action }),
+  stkPushSubscriber: (id, amount) => post(`/api/subscribers/${id}/stk`, amount ? { amount } : {}),
   newSubscriberCredentials: () => get('/api/subscribers/new-credentials'),
   generatePortalPassword: (id, password) => post(`/api/subscribers/${id}/portal-password`,
     password ? { password } : {}),
