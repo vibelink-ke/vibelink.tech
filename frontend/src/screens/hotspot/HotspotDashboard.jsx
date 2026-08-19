@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { color, font, kes } from '../../theme/tokens';
 import { useStore } from '../../state/store';
-import { Card, Empty, Grid, Stat, Table } from '../../ui/primitives';
+import { api } from '../../api/client';
+import { Button, Card, Empty, Grid, Stat, Table } from '../../ui/primitives';
 
 export default function HotspotDashboard() {
   const store = useStore();
+  const [checking, setChecking] = useState(false);
   const vouchers = store.vouchers ?? [];
   const inUse = vouchers.filter((v) => v.status === 'in_use');
   const unused = vouchers.filter((v) => v.status === 'unused');
@@ -21,6 +23,28 @@ export default function HotspotDashboard() {
     return at && at.toDateString() === new Date().toDateString();
   }).length;
 
+  /**
+   * "Online now" reads from voucher.status === 'in_use', which is only as
+   * fresh as the last time something asked the router — RADIUS accounting
+   * is silent when the tunnel is down, and nothing on this screen ever
+   * triggered a check before. Same action Clients uses to "check who is
+   * online" for PPPoE; here it also updates hotspot voucher status.
+   */
+  const checkOnline = async () => {
+    setChecking(true);
+    try {
+      const res = await api.refreshPresence();
+      await store.reload({ quiet: true });
+      const parts = [`${res.online} connected on ${res.asked} router${res.asked === 1 ? '' : 's'}`];
+      if (res.unreachable?.length) parts.push(`could not reach ${res.unreachable.join(', ')}`);
+      store.toast(parts.join(' — '));
+    } catch (e) {
+      store.toast(`Could not ask the routers: ${e.message}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <Grid min={200} gap={14}>
@@ -32,7 +56,16 @@ export default function HotspotDashboard() {
       </Grid>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start' }}>
-        <Card title="Live sessions" subtitle="Vouchers currently connected">
+        <Card
+          title="Live sessions"
+          subtitle="Vouchers currently connected"
+          actions={
+            <Button size="sm" onClick={checkOnline} disabled={checking}
+              title="Ask each router who is connected right now">
+              {checking ? 'Asking routers…' : 'Refresh'}
+            </Button>
+          }
+        >
           <Table
             rowKey={(v) => v.id}
             empty="Nobody connected right now"

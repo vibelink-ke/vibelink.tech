@@ -119,8 +119,8 @@ export function loginPage({
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
-         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { width:100%; max-width:${tvMode ? '620px' : '380px'}; background:var(--card);
+         font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; background:var(--card);
           border:1px solid var(--line); border-radius:var(--rad);
           padding:${tvMode ? '40px 34px' : '26px 22px'}; }
   /* Television: read from a sofa, and typed with a remote. Everything scales up
@@ -135,53 +135,53 @@ export function loginPage({
   .plan strong { font-size:21px; }
   .meta, .hint { font-size:16px !important; }
   ` : ''}
-  h1 { margin:0 0 2px; font-size:21px; }
-  .sub { margin:0 0 20px; color:var(--muted); font-size:13.5px; }
-  label { display:block; font-size:12.5px; color:var(--muted); margin:12px 0 5px; }
-  input { width:100%; padding:11px 12px; font-size:16px; border:1px solid var(--line);
+  h1 { margin:0 0 2px; font-size:24px; }
+  .sub { margin:0 0 20px; color:var(--muted); font-size:15px; }
+  label { display:block; font-size:14px; color:var(--muted); margin:12px 0 5px; }
+  input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
           border-radius:9px; background:#fafbf9; color:var(--ink); }
-  /* 16px on inputs is deliberate: anything smaller makes iOS Safari zoom in on
+  /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
      focus, which shoves the form off screen on the phones most guests use. */
-  button { width:100%; margin-top:18px; padding:12px; font-size:15px; font-weight:600;
+  button { width:100%; margin-top:18px; padding:13px; font-size:16px; font-weight:600;
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
-  .plans-title { font-size:12.5px; color:var(--muted); margin:0 0 10px; }
+  .plans-title { font-size:14px; color:var(--muted); margin:0 0 10px; }
   .plan { display:flex; justify-content:space-between; align-items:center; gap:14px;
           padding:10px 0; border-bottom:1px solid var(--line); }
   .plan:last-child { border-bottom:0; }
   .plan-name { min-width:0; }
-  .plan-name strong { display:block; font-size:15px; }
-  .meta { display:block; color:var(--muted); font-size:12.5px; white-space:nowrap; }
+  .plan-name strong { display:block; font-size:16px; }
+  .meta { display:block; color:var(--muted); font-size:14px; white-space:nowrap; }
   .price { font-weight:600; white-space:nowrap; }
   /* width:auto and margin-top:0 undo the global button rule above, which exists
      for Connect. Without them every price button stretched to the full width of
      the card and squeezed the bundle name into a two-line column. */
-  .buy { width:auto; margin-top:0; padding:8px 14px; font-size:14px; font-weight:600;
+  .buy { width:auto; margin-top:0; padding:9px 15px; font-size:15px; font-weight:600;
          white-space:nowrap; color:#fff; background:var(--green); border:0;
          border-radius:8px; cursor:pointer; min-width:96px; }
   .buy:hover { background:var(--greenDark); }
   .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
          background:var(--bg); display:none; }
   .pay.on { display:block; }
-  .pay h2 { margin:0 0 4px; font-size:15px; }
+  .pay h2 { margin:0 0 4px; font-size:16px; }
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
-  .code b { display:block; font-size:24px; letter-spacing:.12em; font-family:monospace; }
-  .chat-open { width:auto; margin:16px auto 0; display:block; padding:8px 14px; font-size:13.5px;
+  .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }
+  .chat-open { width:auto; margin:16px auto 0; display:block; padding:9px 15px; font-size:14.5px;
                background:transparent; color:var(--green); border:1px solid var(--green); }
   .chat { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
           background:var(--bg); display:none; }
   .chat.on { display:block; }
   .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
          margin:0 0 10px; }
-  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
+  .msg { padding:7px 10px; border-radius:9px; font-size:14.5px; max-width:85%; }
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
   .msg.me { background:var(--green); color:#fff; align-self:flex-end; }
-  .hint { margin:10px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
-  .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:12.5px;
+  .hint { margin:10px 0 0; font-size:14px; color:var(--muted); text-align:center; }
+  .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:14px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
   .err:empty { display:none; }
-  .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:13px;
+  .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:14.5px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   a { color:var(--green); }
 </style>

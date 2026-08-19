@@ -939,6 +939,8 @@ app.get('/api/subscribers', async (req, res) => {
 app.post('/api/presence/refresh', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
+  const { withTenant } = await import('./db.js');
+  const { startVoucherClock } = await import('./radius.js');
 
   const { rows: routers } = await pool.query(
     `select id, name, host, api_port, service_user, service_password_enc
@@ -979,6 +981,23 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
                 service = excluded.service, seen_at = now()`,
         [req.tenant.id, r.value.router.id, sess.username, sess.address, sess.service]);
       seen++;
+
+      /**
+       * A hotspot username on the router is the voucher code, and seeing it
+       * active is proof the guest is actually online — the same fact
+       * /radius/post-auth exists to report, but observed directly rather
+       * than depending on FreeRADIUS's post-auth section actually calling
+       * out to us (it currently does not: the site config only stashes the
+       * username into a control attribute and never invokes exec or rest,
+       * so voucher_expiry='login' vouchers stayed 'unused' forever no
+       * matter how long a guest was connected). This is a second, more
+       * reliable path to the same state change, not a replacement for
+       * fixing that config — but it works today without touching a system
+       * that authenticates every currently-connected customer.
+       */
+      if (sess.service === 'hotspot') {
+        await withTenant(req.tenant.id, (c) => startVoucherClock(c, req.tenant.id, sess.username));
+      }
     }
   }
 
@@ -994,6 +1013,26 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
     unreachable,
     noCredentials: routers.length - reachable.length,
   });
+}));
+
+/**
+ * Who is on the hotspot right now — the Hotspot screen's "online" list,
+ * which previously did not exist even though the router-polling machinery
+ * behind it (activeSessions/live_sessions) already did. Voucher code is
+ * the RADIUS username for a hotspot session, so it is the join key back to
+ * who actually bought it.
+ */
+app.get('/api/hotspot/online', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select l.username as code, l.address, l.router_id, r.name as router_name, l.seen_at,
+            v.phone, v.status as voucher_status, p.title as plan_title
+       from live_sessions l
+       left join routers r on r.id = l.router_id
+       left join vouchers v on v.tenant_id = l.tenant_id and v.code = l.username
+       left join plans p on p.id = v.plan_id
+      where l.tenant_id = $1 and l.service = 'hotspot'
+      order by l.seen_at desc`, [req.tenant.id]);
+  res.json(rows);
 }));
 
 app.get('/api/payments/unmatched', async (req, res) => {
