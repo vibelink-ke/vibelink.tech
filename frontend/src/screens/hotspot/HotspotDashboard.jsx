@@ -8,7 +8,14 @@ export default function HotspotDashboard() {
   const store = useStore();
   const [checking, setChecking] = useState(false);
   const vouchers = store.vouchers ?? [];
+  // "in_use" means the code is activated and not yet expired — a customer
+  // entitled to be connected, not proof that they are. /api/vouchers now
+  // carries a real `online` flag (the same radacct/live_sessions check
+  // /api/subscribers uses for PPPoE), so this screen can finally tell "paid
+  // and valid" apart from "actually on the network right now" instead of
+  // showing every still-valid code as a live session.
   const inUse = vouchers.filter((v) => v.status === 'in_use');
+  const online = inUse.filter((v) => v.online);
   const unused = vouchers.filter((v) => v.status === 'unused');
   const expired = vouchers.filter((v) => v.status === 'expired');
 
@@ -54,7 +61,8 @@ export default function HotspotDashboard() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <Grid min={200} gap={14}>
-        <Stat label="Online now" value={inUse.length} hint="active voucher sessions" />
+        <Stat label="Online now" value={online.length} hint="actually connected right now" />
+        <Stat label="Active codes" value={inUse.length} hint="paid & valid, online or not" />
         {/* Counted from the vouchers themselves rather than hardcoded. */}
         <Stat label="Sold today" value={soldToday} hint="vouchers issued" />
         <Stat label="Revenue today" value={`KES ${kes(revenue)}`} hint="hotspot only" />
@@ -64,7 +72,7 @@ export default function HotspotDashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start' }}>
         <Card
           title="Live sessions"
-          subtitle="Vouchers currently connected"
+          subtitle="Vouchers actually connected on the router right now"
           actions={
             <Button size="sm" onClick={checkOnline} disabled={checking}
               title="Ask each router who is connected right now">
@@ -75,7 +83,7 @@ export default function HotspotDashboard() {
           <Table
             rowKey={(v) => v.id}
             empty="Nobody connected right now"
-            rows={inUse}
+            rows={online}
             columns={[
               { key: 'code', label: 'Code', render: (v) => <span style={{ fontFamily: font.mono }}>{v.code}</span> },
               { key: 'phone', label: 'Phone' },

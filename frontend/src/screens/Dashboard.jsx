@@ -84,7 +84,16 @@ export default function Dashboard() {
   }, []);
 
   const clients = store.clients ?? [];
-  const active = clients.filter((c) => c.status === 'active');
+  /**
+   * "Active" is entitlement, not connection: a PPPoE subscription in good
+   * standing, or a hotspot code that is activated and not yet expired
+   * (status='in_use' — the field really does read "in_use," which is the
+   * closest thing vouchers have to "active"). Either can be true while the
+   * customer's device is not currently on the network — someone who paid
+   * this morning and has not connected yet is active, not online.
+   */
+  const hotspotActive = (store.vouchers ?? []).filter((v) => v.status === 'in_use');
+  const active = [...clients.filter((c) => c.status === 'active'), ...hotspotActive];
   /*
    * Connected right now, which is not the same as having an active
    * subscription — and the tile said ONLINE NOW while counting the latter. One
@@ -96,19 +105,23 @@ export default function Dashboard() {
    * /api/subscribers — clients above — is PPPoE only; a hotspot guest never
    * gets a subscribers row at all, they exist only as a voucher. The hint
    * text below already claimed to split "N PPPoE · M hotspot", but the
-   * hotspot half could only ever read 0, structurally, regardless of how
-   * many guests were actually connected — not stale data, a source that
-   * cannot contain the answer. Vouchers with status='in_use' is the same
-   * signal the Hotspot dashboard's own "Online now" already uses correctly.
+   * hotspot half read status='in_use' — active, not online — so every
+   * still-valid code counted as connected, guest present or not. vouchers
+   * now carries a real `online` flag (the same radacct/live_sessions check
+   * /api/subscribers already used for PPPoE), so this can finally ask
+   * "connected right now" instead of "activated at some point."
    */
-  const hotspotOnline = (store.vouchers ?? []).filter((v) => v.status === 'in_use');
+  const hotspotOnline = hotspotActive.filter((v) => v.online);
   const online = [...pppoeOnline, ...hotspotOnline];
 
   // "Collected" comes from applied payments; the backend exposes only the
   // unmatched queue today, so anything not returned stays at zero.
-  const collected = (store.mpesaTx ?? [])
-    .filter((p) => p.status === 'applied')
-    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  const appliedToday = (store.mpesaTx ?? []).filter((p) => p.status === 'applied');
+  const collected = appliedToday.reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  // How many distinct payment channels actually collected something, not how
+  // many individual transactions came in — "across 6 payments" read like six
+  // separate gateways when it was six M-Pesa STK receipts on the one till.
+  const channelsUsed = new Set(appliedToday.map((p) => p.provider)).size;
 
   const expiring = useMemo(() => {
     const limit = Date.now() + 72 * 3600 * 1000;
@@ -183,14 +196,17 @@ export default function Dashboard() {
         <Tile
           label="COLLECTED TODAY"
           value={`KES ${kes(collected)}`}
-          hint={collected ? `across ${store.mpesaTx.length} payments` : 'no collections yet'}
+          hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
         />
         <Tile
           label="ONLINE NOW"
           value={online.length}
-          hint={online.length
-            ? `${pppoeOnline.length} PPPoE · ${hotspotOnline.length} hotspot`
-            : `nobody connected · ${active.length} active account${active.length === 1 ? '' : 's'}`}
+          hint={`${pppoeOnline.length} PPPoE · ${hotspotOnline.length} hotspot connected right now`}
+        />
+        <Tile
+          label="ACTIVE"
+          value={active.length}
+          hint="paid & valid — online or not"
         />
         {/* From the job run log. This was a hardcoded zero, so the tile said
             nothing had happened however much had. */}

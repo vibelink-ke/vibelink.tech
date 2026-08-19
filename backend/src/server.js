@@ -4108,9 +4108,37 @@ app.delete('/api/tariffs/:id', wrap(async (req, res) => {
 }));
 
 // ── vouchers (Hotspot -> Vouchers) ────────────────
+/**
+ * status='in_use' means a voucher's clock has started and it has not yet
+ * expired — a customer who is "active," in the sense of having paid and
+ * still being entitled to connect. It says nothing about whether they are
+ * connected *right now*: a guest who walked off with a live voucher still
+ * reads in_use for the rest of its duration. The Hotspot dashboard's "Live
+ * sessions" table used in_use as a proxy for online, so an operator saw
+ * every currently-valid code as "connected," not only the ones actually on
+ * the network — the same distinction /api/subscribers already draws
+ * between an active subscription and being online, applied here the same
+ * way: radacct for an open, recently-updated session, live_sessions for
+ * what a router answered when last asked.
+ */
 app.get('/api/vouchers', wrap(async (req, res) => {
-  const { rows } = await pool.query(
-    'select * from vouchers where tenant_id=$1 order by created_at desc limit 1000', [req.tenant.id]);
+  const { rows } = await pool.query(`
+    select v.*,
+           (a.framedipaddress is not null or live.username is not null) as online
+      from vouchers v
+      left join lateral (
+        select framedipaddress from radacct
+         where username = v.code
+           and acctstoptime is null
+           and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
+         order by acctstarttime desc limit 1) a on true
+      left join lateral (
+        select username from live_sessions
+         where tenant_id = v.tenant_id and username = v.code
+           and seen_at > now() - interval '5 minutes') live on true
+     where v.tenant_id=$1
+     order by v.created_at desc
+     limit 1000`, [req.tenant.id]);
   res.json(rows);
 }));
 
