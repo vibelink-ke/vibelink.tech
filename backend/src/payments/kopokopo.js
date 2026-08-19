@@ -128,5 +128,14 @@ async function verifyReason(req, tenantId) {
   const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
   if (given.length === 0) return 'request carried no X-KopoKopo-Signature header';
   if (sig.length !== given.length) return `signature length mismatch (ours ${sig.length}, theirs ${given.length})`;
-  return crypto.timingSafeEqual(sig, given) ? null : 'signature did not match';
+  if (crypto.timingSafeEqual(sig, given)) return null;
+  // A same-length mismatch with a secret already proven correct (it works for
+  // the OAuth token call that starts every STK push) means either the body
+  // bytes KopoKopo signed differ from what we hashed, or the header isn't hex
+  // the way we assumed. Logging a short prefix of each — never enough to be
+  // useful to an attacker, plenty to tell those two apart by eye — beats
+  // guessing at the cause a third time.
+  console.error(`kopokopo webhook: signature prefixes — ours ${sig.toString('utf8').slice(0, 8)}…, `
+    + `theirs ${given.toString('utf8').slice(0, 8)}…, rawBody ${req.rawBody.length} bytes`);
+  return 'signature did not match';
 }
