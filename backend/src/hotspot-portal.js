@@ -332,7 +332,18 @@ export function loginPage({
             // guest's behalf, so "paid" and "online" were two separate steps
             // and a guest who didn't notice the Connect button stayed on this
             // page, believing the purchase itself had failed to connect them.
-            setTimeout(function () { document.getElementById('loginForm').submit(); }, 1200);
+            //
+            // form.submit() does not fire the 'submit' event, so the form's
+            // own onsubmit — which copies the code into the hidden password
+            // field — never ran: this sent the router a login with the
+            // right username and an empty password, which RouterOS silently
+            // rejects the same way a wrong password would. Doing that copy
+            // here, the same as onsubmit does, before calling submit()
+            // avoids depending on an event that .submit() never dispatches.
+            setTimeout(function () {
+              document.getElementById('password').value = d.code;
+              document.getElementById('loginForm').submit();
+            }, 1200);
             return;
           }
           if (d.status === 'failed' || d.status === 'cancelled') {
