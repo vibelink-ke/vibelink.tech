@@ -107,6 +107,12 @@ export default function Clients() {
     () => Object.fromEntries((store.routers ?? []).map((r) => [r.id, r])),
     [store.routers]
   );
+  // The paybill a PPPoE customer's payment actually lands on — Daraja only,
+  // matching the same restriction the Send STK button enforces.
+  const pppoePaybill = useMemo(
+    () => (store.paymentMethods ?? []).find((g) => g.provider === 'daraja' && g.enabled_pppoe)?.shortcode ?? null,
+    [store.paymentMethods]
+  );
 
   const counts = useMemo(
     () =>
@@ -692,6 +698,14 @@ export default function Clients() {
             <KV k="Credit" v={`KES ${kes(detail.credit)}`} />
             <KV k="Expires" v={detail.expires_at ? new Date(detail.expires_at).toLocaleString('en-KE') : '—'} />
             <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
+            {detail.service === 'pppoe' && (
+              <KV k="Pay to paybill" v={pppoePaybill ?? 'Not configured — see Settings → Payment gateways'} />
+            )}
+            {detail.service === 'pppoe' && detail.phone && (
+              <Button size="sm" onClick={() => stkPush(detail)} style={{ alignSelf: 'flex-start' }}>
+                Send STK to {detail.phone}
+              </Button>
+            )}
 
             {/* Credentials are behind a button rather than on screen by default.
                 Support has this drawer open while sharing a screen or sitting in
