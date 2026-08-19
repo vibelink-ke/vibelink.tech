@@ -713,6 +713,38 @@ export default function Clients() {
               </Button>
             )}
 
+            {/* A payment landing correctly in the ledger was never visible from
+                here — this drawer showed the balance and expiry that a payment
+                changes, but not the payment itself, so "did it actually apply"
+                had no answer short of asking someone to query the database. */}
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Payment history</span>
+              {(() => {
+                const history = (store.mpesaTx ?? [])
+                  .filter((p) => p.subscriber_id === detail.id)
+                  .sort((a, b) => new Date(b.received_at) - new Date(a.received_at))
+                  .slice(0, 8);
+                if (!history.length) {
+                  return <span style={{ fontSize: 12.5, color: color.neutralInk }}>No payments recorded for this account yet.</span>;
+                }
+                return (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    {history.map((p) => (
+                      <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12.5 }}>
+                        <span style={{ display: 'flex', flexDirection: 'column' }}>
+                          <span style={{ fontFamily: font.mono }}>{p.provider_ref}</span>
+                          <span style={{ color: color.muted, fontSize: 11 }}>
+                            {p.provider} · {new Date(p.received_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </span>
+                        <span style={{ fontWeight: 600 }}>KES {kes(p.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
             {/* Credentials are behind a button rather than on screen by default.
                 Support has this drawer open while sharing a screen or sitting in
                 an open office, and the customer's password does not need to be

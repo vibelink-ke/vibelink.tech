@@ -3764,10 +3764,15 @@ app.get('/api/payments', wrap(async (req, res) => {
            -- Which bundle a hotspot sale actually paid for — a payment
            -- carried only voucher_id, which named nothing a person could
            -- read on this screen.
-           v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up
+           v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up,
+           -- Whose PPPoE account this actually applied to — a payment matched
+           -- by account number carried only subscriber_id, so confirming a
+           -- specific customer's payment landed meant a database query.
+           s.name as customer_name
       from payments pay
       left join vouchers v on v.id = pay.voucher_id
       left join plans p on p.id = v.plan_id
+      left join subscribers s on s.id = pay.subscriber_id
      where pay.tenant_id=$1
      order by pay.received_at desc
      limit 500`, [req.tenant.id]);

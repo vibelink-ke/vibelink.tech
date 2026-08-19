@@ -367,6 +367,13 @@ export default function Payments() {
               columns={[
                 { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
+                {
+                  key: 'customer',
+                  label: 'Customer',
+                  // The account this actually applied to, not who M-Pesa said
+                  // paid — a shared or family phone means those can differ.
+                  render: (r) => r.customer_name ? r.customer_name.trim().split(/\s+/)[0] : '—',
+                },
                 { key: 'payer_phone', label: 'Phone' },
                 {
                   key: 'plan',
