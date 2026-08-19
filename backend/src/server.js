@@ -3759,8 +3759,18 @@ app.delete('/api/subscribers/:id', wrap(async (req, res) => {
 
 // ── money (Payments screen) ───────────────────────
 app.get('/api/payments', wrap(async (req, res) => {
-  const { rows } = await pool.query(
-    'select * from payments where tenant_id=$1 order by received_at desc limit 500', [req.tenant.id]);
+  const { rows } = await pool.query(`
+    select pay.*,
+           -- Which bundle a hotspot sale actually paid for — a payment
+           -- carried only voucher_id, which named nothing a person could
+           -- read on this screen.
+           v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up
+      from payments pay
+      left join vouchers v on v.id = pay.voucher_id
+      left join plans p on p.id = v.plan_id
+     where pay.tenant_id=$1
+     order by pay.received_at desc
+     limit 500`, [req.tenant.id]);
   res.json(rows);
 }));
 
@@ -4124,8 +4134,17 @@ app.delete('/api/tariffs/:id', wrap(async (req, res) => {
 app.get('/api/vouchers', wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select v.*,
-           (a.framedipaddress is not null or live.username is not null) as online
+           (a.framedipaddress is not null or live.username is not null) as online,
+           -- Which bundle this code actually was, and at what speed — a
+           -- voucher only ever carried plan_id, an id an operator cannot
+           -- read, so the table had no way to say what somebody bought.
+           p.title as plan_title, p.rate_down, p.rate_up,
+           -- The M-Pesa/KopoKopo reference that paid for this code, for the
+           -- same reason a receipt names the transaction it came from.
+           pay.provider_ref as mpesa_ref, pay.provider as pay_provider
       from vouchers v
+      left join plans p on p.id = v.plan_id
+      left join payments pay on pay.voucher_id = v.id
       left join lateral (
         select framedipaddress from radacct
          where username = v.code

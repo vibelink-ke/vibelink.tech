@@ -365,9 +365,16 @@ export default function Payments() {
               empty="No transactions recorded yet"
               rows={all}
               columns={[
-                { key: 'provider_ref', label: 'Ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
+                { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
                 { key: 'payer_phone', label: 'Phone' },
+                {
+                  key: 'plan',
+                  label: 'Bundle',
+                  render: (r) => r.plan_title
+                    ? <span>{r.plan_title}{r.rate_down ? <span style={{ color: color.neutralInk }}> · {Math.round(r.rate_down / 1000)}/{Math.round(r.rate_up / 1000)} Mbps</span> : null}</span>
+                    : '—',
+                },
                 { key: 'provider', label: 'Channel' },
                 { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
                 { key: 'received_at', label: 'Received', render: (r) => when(r.received_at) },

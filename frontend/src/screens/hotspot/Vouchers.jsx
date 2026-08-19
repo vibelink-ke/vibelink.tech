@@ -47,8 +47,8 @@ export default function Vouchers() {
 
   const exportCsv = () => {
     const rows = [
-      ['code', 'phone', 'batch', 'status', 'data_used_mb', 'starts_at', 'expires_at', 'created_at'],
-      ...visible.map((v) => [v.code, v.phone, v.batch, v.status, v.data_used_mb, v.starts_at, v.expires_at, v.created_at]),
+      ['code', 'phone', 'plan', 'mpesa_ref', 'batch', 'status', 'data_used_mb', 'starts_at', 'expires_at', 'created_at'],
+      ...visible.map((v) => [v.code, v.phone, v.plan_title, v.mpesa_ref, v.batch, v.status, v.data_used_mb, v.starts_at, v.expires_at, v.created_at]),
     ];
     const n = downloadCsv(`vouchers-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     store.toast(n ? `Exported ${n} voucher(s)` : 'Nothing to export');
@@ -201,6 +201,18 @@ export default function Vouchers() {
             },
             { key: 'code', label: 'Code', render: (v) => <span style={{ fontFamily: font.mono, fontWeight: 500 }}>{v.code}</span> },
             { key: 'phone', label: 'Phone', render: (v) => v.phone ?? '—' },
+            {
+              key: 'plan',
+              label: 'Bundle',
+              render: (v) => v.plan_title
+                ? <span>{v.plan_title}{v.rate_down ? <span style={{ color: color.muted }}> · {Math.round(v.rate_down / 1000)}/{Math.round(v.rate_up / 1000)} Mbps</span> : null}</span>
+                : '—',
+            },
+            {
+              key: 'mpesa_ref',
+              label: 'M-Pesa ref',
+              render: (v) => v.mpesa_ref ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{v.mpesa_ref}</span> : '—',
+            },
             { key: 'batch', label: 'Batch', render: (v) => v.batch ?? '—' },
             { key: 'status', label: 'Status', render: (v) => <Badge tone={v.status}>{STATUS_LABEL[v.status] ?? v.status}</Badge> },
             { key: 'data_used_mb', label: 'Used', align: 'right', render: (v) => `${v.data_used_mb ?? 0} MB` },
