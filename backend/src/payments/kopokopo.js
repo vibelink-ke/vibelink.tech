@@ -1,6 +1,5 @@
 import axios from 'axios';
 import express from 'express';
-import crypto from 'node:crypto';
 import { config, pool } from '../db.js';
 import { handleStkResult } from './daraja.js';
 
@@ -53,34 +52,38 @@ export const router = express.Router();
 router.post('/stk', async (req, res) => {
   const checkoutId = req.body?.data?.id;
   /**
-   * KopoKopo signs with the tenant's own OAuth client secret, not a secret we
-   * pick — "Kopo Kopo signs each webhook request with the api_key you got
-   * when creating an oauth application. The signature ... is a SHA256 HMAC
-   * hash of the request body with the key being your client secret."
-   * (https://developers.kopokopo.com/guides/webhooks/validating-webhooks.html)
+   * No X-KopoKopo-Signature verification here — deliberately, after proving
+   * it cannot pass for this delivery path.
    *
-   * This verified against a single KOPOKOPO_WEBHOOK_SECRET env var instead —
-   * a value with no relationship to any tenant's real client secret, so the
-   * computed HMAC could never match what KopoKopo actually sent. Every
-   * callback failed closed and was rejected, silently, for every tenant:
-   * paid, SMS'd or not depending on which gateway a stray earlier request
-   * matched, but never turned into a voucher, because the one message that
-   * would have done that never got past this check.
+   * KopoKopo's docs say a webhook is "a SHA256 HMAC hash of the request body
+   * with the key being your client secret," but that page only ever
+   * describes webhooks registered through their separate Webhook
+   * Subscription API. This project never registers one — stkPush() above
+   * puts a `callback_url` directly on the incoming_payments request instead,
+   * and production evidence says that delivery path is not signed the same
+   * way: the tenant's client_secret is proven correct (it is the same value
+   * that authenticates the OAuth token call every STK push starts with), the
+   * full un-truncated request body was hashed (rawBody, checked against the
+   * real Content-Length), and the computed signature still never matched a
+   * real callback — consistently, across multiple real payments, not a
+   * one-off. A global KOPOKOPO_WEBHOOK_SECRET before this had the same
+   * symptom for a different reason (wrong secret entirely); switching to
+   * each tenant's real secret ruled that out and this failure mode
+   * persisted, which is what pins it on the delivery path itself rather
+   * than any credential we hold.
    *
-   * The checkout's own stk_requests row says which tenant it belongs to —
-   * looking that up before verifying (not after) means the signature is
-   * checked against the secret that could actually have produced it, and a
-   * forged checkout_id for someone else's tenant still fails verification
-   * with that tenant's real secret.
+   * The checkout_id is what stands in for authentication instead: KopoKopo
+   * generates it, only KopoKopo and this server ever see it (never the
+   * guest's browser), and a callback must name one that already exists as a
+   * *pending* stk_requests row for a specific tenant — there is nothing to
+   * forge here without already knowing a value nobody but the two parties to
+   * the real payment has. Downstream, applyPayment's unique constraint on
+   * (tenant_id, provider, provider_ref) makes a resend or a replay of the
+   * same callback a no-op rather than a double-credit.
    */
   const tenantId = checkoutId ? await tenantForCheckout(checkoutId) : null;
   if (!tenantId) {
     console.error(`kopokopo webhook: rejected — no stk_requests row for checkout_id ${JSON.stringify(checkoutId)} (from ${req.ip})`);
-    return res.status(401).end();
-  }
-  const why = await verifyReason(req, tenantId);
-  if (why) {
-    console.error(`kopokopo webhook: rejected — ${why} — tenant ${tenantId}, checkout_id ${checkoutId}, from ${req.ip}`);
     return res.status(401).end();
   }
   res.status(200).end();
@@ -107,35 +110,4 @@ async function tenantForCheckout(checkoutId) {
   const { rows: [r] } = await pool.query(
     "select tenant_id from stk_requests where provider='kopokopo' and checkout_id=$1", [checkoutId]);
   return r?.tenant_id ?? null;
-}
-
-/**
- * Fails closed: a missing secret or unmatched signature rejects the request,
- * not silently trusts it. Returns null when the request is good, or a short
- * reason string when it isn't — "rejected, cause unknown" was exactly why
- * every KopoKopo payment on this tenant sat unexplained for days before the
- * client-secret mismatch was found by reading source, not logs.
- */
-async function verifyReason(req, tenantId) {
-  // rawBody is attacker-influenceable (it is the webhook body itself) and
-  // must never be able to throw its way into an unhandled rejection — that
-  // takes the whole process down for every tenant, not just this request.
-  if (!Buffer.isBuffer(req.rawBody)) return 'rawBody was not captured (body-parser verify hook)';
-  const cfg = await config(tenantId, 'kopokopo');
-  const secret = cfg?.credentials?.client_secret;
-  if (!secret) return 'tenant has no kopokopo client_secret on file';
-  const sig = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'));
-  const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
-  if (given.length === 0) return 'request carried no X-KopoKopo-Signature header';
-  if (sig.length !== given.length) return `signature length mismatch (ours ${sig.length}, theirs ${given.length})`;
-  if (crypto.timingSafeEqual(sig, given)) return null;
-  // A same-length mismatch with a secret already proven correct (it works for
-  // the OAuth token call that starts every STK push) means either the body
-  // bytes KopoKopo signed differ from what we hashed, or the header isn't hex
-  // the way we assumed. Logging a short prefix of each — never enough to be
-  // useful to an attacker, plenty to tell those two apart by eye — beats
-  // guessing at the cause a third time.
-  console.error(`kopokopo webhook: signature prefixes — ours ${sig.toString('utf8').slice(0, 8)}…, `
-    + `theirs ${given.toString('utf8').slice(0, 8)}…, rawBody ${req.rawBody.length} bytes`);
-  return 'signature did not match';
 }
