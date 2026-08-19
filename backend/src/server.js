@@ -882,6 +882,10 @@ app.get('/portal/me', wrap(async (req, res) => {
   // operator can run a different paybill per site, and this was picking the
   // tenant's first default gateway regardless of which router the customer is
   // actually on, showing the wrong paybill for anyone not on that one site.
+  // It also picked across every provider with no filter, so a tenant running
+  // both Daraja (PPPoE+hotspot) and KopoKopo (hotspot-only, schema-enforced)
+  // could show a PPPoE customer the KopoKopo till — enabled_pppoe scopes it
+  // to gateways this subscriber's service can actually use.
   const { rows: [gw] } = await pool.query(
     `select coalesce(sp.shortcode, tpc.shortcode) as shortcode
        from subscribers sub
@@ -889,6 +893,7 @@ app.get('/portal/me', wrap(async (req, res) => {
        left join lateral (
          select shortcode from tenant_payment_config
           where tenant_id=sub.tenant_id and shortcode is not null
+            and (case when sub.service='pppoe' then enabled_pppoe else enabled_hotspot end)
           order by is_default desc nulls last limit 1
        ) tpc on true
       where sub.id=$1`, [s.subscriber_id]).catch(() => ({ rows: [] }));
@@ -1075,8 +1080,13 @@ app.get('/api/subscribers', async (req, res) => {
       from subscribers s
       left join site_profiles sp on sp.router_id = s.router_id and sp.tenant_id = s.tenant_id
       left join lateral (
+        -- /api/subscribers is PPPoE-only (see the comment on this route above),
+        -- so this always wants the PPPoE-enabled gateway — without the filter
+        -- a tenant also running KopoKopo (hotspot-only, schema-enforced) could
+        -- have its till outrank Daraja here and show PPPoE customers a paybill
+        -- they can't actually pay into.
         select shortcode from tenant_payment_config
-         where tenant_id=s.tenant_id and shortcode is not null
+         where tenant_id=s.tenant_id and shortcode is not null and enabled_pppoe
          order by is_default desc nulls last limit 1
       ) tpc on true
       left join lateral (

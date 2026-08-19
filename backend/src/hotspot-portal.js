@@ -139,8 +139,12 @@ export function loginPage({
   h1 { margin:0 0 2px; font-size:24px; }
   .sub { margin:0 0 20px; color:var(--muted); font-size:15px; }
   label { display:block; font-size:14px; color:var(--muted); margin:12px 0 5px; }
+  /* Background is a fixed light color regardless of template, so the text
+     color has to be fixed dark too — using var(--ink) here made typed text
+     on the 'dark' template (near-white ink) nearly invisible against this
+     always-light field. */
   input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
-          border-radius:9px; background:#fafbf9; color:var(--ink); }
+          border-radius:9px; background:#fafbf9; color:#161a17; }
   /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
      focus, which shoves the form off screen on the phones most guests use. */
   button { width:100%; margin-top:18px; padding:13px; font-size:16px; font-weight:600;
@@ -213,7 +217,7 @@ export function loginPage({
       the page is served by the router to a guest who cannot reach anything
       else; an external file would simply not load.
     -->
-    <form action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
+    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
       <!--
         Where the guest lands once connected. An operator's configured
         redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
@@ -318,11 +322,17 @@ export function loginPage({
         .then(function (d) {
           if (d.code) {
             clearInterval(timer);
-            note.textContent = 'Paid.';
+            note.textContent = 'Paid. Connecting…';
             codeVal.textContent = d.code;
             codeBox.style.display = 'block';
             document.getElementById('username').value = d.code;
             watchVoucher(d.code);
+            // The code being visible and correct was never in question — what
+            // was missing is that nothing ever submitted the form on the
+            // guest's behalf, so "paid" and "online" were two separate steps
+            // and a guest who didn't notice the Connect button stayed on this
+            // page, believing the purchase itself had failed to connect them.
+            setTimeout(function () { document.getElementById('loginForm').submit(); }, 1200);
             return;
           }
           if (d.status === 'failed' || d.status === 'cancelled') {
