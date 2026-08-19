@@ -453,12 +453,34 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   if (!plan) return res.status(404).json({ error: 'That bundle is no longer on sale' });
 
   const { config } = await import('./db.js');
-  // KopoKopo first: it is the hotspot-only channel and carries the plan through
-  // to the callback, so the voucher is issued for the right bundle.
-  const kk = await config(tenant.id, 'kopokopo');
-  const daraja = kk ? null : await config(tenant.id, 'daraja');
+  /**
+   * Which gateway actually takes the payment is the operator's own choice —
+   * Hotspot -> Settings -> "Payment method" — not a fixed priority order.
+   * This used to always prefer KopoKopo whenever it happened to be
+   * configured, so a tenant who set up both gateways and picked "M-Pesa
+   * Paybill" in settings (say, because KopoKopo's till has a lower limit,
+   * or they simply prefer Daraja) had every hotspot sale silently routed
+   * through KopoKopo anyway — the setting was saved, shown as selected, and
+   * never once read here.
+   */
+  const { rows: [hs] } = await pool.query(
+    'select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
+  const method = hs?.payment_method ?? 'kopokopo';
+
+  let kk = null, daraja = null;
+  if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
+  else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
+  else {
+    return res.status(503).json({
+      error: `Hotspot payment method "${method}" does not support in-page STK push. `
+        + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
+    });
+  }
   if (!kk && !daraja) {
-    return res.status(503).json({ error: 'This network cannot take payments yet. Ask the operator.' });
+    return res.status(503).json({
+      error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
+        + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
+    });
   }
 
   try {
