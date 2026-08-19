@@ -8,6 +8,33 @@ import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
+const AUTOPAY_OPTIONS = [
+  { value: '', label: 'Off' },
+  { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
+  { value: 'kopokopo', label: 'KopoKopo' },
+  { value: 'bankstk', label: 'Bank STK push' },
+];
+
+/**
+ * Usable host addresses in an IPv4 CIDR block — network and broadcast
+ * excluded, capped at 254 so a /16 someone typed by mistake can't hang the
+ * page enumerating 65,000 addresses for a dropdown.
+ */
+function hostsInCidr(cidr, max = 254) {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(String(cidr ?? '').trim());
+  if (!m) return [];
+  const [, a, b, c, d, bits] = m.map(Number);
+  const base = (a << 24) | (b << 16) | (c << 8) | d;
+  const size = 2 ** (32 - bits);
+  if (size < 2 || size > max + 2) return [];
+  const out = [];
+  for (let i = 1; i < size - 1 && out.length < max; i++) {
+    const ip = (base + i) >>> 0;
+    out.push([(ip >>> 24) & 255, (ip >>> 16) & 255, (ip >>> 8) & 255, ip & 255].join('.'));
+  }
+  return out;
+}
+
 const FILTERS = [
   { key: 'all', label: 'All' },
   // Online means a live session, not "paid up" — those are different questions
@@ -250,6 +277,8 @@ export default function Clients() {
       router_id: editing.router_id || null,
       credit: editing.credit === '' || editing.credit == null ? 0 : Number(editing.credit),
       expires_at: editing.expires_at || null,
+      autopay: editing.autopay || null,
+      location: editing.location || null,
     };
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -853,11 +882,55 @@ export default function Clients() {
                 ]}
               />
             </Field>
-            <Field label="Static IP">
+            <Field label="Static IP" hint={editing.router_id ? undefined : 'Pick a router first for a pool to choose from'}>
+              {(() => {
+                // Every free address in this router's pool, minus whoever
+                // else already holds one — typing an IP by hand risked
+                // handing two lines the same address with nothing to catch
+                // it until the router did, silently, to whichever session
+                // reconnected second.
+                const pool = (store.ipPools ?? []).find((p) => p.router_id === editing.router_id && p.service !== 'hotspot');
+                const taken = new Set(
+                  clients.filter((c) => c.id !== editing.id && c.static_ip).map((c) => c.static_ip)
+                );
+                const free = pool ? hostsInCidr(pool.cidr).filter((ip) => !taken.has(ip)) : [];
+                if (!pool) {
+                  return (
+                    <Input
+                      value={editing.static_ip ?? ''}
+                      onChange={(e) => setEditing((s) => ({ ...s, static_ip: e.target.value }))}
+                      placeholder="10.10.0.5"
+                    />
+                  );
+                }
+                return (
+                  <Select
+                    value={editing.static_ip ?? ''}
+                    onChange={(e) => setEditing((s) => ({ ...s, static_ip: e.target.value }))}
+                    options={[
+                      { value: '', label: 'No static IP' },
+                      // The address already on the account stays selectable
+                      // even if this pass computed it as "taken" — by itself.
+                      ...(editing.static_ip && !free.includes(editing.static_ip)
+                        ? [{ value: editing.static_ip, label: `${editing.static_ip} (current)` }] : []),
+                      ...free.map((ip) => ({ value: ip, label: ip })),
+                    ]}
+                  />
+                );
+              })()}
+            </Field>
+            <Field label="Location">
               <Input
-                value={editing.static_ip ?? ''}
-                onChange={(e) => setEditing((s) => ({ ...s, static_ip: e.target.value }))}
-                placeholder="10.10.0.5"
+                value={editing.location ?? ''}
+                onChange={(e) => setEditing((s) => ({ ...s, location: e.target.value }))}
+                placeholder="Kilimani, Block C"
+              />
+            </Field>
+            <Field label="Auto-pay" hint="Charge this gateway automatically before expiry">
+              <Select
+                value={editing.autopay ?? ''}
+                onChange={(e) => setEditing((s) => ({ ...s, autopay: e.target.value }))}
+                options={AUTOPAY_OPTIONS}
               />
             </Field>
             <Field label="Plan">
@@ -906,6 +979,28 @@ export default function Clients() {
                 ))}
               </div>
             </Field>
+
+            <div style={{ gridColumn: '1 / -1', borderTop: `1px solid ${color.line}`, marginTop: 4, paddingTop: 10 }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Invoices</span>
+              {(() => {
+                const invoices = (store.invoices ?? []).filter((i) => i.subscriber_id === editing.id);
+                if (!invoices.length) {
+                  return <div style={{ fontSize: 12.5, color: color.neutralInk, marginTop: 6 }}>No invoices raised for this account.</div>;
+                }
+                return (
+                  <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                    {invoices.slice(0, 6).map((inv) => (
+                      <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5 }}>
+                        <span style={{ fontFamily: font.mono }}>{inv.number}</span>
+                        <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
+                        <span>KES {kes(inv.paid)} / {kes(inv.amount)}</span>
+                        <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         )}
       </Modal>

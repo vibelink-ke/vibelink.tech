@@ -29,6 +29,8 @@ const api = {
   changePassword: (currentPassword, newPassword) =>
     api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
   usage: () => api.call('GET', '/portal/usage'),
+  pay: (phone) => api.call('POST', '/portal/pay', { phone }),
+  payStatus: (checkoutId) => api.call('GET', `/portal/status/${checkoutId}`),
 };
 
 /**
@@ -188,6 +190,15 @@ export default function CustomerPortal() {
 
   const [usage, setUsage] = useState(null);   // [{ day, mb }], fetched once signed in
 
+  // Self-service STK — a customer pushes their own prompt instead of typing
+  // the paybill and account number into the M-Pesa menu by hand.
+  const [payOpen, setPayOpen] = useState(false);
+  const [payPhone, setPayPhone] = useState('');
+  const [payBusy, setPayBusy] = useState(false);
+  const [payMsg, setPayMsg] = useState('');
+  const payPoll = React.useRef(null);
+  useEffect(() => () => clearInterval(payPoll.current), []);
+
   const load = useCallback(async () => {
     try { setMe(await api.me()); } catch { setMe(null); }
   }, []);
@@ -269,6 +280,47 @@ export default function CustomerPortal() {
     if (!me) return;
     api.usage().then(setUsage).catch(() => setUsage([]));
   }, [me]);
+
+  // Pre-filled from the number on file, in the 254xxxxxxxxx form Daraja
+  // wants — 07xx.../+254.../254... all normalise to the same thing, but
+  // showing it any other way here just invites someone to "correct" it back.
+  useEffect(() => {
+    if (me?.phone) setPayPhone(String(me.phone).replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254'));
+  }, [me]);
+
+  const payNow = async () => {
+    setPayBusy(true);
+    setPayMsg('');
+    try {
+      const r = await api.pay(payPhone);
+      setPayMsg('Check your phone and enter your M-Pesa PIN.');
+      clearInterval(payPoll.current);
+      let elapsed = 0;
+      payPoll.current = setInterval(async () => {
+        elapsed += 3;
+        try {
+          const s = await api.payStatus(r.checkoutId);
+          if (s.status === 'success') {
+            clearInterval(payPoll.current);
+            setPayMsg('Paid — thank you.');
+            setPayBusy(false);
+            load();
+          } else if (s.status === 'failed') {
+            clearInterval(payPoll.current);
+            setPayMsg(s.result_desc || 'The payment did not go through.');
+            setPayBusy(false);
+          } else if (elapsed >= 90) {
+            clearInterval(payPoll.current);
+            setPayMsg('Still waiting — if you paid, it will reflect shortly.');
+            setPayBusy(false);
+          }
+        } catch { /* keep polling; a dropped check is not a failure */ }
+      }, 3000);
+    } catch (err) {
+      setPayMsg(err.message);
+      setPayBusy(false);
+    }
+  };
 
   const changePassword = async (e) => {
     e.preventDefault();
@@ -602,6 +654,32 @@ export default function CustomerPortal() {
         <div style={card}>
           {me.paybill && <Row k="Pay to paybill" v={me.paybill} />}
           <Row k="Your account number" v={me.account} />
+          {/* Typing the paybill and account number by hand is where most
+              support calls about payment start — a wrong digit sends money
+              nowhere findable. Pushing a prompt to the number on file skips
+              that step entirely for anyone who would rather not risk it. */}
+          {me.service === 'pppoe' && (!payOpen ? (
+            <button style={{ ...button(true), marginTop: 4 }} onClick={() => { setPayOpen(true); setPayMsg(''); }}>
+              Pay now via M-Pesa
+            </button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              <label style={{ fontSize: 13, color: pc.muted }}>M-Pesa number to pay from</label>
+              <input
+                style={input}
+                type="tel"
+                inputMode="tel"
+                value={payPhone}
+                onChange={(e) => setPayPhone(e.target.value)}
+                placeholder="254712345678"
+                disabled={payBusy}
+              />
+              <button style={button(true)} onClick={payNow} disabled={payBusy || !payPhone}>
+                {payBusy ? 'Waiting…' : `Send prompt for KES ${me.plan?.price ?? ''}`}
+              </button>
+              {payMsg && <span style={{ fontSize: 13, color: pc.muted }}>{payMsg}</span>}
+            </div>
+          ))}
         </div>
 
         <div style={card}>

@@ -114,10 +114,21 @@ export default function Dashboard() {
   const hotspotOnline = hotspotActive.filter((v) => v.online);
   const online = [...pppoeOnline, ...hotspotOnline];
 
-  // "Collected" comes from applied payments; the backend exposes only the
-  // unmatched queue today, so anything not returned stays at zero.
-  const appliedToday = (store.mpesaTx ?? []).filter((p) => p.status === 'applied');
+  // "Collected today" summed every applied payment ever returned, with no
+  // date filter at all — it never actually reset at midnight, just kept
+  // growing for as long as the payments table did. This tile is meant to
+  // answer "how much came in today," which "today" here now actually means.
+  const appliedToday = (store.mpesaTx ?? []).filter((p) => {
+    if (p.status !== 'applied') return false;
+    const at = p.received_at ? new Date(p.received_at) : null;
+    return at && at.toDateString() === new Date().toDateString();
+  });
   const collected = appliedToday.reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  // The "last 7 days" chart heading was paired with the same "today" total
+  // above it — right label, wrong number underneath it.
+  const collected7d = (store.mpesaTx ?? [])
+    .filter((p) => p.status === 'applied' && p.received_at && Date.now() - new Date(p.received_at).getTime() <= 7 * 86400000)
+    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
   // How many distinct payment channels actually collected something, not how
   // many individual transactions came in — "across 6 payments" read like six
   // separate gateways when it was six M-Pesa STK receipts on the one till.
@@ -236,7 +247,7 @@ export default function Dashboard() {
         <div style={{ ...card, gap: 18 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 14.5, fontWeight: 600 }}>Collections by channel · last 7 days</span>
-            <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected)}</span>
+            <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected7d)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
             {WEEKDAYS.map((d) => (

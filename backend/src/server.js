@@ -1009,6 +1009,48 @@ app.get('/portal/usage', wrap(async (req, res) => {
   res.json(rows.map((r) => ({ day: r.day, mb: Math.round(Number(r.bytes) / (1024 * 1024)) })));
 }));
 
+/**
+ * Self-service STK: a signed-in customer pushes their own M-Pesa prompt
+ * instead of copying the paybill and their account number by hand into the
+ * M-Pesa menu — the same gateway and account reference the admin's "Send
+ * STK" button already uses, scoped so a customer can only ever pay their
+ * own account. Daraja only: this is the PPPoE portal, and KopoKopo is
+ * hotspot-only by the same schema constraint that keeps it off every other
+ * PPPoE path.
+ */
+app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+
+  const { rows: [sub] } = await pool.query(
+    `select sub.name, sub.phone, sub.account_code, p.price as plan_price
+       from subscribers sub left join plans p on p.id = sub.plan_id
+      where sub.id=$1 and sub.tenant_id=$2`, [s.subscriber_id, s.tenant_id]);
+  if (!sub) return res.status(404).json({ error: 'not found' });
+
+  // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
+  let phone = String(req.body?.phone ?? sub.phone ?? '').trim();
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  const amount = Number(sub.plan_price);
+  if (!(amount > 0)) {
+    return res.status(400).json({ error: 'No plan is set on this account yet — contact support.' });
+  }
+
+  try {
+    const data = await mpesa.stkPush(s.tenant_id, {
+      phone, amount, accountRef: sub.account_code,
+      description: `${sub.name} — ${sub.account_code}`,
+    });
+    res.json({ phone, amount, checkoutId: data?.CheckoutRequestID ?? null });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
 /** Raise a support request from the portal, which the Tickets screen picks up. */
 app.post('/portal/support', wrap(async (req, res) => {
   const s = await portalSession(req);
