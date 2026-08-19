@@ -4960,7 +4960,7 @@ app.put('/api/settings', wrap(async (req, res) => {
   }
   if (smtp || prefs) {
     await pool.query(
-      `insert into app_settings (tenant_id, smtp, prefs) values ($1, $2, $3)
+      `insert into app_settings (tenant_id, smtp, prefs) values ($1, coalesce($2, '{}'::jsonb), $3)
        on conflict (tenant_id) do update set
          smtp = coalesce($2, app_settings.smtp), prefs = coalesce($3, app_settings.prefs)`,
       [req.tenant.id, smtp ?? null, prefs ?? null]);
