@@ -322,6 +322,7 @@ export function loginPage({
             codeVal.textContent = d.code;
             codeBox.style.display = 'block';
             document.getElementById('username').value = d.code;
+            watchVoucher(d.code);
             return;
           }
           if (d.status === 'failed' || d.status === 'cancelled') {
@@ -330,6 +331,30 @@ export function loginPage({
           }
         })
         .catch(function () { /* keep polling; a dropped request is not a failure */ });
+    }
+
+    /**
+     * Nothing watched a voucher after it was shown as paid — a guest who kept
+     * this tab open just quietly lost internet with no explanation once time
+     * ran out, and had to work out on their own that reloading would get them
+     * back to a sign-in form. This polls the same status this page's own
+     * server-side sweep updates on every read, and reloads the instant it
+     * sees anything other than in_use — the reload is what puts the sign-in
+     * form back in front of them, since RouterOS itself has already stopped
+     * treating them as authenticated by then.
+     */
+    function watchVoucher(code) {
+      var watchTimer = setInterval(function () {
+        fetch(API + '/hotspot/voucher-status?code=' + encodeURIComponent(code))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.status && d.status !== 'in_use') {
+              clearInterval(watchTimer);
+              location.reload();
+            }
+          })
+          .catch(function () { /* keep watching; a dropped check is not expiry */ });
+      }, 30000);
     }
 
     // ── live chat ──────────────────────────────────────────────────────

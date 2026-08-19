@@ -540,6 +540,35 @@ app.get('/hotspot/buy/:checkoutId', pollLimiter, wrap(async (req, res) => {
 }));
 
 /**
+ * Whether a voucher a guest is already using is still good — polled by the
+ * page itself after it shows "Paid," which is the only point nothing was
+ * watching before. jobs.js's expireAndSuspend also flips in_use vouchers
+ * past their expiry, but only every 5 minutes; a guest sitting on this page
+ * deserves better than up to 5 minutes of "connected" reading true after it
+ * stopped being true. The update here is the same one-liner, run inline
+ * so a poll is also the moment the status becomes accurate, not just the
+ * moment it gets checked.
+ */
+app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const code = String(req.query.code ?? '').trim();
+  if (!code) return res.status(400).json({ error: 'no code' });
+
+  await pool.query(
+    `update vouchers set status='expired'
+      where tenant_id=$1 and code=$2 and status='in_use' and expires_at < now()`,
+    [tenant.id, code]);
+
+  const { rows: [v] } = await pool.query(
+    'select status, expires_at from vouchers where tenant_id=$1 and code=$2', [tenant.id, code]);
+  if (!v) return res.json({ status: 'unknown' });
+  res.json({ status: v.status, expiresAt: v.expires_at });
+}));
+
+/**
  * Live chat for people with no account.
  *
  * A hotspot guest has not paid yet and a customer may not have a portal
@@ -1073,6 +1102,13 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
   const secrets = await import('./secrets.js');
   const { withTenant } = await import('./db.js');
   const { startVoucherClock } = await import('./radius.js');
+
+  // Same one-liner /hotspot/voucher-status runs, so an operator checking who
+  // is online sees accurate status too, not whatever jobs.js's 5-minute
+  // sweep last left behind.
+  await pool.query(
+    "update vouchers set status='expired' where tenant_id=$1 and status='in_use' and expires_at < now()",
+    [req.tenant.id]);
 
   const { rows: routers } = await pool.query(
     `select id, name, host, api_port, service_user, service_password_enc

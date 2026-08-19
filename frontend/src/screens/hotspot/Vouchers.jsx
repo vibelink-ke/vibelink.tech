@@ -6,6 +6,9 @@ import { downloadCsv } from '../../lib/csv';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
 const STATUSES = ['All status', 'unused', 'in_use', 'expired', 'compensated'];
+// The raw column values stay the filter/query vocabulary; this is only what
+// gets shown, in the words an operator actually uses over the phone.
+const STATUS_LABEL = { unused: 'Active', in_use: 'Used', expired: 'Expired', compensated: 'Compensated' };
 const TYPES = ['All types', 'Numeric', 'Mixed', 'Words'];
 
 export default function Vouchers() {
@@ -97,7 +100,11 @@ export default function Vouchers() {
       <Card title="Filters">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, alignItems: 'end' }}>
           <Field label="Status">
-            <Select value={filter.status} onChange={set('status')} options={STATUSES} />
+            <Select
+              value={filter.status}
+              onChange={set('status')}
+              options={STATUSES.map((s) => ({ value: s, label: s === 'All status' ? s : STATUS_LABEL[s] }))}
+            />
           </Field>
           <Field label="Code type">
             <Select value={filter.type} onChange={set('type')} options={TYPES} />
@@ -195,7 +202,7 @@ export default function Vouchers() {
             { key: 'code', label: 'Code', render: (v) => <span style={{ fontFamily: font.mono, fontWeight: 500 }}>{v.code}</span> },
             { key: 'phone', label: 'Phone', render: (v) => v.phone ?? '—' },
             { key: 'batch', label: 'Batch', render: (v) => v.batch ?? '—' },
-            { key: 'status', label: 'Status', render: (v) => <Badge tone={v.status}>{v.status}</Badge> },
+            { key: 'status', label: 'Status', render: (v) => <Badge tone={v.status}>{STATUS_LABEL[v.status] ?? v.status}</Badge> },
             { key: 'data_used_mb', label: 'Used', align: 'right', render: (v) => `${v.data_used_mb ?? 0} MB` },
             {
               key: 'expires_at',
