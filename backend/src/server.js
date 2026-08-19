@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import util from 'node:util';
 import dns from 'node:dns';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -29,6 +30,22 @@ process.on('unhandledRejection', (e) => {
 
 const app = express();
 app.use(express.json());
+
+/**
+ * Nothing in the stack previously bounded request rate anywhere, so a login
+ * form or the hotspot STK-purchase endpoint could be hammered without limit —
+ * credential stuffing on one side, running up a tenant's Daraja/KopoKopo API
+ * call volume on the other. `standardHeaders`/`legacyHeaders: false` keeps the
+ * response shape unchanged for existing clients; only 429s are new behavior.
+ */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Try again in a few minutes.' },
+});
+const stkLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many payment attempts. Try again in a few minutes.' },
+});
 
 /**
  * Which build is actually running.
@@ -115,7 +132,7 @@ app.get('/api/auth/session', wrap(async (req, res) => {
   res.json(s ? auth.publicSession(s) : null);
 }));
 
-app.post('/api/auth/login', wrap(async (req, res) => {
+app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   // `identifier` is the email-or-username field; `email` stays accepted so an
   // older client keeps working.
   const { identifier, email, password, remember = true } = req.body;
@@ -364,7 +381,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
  * voucher is issued and texted by the code that already does that. Nothing here
  * grants access on its own — access follows the money arriving.
  */
-app.post('/hotspot/buy', wrap(async (req, res) => {
+app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
@@ -605,6 +622,22 @@ app.use((req, res, next) => {
   next();
 });
 
+/**
+ * Gate a route to specific staff roles, on top of the plain "signed in" check
+ * above. Platform owner (`is_super_admin`) always passes — they already have
+ * unrestricted cross-tenant access elsewhere.
+ *
+ * Applied narrowly to routes that read or write credentials (router logins,
+ * PPPoE/portal passwords, payment-gateway API secrets): a `support` account
+ * has no business reading those, and until now nothing stopped it.
+ */
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (req.session.is_super_admin || roles.includes(req.session.role)) return next();
+    res.status(403).json({ error: 'not allowed for your role' });
+  };
+}
+
 /* ── customer portal ───────────────────────────────
  *
  * Lives at /portal/*, which the guard above lets through unauthenticated —
@@ -645,7 +678,7 @@ async function portalSession(req) {
  * quote when paying, already printed on their receipts, and the one thing a
  * customer reliably knows about themselves.
  */
-app.post('/portal/login', wrap(async (req, res) => {
+app.post('/portal/login', loginLimiter, wrap(async (req, res) => {
   const account = String(req.body?.account ?? '').trim();
   const password = String(req.body?.password ?? '');
   // Deliberately one message for both cases: telling a stranger which account
@@ -744,7 +777,7 @@ app.get('/portal/plans', async (req, res) => {
 });
 
 /** Hotspot purchase. Channel comes from hotspot_settings.payment_method; fallbacks below. */
-app.post('/portal/buy', async (req, res) => {
+app.post('/portal/buy', stkLimiter, async (req, res) => {
   const { planId, phone, mac } = req.body;
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [req.tenant.id]);
   const method = req.body.method ?? hs?.payment_method ?? 'kopokopo';
@@ -768,7 +801,7 @@ app.get('/portal/status/:checkoutId', async (req, res) => {
 });
 
 /** Customer typed an M-Pesa code after paying a no-API till. */
-app.post('/portal/verify-code', async (req, res) => {
+app.post('/portal/verify-code', loginLimiter, async (req, res) => {
   const { rows: [p] } = await pool.query(
     "select * from payments where tenant_id=$1 and provider_ref=$2", [req.tenant.id, req.body.code]);
   if (!p) return res.status(404).json({ status: 'not_found', grantedMinutes: 20 });
@@ -1308,7 +1341,7 @@ app.get('/api/routers/tunnel-info', wrap(async (req, res) => {
 // address inside it. Addresses used to come from a single shared 10.50.0.0/24 and
 // were derived from a row count, so tenants collided with each other and a deleted
 // router's address was immediately handed to the next one.
-app.post('/api/routers/ovpn-script', wrap(async (req, res) => {
+app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res) => {
   const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
 
   const subnet = await ensureSubnet(req.tenant.id);
@@ -2517,7 +2550,7 @@ function describeRouterError(e, host, port) {
 }
 
 /** Rename a router, correct its NAS address, secret, API port or role. */
-app.put('/api/routers/:id', wrap(async (req, res) => {
+app.put('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
   const { name, host, secret, apiPort, role, nasIdentifier } = req.body ?? {};
   const { rows: [r] } = await pool.query(
     `update routers set
@@ -2543,7 +2576,7 @@ app.put('/api/routers/:id', wrap(async (req, res) => {
  * would silently stop enforcement for those customers rather than fail loudly.
  * Their tunnel credentials go too, so a deleted router cannot dial back in.
  */
-app.delete('/api/routers/:id', wrap(async (req, res) => {
+app.delete('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!r) return res.status(404).json({ error: 'No such router' });
@@ -2625,7 +2658,7 @@ app.delete('/api/routers/:id', wrap(async (req, res) => {
 // ── router onboarding via WireGuard ───────────────
 // Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
 // single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.
-app.post('/api/routers/wg-peer', wrap(async (req, res) => {
+app.post('/api/routers/wg-peer', requireRole('owner'), wrap(async (req, res) => {
   const wg = await import('./wireguard.js');
   const { name, routerId } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name the router' });
@@ -2687,7 +2720,7 @@ app.get('/api/routers/wg-peers', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.delete('/api/routers/wg-peers/:id', wrap(async (req, res) => {
+app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, res) => {
   await pool.query('delete from wg_peers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true, note: 'Run scripts/wg-sync.mjs to drop it from the running server.' });
 }));
@@ -2698,7 +2731,7 @@ app.get('/api/routers', async (req, res) => {
 });
 
 /** Confirm the router after the OVPN tunnel is up: nickname, NAS secret, API port (default 8728). */
-app.post('/api/routers', wrap(async (req, res) => {
+app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
   const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both' } = req.body;
 
   // Nobody needs to invent this. It is a shared secret between us and one router,
@@ -3267,7 +3300,7 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
  * the encrypted column existed. Older ones have a hash and nothing else, so they
  * report as unreadable rather than pretending to be missing.
  */
-app.get('/api/subscribers/:id/credentials', wrap(async (req, res) => {
+app.get('/api/subscribers/:id/credentials', requireRole('owner'), wrap(async (req, res) => {
   const secrets = await import('./secrets.js');
   const { rows: [s] } = await pool.query(
     `select account_code, pppoe_user, pppoe_pass, portal_password_enc, portal_password_hash
@@ -3533,7 +3566,7 @@ app.post('/api/subscribers/compensate', wrap(async (req, res) => {
 }));
 
 /** Report which required credentials a payment channel is still missing. */
-app.post('/api/payment-methods/:provider/test', wrap(async (req, res) => {
+app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async (req, res) => {
   const required = {
     daraja: ['consumer_key', 'consumer_secret', 'passkey'],
     kopokopo: ['client_id', 'client_secret'],
@@ -3970,7 +4003,7 @@ app.delete('/api/site-profiles/:id', wrap(async (req, res) => {
 }));
 
 // ── payment credentials (Payment methods screen) ──
-app.put('/api/payment-methods/:provider', wrap(async (req, res) => {
+app.put('/api/payment-methods/:provider', requireRole('owner'), wrap(async (req, res) => {
   const { shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
   if (req.params.provider === 'kopokopo' && enabledPppoe)
     return res.status(400).json({ error: 'KopoKopo is hotspot-only' });

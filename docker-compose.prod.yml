@@ -74,6 +74,13 @@ services:
       # Encrypts the per-router service passwords. Without it, pushing router
       # configuration refuses rather than storing them in the clear.
       APP_SECRET_KEY: ${APP_SECRET_KEY}
+      # Daraja does not sign its own webhook callbacks; this secret (appended
+      # as ?k=... to the callback URLs) is what stops a forged "payment
+      # succeeded" POST from crediting an account for free. Unset = the
+      # webhook rejects everything rather than accepting unsigned requests.
+      DARAJA_WEBHOOK_SECRET: ${DARAJA_WEBHOOK_SECRET}
+      # Same role for KopoKopo's X-KopoKopo-Signature HMAC.
+      KOPOKOPO_WEBHOOK_SECRET: ${KOPOKOPO_WEBHOOK_SECRET}
       # WireGuard onboarding. Optional: without them the button says what to set
       # rather than minting a peer that could never hand shake. The endpoint is
       # where routers dial, and the public key is the server's own — the private

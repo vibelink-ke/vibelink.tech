@@ -1,10 +1,41 @@
 import axios from 'axios';
 import express from 'express';
+import crypto from 'node:crypto';
 import { config, tenantByShortcode } from '../db.js';
 import { applyPayment } from './apply.js';
 
 const BASE = process.env.DARAJA_ENV === 'sandbox'
   ? 'https://sandbox.safaricom.co.ke' : 'https://api.safaricom.co.ke';
+
+/**
+ * Safaricom does not sign Daraja callbacks, so the only thing standing
+ * between "a real payment happened" and "anyone on the internet POSTed a
+ * fake one" is a secret baked into the callback URL itself. Without this,
+ * /webhooks/daraja/confirm and /stk would credit any amount to any account,
+ * or mint a hotspot voucher, for whoever asked.
+ *
+ * Fails closed, not open: if this is unset, the webhook endpoints reject
+ * every request rather than accepting unsigned ones. That is "payments
+ * stop working" — loud, immediately visible, fixed by setting one env var —
+ * instead of "payments are free," which is silent and only found by
+ * reading the ledger after the fact.
+ */
+const WEBHOOK_SECRET = process.env.DARAJA_WEBHOOK_SECRET;
+if (!WEBHOOK_SECRET) {
+  console.error('DARAJA_WEBHOOK_SECRET is not set — /webhooks/daraja/* will reject all '
+    + 'requests until it is. Set it to a long random value, the same one on every deploy.');
+}
+
+const withSecret = (url) => WEBHOOK_SECRET ? `${url}?k=${WEBHOOK_SECRET}` : url;
+
+function verifyWebhook(req, res, next) {
+  const given = Buffer.from(String(req.query.k ?? ''));
+  const expected = Buffer.from(WEBHOOK_SECRET ?? '');
+  if (!WEBHOOK_SECRET || given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) {
+    return res.status(401).end();
+  }
+  next();
+}
 
 async function token(cfg) {
   const key = Buffer.from(`${cfg.credentials.consumer_key}:${cfg.credentials.consumer_secret}`).toString('base64');
@@ -26,7 +57,7 @@ export async function stkPush(tenantId, { phone, amount, accountRef, description
     TransactionType: 'CustomerPayBillOnline',
     Amount: Math.round(amount),
     PartyA: phone, PartyB: cfg.shortcode, PhoneNumber: phone,
-    CallBackURL: `${process.env.BASE_URL}/webhooks/daraja/stk`,
+    CallBackURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/stk`),
     AccountReference: accountRef, TransactionDesc: description ?? 'Internet'
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
   return data;   // CheckoutRequestID -> store in stk_requests
@@ -38,8 +69,8 @@ export async function registerC2B(tenantId) {
   const { data } = await axios.post(`${BASE}/mpesa/c2b/v1/registerurl`, {
     ShortCode: cfg.shortcode,
     ResponseType: 'Completed',
-    ConfirmationURL: `${process.env.BASE_URL}/webhooks/daraja/confirm`,
-    ValidationURL: `${process.env.BASE_URL}/webhooks/daraja/validate`
+    ConfirmationURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/confirm`),
+    ValidationURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/validate`)
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
   return data;
 }
@@ -119,9 +150,9 @@ router.post('/b2c-timeout', express.json(), async (req, res) => {
 });
 
 // Validation: accept anything we can plausibly place; Safaricom needs a fast 200.
-router.post('/validate', (_req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));
+router.post('/validate', verifyWebhook, (_req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));
 
-router.post('/confirm', async (req, res) => {
+router.post('/confirm', verifyWebhook, async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
   const b = req.body;
   const tenantId = await tenantByShortcode('daraja', String(b.BusinessShortCode));
@@ -137,7 +168,7 @@ router.post('/confirm', async (req, res) => {
   }).catch(console.error);
 });
 
-router.post('/stk', async (req, res) => {
+router.post('/stk', verifyWebhook, async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
   const cb = req.body?.Body?.stkCallback;
   if (!cb) return;

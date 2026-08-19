@@ -52,9 +52,22 @@ router.post('/stk', express.json({ verify: keepRaw }), async (req, res) => {
 
 function keepRaw(req, _res, buf) { req.rawBody = buf; }
 
+let warnedNoSecret = false;
+
+// Fails closed: no secret configured means every callback is rejected, not
+// silently trusted. An unset secret used to make this return true
+// unconditionally, which is indistinguishable from "no verification at all."
 function verify(req) {
   const secret = process.env.KOPOKOPO_WEBHOOK_SECRET;
-  if (!secret) return true;
-  const sig = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(req.get('X-KopoKopo-Signature') ?? ''));
+  if (!secret) {
+    if (!warnedNoSecret) {
+      console.error('KOPOKOPO_WEBHOOK_SECRET is not set — /webhooks/kopokopo/stk will reject '
+        + 'all requests until it is.');
+      warnedNoSecret = true;
+    }
+    return false;
+  }
+  const sig = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'));
+  const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
+  return sig.length === given.length && crypto.timingSafeEqual(sig, given);
 }
