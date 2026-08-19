@@ -112,6 +112,36 @@ export default function CustomerPortal() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  /**
+   * Moved here from after the signed-out early return below, where it broke
+   * the Rules of Hooks: a customer who already holds a valid portal session
+   * skips the signed-out render entirely and lands straight on the signed-in
+   * one, calling one more hook than that first render did. React requires
+   * the same hooks in the same order every render regardless of branch, and
+   * violating it doesn't degrade gracefully — it throws (minified error
+   * #310) and the whole component renders nothing, with no error boundary
+   * catching it, which reads as a blank page. The `if (!chat?.id)` guard
+   * inside already made this hook a safe no-op before chat exists, so
+   * calling it unconditionally changes nothing for the signed-out case.
+   */
+  useEffect(() => {
+    if (!chat?.id) return undefined;
+    let live = true;
+    const pull = async () => {
+      try {
+        const res = await fetch(`/chat/${chat.id}?token=${encodeURIComponent(chat.token)}&since=0`);
+        const d = await res.json();
+        if (!live || !d.messages) return;
+        setChat((c) => (c?.id === chat.id
+          ? { ...c, messages: d.messages, note: d.status === 'closed' ? 'Support closed this chat.' : c.note }
+          : c));
+      } catch { /* keep trying; a dropped poll is not a failure */ }
+    };
+    pull();
+    const id = setInterval(pull, 3000);
+    return () => { live = false; clearInterval(id); };
+  }, [chat?.id, chat?.token]);
+
   const signIn = async (e) => {
     e.preventDefault();
     setBusy(true);
@@ -239,24 +269,6 @@ export default function CustomerPortal() {
       setChat({ id: null, token: null, messages: [], note: e.message });
     }
   };
-
-  useEffect(() => {
-    if (!chat?.id) return undefined;
-    let live = true;
-    const pull = async () => {
-      try {
-        const res = await fetch(`/chat/${chat.id}?token=${encodeURIComponent(chat.token)}&since=0`);
-        const d = await res.json();
-        if (!live || !d.messages) return;
-        setChat((c) => (c?.id === chat.id
-          ? { ...c, messages: d.messages, note: d.status === 'closed' ? 'Support closed this chat.' : c.note }
-          : c));
-      } catch { /* keep trying; a dropped poll is not a failure */ }
-    };
-    pull();
-    const id = setInterval(pull, 3000);
-    return () => { live = false; clearInterval(id); };
-  }, [chat?.id, chat?.token]);
 
   const sendChat = async () => {
     const body = chatDraft.trim();
