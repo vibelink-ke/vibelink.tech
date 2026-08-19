@@ -74,8 +74,13 @@ router.post('/stk', async (req, res) => {
    * with that tenant's real secret.
    */
   const tenantId = checkoutId ? await tenantForCheckout(checkoutId) : null;
-  if (!tenantId || !(await verify(req, tenantId))) {
-    console.error(`kopokopo webhook: rejected unsigned/invalid request from ${req.ip}`);
+  if (!tenantId) {
+    console.error(`kopokopo webhook: rejected — no stk_requests row for checkout_id ${JSON.stringify(checkoutId)} (from ${req.ip})`);
+    return res.status(401).end();
+  }
+  const why = await verifyReason(req, tenantId);
+  if (why) {
+    console.error(`kopokopo webhook: rejected — ${why} — tenant ${tenantId}, checkout_id ${checkoutId}, from ${req.ip}`);
     return res.status(401).end();
   }
   res.status(200).end();
@@ -104,17 +109,24 @@ async function tenantForCheckout(checkoutId) {
   return r?.tenant_id ?? null;
 }
 
-// Fails closed: a missing secret or unmatched signature rejects the request,
-// not silently trusts it.
-async function verify(req, tenantId) {
+/**
+ * Fails closed: a missing secret or unmatched signature rejects the request,
+ * not silently trusts it. Returns null when the request is good, or a short
+ * reason string when it isn't — "rejected, cause unknown" was exactly why
+ * every KopoKopo payment on this tenant sat unexplained for days before the
+ * client-secret mismatch was found by reading source, not logs.
+ */
+async function verifyReason(req, tenantId) {
   // rawBody is attacker-influenceable (it is the webhook body itself) and
   // must never be able to throw its way into an unhandled rejection — that
   // takes the whole process down for every tenant, not just this request.
-  if (!Buffer.isBuffer(req.rawBody)) return false;
+  if (!Buffer.isBuffer(req.rawBody)) return 'rawBody was not captured (body-parser verify hook)';
   const cfg = await config(tenantId, 'kopokopo');
   const secret = cfg?.credentials?.client_secret;
-  if (!secret) return false;
+  if (!secret) return 'tenant has no kopokopo client_secret on file';
   const sig = Buffer.from(crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex'));
   const given = Buffer.from(req.get('X-KopoKopo-Signature') ?? '');
-  return sig.length === given.length && crypto.timingSafeEqual(sig, given);
+  if (given.length === 0) return 'request carried no X-KopoKopo-Signature header';
+  if (sig.length !== given.length) return `signature length mismatch (ours ${sig.length}, theirs ${given.length})`;
+  return crypto.timingSafeEqual(sig, given) ? null : 'signature did not match';
 }
