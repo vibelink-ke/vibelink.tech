@@ -91,7 +91,18 @@ export default function Dashboard() {
    * customer with a paid-up line read as one customer online, on a night when
    * the router was not even reachable.
    */
-  const online = clients.filter((c) => c.online);
+  const pppoeOnline = clients.filter((c) => c.online);
+  /**
+   * /api/subscribers — clients above — is PPPoE only; a hotspot guest never
+   * gets a subscribers row at all, they exist only as a voucher. The hint
+   * text below already claimed to split "N PPPoE · M hotspot", but the
+   * hotspot half could only ever read 0, structurally, regardless of how
+   * many guests were actually connected — not stale data, a source that
+   * cannot contain the answer. Vouchers with status='in_use' is the same
+   * signal the Hotspot dashboard's own "Online now" already uses correctly.
+   */
+  const hotspotOnline = (store.vouchers ?? []).filter((v) => v.status === 'in_use');
+  const online = [...pppoeOnline, ...hotspotOnline];
 
   // "Collected" comes from applied payments; the backend exposes only the
   // unmatched queue today, so anything not returned stays at zero.
@@ -178,7 +189,7 @@ export default function Dashboard() {
           label="ONLINE NOW"
           value={online.length}
           hint={online.length
-            ? `${online.filter((c) => c.service === 'pppoe').length} PPPoE · ${online.filter((c) => c.service === 'hotspot').length} hotspot`
+            ? `${pppoeOnline.length} PPPoE · ${hotspotOnline.length} hotspot`
             : `nobody connected · ${active.length} active account${active.length === 1 ? '' : 's'}`}
         />
         {/* From the job run log. This was a hardcoded zero, so the tile said
