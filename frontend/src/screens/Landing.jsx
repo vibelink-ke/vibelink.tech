@@ -61,7 +61,7 @@ const STEPS = [
 ];
 
 const Section = ({ children, style }) => (
-  <section style={{ maxWidth: 1080, margin: '0 auto', padding: '0 22px', ...style }}>
+  <section style={{ maxWidth: 1440, margin: '0 auto', padding: '0 32px', ...style }}>
     {children}
   </section>
 );

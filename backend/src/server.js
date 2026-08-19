@@ -47,6 +47,31 @@ app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.set('trust proxy', 1);
 
 /**
+ * The hotspot login page is not served from this app's own origin — it is
+ * downloaded onto the ROUTER by /tool/fetch and served from the router's own
+ * IP (its hotspot-address), because that is the only address a guest device
+ * can reach before it has authenticated. That page still needs to call back
+ * to /hotspot/buy and /chat/* on the tenant's real domain to start a
+ * purchase or open live chat — a genuine cross-origin fetch from the
+ * browser's point of view, silently blocked with no CORS headers, and
+ * caught only as "Could not reach the billing system from here" client-side
+ * with no server-side error to find. The rest of the app is intentionally
+ * same-origin only (the admin app and API share an origin); this opens
+ * exactly the two path prefixes that must not be, and nothing else —
+ * neither carries a session cookie, so nothing here becomes readable
+ * cross-origin that was not already meant to be public.
+ */
+app.use((req, res, next) => {
+  if (req.path.startsWith('/hotspot/') || req.path.startsWith('/chat/')) {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST');
+    res.set('Access-Control-Allow-Headers', 'content-type');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+  }
+  next();
+});
+
+/**
  * Nothing in the stack previously bounded request rate anywhere, so a login
  * form or the hotspot STK-purchase endpoint could be hammered without limit —
  * credential stuffing on one side, running up a tenant's Daraja/KopoKopo API
