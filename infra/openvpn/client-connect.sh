@@ -38,4 +38,34 @@ fi
 # is the whole supernet, not the tenant's /24.
 echo "ifconfig-push $ip 255.255.0.0" > "$OUT"
 echo "openvpn-connect: $username -> $ip" >&2
+
+# Per-tenant tunnel isolation. client-to-client is on (server.conf) so a
+# staff peer's laptop can reach its own tenant's routers — but on its own
+# that would let it, and every other peer, reach everyone's. A router peer
+# gets no hole: it only ever needs the server itself, which ordinary routing
+# already provides regardless of this chain. Never allowed to fail the
+# connection itself — a firewall-rule hiccup must cost this feature, not the
+# router tunnels the whole platform depends on.
+kind=$(/usr/bin/psql -h "${PGHOST:-db}" -p "${PGPORT:-5432}" -U "${PGUSER:-billing}" \
+       -d "${PGDATABASE:-billing}" -tA -v u="$username" <<'SQL' 2>/dev/null
+select kind from ovpn_clients where username = :'u' order by created_at desc limit 1
+SQL
+)
+
+if [ "$kind" = "staff" ] && command -v iptables >/dev/null 2>&1; then
+  router_ips=$(/usr/bin/psql -h "${PGHOST:-db}" -p "${PGPORT:-5432}" -U "${PGUSER:-billing}" \
+       -d "${PGDATABASE:-billing}" -tA -v u="$username" <<'SQL' 2>/dev/null
+select host(r.host) from ovpn_clients c
+  join routers r on r.tenant_id = c.tenant_id
+ where c.username = :'u'
+SQL
+  )
+  for rip in $router_ips; do
+    [ -z "$rip" ] && continue
+    iptables -I VIBELINK_TUNNEL_ISOLATION 1 -s "$ip" -d "$rip" -j ACCEPT 2>/dev/null || true
+    iptables -I VIBELINK_TUNNEL_ISOLATION 1 -s "$rip" -d "$ip" -j ACCEPT 2>/dev/null || true
+    echo "openvpn-connect: opened $ip <-> $rip (staff tunnel access for $username)" >&2
+  done
+fi
+
 exit 0

@@ -2273,6 +2273,106 @@ app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res)
 }));
 
 /**
+ * Winbox into your own router over the same tunnel it already dials into —
+ * a real OpenVPN client peer, not a proxy. Reaches only this tenant's own
+ * routers: server.conf turns on client-to-client for this to work at all,
+ * and infra/openvpn/client-connect.sh is what actually confines it — see
+ * the VIBELINK_TUNNEL_ISOLATION chain there. Nothing on the API side
+ * enforces the isolation; it is entirely a property of that firewall chain.
+ */
+app.post('/api/routers/vpn-access', requireRole('owner'), wrap(async (req, res) => {
+  const { ensureSubnet, nextHostIp } = await import('./tunnel.js');
+
+  const { rows: [{ count }] } = await pool.query(
+    `select count(*)::int from routers where tenant_id=$1`, [req.tenant.id]);
+  if (!count) return res.status(409).json({ error: 'Add a router first — there is nothing to Winbox into yet.' });
+
+  const subnet = await ensureSubnet(req.tenant.id);
+  const ip = await nextHostIp(req.tenant.id);
+  const token = crypto.randomBytes(9).toString('base64url');
+  // staff- prefix (not router-<octet>) so client-connect.sh's log lines and
+  // an operator reading `docker compose logs openvpn` can tell the two
+  // kinds of peer apart at a glance.
+  const username = `staff-${req.session.staff_id}-${Date.now().toString(36)}`;
+
+  await pool.query(
+    `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip, kind, staff_id)
+     values ($1,$2,crypt($3, gen_salt('bf')),$4,'staff',$5)`,
+    [req.tenant.id, username, token, ip, req.session.staff_id]);
+
+  let ca;
+  try {
+    ca = (await (await import('node:fs/promises')).readFile('/etc/openvpn/pki/ca.crt', 'utf8')).trim();
+  } catch (e) {
+    return res.status(500).json({ error: `Could not read the tunnel's CA certificate: ${e.message}` });
+  }
+
+  const host = String(req.body?.serverHost ?? '').trim() || tunnelHost(req);
+  const authDigest = (process.env.OVPN_AUTH_DIGEST ?? 'sha1').toLowerCase();
+
+  // A standard client config any OpenVPN app can import — Tunnelblick, the
+  // official OpenVPN Connect app, or `openvpn --config` directly. Matches
+  // server.conf's own settings (cipher, auth digest, no renegotiation)
+  // because none of those are negotiated; a mismatch here fails silently
+  // with "no shared cipher" the same way it does for a router.
+  const config = [
+    'client',
+    'dev tun',
+    'proto tcp-client',
+    `remote ${host} 1194`,
+    'resolv-retry infinite',
+    'nobind',
+    'persist-key',
+    'persist-tun',
+    'remote-cert-tls server',
+    'data-ciphers AES-256-CBC',
+    'data-ciphers-fallback AES-256-CBC',
+    `auth ${authDigest.toUpperCase()}`,
+    'reneg-sec 0',
+    'verb 3',
+    '<auth-user-pass>',
+    username,
+    token,
+    '</auth-user-pass>',
+    '<ca>',
+    ca,
+    '</ca>',
+  ].filter(Boolean).join('\n');
+
+  res.json({
+    config,
+    filename: `${req.tenant.subdomain ?? 'vibelink'}-winbox.ovpn`,
+    yourAddress: ip,
+    tenantSubnet: subnet,
+    note: `Once connected, Winbox to each router's tunnel address (Routers screen shows it) — `
+      + 'this peer can reach your own routers only, nothing else on the platform.',
+  });
+}));
+
+/** Staff VPN peers this tenant has issued, for a "revoke" list — never the password, already hashed and gone. */
+app.get('/api/routers/vpn-access', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select c.id, c.username, host(c.assigned_ip) as ip, c.connected_at, c.created_at,
+            s.name as staff_name
+       from ovpn_clients c
+       left join staff s on s.id = c.staff_id
+      where c.tenant_id=$1 and c.kind='staff'
+      order by c.created_at desc`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.delete('/api/routers/vpn-access/:id', requireRole('owner'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    `delete from ovpn_clients where id=$1 and tenant_id=$2 and kind='staff'`,
+    [req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such peer' });
+  // The connection itself dies on its own: auth.sh is asked again on
+  // OpenVPN's periodic re-check and the row is simply gone by then. No
+  // separate disconnect step exists to force it sooner.
+  res.json({ ok: true, note: 'Revoked — the connection will drop within a few minutes if it is currently active.' });
+}));
+
+/**
  * The tunnel username an address implies: 10.50.2.3 is router-2-3.
  *
  * The minting route builds it from the address octets, so the same rule

@@ -99,6 +99,13 @@ services:
       # on that side, and until both met in one place the documented setup
       # could not be run at all. Writable, because writing it is the point.
       - ./infra/wireguard/wg_confs:/config/wg_confs
+      # Read-only, and only ca.crt is ever actually read from it (see
+      # server.js's staff VPN peer route) — ca.key lives in this same
+      # directory but the API has no reason to open it and never does.
+      # Mounted as a directory rather than a single file: pinning one file
+      # out of a named volume needs Compose's `subpath:` (recent versions
+      # only), and the whole-directory mount works everywhere.
+      - billing-ovpn-pki:/etc/openvpn/pki:ro
     # No `ports`: the namespace belongs to `net`. Caddy reaches it as net:8080.
 
   web:

@@ -20,6 +20,81 @@ const bitrate = (bps) => {
   return `${n} bps`;
 };
 
+/**
+ * Winbox into your own router directly, over the same tunnel it already
+ * dials into — a real VPN peer for your own laptop, not a proxy through the
+ * billing server. Reaches only this tenant's own routers; see
+ * POST /api/routers/vpn-access for what actually enforces that.
+ */
+function WinboxAccess({ store }) {
+  const [peers, setPeers] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try { setPeers(await api.vpnAccessList()); } catch { /* shown as empty */ } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const generate = async () => {
+    setBusy(true);
+    try {
+      const res = await api.vpnAccessCreate({});
+      const blob = new Blob([res.config], { type: 'application/x-openvpn-profile' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = res.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      store.toast(`Downloaded — import into any OpenVPN client, then Winbox to a router's tunnel address (${res.yourAddress} is yours on the tunnel)`);
+      load();
+    } catch (e) {
+      store.toast(`Could not create a VPN peer: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revoke = async (p) => {
+    if (!window.confirm(`Revoke ${p.staff_name ?? p.username}'s Winbox access? Any current connection drops within a few minutes.`)) return;
+    try {
+      await api.vpnAccessRevoke(p.id);
+      store.toast('Revoked');
+      load();
+    } catch (e) {
+      store.toast(`Could not revoke: ${e.message}`);
+    }
+  };
+
+  return (
+    <Card
+      title="Winbox access"
+      actions={<Button variant="primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : '+ Generate .ovpn'}</Button>}
+    >
+      <p style={{ margin: '0 0 12px', fontSize: 12.5, color: color.muted }}>
+        A VPN profile for your own laptop, over the same tunnel your routers already use. Import it into
+        any OpenVPN client, connect, then open Winbox pointed at a router's tunnel address — it only
+        reaches your own routers, nothing else on the platform.
+      </p>
+      {!loading && peers.length === 0 ? (
+        <p style={{ fontSize: 12.5, color: color.muted }}>No Winbox access issued yet.</p>
+      ) : (
+        <Table
+          rowKey={(p) => p.id}
+          rows={peers}
+          columns={[
+            { key: 'staff_name', label: 'Issued to', render: (p) => p.staff_name ?? '—' },
+            { key: 'username', label: 'Peer', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.username}</span> },
+            { key: 'ip', label: 'Address', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.ip}</span> },
+            { key: 'connected_at', label: 'Last connected', render: (p) => (p.connected_at ? new Date(p.connected_at).toLocaleString('en-KE') : 'never') },
+            { key: 'actions', label: '', align: 'right', render: (p) => <Button onClick={() => revoke(p)}>Revoke</Button> },
+          ]}
+        />
+      )}
+    </Card>
+  );
+}
+
 export default function Routers() {
   const store = useStore();
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
@@ -583,6 +658,8 @@ Revoke anyway?`
           />
         </Card>
       )}
+
+      <WinboxAccess store={store} />
 
       {/* A router hammering the tunnel with a credential we no longer have.
           Revoking does not stop it trying — RouterOS retries every few seconds

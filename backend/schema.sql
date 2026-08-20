@@ -696,6 +696,19 @@ create trigger radacct_to_sessions after insert or update on radacct
 alter table ovpn_clients add column if not exists password_hash text;
 alter table ovpn_clients alter column password drop not null;
 
+-- 'staff' peers are a tenant's own laptop, not a router — issued so an
+-- operator can Winbox into their own MikroTik over the same tunnel their
+-- routers already use. auth.sh and client-connect.sh don't care about the
+-- distinction (any row here authenticates and gets its assigned_ip pinned
+-- the same way); it exists so client-connect.sh knows to punch this peer's
+-- laptop a narrow firewall hole to its own tenant's routers — see
+-- infra/openvpn/entrypoint.sh's VIBELINK_TUNNEL_ISOLATION chain — and so a
+-- router peer, which needs none, doesn't get one by mistake.
+alter table ovpn_clients add column if not exists kind text not null default 'router';
+alter table ovpn_clients drop constraint if exists ovpn_clients_kind_check;
+alter table ovpn_clients add constraint ovpn_clients_kind_check check (kind in ('router', 'staff'));
+alter table ovpn_clients add column if not exists staff_id uuid references staff on delete cascade;
+
 -- ─────────────── the rest of the standard FreeRADIUS schema ───────────────
 -- The app only ever writes radcheck and radreply, so these looked unnecessary.
 -- They are not: the stock queries.conf reads the group tables on every single

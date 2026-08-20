@@ -58,6 +58,29 @@ chmod 600 /dev/net/tun
 sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || \
   echo "could not enable ip_forward (needs --privileged or a sysctl in compose)"
 
+# Per-tenant tunnel isolation. client-to-client (server.conf) is now on, which
+# on its own would let every connected peer — every router, every tenant's
+# staff laptop — reach every other one. This chain is what actually stops
+# that: a default DROP for all tun-to-tun traffic, with client-connect.sh
+# punching a narrow ACCEPT (this staff peer's IP <-> this tenant's own router
+# IPs, nothing wider) the moment a staff peer connects, and
+# client-disconnect.sh removing it the moment they leave.
+#
+# Rebuilt from scratch on every start rather than preserved: a restart drops
+# every existing tunnel anyway, so there is nothing valid left to keep, and
+# starting clean means a leftover rule from a bug can never survive a restart.
+if command -v iptables >/dev/null 2>&1; then
+  iptables -F VIBELINK_TUNNEL_ISOLATION 2>/dev/null
+  iptables -N VIBELINK_TUNNEL_ISOLATION 2>/dev/null
+  iptables -D FORWARD -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION 2>/dev/null
+  iptables -I FORWARD 1 -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION
+  iptables -A VIBELINK_TUNNEL_ISOLATION -j DROP
+  echo "tunnel isolation chain ready (default deny, per-connection holes only)"
+else
+  echo "iptables not available — tunnel isolation chain NOT set up; " \
+       "client-to-client is on, so do not issue staff VPN peers until this is fixed" >&2
+fi
+
 # OpenVPN does not hand its own environment to auth.sh and client-connect.sh — it
 # builds a fresh one holding only the variables it defines, so PATH and every PG*
 # setting would be missing there. Snapshot them to a file the scripts source.
