@@ -307,6 +307,10 @@ create table ip_pools (
   cidr       cidr not null,
   router_id  uuid references routers,
   service    text not null default 'pppoe',   -- pppoe | hotspot
+  -- 'expired' pools are a distinct range for suspended/expired/paused
+  -- subscribers, so the whole range can be dropped in one static firewall
+  -- rule instead of chasing individual sessions into an address-list.
+  purpose    text not null default 'normal' check (purpose in ('normal', 'expired')),
   unique (tenant_id, name)
 );
 
@@ -781,6 +785,20 @@ alter table subscribers add constraint subscribers_status_check
 -- Households share a connection but not a handset: the person who pays is often
 -- not the person who notices it is down. Both numbers get every notification.
 alter table subscribers add column if not exists phone_alt text;
+
+-- When a pause started. A pause froze the status but not the clock: expires_at
+-- kept counting down underneath it, so a customer paused for a week came back
+-- to find their remaining days had quietly burned away regardless. On resume,
+-- the elapsed pause is added back onto expires_at so paused time is never
+-- billed; null the rest of the time.
+alter table subscribers add column if not exists paused_at timestamptz;
+
+-- ip_pools created before the 'expired' purpose existed are all 'normal' —
+-- there is nothing to reinterpret, an operator has to actually set one of
+-- these ranges aside for suspended/expired/paused subscribers.
+alter table ip_pools add column if not exists purpose text not null default 'normal';
+alter table ip_pools drop constraint if exists ip_pools_purpose_check;
+alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal', 'expired'));
 
 -- What a customer signs in to the portal with. Hashed like a staff password —
 -- the plaintext is shown once when it is generated and never stored, so a

@@ -1368,6 +1368,64 @@ export async function applyPppoeServer(conn, {
 }
 
 /**
+ * The static half of "suspended/expired customers get 0kb": one address-list
+ * entry covering the whole expired-pool range, and one filter rule dropping
+ * forward traffic from it. Both are set-and-forget — after this runs once,
+ * radius.js only ever has to put a subscriber's address inside the range;
+ * nothing per-subscriber needs pushing to the router again.
+ *
+ * `cidr` is the range from Networks → the tenant's ip_pools row with
+ * purpose='expired', e.g. "10.100.250.0/24". Skipped entirely if the tenant
+ * has not set one up — radius.js falls back to the normal pool at a near-zero
+ * rate limit in that case, which is real but weaker than an IP-range block.
+ */
+export async function applyExpiredPool(conn, { cidr } = {}) {
+  if (!cidr) return { configured: false };
+  const LIST = 'expired-customers';
+  const done = [];
+
+  const entries = await conn.write('/ip/firewall/address-list/print', [`?list=${LIST}`]);
+  const mine = entries.filter((e) => e.comment === MANAGED_COMMENT);
+  const wantAddr = ['=list=' + LIST, `=address=${cidr}`, `=comment=${MANAGED_COMMENT}`];
+  if (mine.length) {
+    if (!unchanged(mine[0], wantAddr)) {
+      await cmd(conn, 'expired-customers address list', '/ip/firewall/address-list/set',
+        [`=.id=${idOf(mine[0])}`, ...wantAddr]);
+    }
+  } else {
+    await cmd(conn, 'expired-customers address list', '/ip/firewall/address-list/add', wantAddr);
+    done.push(`address list ${LIST} = ${cidr}`);
+  }
+  for (const dupe of mine.slice(1)) {
+    await cmd(conn, 'remove duplicate expired-customers entry', '/ip/firewall/address-list/remove',
+      [`=.id=${idOf(dupe)}`]);
+  }
+
+  const rules = await conn.write('/ip/firewall/filter/print', []);
+  const mineRules = rules.filter((r) => r.comment === MANAGED_COMMENT
+    && String(r.chain) === 'forward' && r['src-address-list'] === LIST);
+  const wantRule = ['=chain=forward', `=src-address-list=${LIST}`, '=action=drop', `=comment=${MANAGED_COMMENT}`];
+  if (mineRules.length) {
+    if (!unchanged(mineRules[0], wantRule)) {
+      await cmd(conn, 'expired-customers block rule', '/ip/firewall/filter/set',
+        [`=.id=${idOf(mineRules[0])}`, ...wantRule]);
+    }
+  } else {
+    // Near the top: a forward-chain accept rule earlier in the list (NAT
+    // masquerade setups often have one) would otherwise let the traffic
+    // through before this is ever reached.
+    await cmd(conn, 'expired-customers block rule', '/ip/firewall/filter/add', [...wantRule, '=place-before=0']);
+    done.push('filter rule dropping forward traffic from ' + LIST);
+  }
+  for (const dupe of mineRules.slice(1)) {
+    await cmd(conn, 'remove duplicate expired-customers block rule', '/ip/firewall/filter/remove',
+      [`=.id=${idOf(dupe)}`]);
+  }
+
+  return { configured: true, list: LIST, cidr, done };
+}
+
+/**
  * Who is connected right now, asked of the router rather than inferred.
  *
  * The authoritative answer to "is this customer online". RADIUS accounting is

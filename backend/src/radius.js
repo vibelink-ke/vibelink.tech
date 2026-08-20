@@ -19,7 +19,7 @@ const HOTSPOT_PROFILE = 'hs-default';
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */
 export async function activateSubscriber(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    `select s.*, p.radius_profile, p.rate_down, p.rate_up, r.host, r.secret
+    `select s.*, p.radius_profile, p.rate_down, p.rate_up, r.host, r.secret, r.pppoe_pool
      from subscribers s join plans p on p.id = s.plan_id
      left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
 
@@ -35,13 +35,38 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, s.pppoe_pass, tenantId]);
 
+  const rate = `${s.rate_up}k/${s.rate_down}k`;
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value)
      values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`, tenantId]);
+    [s.pppoe_user, rate, tenantId]);
 
-  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, `${s.rate_up}k/${s.rate_down}k`);
+  // Reassigns off the expired pool back onto the normal one if that is where
+  // they were parked while suspended/expired/paused — status is already
+  // 'active' by the time this runs, so framedAddress reads that back correctly.
+  const address = await framedAddress(c, tenantId, subId, s);
+  if (address == null) {
+    await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+      [s.pppoe_user, 'Framed-IP-Address', tenantId]);
+  } else {
+    await c.query(
+      `insert into radreply (tenant_id, username, attribute, op, value)
+       values ($3,$1,'Framed-IP-Address',':=',$2)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [s.pppoe_user, address, tenantId]);
+  }
+
+  if (s.host) {
+    await coa(c, s.host, s.secret, s.pppoe_user, rate);
+    // A live session cannot be handed a new Framed-IP-Address by CoA — that
+    // attribute only applies at the start of a session — so if they were
+    // parked on the expired pool, force a reconnect now rather than leaving
+    // them on the old (expired-range) address until they redial on their own.
+    if (address && s.static_ip && String(s.static_ip).split('/')[0] !== address) {
+      await coa(c, s.host, s.secret, s.pppoe_user, rate, undefined, true);
+    }
+  }
 }
 
 /**
@@ -153,21 +178,38 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
  * line every time its credentials are rewritten would drop the session and
  * break anything pointed at it.
  */
+/**
+ * Suspended/expired/paused subscribers are allocated from a separate pool —
+ * see "expired pools" below — so the whole range can be dropped by one static
+ * firewall rule instead of the router needing to know who, individually, is
+ * cut off.
+ */
 async function framedAddress(c, tenantId, subId, s) {
-  // Whatever they already hold, provided it is still inside the pool.
+  const purpose = ['expired', 'suspended', 'paused'].includes(s.status) ? 'expired' : 'normal';
+
+  const poolFor = async (p) => {
+    const { rows: [row] } = await c.query(
+      `select cidr from ip_pools
+        where tenant_id=$1 and service='pppoe' and purpose=$2
+        order by (router_id is not null) desc limit 1`, [tenantId, p]);
+    return row;
+  };
+
+  // A tenant who has not set aside a dedicated expired-customers range yet
+  // still needs an address to hand out — falling back to the normal pool costs
+  // them the IP-range block, not connectivity outright. Mikrotik-Rate-Limit
+  // still applies regardless of which pool answered.
+  const pool = (await poolFor(purpose)) ?? (purpose === 'expired' ? await poolFor('normal') : null);
+  if (!pool) return null;
+
+  // Whatever they already hold, provided it is still inside both the router's
+  // servable range and the pool that matches their current purpose — a
+  // customer moving from active to expired (or back) must not simply keep an
+  // address from the other range.
   if (s.static_ip) {
     const { rows: [held] } = await c.query('select host($1::inet) as a', [s.static_ip]);
-    if (inPool(held?.a, s.pppoe_pool)) return held.a;
+    if (held?.a && inPool(held.a, s.pppoe_pool) && inPool(held.a, pool.cidr)) return held.a;
   }
-
-  // The tenant's PPPoE pool. Without one there is nothing to allocate from, and
-  // sending no address is correct: the router will refuse a session it cannot
-  // address, which is louder than a silent collision.
-  const { rows: [pool] } = await c.query(
-    `select cidr from ip_pools
-      where tenant_id=$1 and service='pppoe'
-      order by (router_id is not null) desc limit 1`, [tenantId]);
-  if (!pool) return null;
 
   /**
    * The lowest address in the pool nobody else holds.
@@ -299,17 +341,49 @@ export async function clearFupThrottle(c, tenantId, subId) {
   return true;
 }
 
-/** Move an expired account to the walled-garden profile without dropping the session. */
+// RouterOS treats a literal 0 as "no limit" — the opposite of a cut-off
+// account — so this is the practical floor: a page will not load, which is
+// the point. Real blocking is the firewall filter rule against the
+// expired-customers address list (see applyExpiredPool in routeros.js); this
+// is only the fallback for a tenant who has not provisioned that rule yet.
+const EXPIRED_RATE = '1k/1k';
+
+/** Move a suspended/expired/paused subscriber onto the expired pool at effectively zero speed. */
 export async function walledGarden(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    'select s.pppoe_user, r.host, r.secret from subscribers s left join routers r on r.id=s.router_id where s.id=$1',
-    [subId]);
+    `select s.*, r.host, r.secret, r.pppoe_pool
+       from subscribers s left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
   if (!s?.pppoe_user) return;   // nothing provisioned in RADIUS to walled-garden
+
   await c.query(
-    `update radreply set value='2048k/2048k'
-      where tenant_id=$2 and username=$1 and attribute='Mikrotik-Rate-Limit'`,
-    [s.pppoe_user, tenantId]);
-  if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, '2048k/2048k', 'walled');
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, EXPIRED_RATE, tenantId]);
+
+  // Framed-IP-Address here moves them into the expired pool (or clears it, if
+  // no dedicated pool is configured and none is free) — see framedAddress.
+  const address = await framedAddress(c, tenantId, subId, s);
+  if (address == null) {
+    await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+      [s.pppoe_user, 'Framed-IP-Address', tenantId]);
+  } else {
+    await c.query(
+      `insert into radreply (tenant_id, username, attribute, op, value)
+       values ($3,$1,'Framed-IP-Address',':=',$2)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [s.pppoe_user, address, tenantId]);
+  }
+
+  if (s.host) {
+    // The address-list attribute takes effect on the live session immediately;
+    // the disconnect (if the pool actually changed) is what makes the new
+    // Framed-IP-Address apply without waiting for them to redial on their own.
+    await coa(c, s.host, s.secret, s.pppoe_user, EXPIRED_RATE, 'expired');
+    if (address && s.static_ip && String(s.static_ip).split('/')[0] !== address) {
+      await coa(c, s.host, s.secret, s.pppoe_user, EXPIRED_RATE, undefined, true);
+    }
+  }
 }
 
 export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
@@ -442,7 +516,7 @@ export async function startVoucherClock(c, tenantId, code) {
  * thrown away — a CoA that never works is invisible otherwise, which is exactly
  * how it stayed broken before.
  */
-async function coa(c, host, secret, user, rate, mode) {
+async function coa(c, host, secret, user, rate, mode, disconnect = false) {
   // Target the live session if there is one. Without a session id the NAS has to
   // guess which login to change when a subscriber is connected more than once.
   let sessionId;
@@ -456,8 +530,12 @@ async function coa(c, host, secret, user, rate, mode) {
 
   const result = await coaClient.send({
     host, secret, username: user, rate,
-    addressList: mode === 'walled' ? 'walled' : undefined,
+    // Matches the static address-list name applyExpiredPool provisions on the
+    // router, so a session moved here right now (before it reconnects onto the
+    // expired pool's own range) still hits the same firewall filter rule.
+    addressList: mode === 'expired' ? 'expired-customers' : undefined,
     sessionId,
+    disconnect,
   });
 
   if (!result.ok) {

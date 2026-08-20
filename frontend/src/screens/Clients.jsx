@@ -194,6 +194,30 @@ export default function Clients() {
     store.toast(sent === picked.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${picked.length}`);
   };
 
+  /**
+   * One client, not the bulk selection — outage credit and a one-off grace
+   * period are the same operation underneath (push expires_at out by N days),
+   * so this is the single-customer door onto the same endpoint bulkCompensate
+   * already uses, rather than a second thing to maintain.
+   */
+  const giveDays = async (c) => {
+    const raw = window.prompt(`Free days to add for ${c.name} — outage credit or a grace period:`, '1');
+    if (raw === null) return;
+    const days = Number(raw);
+    if (!Number.isFinite(days) || days <= 0) return store.toast('Enter a positive number of days');
+    try {
+      const out = await api.compensateSubscribers([c.id], days);
+      const hit = out.rows?.[0];
+      if (hit) {
+        store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, expires_at: hit.expires_at } : x)));
+        setDetail((d) => (d?.id === c.id ? { ...d, expires_at: hit.expires_at } : d));
+      }
+      store.toast(`Added ${out.days} day(s) for ${c.name}`);
+    } catch (e) {
+      store.toast(`Could not add days: ${e.message}`);
+    }
+  };
+
   const bulkCompensate = async () => {
     const picked = selectedClients();
     if (!picked.length) return store.toast('Select at least one client first');
@@ -700,6 +724,15 @@ export default function Clients() {
           ...(detail.service === 'pppoe' && detail.phone
             ? [{ label: `Send STK to ${detail.phone}`, onClick: () => stkPush(detail) }]
             : []),
+          { label: 'Give free days', onClick: () => giveDays(detail), title: 'Outage credit or a grace period — extends their expiry' },
+          {
+            label: 'Add another line',
+            title: 'A second connection for this same customer — same account number, a new line tag',
+            onClick: () => navigate(
+              `/clients/new?account=${encodeURIComponent(detail.account_code)}`
+              + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
+            ),
+          },
           { label: 'Edit', onClick: () => setEditing({ ...detail }), tone: 'primary' },
           { label: 'Delete', tone: 'danger', onClick: () => removeClient(detail) },
         ] : []}

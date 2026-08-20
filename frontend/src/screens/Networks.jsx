@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, RowAction, RowActions, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe' };
+const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe', purpose: 'normal' };
 
 const act = (c) => ({ fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10, color: c });
 
@@ -48,7 +48,7 @@ export default function Networks() {
     try {
       const updated = await api.updateIpPool(editing.id, {
         name: editing.name, cidr: editing.cidr,
-        routerId: editing.routerId, service: editing.service,
+        routerId: editing.routerId, service: editing.service, purpose: editing.purpose,
       });
       store.setCollection('ipPools', (ps) => ps.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
       store.toast(`${updated.name} updated`);
@@ -81,6 +81,7 @@ export default function Networks() {
         cidr: f.cidr,
         routerId: f.routerId || null,
         service: f.service,
+        purpose: f.purpose,
       });
       store.setCollection('ipPools', (ps) => [...ps, created]);
       store.toast('IP pool created');
@@ -124,6 +125,13 @@ export default function Networks() {
             { key: 'cidr', label: 'Range', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.cidr}</span> },
             { key: 'router_name', label: 'Router', render: (p) => p.router_name ?? <span style={{ color: color.muted }}>Any</span> },
             { key: 'service', label: 'Service' },
+            {
+              key: 'purpose',
+              label: 'Purpose',
+              render: (p) => p.purpose === 'expired'
+                ? <span style={{ fontSize: 11.5, fontWeight: 600, color: color.rust }}>Expired customers</span>
+                : <span style={{ color: color.muted }}>Normal</span>,
+            },
             {
               key: 'used',
               label: 'Used',
@@ -222,6 +230,13 @@ export default function Networks() {
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
               />
             </Field>
+            <Field label="Purpose">
+              <Select
+                value={editing.purpose ?? 'normal'}
+                onChange={(e) => setEditing((s) => ({ ...s, purpose: e.target.value }))}
+                options={[{ value: 'normal', label: 'Normal' }, { value: 'expired', label: 'Expired customers' }]}
+              />
+            </Field>
             <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
               Narrowing a range that clients already sit inside does not move them — check View
               first to see who holds an address.
@@ -252,6 +267,16 @@ export default function Networks() {
           </Field>
           <Field label="Service">
             <Select value={f.service} onChange={set('service')} options={[{ value: 'pppoe', label: 'PPPoE' }, { value: 'hotspot', label: 'Hotspot' }]} />
+          </Field>
+          <Field
+            label="Purpose"
+            hint={f.purpose === 'expired' ? 'Suspended/expired customers only — pushed to the router as a firewall block, not handed out normally' : undefined}
+          >
+            <Select
+              value={f.purpose}
+              onChange={set('purpose')}
+              options={[{ value: 'normal', label: 'Normal' }, { value: 'expired', label: 'Expired customers' }]}
+            />
           </Field>
           <Field label="Router" span={2}>
             <Select

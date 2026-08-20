@@ -333,8 +333,11 @@ export function StoreProvider({ children }) {
       role,
       setRole,
       // Platform-owner screens follow the signed-in account, not a UI toggle.
-      // The backend enforces this too — see superAdminOnly in server.js.
-      isPlatformOwner: !!session?.superAdmin && role === 'owner',
+      // Both conditions matter: superAdmin alone would show this to any staff
+      // role on the one tenant that happens to be flagged super-admin, not
+      // just the company owner who holds that account. The backend enforces
+      // this too — see superAdminOnly in server.js.
+      isPlatformOwner: !!session?.superAdmin && session?.role === 'owner' && role === 'owner',
       // Staff who may take service away from a customer. Suspend is destructive
       // enough that a support agent should not have it to hand.
       isAdmin: ['owner', 'admin'].includes(session?.role ?? role),

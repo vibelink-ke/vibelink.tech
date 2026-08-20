@@ -2839,6 +2839,27 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         // subscriber and then drop the session a second later.
         await pool.query('update routers set pppoe_pool=$2 where id=$1',
           [r.id, confPool?.cidr ?? null]);
+
+        // The expired-customers range, if the tenant has set one aside under
+        // Networks — same lookup shape as the normal pool above. Provisioned
+        // once per push: after this, radius.js only ever has to put a
+        // subscriber's address inside the range, nothing more to push here.
+        const { rows: [expiredPool] } = await pool.query(
+          `select cidr from ip_pools
+            where tenant_id=$1 and service='pppoe' and purpose='expired'
+              and (router_id = $2 or router_id is null)
+            order by (router_id = $2) desc
+            limit 1`, [req.tenant.id, r.id]);
+        if (expiredPool) {
+          const blocked = await tryStep('expired-customers firewall block', () =>
+            ros.applyExpiredPool(conn, { cidr: expiredPool.cidr }), 20000);
+          done.push(blocked.done?.length
+            ? `expired customers (${expiredPool.cidr}) blocked at the firewall: ${blocked.done.join('; ')}`
+            : `expired customers (${expiredPool.cidr}) already blocked at the firewall`);
+        } else {
+          done.push('no expired-customers pool defined under Networks — suspended/expired accounts '
+            + 'fall back to a near-zero speed limit instead of a firewall block');
+        }
       }
     }
     if (r.role === 'both' || r.role === 'hotspot') {
@@ -3322,7 +3343,10 @@ app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
  * Network and broadcast are skipped, and anything already assigned is left out.
  */
 app.put('/api/ip-pools/:id', wrap(async (req, res) => {
-  const { name, cidr, routerId, service } = req.body ?? {};
+  const { name, cidr, routerId, service, purpose } = req.body ?? {};
+  if (purpose !== undefined && !['normal', 'expired'].includes(purpose)) {
+    return res.status(400).json({ error: 'purpose must be normal or expired' });
+  }
   const { rows: [p] } = await pool.query(
     `update ip_pools set
        name      = coalesce(nullif($3,''), name),
@@ -3330,10 +3354,11 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
        -- '' clears the assignment; absent leaves it alone.
        router_id = case when $5::text is null then router_id
                         when $5 = '' then null else $5::uuid end,
-       service   = coalesce(nullif($6,''), service)
+       service   = coalesce(nullif($6,''), service),
+       purpose   = coalesce(nullif($7,''), purpose)
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, name ?? '', cidr ?? '',
-     routerId === undefined ? null : String(routerId), service ?? '']);
+     routerId === undefined ? null : String(routerId), service ?? '', purpose ?? '']);
   if (!p) return res.status(404).json({ error: 'No such pool' });
   res.json(p);
 }));
@@ -3479,8 +3504,9 @@ function tunnelConflict(cidr, tunnelSubnet, serverIp) {
 }
 
 app.post('/api/ip-pools', wrap(async (req, res) => {
-  const { name, cidr, routerId, service = 'pppoe' } = req.body;
+  const { name, cidr, routerId, service = 'pppoe', purpose = 'normal' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
+  if (!['normal', 'expired'].includes(purpose)) return res.status(400).json({ error: 'purpose must be normal or expired' });
 
   const { rows: existing } = await pool.query(
     'select name, cidr, service from ip_pools where tenant_id=$1', [req.tenant.id]);
@@ -3516,8 +3542,8 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
   }
 
   const { rows: [p] } = await pool.query(
-    'insert into ip_pools (tenant_id, name, cidr, router_id, service) values ($1,$2,$3,$4,$5) returning *',
-    [req.tenant.id, name, cidr, routerId ?? null, service]);
+    'insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose) values ($1,$2,$3,$4,$5,$6) returning *',
+    [req.tenant.id, name, cidr, routerId ?? null, service, purpose]);
   res.json(p);
 }));
 
@@ -3854,8 +3880,30 @@ app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
   const target = { pause: 'paused', suspend: 'suspended', resume: 'active' }[action];
   if (!target) return res.status(400).json({ error: 'action must be pause, suspend or resume' });
 
+  /**
+   * A pause used to freeze the status but not the clock: expires_at kept
+   * counting down underneath it, so a customer paused for a week came back to
+   * find a week of their remaining days had quietly burned away regardless.
+   *
+   * paused_at records when the pause started; on resume, that elapsed stretch
+   * is added back onto expires_at before it is cleared, so paused time is
+   * never billed. A pause resumed by another pause (already paused, paused
+   * again) leaves paused_at untouched — the clock was already stopped.
+   */
   const { rows: [s] } = await pool.query(
-    'update subscribers set status=$3 where id=$1 and tenant_id=$2 returning *',
+    `update subscribers set
+       status = $3,
+       paused_at = case
+         when $3 = 'paused' and status <> 'paused' then now()
+         when $3 = 'paused' then paused_at
+         else null
+       end,
+       expires_at = case
+         when $3 = 'active' and paused_at is not null
+           then expires_at + (now() - paused_at)
+         else expires_at
+       end
+     where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, target]);
   if (!s) return res.status(404).json({ error: 'not found' });
 

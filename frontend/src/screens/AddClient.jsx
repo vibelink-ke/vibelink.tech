@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -39,7 +39,19 @@ const SERVICES = ['PPPoE', 'Hotspot', 'Static IP'];
 export default function AddClient() {
   const store = useStore();
   const navigate = useNavigate();
-  const [f, setF] = useState(BLANK);
+  const [params] = useSearchParams();
+
+  // Arrived from Clients → a customer's drawer → "Add another line": the
+  // account number is fixed to theirs (a second connection is the same
+  // account, a new line tag, not a new customer) and their name/phone come
+  // along so this is one field — the tag — rather than the whole form again.
+  const linkedAccount = params.get('account') ?? '';
+  const [f, setF] = useState(() => {
+    if (!linkedAccount) return BLANK;
+    const [firstName = '', ...rest] = (params.get('name') ?? '').trim().split(/\s+/);
+    return { ...BLANK, account: linkedAccount, firstName, lastName: rest.join(' '), phone: params.get('phone') ?? '' };
+  });
+  const [differentCustomer, setDifferentCustomer] = useState(false);
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
@@ -98,7 +110,10 @@ export default function AddClient() {
    * placeholder text is never mistaken for one.
    */
   useEffect(() => {
-    genCredentials();
+    // Arriving with a linked account already has its real number — theirs,
+    // not a fresh one — so generating here would silently swap it out from
+    // under the "Add another line" flow before the operator even notices.
+    if (!linkedAccount) genCredentials();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -166,6 +181,7 @@ export default function AddClient() {
         location: f.location || null,
         lat: f.lat,
         lng: f.lng,
+        allowDuplicatePhone: differentCustomer || !!linkedAccount,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
       store.toast(`${created.name} added`);
@@ -179,8 +195,10 @@ export default function AddClient() {
 
   return (
     <Screen
-      title="Add client"
-      subtitle="A PPPoE line. The RADIUS profile is written when the first payment lands."
+      title={linkedAccount ? `Add a line for ${params.get('name') ?? 'this customer'}` : 'Add client'}
+      subtitle={linkedAccount
+        ? `Account ${linkedAccount} — give this line a tag below so it's told apart from their others.`
+        : 'A PPPoE line. The RADIUS profile is written when the first payment lands.'}
       actions={
         <>
           <Button onClick={() => navigate('/clients')}>Cancel</Button>
@@ -202,6 +220,21 @@ export default function AddClient() {
             <Field label="Phone" hint="Used for M-Pesa matching">
               <Input value={f.phone} onChange={set('phone')} placeholder="07xx xxx xxx" />
             </Field>
+            {!linkedAccount && (
+              <Field
+                label=" "
+                hint="Leave unticked if this is the same person's second line — use Account number above instead"
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={differentCustomer}
+                    onChange={(e) => setDifferentCustomer(e.target.checked)}
+                  />
+                  This phone number belongs to a different customer already on file
+                </label>
+              </Field>
+            )}
             {/* A household shares the line but not the handset — whoever pays is
                 often not whoever notices it is down. Both get every message. */}
             <Field label="Second number" hint="Optional. Also receives every notification">
@@ -221,16 +254,22 @@ export default function AddClient() {
 
         <Card title="Billing">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Field label="Account number" hint="5 digits. What the client types as the paybill account">
+            <Field
+              label="Account number"
+              hint={linkedAccount
+                ? 'Fixed to their existing account — a second line bills the same customer, not a new one'
+                : '5 digits. What the client types as the paybill account'}
+            >
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={f.account}
                   onChange={setDigits('account', 5)}
                   inputMode="numeric"
                   placeholder="48213"
+                  disabled={!!linkedAccount}
                   style={{ fontFamily: font.mono }}
                 />
-                <Button onClick={genCredentials}>Generate</Button>
+                {!linkedAccount && <Button onClick={genCredentials}>Generate</Button>}
               </div>
             </Field>
             {/* One customer, several connections: a house and a shop, or a
