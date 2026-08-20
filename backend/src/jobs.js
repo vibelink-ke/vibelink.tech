@@ -5,6 +5,7 @@ import { walledGarden } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
+import { dbBackup } from './backup.js';
 
 /**
  * A job that throws must not take the process down with it — node-cron does not
@@ -53,6 +54,9 @@ export function startJobs() {
   // elsewhere. Only licence_ends remains — WHMCS moves it, this acts on it.
   cron.schedule('0 7 * * *',  safely('expireTenantLicences', expireTenantLicences));
   cron.schedule('*/5 * * * *', safely('lockNewPppoeMacs', lockNewPppoeMacs));
+  // 3am local — after the day's invoicing/charging runs, before the 6am invoice
+  // generation for the *next* day, so the dump reliably lands in the quiet gap.
+  cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
 }
 
 /**
