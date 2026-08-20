@@ -104,6 +104,21 @@ export async function connect({ host, port = 8728, user, password, timeoutSec = 
 }
 
 /**
+ * RouterOS's own HH:MM:SS shape for an interim-update interval, from a
+ * plain seconds count — the three interim-update writes below used to
+ * format their minutes-only parameter straight into the MM slot
+ * (`00:${mm}:00`), which cannot express anything under a minute at all;
+ * a 30-second interval needed the SS slot instead.
+ */
+function hhmmss(totalSeconds) {
+  const s = Math.max(1, Math.round(Number(totalSeconds) || 0));
+  const hh = String(Math.floor(s / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+  const ss = String(s % 60).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+/**
  * Run one RouterOS command and, if it fails, say which one.
  *
  * RouterOS errors are terse and context-free -- "invalid network", "no such
@@ -327,12 +342,11 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
  * interim-update matters more than it looks: without it the router reports usage
  * only when a session ends, so fair-use sees zero all day and then a cliff.
  */
-export async function applyPpp(conn, { interimMinutes = 5 } = {}) {
-  const mm = String(interimMinutes).padStart(2, '0');
+export async function applyPpp(conn, { interimSeconds = 30 } = {}) {
   await conn.write('/ppp/aaa/set', [
     '=use-radius=yes',
     '=accounting=yes',
-    `=interim-update=00:${mm}:00`,
+    `=interim-update=${hhmmss(interimSeconds)}`,
   ]);
 }
 
@@ -343,14 +357,13 @@ export async function applyPpp(conn, { interimMinutes = 5 } = {}) {
  * below — "the hotspot package is not installed" — instead of RouterOS's raw
  * "no such command or directory (hotspot)".
  */
-export async function applyHotspot(conn, { interimMinutes = 5 } = {}) {
+export async function applyHotspot(conn, { interimSeconds = 30 } = {}) {
   const profiles = await cmd(conn, 'read hotspot profiles', '/ip/hotspot/profile/print', []);
-  const mm = String(interimMinutes).padStart(2, '0');
   for (const p of profiles) {
     await conn.write('/ip/hotspot/profile/set', [
       `=.id=${idOf(p)}`,
       '=use-radius=yes',
-      `=radius-interim-update=00:${mm}:00`,
+      `=radius-interim-update=${hhmmss(interimSeconds)}`,
     ]);
   }
   return { profiles: profiles.length };
@@ -424,7 +437,7 @@ export function planNetwork(input) {
 export async function applyHotspotServer(conn, {
   bridge = 'bridge-lan',
   network = '10.5.50.0/24',
-  interimMinutes = 5,
+  interimSeconds = 30,
   dnsName = 'wifi.local',
   sharedUsers = 1,
   idleMinutes = 10,
@@ -506,14 +519,13 @@ export async function applyHotspotServer(conn, {
     done.push('dhcp network');
   }
 
-  const mm = String(interimMinutes).padStart(2, '0');
   const PROFILE = 'hsprof-billing';
   const profile = (await conn.write('/ip/hotspot/profile/print', [`?name=${PROFILE}`]))[0];
   const profileFields = [
     `=hotspot-address=${gateway}`,
     `=dns-name=${dnsName}`,
     '=use-radius=yes',
-    `=radius-interim-update=00:${mm}:00`,
+    `=radius-interim-update=${hhmmss(interimSeconds)}`,
     // http-chap needs the login page to do the hashing; plain http-pap is what
     // actually works against a Cleartext-Password in radcheck, which is what we
     // store. Offering chap here is how you get a login page that always fails.

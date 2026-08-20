@@ -431,58 +431,124 @@ export function Modal({ open, title, onClose, footer, width = 520, children }) {
  * width: the list behind it is the context for what you are reading, and losing
  * it entirely turns a glance into navigation.
  */
-export function Drawer({ open, title, onClose, children, width = 'min(880px, 94vw)' }) {
+/**
+ * A centered popup, not a side panel — a wall of 12.5px rows with no
+ * grouping was the original complaint, and even enlarged, a slide-out felt
+ * like a filing drawer rather than somewhere a person actually works.
+ * Every "View" button in the app opens this one component, so its shape
+ * changing here is what makes every one of them look and behave the same
+ * way, not just Clients.
+ *
+ * `subtitle` and `actions` are both optional — a screen that only ever
+ * passed `title` and `children` still renders correctly, just without the
+ * avatar circle's second line or an actions row. `actions` is an array of
+ * { label, onClick, tone: 'primary'|'danger'|undefined, disabled, title }.
+ */
+export function Drawer({ open, title, subtitle, actions, onClose, children, width = 640 }) {
   if (!open) return null;
-  // A wall of 12.5px rows with no grouping was the actual complaint — every
-  // "View" panel in the app is built from this one component, so making it
-  // bigger and better organised here is what fixes all of them at once
-  // rather than one screen at a time.
+  const initials = typeof title === 'string'
+    ? title.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
+    : '';
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(18,33,29,.45)', display: 'flex', justifyContent: 'flex-end', zIndex: 55 }}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(18,33,29,.45)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 55,
+      }}
     >
-      <aside
+      <div
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={typeof title === 'string' ? title : undefined}
         style={{
           width: '100%',
           maxWidth: width,
+          maxHeight: '88vh',
           background: color.cardBg,
-          height: '100%',
+          borderRadius: radius.lg,
           display: 'flex',
           flexDirection: 'column',
-          borderLeft: `1px solid ${color.line}`,
-          boxShadow: '-24px 0 60px rgba(18,23,21,.18)',
+          overflow: 'hidden',
+          boxShadow: '0 30px 80px rgba(18,23,21,.30)',
         }}
       >
         <header
           style={{
-            padding: '22px 28px',
+            padding: '26px 28px 20px',
             borderBottom: `1px solid ${color.line}`,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
             background: color.subtleBg,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
           }}
         >
-          <span style={{ fontSize: 21, fontWeight: 700, color: color.ink, letterSpacing: '-.01em' }}>{title}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            style={{
-              border: `1px solid ${color.line}`, background: color.cardBg, cursor: 'pointer',
-              fontSize: 18, color: color.muted, lineHeight: 1, width: 34, height: 34,
-              borderRadius: radius.pill, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            ×
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 }}>
+              {initials && (
+                <div
+                  style={{
+                    width: 52, height: 52, borderRadius: radius.pill, background: color.green, color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 19, fontWeight: 700, flexShrink: 0,
+                  }}
+                >
+                  {initials}
+                </div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 21, fontWeight: 700, color: color.ink, letterSpacing: '-.01em',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}
+                >
+                  {title}
+                </span>
+                {subtitle && <span style={{ fontSize: 13, color: color.muted }}>{subtitle}</span>}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{
+                border: `1px solid ${color.line}`, background: color.cardBg, cursor: 'pointer',
+                fontSize: 18, color: color.muted, lineHeight: 1, width: 34, height: 34,
+                borderRadius: radius.pill, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+              }}
+            >
+              ×
+            </button>
+          </div>
+          {actions?.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {actions.map((a, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={a.onClick}
+                  disabled={a.disabled}
+                  title={a.title}
+                  style={{
+                    padding: '9px 16px', borderRadius: radius.md, fontSize: 13.5, fontWeight: 600,
+                    cursor: a.disabled ? 'default' : 'pointer', opacity: a.disabled ? 0.5 : 1,
+                    border: a.tone === 'primary' ? 'none' : `1px solid ${a.tone === 'danger' ? color.rust : color.line}`,
+                    background: a.tone === 'primary' ? color.green : a.tone === 'danger' ? 'transparent' : color.cardBg,
+                    color: a.tone === 'primary' ? '#fff' : a.tone === 'danger' ? color.rust : color.ink,
+                  }}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
-        <div style={{ padding: '24px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 22, fontSize: 15 }}>
+        <div style={{ padding: '22px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 20, fontSize: 15 }}>
           {children}
         </div>
-      </aside>
+      </div>
     </div>
   );
 }

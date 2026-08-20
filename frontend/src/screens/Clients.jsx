@@ -687,7 +687,23 @@ export default function Clients() {
       </div>
       )}
 
-      <Drawer open={!!detail} title={detail?.name} onClose={() => { setDetail(null); closeCreds(); }}>
+      <Drawer
+        open={!!detail}
+        title={detail?.name}
+        subtitle={detail ? `${detail.account_code} · ${detail.phone}` : undefined}
+        onClose={() => { setDetail(null); closeCreds(); }}
+        actions={detail ? [
+          { label: detail.status === 'active' ? 'Pause' : 'Resume', onClick: () => setAccess(detail, detail.status === 'active' ? 'pause' : 'resume') },
+          ...(store.isAdmin && detail.status !== 'suspended'
+            ? [{ label: 'Suspend', tone: 'danger', onClick: () => setAccess(detail, 'suspend'), title: 'Block this customer — a payment clears it' }]
+            : []),
+          ...(detail.service === 'pppoe' && detail.phone
+            ? [{ label: `Send STK to ${detail.phone}`, onClick: () => stkPush(detail) }]
+            : []),
+          { label: 'Edit', onClick: () => setEditing({ ...detail }), tone: 'primary' },
+          { label: 'Delete', tone: 'danger', onClick: () => removeClient(detail) },
+        ] : []}
+      >
         {detail && (
           <>
             <KV k="Account" v={detail.account_code} />
@@ -735,11 +751,6 @@ export default function Clients() {
             <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
             {detail.service === 'pppoe' && (
               <KV k="Pay to paybill" v={detail.paybill ?? 'Not configured — see Settings → Payment gateways'} />
-            )}
-            {detail.service === 'pppoe' && detail.phone && (
-              <Button size="sm" onClick={() => stkPush(detail)} style={{ alignSelf: 'flex-start' }}>
-                Send STK to {detail.phone}
-              </Button>
             )}
 
             {/* A payment landing correctly in the ledger was never visible from
