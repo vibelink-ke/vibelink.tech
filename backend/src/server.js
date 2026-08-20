@@ -29,6 +29,27 @@ process.on('unhandledRejection', (e) => {
 });
 
 const app = express();
+/**
+ * No conditional GETs on this API.
+ *
+ * Express's default ETag support means every JSON response carries a
+ * content hash, and the app's fetch client sends it straight back on the
+ * next request — the browser gets a 304 with no body and is left to serve
+ * whatever it has cached instead. That is fine for a stylesheet. It is not
+ * fine for a dashboard: a customer added, a payment applied, a status
+ * change, none of it can be trusted to show up if the byte-identical
+ * response from ten minutes ago happens to satisfy the conditional check
+ * (a browser cache is not a reliable proof that the data hasn't moved), and
+ * a cache that has been evicted or is simply missing turns that 304 into
+ * nothing at all — every screen quietly empty with no error to explain why.
+ * Every response here is either already small or genuinely needs to be
+ * current; there is nothing worth this trade for either kind.
+ */
+app.set('etag', false);
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
 // KopoKopo's webhook needs the exact raw bytes to verify its HMAC signature
 // against — capturing it here, once, for every request is cheap and correct.
 // It used to be captured by a second express.json({verify}) mounted only on
