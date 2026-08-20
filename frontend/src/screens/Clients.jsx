@@ -810,6 +810,60 @@ export default function Clients() {
                 }
               />
             )}
+            {/* Every line on this account, this one included — a customer with
+                two PPPoE connections is one person paying one account number,
+                not two strangers who happen to share it, and until now the
+                only way to see the second line was to close this drawer and
+                go find its own row in the table. */}
+            {(() => {
+              const siblings = clients
+                .filter((c) => c.account_code === detail.account_code)
+                .sort((a, b) => (a.line_label ?? '').localeCompare(b.line_label ?? ''));
+              if (siblings.length < 2) return null;
+              return (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
+                  <span style={{ fontSize: 12.5, color: color.muted }}>Services on this account ({siblings.length})</span>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {siblings.map((line) => {
+                      const p = planById[line.plan_id];
+                      const isOpen = line.id === detail.id;
+                      return (
+                        <div
+                          key={line.id}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                            padding: '9px 11px', borderRadius: radius.md,
+                            background: isOpen ? color.subtleBg : 'transparent',
+                            border: `1px solid ${isOpen ? color.line : 'transparent'}`,
+                          }}
+                        >
+                          <div
+                            onClick={() => { if (!isOpen) { closeCreds(); setDetail(line); } }}
+                            style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, cursor: isOpen ? 'default' : 'pointer' }}
+                          >
+                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>
+                              {line.line_label || 'Primary line'}
+                              {isOpen && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: color.green }}>viewing</span>}
+                            </span>
+                            <span style={{ fontSize: 11.5, color: color.muted }}>
+                              {p?.title ?? 'No plan'} · {line.static_ip ?? 'no IP'} ·{' '}
+                              <span style={{ color: STATUS_DOT[line.status] ?? color.muted, fontWeight: 600 }}>{line.status}</span>
+                            </span>
+                          </div>
+                          <RowActions>
+                            <RowAction tone={color.amberInk} onClick={() => setAccess(line, line.status === 'active' ? 'pause' : 'resume')}>
+                              {line.status === 'active' ? 'Pause' : 'Resume'}
+                            </RowAction>
+                            <RowAction tone={color.green} onClick={() => setEditing({ ...line })}>Edit</RowAction>
+                          </RowActions>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
             <KV k="Plan" v={planById[detail.plan_id]?.title ?? '—'} />
             <KV k="Router" v={routerById[detail.router_id]?.name ?? '—'} />
             <KV k="Status" v={detail.status} />
