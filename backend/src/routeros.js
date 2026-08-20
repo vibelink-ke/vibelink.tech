@@ -84,6 +84,16 @@ const { RouterOSAPI } = pkg;
  * carry its own description and still be found, updated, and left alone by
  * the next push exactly as before.
  */
+/**
+ * A short breather between heavy config-push steps (bridge, PPPoE server,
+ * hotspot server, DNS proxy…), each of which makes RouterOS recompute
+ * interface/routing/connection-tracking state. Fired back-to-back with no
+ * gap at all, that recomputation stacked up into a CPU spike big enough to
+ * starve the management tunnel mid-push on weaker boards — see the Configure
+ * handler in server.js, which calls this between the biggest steps.
+ */
+export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const TAG = '(vibelink)';
 const managed = (label) => `${label} ${TAG}`;
 const isManaged = (row) => typeof row?.comment === 'string' && row.comment.endsWith(TAG);
@@ -796,20 +806,43 @@ export async function applyNat(conn, { subnet, wan = null }) {
  * hotspot is a shop with the door locked from the inside. The billing portal
  * itself has to be reachable for the same reason.
  *
- * Entries we manage are tagged and replaced wholesale on each run; anything
- * an operator added by hand is left alone.
+ * Entries we manage are tagged and diffed against the wanted list on each
+ * run — only what actually changed is touched; anything an operator added
+ * by hand is left alone.
  */
 export async function applyWalledGarden(conn, hosts = []) {
   const wanted = [...new Set(hosts.map((h) => String(h).trim()).filter(Boolean))];
 
+  /**
+   * Diffed, not rebuilt — this used to remove every managed row and re-add
+   * the entire list on every single push, even when nothing had changed. On
+   * a walled garden of any real size that is dozens of back-to-back RouterOS
+   * writes for zero actual change, every push, forever — on a weak board
+   * that burst of control-plane work was enough to spike CPU to 100% and
+   * knock the management tunnel out mid-push. Now it only touches rows that
+   * actually need to move, so a re-push with an unchanged list is a no-op,
+   * same as every other apply* function here.
+   */
   const current = await conn.write('/ip/hotspot/walled-garden/print', []);
-  for (const row of current.filter((r) => isManaged(r))) {
+  const mine = current.filter((r) => isManaged(r));
+  const have = new Set(mine.map((r) => r['dst-host']));
+
+  const toRemove = mine.filter((r) => !wanted.includes(r['dst-host']));
+  const toAdd = wanted.filter((h) => !have.has(h));
+
+  // Still paced even after diffing to a minimal set — a router being onboarded
+  // for the first time has nothing managed yet, so the whole list is new adds
+  // in one go. A short gap between writes gives the router's control plane a
+  // breath between each rather than saturating it in one unbroken burst.
+  for (const row of toRemove) {
     await conn.write('/ip/hotspot/walled-garden/remove', [`=.id=${idOf(row)}`]);
+    await sleep(40);
   }
-  for (const host of wanted) {
+  for (const host of toAdd) {
     await conn.write('/ip/hotspot/walled-garden/add', [
       `=dst-host=${host}`, '=action=allow', `=comment=${managed('ispHotspot walled garden')}`,
     ]);
+    await sleep(40);
   }
   return { allowed: wanted.length };
 }

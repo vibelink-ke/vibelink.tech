@@ -3157,6 +3157,11 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
           ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
           : `${bridge.bridge} already had those ports`);
         if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
+        // A breather after bridge creation, which makes RouterOS recompute its
+        // whole interface/STP state — firing the next heavy step immediately
+        // after was part of what spiked CPU to 100% and dropped the tunnel
+        // mid-push on weaker boards.
+        await ros.sleep(500);
 
         /**
          * The pool the operator configured under Networks, not a built-in one.
@@ -3207,6 +3212,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         done.push(confPool
           ? `PPPoE server on ${pppoe.bridge}; addresses come from ${confPool.cidr} here, not from the router`
           : `PPPoE server on ${pppoe.bridge} — no PPPoE pool defined under Networks, so no addresses can be issued`);
+        await ros.sleep(500);
 
         // Recorded so RADIUS can refuse a static IP this router cannot serve.
         // Sending one outside the pool makes the router authenticate the
@@ -3276,6 +3282,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         done.push(built.changed.length
           ? `hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool} — created ${built.changed.join(', ')}`
           : `hotspot on ${bridge.bridge} already set up at ${built.gateway}`);
+        await ros.sleep(500);
       } else if (!profiles) {
         done.push('no hotspot profiles on this router, and no LAN ports chosen to build one on');
       }
@@ -3291,6 +3298,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         : dnsProxy.enabled
           ? 'DNS proxy open to guests — could not confirm the uplink to firewall it, so check this by hand'
           : 'could not enable the DNS proxy safely (no uplink identified) — guests will not be able to resolve names, and the popup will not appear');
+      await ros.sleep(400);
 
       // The walled garden goes on regardless: it is what lets an unpaid guest
       // reach M-Pesa, and it applies to a hotspot we inherited just as much as
