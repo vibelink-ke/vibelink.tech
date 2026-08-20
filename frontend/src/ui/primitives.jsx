@@ -431,12 +431,16 @@ export function Modal({ open, title, onClose, footer, width = 520, children }) {
  * width: the list behind it is the context for what you are reading, and losing
  * it entirely turns a glance into navigation.
  */
-export function Drawer({ open, title, onClose, children, width = 'min(760px, 92vw)' }) {
+export function Drawer({ open, title, onClose, children, width = 'min(880px, 94vw)' }) {
   if (!open) return null;
+  // A wall of 12.5px rows with no grouping was the actual complaint — every
+  // "View" panel in the app is built from this one component, so making it
+  // bigger and better organised here is what fixes all of them at once
+  // rather than one screen at a time.
   return (
     <div
       onClick={onClose}
-      style={{ position: 'fixed', inset: 0, background: 'rgba(18,33,29,.35)', display: 'flex', justifyContent: 'flex-end', zIndex: 55 }}
+      style={{ position: 'fixed', inset: 0, background: 'rgba(18,33,29,.45)', display: 'flex', justifyContent: 'flex-end', zIndex: 55 }}
     >
       <aside
         onClick={(e) => e.stopPropagation()}
@@ -448,37 +452,50 @@ export function Drawer({ open, title, onClose, children, width = 'min(760px, 92v
           display: 'flex',
           flexDirection: 'column',
           borderLeft: `1px solid ${color.line}`,
+          boxShadow: '-24px 0 60px rgba(18,23,21,.18)',
         }}
       >
         <header
           style={{
-            padding: '14px 16px',
+            padding: '22px 28px',
             borderBottom: `1px solid ${color.line}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
+            background: color.subtleBg,
           }}
         >
-          <span style={{ fontSize: 14, fontWeight: 600, color: color.ink }}>{title}</span>
+          <span style={{ fontSize: 21, fontWeight: 700, color: color.ink, letterSpacing: '-.01em' }}>{title}</span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 18, color: color.muted, lineHeight: 1 }}
+            style={{
+              border: `1px solid ${color.line}`, background: color.cardBg, cursor: 'pointer',
+              fontSize: 18, color: color.muted, lineHeight: 1, width: 34, height: 34,
+              borderRadius: radius.pill, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
           >
             ×
           </button>
         </header>
-        <div style={{ padding: 16, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>
+        <div style={{ padding: '24px 28px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 22, fontSize: 15 }}>
+          {children}
+        </div>
       </aside>
     </div>
   );
 }
 
 export const KV = ({ k, v }) => (
-  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5 }}>
-    <span style={{ color: color.muted }}>{k}</span>
-    <span style={{ color: color.ink, textAlign: 'right' }}>{v}</span>
+  <div
+    style={{
+      display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 16,
+      fontSize: 14.5, padding: '9px 0', borderBottom: `1px solid ${color.tileBg}`,
+    }}
+  >
+    <span style={{ color: color.muted, fontWeight: 500 }}>{k}</span>
+    <span style={{ color: color.ink, textAlign: 'right', fontWeight: 600 }}>{v}</span>
   </div>
 );
 
