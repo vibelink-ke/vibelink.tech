@@ -166,6 +166,9 @@ export default function Sidebar() {
       }}
     >
       <div style={{ padding: '20px 18px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${color.sideLine}` }}>
+        {/* A WiFi mark instead of a plain letter tile — this is a WiFi
+            billing platform, and the brand square is the one piece of
+            chrome on screen every single page, every single time. */}
         <div
           style={{
             width: 30,
@@ -176,12 +179,14 @@ export default function Sidebar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: '#fff',
-            fontWeight: 700,
-            fontSize: 14,
           }}
         >
-          {brandName.charAt(0).toUpperCase()}
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M4 8.5C9.5 3.5 14.5 3.5 20 8.5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.55" />
+            <path d="M6.8 12.3C10.5 9 13.5 9 17.2 12.3" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.8" />
+            <path d="M9.7 16C11.3 14.6 12.7 14.6 14.3 16" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+            <circle cx="12" cy="19.3" r="1.4" fill="#fff" />
+          </svg>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
           <span
