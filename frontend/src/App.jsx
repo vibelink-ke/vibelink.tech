@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, useEffect } from 'react';
-import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
@@ -56,6 +56,15 @@ export default function App() {
   const { dark, session, signIn, reload } = useStore();
   const isMobile = useMediaQuery('(max-width: 900px)');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
+
+  // A session that resolves while sitting on a deep page (it expired on
+  // /clients, or the tab was reopened there) should not sign back in on
+  // that same URL — the operator asked to sign in, not to stay put.
+  const signInToDashboard = (s, message) => {
+    signIn(s, message);
+    navigate('/', { replace: true });
+  };
 
   /**
    * Fetch again whenever a screen is opened.
@@ -123,7 +132,7 @@ export default function App() {
 
   // A tenant's own subdomain: sign in only. Registering a second account from
   // inside a working portal splits an operator's customers across two of them.
-  if (session === null) return <AuthGate onSignedIn={signIn} only="login" />;
+  if (session === null) return <AuthGate onSignedIn={signInToDashboard} only="login" />;
 
   return (
     // `om-dark` is the mockup's rootClass: it inverts the whole tree, and
