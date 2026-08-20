@@ -897,10 +897,19 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
     return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
   }
 
+  const { rows: [plan] } = await pool.query(
+    'select rate_down, rate_up from plans where id=$1', [found.voucher.plan_id]);
+
   // Re-read the router's own host list rather than trusting the mac the
   // client sent — the earlier GET is a convenience list, not a permission
   // slip, and binding a mac nobody actually saw on this network would let
   // a guest grant free access to any device whose address they could guess.
+  //
+  // The bind itself needs no code at all once this confirms the device is
+  // real — see bindDeviceByMac. That is deliberate: a shared voucher code
+  // is a secret that can be typed into a second device by anyone who reads
+  // it off a receipt or overhears it, which is exactly the "code sharing"
+  // this is meant to close. A MAC bypass has nothing to type anywhere.
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const r = found.router;
@@ -910,18 +919,29 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
       host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
       user: r.service_user, password, timeoutSec: 8,
     });
-    let devices;
-    try { devices = await ros.nearbyDevices(conn); } finally { ros.close(conn); }
-    if (!devices.some((d) => d.mac === mac)) {
-      return res.status(404).json({ error: 'That device is not currently on this network.' });
+    try {
+      const devices = await ros.nearbyDevices(conn);
+      if (!devices.some((d) => d.mac === mac)) {
+        return res.status(404).json({ error: 'That device is not currently on this network.' });
+      }
+      await ros.bindDeviceByMac(conn, {
+        mac, downKbps: plan?.rate_down ?? 2000, upKbps: plan?.rate_up ?? 1000,
+        comment: found.voucher.code,
+      });
+    } finally {
+      ros.close(conn);
     }
   } catch (e) {
-    return res.status(502).json({ error: `Could not confirm that device with the router: ${e.message}` });
+    return res.status(502).json({ error: `Could not add that device on the router: ${e.message}` });
   }
 
+  // Kept for expiry bookkeeping only now — not for authentication, which the
+  // ip-binding above already handles entirely on its own. router_id is what
+  // lets expiry cleanup find its way back to this exact box later.
   await pool.query(
-    `insert into voucher_devices (voucher_id, mac) values ($1,$2)
-     on conflict (voucher_id, mac) do nothing`, [found.voucher.id, mac]);
+    `insert into voucher_devices (voucher_id, mac, router_id) values ($1,$2,$3)
+     on conflict (voucher_id, mac) do update set router_id = excluded.router_id`,
+    [found.voucher.id, mac, r.id]);
   res.json({ ok: true });
 }));
 

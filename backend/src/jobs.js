@@ -95,6 +95,36 @@ async function expireAndSuspend() {
     await pool.query('update subscribers set status=$2 where id=$1', [s.id, next]);
     if (next === 'expired') await pool.query('begin').then(() => walledGarden(pool, s.tenant_id, s.id)).catch(() => {});
   }
+  // Before the flip, not after: 'in_use' is what the join below is looking
+  // for, and unbindDeviceByMac is best-effort by design (the DB status
+  // change is the part that must not depend on a router being reachable) —
+  // a router that fails to answer here just leaves its ip-binding and queue
+  // in place until the next run tries again, never blocking the expiry itself.
+  const { rows: expiringDevices } = await pool.query(
+    `select d.mac, r.host, r.secret, r.api_port, r.service_user, r.service_password_enc
+       from vouchers v
+       join voucher_devices d on d.voucher_id = v.id
+       join routers r on r.id = d.router_id
+      where v.status='in_use' and v.expires_at < now() and v.tenant_id in (${enabledTenants})
+        and r.service_user is not null and r.service_password_enc is not null`,
+    ['expireAndSuspend']);
+  if (expiringDevices.length) {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    for (const d of expiringDevices) {
+      try {
+        const password = secrets.decrypt(d.service_password_enc);
+        const conn = await ros.connect({
+          host: String(d.host).split('/')[0], port: d.api_port ?? 8728,
+          user: d.service_user, password, timeoutSec: 8,
+        });
+        try { await ros.unbindDeviceByMac(conn, { mac: d.mac }); } finally { ros.close(conn); }
+      } catch (e) {
+        console.warn('unbindDeviceByMac failed for', d.mac, '—', e.message);
+      }
+    }
+  }
+
   await pool.query(
     `update vouchers set status='expired'
      where status='in_use' and expires_at < now() and tenant_id in (${enabledTenants})`,

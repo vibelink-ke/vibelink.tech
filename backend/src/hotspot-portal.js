@@ -632,7 +632,7 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
         .then(function (res) {
           if (!res.ok) { note.textContent = res.d.error || 'Could not add that device.'; btn.disabled = false; btn.textContent = 'Add'; return; }
           btn.textContent = 'Added';
-          note.textContent = 'Done — open a browser on that device and it should connect on its own within a minute.';
+          note.textContent = "Done — that device is online now, no code or browser needed on it.";
         })
         .catch(function () { note.textContent = 'Could not reach the billing system from here.'; btn.disabled = false; btn.textContent = 'Add'; });
     }

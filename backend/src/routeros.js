@@ -1507,6 +1507,81 @@ export async function nearbyDevices(conn) {
     .filter((d) => d.mac);
 }
 
+/**
+ * Get a device online with no login step at all — the actual answer for a TV
+ * with no browser, as opposed to nearbyDevices()/the shared-code path, which
+ * still needs *some* browser to submit the form.
+ *
+ * Two things happen: a static DHCP lease pins the device to one IP forever
+ * (queues target an address, not a MAC, so this has to be stable), and an
+ * ip-binding of type=bypassed tells the hotspot to wave that MAC straight
+ * through with no login page at all. Bypassed skips RADIUS entirely, so it
+ * carries no rate limit on its own — the queue is what actually enforces the
+ * plan's speed; without it a bypassed device would run at the router's full
+ * uncapped rate, backwards from what a paying customer bought.
+ *
+ * This is also the actual fix for "no code sharing": nothing here is a
+ * secret that can be typed into a second device. Access is tied to this one
+ * MAC, full stop — the router simply does not consult a shared code for it.
+ */
+export async function bindDeviceByMac(conn, { mac, downKbps, upKbps, comment = '' }) {
+  const MAC = String(mac).toUpperCase();
+  const label = managed(`ispHotspot device ${comment}`.trim());
+
+  // Static lease: the same MAC always gets the same address, which is what
+  // lets a queue keyed on that address actually mean anything over time.
+  const leases = await conn.write('/ip/dhcp-server/lease/print', [`?mac-address=${MAC}`]);
+  let ip = leases[0]?.address;
+  if (leases[0]) {
+    if (leases[0]['dynamic'] !== 'false' && leases[0]['dynamic'] !== undefined) {
+      await cmd(conn, 'pin device DHCP lease', '/ip/dhcp-server/lease/make-static', [`=.id=${idOf(leases[0])}`]);
+    }
+  } else {
+    throw new Error('This device has no DHCP lease yet — it needs to be connected to the WiFi first.');
+  }
+
+  // ip-binding: the actual bypass. Idempotent by MAC.
+  const bindings = await conn.write('/ip/hotspot/ip-binding/print', [`?mac-address=${MAC}`]);
+  const bindFields = [`=mac-address=${MAC}`, '=type=bypassed', `=comment=${label}`];
+  if (bindings[0]) {
+    if (!unchanged(bindings[0], bindFields)) {
+      await cmd(conn, 'device ip-binding', '/ip/hotspot/ip-binding/set', [`=.id=${idOf(bindings[0])}`, ...bindFields]);
+    }
+  } else {
+    await cmd(conn, 'device ip-binding', '/ip/hotspot/ip-binding/add', bindFields);
+  }
+
+  // The queue: the only thing standing between "bypassed" and unlimited speed.
+  const queues = await conn.write('/queue/simple/print', [`?target=${ip}/32`]);
+  const queueFields = [`=target=${ip}/32`, `=max-limit=${upKbps}k/${downKbps}k`, `=comment=${label}`];
+  if (queues[0]) {
+    if (!unchanged(queues[0], queueFields)) {
+      await cmd(conn, 'device speed cap', '/queue/simple/set', [`=.id=${idOf(queues[0])}`, ...queueFields]);
+    }
+  } else {
+    await cmd(conn, 'device speed cap', '/queue/simple/add', [`=name=${managed('ispHotspot-' + MAC.replace(/:/g, ''))}`, ...queueFields]);
+  }
+
+  return { mac: MAC, ip };
+}
+
+/** Undo bindDeviceByMac — called once the underlying voucher/device expires. */
+export async function unbindDeviceByMac(conn, { mac }) {
+  const MAC = String(mac).toUpperCase();
+  const bindings = await conn.write('/ip/hotspot/ip-binding/print', [`?mac-address=${MAC}`]);
+  for (const b of bindings) {
+    if (isManaged(b)) await cmd(conn, 'remove device ip-binding', '/ip/hotspot/ip-binding/remove', [`=.id=${idOf(b)}`]);
+  }
+  const leases = await conn.write('/ip/dhcp-server/lease/print', [`?mac-address=${MAC}`]);
+  const ip = leases[0]?.address;
+  if (ip) {
+    const queues = await conn.write('/queue/simple/print', [`?target=${ip}/32`]);
+    for (const q of queues) {
+      if (isManaged(q)) await cmd(conn, 'remove device speed cap', '/queue/simple/remove', [`=.id=${idOf(q)}`]);
+    }
+  }
+}
+
 /** "01:23:45" (RouterOS uptime/idle-time shape) -> seconds, for sorting by how recently a device was active. */
 function hhmmssToSeconds(v) {
   const parts = String(v).match(/(\d+)d|(\d+)h|(\d+)m|(\d+)s/g) ?? [];
