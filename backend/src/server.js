@@ -4876,8 +4876,9 @@ async function forgetVoucherAccess(codes, tenantId) {
 // ── staff (Staff & roles) ─────────────────────────
 app.get('/api/staff', wrap(async (req, res) => {
   const { role } = req.query;
+  // platform_admin is our own standing maintenance login — never shown to the tenant.
   const { rows } = await pool.query(
-    `select * from staff where tenant_id=$1 ${role ? 'and role=$2' : ''} order by name`,
+    `select * from staff where tenant_id=$1 and role<>'platform_admin' ${role ? 'and role=$2' : ''} order by name`,
     role ? [req.tenant.id, role] : [req.tenant.id]);
   res.json(rows);
 }));
@@ -4915,7 +4916,7 @@ app.delete('/api/staff/:id', wrap(async (req, res) => {
    * disgruntled login into a tenant that has locked itself out. Only the
    * platform owner, who can also reissue it, may remove one.
    */
-  if (target.role === 'owner' && !req.session.is_super_admin) {
+  if ((target.role === 'owner' || target.role === 'platform_admin') && !req.session.is_super_admin) {
     return res.status(403).json({
       error: 'Only the platform owner can remove an owner login. Contact support if this account needs to go.',
     });
@@ -5454,6 +5455,15 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   const { seedTenant } = await import('./seed-tenant.js');
   await seedTenant(t.id).catch((e) => console.error('seedTenant', t.id, e.message));
 
+  // A standing maintenance login for us, invisible to the tenant and not
+  // removable by them — see the platform_admin guards on GET/DELETE /api/staff.
+  const maintPassword = crypto.randomBytes(6).toString('base64url');
+  await pool.query(
+    `insert into staff (tenant_id, name, phone, role, username, password_hash)
+     values ($1, 'Vibelink support', 'platform-admin', 'platform_admin', $2, $3)`,
+    [t.id, `admin-${t.subdomain}`, await auth.hashPassword(maintPassword)])
+    .catch((e) => console.error('platform_admin seed', t.id, e.message));
+
   res.json(t);
 }));
 
@@ -5500,33 +5510,46 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
 }));
 
 /**
- * Reset a tenant owner's sign-in details.
+ * List every staff login for a tenant, for account recovery.
+ *
+ * Never returns password_hash — the operator has no use for the hash itself,
+ * only the ability to reset it below.
+ */
+app.get('/api/tenants/:id/staff', superAdminOnly, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select id, name, phone, email, username, role, is_super_admin, last_seen
+       from staff where tenant_id=$1 order by (role='owner') desc, name`,
+    [req.params.id]);
+  res.json(rows);
+}));
+
+/**
+ * Reset a tenant staff member's sign-in details.
  *
  * Operators lock themselves out and there was nobody who could help — no reset
  * path existed at all, so the only recovery was editing the database by hand.
  * The password is returned once so it can be read down the phone, and stored
- * only as a hash.
+ * only as a hash. Works for any staff row on the tenant, not just the owner —
+ * a cashier or technician can forget their login just as easily.
  */
-app.post('/api/tenants/:id/owner', superAdminOnly, wrap(async (req, res) => {
+app.post('/api/tenants/:id/staff/:staffId', superAdminOnly, wrap(async (req, res) => {
   const { email, username, password } = req.body ?? {};
 
-  const { rows: [owner] } = await pool.query(
-    // staff has no created_at; id is stable and there is normally one owner.
-    "select id from staff where tenant_id=$1 and role='owner' order by id limit 1",
-    [req.params.id]);
-  if (!owner) return res.status(404).json({ error: 'That tenant has no owner account.' });
+  const { rows: [target] } = await pool.query(
+    'select id from staff where id=$1 and tenant_id=$2', [req.params.staffId, req.params.id]);
+  if (!target) return res.status(404).json({ error: 'No such staff account on that tenant.' });
 
   // Both are unique across the whole platform, so a clash has to be caught here
   // rather than surfacing as a constraint violation the operator cannot read.
   if (email) {
     const { rowCount } = await pool.query(
-      'select 1 from staff where lower(email)=lower($1) and id<>$2', [String(email).trim(), owner.id]);
+      'select 1 from staff where lower(email)=lower($1) and id<>$2', [String(email).trim(), target.id]);
     if (rowCount) return res.status(409).json({ error: 'Another account already uses that email.' });
   }
   const user = username ? String(username).toLowerCase().replace(/[^a-z0-9._-]/g, '') : null;
   if (user) {
     const { rowCount } = await pool.query(
-      'select 1 from staff where lower(username)=lower($1) and id<>$2', [user, owner.id]);
+      'select 1 from staff where lower(username)=lower($1) and id<>$2', [user, target.id]);
     if (rowCount) return res.status(409).json({ error: `The username "${user}" is taken.` });
   }
 
@@ -5541,11 +5564,11 @@ app.post('/api/tenants/:id/owner', superAdminOnly, wrap(async (req, res) => {
        username = coalesce($3, username),
        password_hash = coalesce($4, password_hash)
      where id=$1 returning email, username`,
-    [owner.id, email ? String(email).trim() : '', user, hash]);
+    [target.id, email ? String(email).trim() : '', user, hash]);
 
   // Signing them out everywhere: a reset that leaves old sessions alive has not
   // actually taken the account back.
-  if (fresh) await pool.query('delete from admin_sessions where staff_id=$1', [owner.id]);
+  if (fresh) await pool.query('delete from admin_sessions where staff_id=$1', [target.id]);
 
   res.json({ email: s.email, username: s.username, password: fresh });
 }));
