@@ -3730,10 +3730,13 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const { rows } = await pool.query(`
     with pools as (
+      -- Not the expired-customers pool: that range exists to be firewalled
+      -- off, not offered as a normal client's assigned address.
       select cidr from ip_pools
        where tenant_id = $1
          and (router_id = $2 or router_id is null)
          and service = 'pppoe'
+         and purpose != 'expired'
     )
     select host(network(p.cidr) + i) as ip, text(p.cidr) as pool
       from pools p,

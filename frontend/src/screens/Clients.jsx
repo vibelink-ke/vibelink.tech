@@ -17,8 +17,19 @@ const AUTOPAY_OPTIONS = [
 
 /**
  * Usable host addresses in an IPv4 CIDR block — network and broadcast
- * excluded, capped at 254 so a /16 someone typed by mistake can't hang the
- * page enumerating 65,000 addresses for a dropdown.
+ * excluded, capped at 254 results so a dropdown never has to render more
+ * than that.
+ *
+ * Used to also refuse outright — return nothing at all — for any pool over
+ * 256 addresses, on the theory that someone had typed a /16 by mistake. Real
+ * pools routinely aren't /24s: the auto-created expired-customer pools are
+ * /20 (4096 addresses), and an operator's own PPPoE pool is whatever size
+ * they actually need. The dropdown read as having zero free addresses for
+ * any of them — indistinguishable from the pool genuinely being full. The
+ * loop itself was always bounded to `max` results; only the guard in front
+ * of it was refusing to let it run. Iteration is still bounded (not just the
+ * output) so a genuinely huge block someone did type by mistake — a /8 —
+ * can't scan millions of addresses just to fill 254 dropdown rows.
  */
 function hostsInCidr(cidr, max = 254) {
   const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(String(cidr ?? '').trim());
@@ -26,9 +37,10 @@ function hostsInCidr(cidr, max = 254) {
   const [, a, b, c, d, bits] = m.map(Number);
   const base = (a << 24) | (b << 16) | (c << 8) | d;
   const size = 2 ** (32 - bits);
-  if (size < 2 || size > max + 2) return [];
+  if (size < 2) return [];
+  const scanLimit = Math.min(size - 1, 65536);
   const out = [];
-  for (let i = 1; i < size - 1 && out.length < max; i++) {
+  for (let i = 1; i < scanLimit && out.length < max; i++) {
     const ip = (base + i) >>> 0;
     out.push([(ip >>> 24) & 255, (ip >>> 16) & 255, (ip >>> 8) & 255, ip & 255].join('.'));
   }
@@ -967,7 +979,12 @@ export default function Clients() {
                 // handing two lines the same address with nothing to catch
                 // it until the router did, silently, to whichever session
                 // reconnected second.
-                const pool = (store.ipPools ?? []).find((p) => p.router_id === editing.router_id && p.service !== 'hotspot');
+                // Not the expired-customers pool, even when it's the only
+                // other one on this router — that range exists to be
+                // firewalled off, not handed to an active client by editing
+                // their static IP.
+                const pool = (store.ipPools ?? [])
+                  .find((p) => p.router_id === editing.router_id && p.service !== 'hotspot' && p.purpose !== 'expired');
                 const taken = new Set(
                   clients.filter((c) => c.id !== editing.id && c.static_ip).map((c) => c.static_ip)
                 );
