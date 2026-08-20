@@ -2014,8 +2014,22 @@ app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res)
       // Explicit, because a management tunnel must never carry customer traffic
       // even if the server one day pushes a route.
       + 'add-default-route=no mode=ip',
-    // No srcnat rule here. This tunnel exists so the server can reach the router;
-    // masquerading out of it would hide everything behind the router instead.
+    /**
+     * Masquerade on the tunnel interface itself, not a subnet.
+     *
+     * add-default-route=no above means nothing is routed through this
+     * interface except the router's own self-generated traffic, so this is
+     * inert today — a genuine no-op, not a risk. It exists as a safety net
+     * for whatever the router itself needs to originate through the tunnel
+     * (an NTP request, a lookup) rather than something arriving from behind
+     * it: masquerading subscriber traffic out of this interface would still
+     * be wrong for exactly the reason a plain srcnat-by-subnet rule would be
+     * — it would hide every customer behind the router's own single address
+     * — which is why this is scoped to the interface, not a subnet.
+     */
+    '/ip firewall nat remove [find where comment="ispVpn tunnel egress (vibelink)"]',
+    '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade '
+      + 'comment="ispVpn tunnel egress (vibelink)"',
     ':log info "Billing OVPN client added - waiting for tunnel IP"',
   ].join('\n');
 
