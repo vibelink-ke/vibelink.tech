@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, TOPBAR_H } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -61,6 +62,34 @@ export default function Topbar() {
   const results = useSearchResults(searchQuery, store);
   const hasQuery = searchQuery.trim().length > 0;
 
+  /**
+   * The dropdown is portaled to <body> and positioned with `fixed`, not
+   * rendered inline where it visually sits.
+   *
+   * The header it used to live inside sets overflow-y:hidden — needed so
+   * the chips scroll sideways on a narrow screen without wrapping onto a
+   * second line — and that clips any absolutely-positioned child that
+   * extends past the header's own height, dropdown included. The search box
+   * itself worked fine; every result was rendering, just invisible, which
+   * is indistinguishable from search being broken.
+   */
+  const searchBoxRef = useRef(null);
+  const [dropdownRect, setDropdownRect] = useState(null);
+  useLayoutEffect(() => {
+    if (!hasQuery || !searchBoxRef.current) return;
+    const update = () => {
+      const r = searchBoxRef.current.getBoundingClientRect();
+      setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [hasQuery]);
+
   const sms = store.smsCredits;             // null until the first read comes back
   const known = sms != null;
   const credits = sms?.credits ?? 0;
@@ -104,7 +133,7 @@ export default function Topbar() {
         </button>
       )}
 
-      <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 110, maxWidth: 380 }}>
+      <div ref={searchBoxRef} style={{ position: 'relative', flex: '1 1 auto', minWidth: 110, maxWidth: 380 }}>
         <div
           style={{
             display: 'flex',
@@ -141,14 +170,14 @@ export default function Topbar() {
           )}
         </div>
 
-        {hasQuery && (
+        {hasQuery && dropdownRect && createPortal(
           <div
             style={{
-              position: 'absolute',
-              top: 40,
-              left: 0,
-              right: 0,
-              zIndex: 40,
+              position: 'fixed',
+              top: dropdownRect.top,
+              left: dropdownRect.left,
+              width: dropdownRect.width,
+              zIndex: 500,
               background: '#fff',
               border: `1px solid ${color.line}`,
               borderRadius: 10,
@@ -200,7 +229,8 @@ export default function Topbar() {
                 </div>
               ))
             )}
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 
