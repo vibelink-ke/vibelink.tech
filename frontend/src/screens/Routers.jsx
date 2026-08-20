@@ -30,6 +30,10 @@ function WinboxAccess({ store }) {
   const [peers, setPeers] = useState([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Hidden by default: this list carries staff names and tunnel addresses,
+  // which is not something to leave sitting open on a screen someone else
+  // might glance at (a shared screen, a demo, a support call).
+  const [visible, setVisible] = useState(false);
 
   const load = useCallback(async () => {
     try { setPeers(await api.vpnAccessList()); } catch { /* shown as empty */ } finally { setLoading(false); }
@@ -69,14 +73,23 @@ function WinboxAccess({ store }) {
   return (
     <Card
       title="Winbox access"
-      actions={<Button variant="primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : '+ Generate .ovpn'}</Button>}
+      actions={
+        <>
+          <Button onClick={() => setVisible((v) => !v)}>{visible ? 'Hide' : `Show${peers.length ? ` (${peers.length})` : ''}`}</Button>
+          <Button variant="primary" onClick={generate} disabled={busy}>{busy ? 'Generating…' : '+ Generate .ovpn'}</Button>
+        </>
+      }
     >
       <p style={{ margin: '0 0 12px', fontSize: 12.5, color: color.muted }}>
         A VPN profile for your own laptop, over the same tunnel your routers already use. Import it into
         any OpenVPN client, connect, then open Winbox pointed at a router's tunnel address — it only
         reaches your own routers, nothing else on the platform.
       </p>
-      {!loading && peers.length === 0 ? (
+      {!visible ? (
+        <p style={{ fontSize: 12.5, color: color.muted }}>
+          {peers.length ? `${peers.length} peer${peers.length === 1 ? '' : 's'} issued — hidden.` : 'No Winbox access issued yet.'}
+        </p>
+      ) : peers.length === 0 ? (
         <p style={{ fontSize: 12.5, color: color.muted }}>No Winbox access issued yet.</p>
       ) : (
         <Table
