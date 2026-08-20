@@ -102,6 +102,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
   const [f, setF] = useState(BLANK);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
 
   // Mirror the server's normalisation as you type, so the field always shows what
   // will actually be stored rather than silently rewriting it on submit.
@@ -115,6 +116,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     const value = (NORMALISE[k] ?? ((v) => v))(e.target.value);
     setF((s) => ({ ...s, [k]: value }));
     setError('');
+    setNotice('');
   };
 
   const toggle = (k) => () => setF((s) => ({ ...s, [k]: !s[k] }));
@@ -133,6 +135,36 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
       const session = await api.login({ identifier: f.identifier, password: f.password, remember: f.remember });
       clearSecrets();
       onSignedIn(session, `Signed in as ${session.company}`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const forgotPassword = async () => {
+    if (!f.identifier) return setError('Enter your email or username first, then click Forgot password.');
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const r = await api.forgotPassword(f.identifier);
+      setNotice(r.message || 'If that account exists, a reset link has been sent to it.');
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const magicLink = async () => {
+    if (!f.identifier) return setError('Enter your email or username first, then click Email me a link.');
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const r = await api.requestMagicLink(f.identifier);
+      setNotice(r.message || 'If that account exists, a sign-in link has been sent to its email.');
     } catch (e) {
       setError(e.message);
     } finally {
@@ -306,23 +338,40 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
                 />
               </Field>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                 <Check on={f.remember} onClick={toggle('remember')}>
                   Keep me signed in
                 </Check>
-                <span
-                  onClick={() =>
-                    setError(
-                      f.identifier
-                        ? `Reset link sent to the address on file for ${f.identifier}`
-                        : 'Enter your email or username first'
-                    )
-                  }
-                  style={{ fontSize: 12.5, fontWeight: 600, color: color.green, cursor: 'pointer' }}
-                >
-                  Forgot password?
-                </span>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <span
+                    onClick={magicLink}
+                    style={{ fontSize: 12.5, fontWeight: 600, color: color.green, cursor: 'pointer' }}
+                  >
+                    Login with magic link
+                  </span>
+                  <span
+                    onClick={forgotPassword}
+                    style={{ fontSize: 12.5, fontWeight: 600, color: color.green, cursor: 'pointer' }}
+                  >
+                    Forgot password?
+                  </span>
+                </div>
               </div>
+
+              {notice && (
+                <div
+                  style={{
+                    background: '#eef7f1',
+                    border: '1px solid #c9e3d2',
+                    borderRadius: 9,
+                    padding: '11px 13px',
+                    fontSize: 12.5,
+                    color: color.green,
+                  }}
+                >
+                  {notice}
+                </div>
+              )}
 
               {error && (
                 <div

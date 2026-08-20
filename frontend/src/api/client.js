@@ -48,6 +48,9 @@ export const api = {
   login: (creds) => post('/api/auth/login', creds),
   signup: (form) => post('/api/auth/signup', form),
   logout: () => post('/api/auth/logout', {}),
+  forgotPassword: (identifier) => post('/api/auth/forgot', { identifier }),
+  resetPassword: (token, password) => post('/api/auth/reset', { token, password }),
+  requestMagicLink: (identifier) => post('/api/auth/magic-link', { identifier }),
 
   // ── subscribers ──
   subscribers: () => get('/api/subscribers'),

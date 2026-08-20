@@ -102,6 +102,48 @@ export async function sendToSubscriber(tenantId, subscriberId, subject, body) {
   return send(tenantId, s.email, fill(subject), fill(body));
 }
 
+function platformTransport() {
+  if (!process.env.PLATFORM_SMTP_HOST) return null;
+  return nodemailer.createTransport({
+    host: process.env.PLATFORM_SMTP_HOST,
+    port: Number(process.env.PLATFORM_SMTP_PORT) || 587,
+    secure: process.env.PLATFORM_SMTP_SECURE === 'true',
+    auth: process.env.PLATFORM_SMTP_USER
+      ? { user: process.env.PLATFORM_SMTP_USER, pass: process.env.PLATFORM_SMTP_PASS ?? '' }
+      : undefined,
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+  });
+}
+
+/**
+ * Account-security mail — password resets, magic-link sign-in — as opposed to
+ * the customer notices `send()` above handles.
+ *
+ * Tries the tenant's own gateway first so it arrives from a recognised
+ * address, but a brand-new tenant (or one that's locked itself out precisely
+ * because nobody remembers the SMTP password) has no working gateway to try.
+ * PLATFORM_SMTP_* is the fallback so "I forgot my password" still works then.
+ */
+export async function sendSystem(tenantId, to, subject, body) {
+  const c = await config(tenantId);
+  if (c?.enabled) {
+    const r = await send(tenantId, to, subject, body);
+    if (r.ok) return r;
+  }
+  const transport = platformTransport();
+  if (!transport) return { ok: false, error: 'No email gateway configured' };
+  try {
+    await transport.sendMail({
+      from: process.env.PLATFORM_SMTP_FROM || 'Vibelink <no-reply@vibelink.tech>',
+      to, subject, text: body,
+    });
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 export function missingFields(c = {}) {
   return FIELDS.filter((f) => f.required && !String(c[f.key] ?? '').trim()).map((f) => f.label);
 }

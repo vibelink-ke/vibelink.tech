@@ -1314,6 +1314,21 @@ create table if not exists session_handoffs (
 );
 create index if not exists session_handoffs_expiry on session_handoffs (expires_at);
 
+-- ─────────────── password reset / magic-link sign-in ───────────────
+-- Same one-use-ticket shape as session_handoffs, but minted before any session
+-- exists (that is the whole point: the operator has just said they cannot get
+-- one) so it points at a staff row instead of an existing session.
+create table if not exists login_tokens (
+  token      text primary key,
+  staff_id   uuid not null references staff on delete cascade,
+  purpose    text not null check (purpose in ('reset', 'magic')),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null,
+  used_at    timestamptz
+);
+create index if not exists login_tokens_staff_idx on login_tokens (staff_id);
+create index if not exists login_tokens_expiry_idx on login_tokens (expires_at);
+
 alter table outages       enable row level security;
 alter table sla_policies  enable row level security;
 alter table kb_articles   enable row level security;

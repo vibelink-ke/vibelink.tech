@@ -303,6 +303,101 @@ app.get('/api/auth/handoff', wrap(async (req, res) => {
   res.redirect(302, '/');
 }));
 
+/**
+ * "I forgot my password" for a staff sign-in — distinct from /portal/recover,
+ * which is the customer-facing equivalent. Sends both channels because losing
+ * the one account that can reach Settings → Email is exactly the situation
+ * this exists for, and a staff row does not always have a working phone.
+ *
+ * Always answers the same way regardless of a match, for the same reason the
+ * customer version does: which emails/usernames exist is not a free list to
+ * hand back through this door.
+ */
+app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
+  const who = String(req.body?.identifier ?? '').trim();
+  const generic = { ok: true, message: 'If that account exists, a reset link has been sent to it.' };
+  if (!who) return res.json(generic);
+
+  const { rows: [acct] } = await pool.query(
+    `select st.id, st.email, st.phone, st.tenant_id, t.subdomain from staff st
+     join tenants t on t.id = st.tenant_id
+     where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
+  if (!acct) return res.json(generic);
+
+  const token = await auth.createLoginToken(acct.id, 'reset');
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const link = `https://${acct.subdomain}.${root}/reset-password?token=${token}`;
+
+  if (acct.email) {
+    const email = await import('./email.js');
+    email.sendSystem(acct.tenant_id, acct.email, 'Reset your Vibelink password',
+      `Reset your password: ${link}\n\nThis link expires in 30 minutes and works once. `
+      + 'If you did not request this, ignore it.').catch(() => {});
+  }
+  if (acct.phone) {
+    const sms = await import('./sms.js');
+    sms.send(acct.tenant_id, acct.phone, 'custom',
+      { body: `Vibelink password reset: ${link} (valid 30 min)` }).catch(() => {});
+  }
+  auth.pruneLoginTokens();
+  res.json(generic);
+}));
+
+app.post('/api/auth/reset', wrap(async (req, res) => {
+  const { token, password } = req.body ?? {};
+  if (String(password ?? '').length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+
+  const staffId = await auth.consumeLoginToken(token, 'reset');
+  if (!staffId) return res.status(400).json({ error: 'That reset link is invalid or has expired.' });
+
+  await pool.query('update staff set password_hash=$2 where id=$1', [staffId, await auth.hashPassword(password)]);
+  // A password reset is also a reason nothing signed in with the old one should stay signed in.
+  await pool.query('delete from admin_sessions where staff_id=$1', [staffId]);
+  res.json({ ok: true });
+}));
+
+/**
+ * Passwordless sign-in: emails a one-use link instead of asking for a
+ * password at all. Email only, unlike /api/auth/forgot — a texted link this
+ * short-lived (15 min) that also signs someone in is a heavier thing to trust
+ * to SMS, which several providers deliver minutes late.
+ */
+app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
+  const who = String(req.body?.identifier ?? '').trim();
+  const generic = { ok: true, message: 'If that account exists, a sign-in link has been sent to its email.' };
+  if (!who) return res.json(generic);
+
+  const { rows: [acct] } = await pool.query(
+    `select st.id, st.email, st.tenant_id, t.subdomain from staff st
+     join tenants t on t.id = st.tenant_id
+     where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
+  if (!acct?.email) return res.json(generic);
+
+  const token = await auth.createLoginToken(acct.id, 'magic');
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const link = `https://${acct.subdomain}.${root}/api/auth/magic?token=${token}`;
+
+  const email = await import('./email.js');
+  email.sendSystem(acct.tenant_id, acct.email, 'Your Vibelink sign-in link',
+    `Sign in: ${link}\n\nThis link expires in 15 minutes and works once. `
+    + 'If you did not request this, ignore it.').catch(() => {});
+  auth.pruneLoginTokens();
+  res.json(generic);
+}));
+
+/** Where the link in that email actually lands: redeem the token, set the cookie, go to the dashboard. */
+app.get('/api/auth/magic', wrap(async (req, res) => {
+  const staffId = await auth.consumeLoginToken(req.query.token, 'magic');
+  if (!staffId) return res.redirect(302, '/?magicError=1');
+
+  const { rows: [acct] } = await pool.query('select tenant_id from staff where id=$1', [staffId]);
+  const { token, expiresAt } = await auth.createSession(staffId, acct.tenant_id, { remember: true });
+  auth.setSessionCookie(res, token, expiresAt);
+  await pool.query('update staff set last_seen = now() where id = $1', [staffId]);
+  res.redirect(302, '/');
+}));
+
 app.post('/api/auth/logout', wrap(async (req, res) => {
   const token = auth.sessionToken(req);
   if (token) await auth.destroySession(token);

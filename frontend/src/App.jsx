@@ -4,6 +4,7 @@ import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
 import AuthGate from './app/AuthGate';
+import ResetPassword from './app/ResetPassword';
 import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
@@ -94,6 +95,10 @@ export default function App() {
   // cookie the admin routes do not accept. Checked first so a subscriber never
   // sees the staff sign-in card.
   if (pathname.startsWith('/customer')) return <CustomerPortal />;
+
+  // Reachable with no session at all — that is the point of a password
+  // reset — so this has to come before the session gate below, not after it.
+  if (pathname === '/reset-password') return <ResetPassword />;
 
   // undefined = the session check has not come back yet. Rendering nothing for
   // that tick avoids flashing the sign-in card at an already-authenticated user.

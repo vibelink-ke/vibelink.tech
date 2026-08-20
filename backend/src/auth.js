@@ -100,6 +100,38 @@ export async function consumeHandoff(token) {
 export const pruneHandoffs = () =>
   pool.query('delete from session_handoffs where expires_at < now()').catch(() => {});
 
+/* ── password reset / magic-link sign-in ─────────────────────── */
+
+const RESET_MINUTES = 30;
+const MAGIC_MINUTES = 15;
+
+/** Minted for a staff row before any session exists — that is what it is for. */
+export async function createLoginToken(staffId, purpose) {
+  const token = crypto.randomBytes(24).toString('base64url');
+  const minutes = purpose === 'magic' ? MAGIC_MINUTES : RESET_MINUTES;
+  await pool.query(
+    `insert into login_tokens (token, staff_id, purpose, expires_at)
+     values ($1, $2, $3, now() + ($4 || ' minutes')::interval)`,
+    [token, staffId, purpose, minutes]
+  );
+  return token;
+}
+
+/** Redeem at most once, and only for the purpose it was minted for. */
+export async function consumeLoginToken(token, purpose) {
+  if (!token) return null;
+  const { rows: [row] } = await pool.query(
+    `update login_tokens set used_at = now()
+      where token = $1 and purpose = $2 and used_at is null and expires_at > now()
+      returning staff_id`,
+    [token, purpose]
+  );
+  return row?.staff_id ?? null;
+}
+
+export const pruneLoginTokens = () =>
+  pool.query('delete from login_tokens where expires_at < now()').catch(() => {});
+
 /** Opportunistic cleanup so expired rows do not accumulate. */
 export const pruneSessions = () =>
   pool.query('delete from admin_sessions where expires_at < now()').catch(() => {});
