@@ -1701,7 +1701,7 @@ app.get('/api/hotspot/settings', async (req, res) => {
 app.put('/api/hotspot/settings', async (req, res) => {
   const f = req.body;
   const { rows: [s] } = await pool.query(`
-    insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_min, bind_mac,
+    insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_sec, bind_mac,
       payment_method, voucher_expiry, code_type, code_length, sms_voucher, auto_login, multi_device,
       template, banner_headline, banner_subtext, walled_garden, hotspot_network)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
@@ -1710,7 +1710,7 @@ app.put('/api/hotspot/settings', async (req, res) => {
             coalesce($18, '10.5.50.0/24'))
     on conflict (tenant_id) do update set
       ssid=excluded.ssid, redirect_url=excluded.redirect_url, trial_minutes=excluded.trial_minutes,
-      idle_timeout_min=excluded.idle_timeout_min, bind_mac=excluded.bind_mac,
+      idle_timeout_sec=excluded.idle_timeout_sec, bind_mac=excluded.bind_mac,
       payment_method=excluded.payment_method, voucher_expiry=excluded.voucher_expiry,
       code_type=excluded.code_type, code_length=excluded.code_length, sms_voucher=excluded.sms_voucher,
       auto_login=excluded.auto_login, multi_device=excluded.multi_device, template=excluded.template,
@@ -1721,7 +1721,7 @@ app.put('/api/hotspot/settings', async (req, res) => {
       walled_garden=coalesce($17, hotspot_settings.walled_garden),
       hotspot_network=coalesce($18, hotspot_settings.hotspot_network)
     returning *`,
-    [req.tenant.id, f.ssid, f.redirect_url, f.trial_minutes, f.idle_timeout_min, f.bind_mac,
+    [req.tenant.id, f.ssid, f.redirect_url, f.trial_minutes, f.idle_timeout_sec, f.bind_mac,
      f.payment_method, f.voucher_expiry, f.code_type, f.code_length, f.sms_voucher, f.auto_login,
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
@@ -2756,7 +2756,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
         network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
         // The profile a voucher will name, built with the same hotspot.
         sharedUsers: hs?.multi_device ? 3 : 1,
-        idleMinutes: hs?.idle_timeout_min ?? 10,
+        idleSeconds: hs?.idle_timeout_sec ?? 30,
         bindMac: hs?.bind_mac ?? true,
       }), 40000);
     done.push(`hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool}`);
@@ -3249,8 +3249,16 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const { profiles } = await ros.applyHotspot(conn);
       if (profiles) done.push(`switched ${profiles} hotspot profile${profiles === 1 ? '' : 's'} to RADIUS`);
 
+      // Every column this handler actually reads below (multi_device, bind_mac,
+      // idle_timeout_sec too) — this used to select only walled_garden and
+      // hotspot_network, so every other preference read from `hs` a few lines
+      // down was always undefined and silently fell back to its hardcoded
+      // default, regardless of what the tenant had saved under Hotspot →
+      // Settings. Configure looked like it respected those settings; it never
+      // read them at all.
       const { rows: [hs] } = await pool.query(
-        'select walled_garden, hotspot_network from hotspot_settings where tenant_id=$1',
+        'select walled_garden, hotspot_network, multi_device, bind_mac, idle_timeout_sec '
+        + 'from hotspot_settings where tenant_id=$1',
         [req.tenant.id]);
 
       // Fetched once, up front, so the reachability check and the local-copy
@@ -3275,7 +3283,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
        */
       const profileResult = await ros.ensureHotspotUserProfile(conn, {
         sharedUsers: hs?.multi_device ? 3 : 1,
-        idleMinutes: hs?.idle_timeout_min ?? 10,
+        idleSeconds: hs?.idle_timeout_sec ?? 30,
         bindMac: hs?.bind_mac ?? true,
       });
       if (profileResult.created) done.push(`hotspot user profile ${profileResult.profile}`);
@@ -3297,7 +3305,7 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
           bridge: bridge.bridge,
           network: hotspotNet,
           sharedUsers: hs?.multi_device ? 3 : 1,
-          idleMinutes: hs?.idle_timeout_min ?? 10,
+          idleSeconds: hs?.idle_timeout_sec ?? 30,
           bindMac: hs?.bind_mac ?? true,
         });
         done.push(built.changed.length

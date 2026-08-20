@@ -246,7 +246,7 @@ create table hotspot_settings (
   portal_path      text not null default '/portal',
   redirect_url     text,
   trial_minutes    int not null default 15,
-  idle_timeout_min int not null default 10,
+  idle_timeout_min int not null default 10,   -- superseded by idle_timeout_sec below; kept, not written to
   bind_mac         boolean not null default true,
   -- Preferences (mirrors Hotspot -> Settings -> Preferences)
   payment_method   text not null default 'kopokopo',   -- kopokopo | paybill | bankstk | till
@@ -1234,6 +1234,21 @@ alter table hotspot_settings add column if not exists walled_garden text[]
 -- platform must not be told to use the same subnet by default.
 alter table hotspot_settings add column if not exists hotspot_network text
   not null default '10.5.50.0/24';
+
+-- idle_timeout_min could only ever express whole minutes — pushed to the
+-- router as `00:${minutes}:00`, which breaks outright for anything under a
+-- minute. A used voucher's username stays locked to whoever is holding it
+-- until the router notices they've gone idle, so ten minutes (the old
+-- default) is ten minutes nobody else can use a code that already froze.
+-- Seconds is what the router setting actually is; the column name should
+-- say so. Existing values are minutes and are converted once, not
+-- reinterpreted — a tenant who set 10 keeps a 600-second idle timeout, not a
+-- sudden 10-second one. idle_timeout_min stays in place (expand, don't
+-- contract) but nothing writes to it after this.
+alter table hotspot_settings add column if not exists idle_timeout_sec int;
+update hotspot_settings set idle_timeout_sec = idle_timeout_min * 60 where idle_timeout_sec is null;
+alter table hotspot_settings alter column idle_timeout_sec set default 30;
+alter table hotspot_settings alter column idle_timeout_sec set not null;
 
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the

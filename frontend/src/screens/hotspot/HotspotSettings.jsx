@@ -29,7 +29,7 @@ const DEFAULTS = {
   ssid: 'WiFi',
   redirect_url: '',
   trial_minutes: 15,
-  idle_timeout_min: 10,
+  idle_timeout_sec: 30,
   bind_mac: true,
   payment_method: 'kopokopo',
   voucher_expiry: 'login',
@@ -75,7 +75,7 @@ export default function HotspotSettings() {
       const saved = await api.saveHotspotSettings({
         ...f,
         trial_minutes: Number(f.trial_minutes),
-        idle_timeout_min: Number(f.idle_timeout_min),
+        idle_timeout_sec: Number(f.idle_timeout_sec),
         code_length: len,
         // Sent as an array; the textarea edits it a line at a time.
         walled_garden: String(f.walled_garden_text ?? '')
@@ -134,8 +134,8 @@ export default function HotspotSettings() {
             <Field label="Free trial (minutes)">
               <Input type="number" value={f.trial_minutes ?? 0} onChange={set('trial_minutes')} />
             </Field>
-            <Field label="Idle timeout (minutes)">
-              <Input type="number" value={f.idle_timeout_min ?? 0} onChange={set('idle_timeout_min')} />
+            <Field label="Idle timeout (seconds)" hint="How long a guest can go quiet before the router drops them and frees the code for someone else">
+              <Input type="number" value={f.idle_timeout_sec ?? 0} onChange={set('idle_timeout_sec')} />
             </Field>
             <Toggle checked={!!f.bind_mac} onChange={setBool('bind_mac')} label="Bind to MAC on first login" detail="Stops one code being shared around" />
           </div>

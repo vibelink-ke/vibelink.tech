@@ -309,11 +309,11 @@ export async function healRouters() {
          * notice and press Configure.
          */
         const { rows: [hs] } = await pool.query(
-          'select multi_device, idle_timeout_min, bind_mac from hotspot_settings where tenant_id=$1',
+          'select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1',
           [r.tenant_id]);
         await ros.ensureHotspotUserProfile(conn, {
           sharedUsers: hs?.multi_device ? 3 : 1,
-          idleMinutes: hs?.idle_timeout_min ?? 10,
+          idleSeconds: hs?.idle_timeout_sec ?? 30,
           bindMac: hs?.bind_mac ?? true,
         });
       }

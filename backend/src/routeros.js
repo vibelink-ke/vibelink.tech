@@ -466,7 +466,7 @@ export async function applyHotspotServer(conn, {
   interimSeconds = 30,
   dnsName = 'billing.spot',
   sharedUsers = 1,
-  idleMinutes = 10,
+  idleSeconds = 30,
   bindMac = true,
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
@@ -620,7 +620,7 @@ export async function applyHotspotServer(conn, {
    * Anything that builds a hotspot must build the profile its sessions will ask
    * for, or the two can drift apart again.
    */
-  const profileResult = await ensureHotspotUserProfile(conn, { sharedUsers, idleMinutes, bindMac });
+  const profileResult = await ensureHotspotUserProfile(conn, { sharedUsers, idleSeconds, bindMac });
   if (profileResult.created) done.push(`user profile ${profileResult.profile}`);
 
   // Without this the guests have a lease and no internet, which is the single
@@ -862,13 +862,24 @@ export async function applyWalledGarden(conn, hosts = []) {
  * built-in one, which we would otherwise be editing on a box we do not own.
  */
 export async function ensureHotspotUserProfile(conn, {
-  name = 'hs-default', sharedUsers = 1, idleMinutes = 10, bindMac = true,
+  name = 'hs-default', sharedUsers = 1, idleSeconds = 30, bindMac = true,
 } = {}) {
   const rows = await conn.write('/ip/hotspot/user/profile/print', []);
   const found = rows.find((p) => p.name === name);
+  // Built from total seconds, not assumed to be a whole number of minutes —
+  // idleSeconds used to be idleMinutes formatted as `00:${minutes}:00`, which
+  // could only ever express whole minutes and produced invalid RouterOS
+  // syntax ("00:0.5:00") for anything shorter, like the 30-second timeout
+  // this is meant to allow: a used voucher's username frees up for someone
+  // else the moment the current holder goes idle, not up to ten minutes
+  // later.
+  const secs = Math.max(1, Math.round(idleSeconds));
+  const hh = String(Math.floor(secs / 3600)).padStart(2, '0');
+  const mm = String(Math.floor((secs % 3600) / 60)).padStart(2, '0');
+  const ss = String(secs % 60).padStart(2, '0');
   const fields = [
     `=shared-users=${sharedUsers}`,
-    `=idle-timeout=00:${String(idleMinutes).padStart(2, '0')}:00`,
+    `=idle-timeout=${hh}:${mm}:${ss}`,
     '=status-autorefresh=1m',
     /**
      * MAC cookie: the device is remembered and logged back in by itself.
