@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from '../api/client';
 
 /**
@@ -184,6 +185,30 @@ export function StoreProvider({ children }) {
     if (session) reload();
     else if (session === null) setLoading(false);
   }, [session, reload]);
+
+  /**
+   * Every collection loaded once when the session resolved and never again
+   * on its own — the 30-second poll above eventually catches up, but
+   * clicking from one page to the next inside that window kept showing
+   * whatever was true up to half a minute ago. A payment applied on
+   * Payments was invisible on Clients until either that poll fired or a
+   * hard reload forced it, which is what "I have to refresh every page"
+   * was: not a bug in any one screen, every screen sharing state that only
+   * a background timer ever refreshed.
+   *
+   * Skips the very first location (the session effect above already
+   * covers that load) and re-fires on every path change after, quiet so
+   * navigating doesn't flash a loading state over the page that's about
+   * to render anyway.
+   */
+  const location = useLocation();
+  const lastPath = useRef(location.pathname);
+  useEffect(() => {
+    if (!session) return;
+    if (lastPath.current === location.pathname) return;
+    lastPath.current = location.pathname;
+    reload({ quiet: true });
+  }, [location.pathname, session, reload]);
 
   const signIn = useCallback(
     (s, message) => {
