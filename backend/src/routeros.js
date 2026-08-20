@@ -1446,6 +1446,82 @@ export async function applyExpiredPool(conn, { cidr } = {}) {
 }
 
 /**
+ * The manufacturer half of a MAC address — the first three octets, assigned
+ * to one vendor by the IEEE and never reused. Good enough to turn "MAC
+ * ending FF:00:11" into "Samsung Electronics" for a guest picking their TV
+ * out of a list of devices they cannot otherwise tell apart; not meant to be
+ * exhaustive, just to cover the streaming/TV brands that actually turn up
+ * on a hotspot.
+ */
+const OUI_VENDORS = {
+  '00:12:FB': 'Samsung Electronics', '00:1D:25': 'Samsung Electronics', '5C:497D': 'Samsung Electronics',
+  '00:1F:CD': 'LG Electronics', '10:F1:F2': 'LG Electronics', 'A8:16:B2': 'LG Electronics',
+  '00:24:BE': 'Sony', 'FC:0F:E6': 'Sony', '54:42:49': 'Sony',
+  'DC:44:6D': 'TCL', '2C:AB:33': 'TCL',
+  '74:E1:82': 'Hisense',
+  '58:D5:6E': 'Roku', 'B0:A7:37': 'Roku', 'AC:3F:A4': 'Roku',
+  'F0:81:73': 'Amazon (Fire TV)', '4C:EF:C0': 'Amazon (Fire TV)', '68:37:E9': 'Amazon (Fire TV)',
+  '54:60:09': 'Google (Chromecast)', 'F4:F5:D8': 'Google (Chromecast)', 'DA:A1:19': 'Google (Chromecast)',
+  '64:CC:2E': 'Xiaomi', '28:6C:07': 'Xiaomi',
+  '20:DF:B9': 'Vizio', '00:19:FB': 'Vizio',
+};
+
+function vendorFor(mac) {
+  const oui = String(mac ?? '').toUpperCase().split(':').slice(0, 3).join(':');
+  return OUI_VENDORS[oui] ?? null;
+}
+
+/**
+ * Devices seen on this router's hotspot that have not authenticated —
+ * candidates for "add this device" on the portal, when a guest's TV or
+ * console has no way to type in a code itself.
+ *
+ * Read-only: this never changes anything on the router, only reports what
+ * is already there. Vendor and hostname are both best-effort hints, not a
+ * guarantee — a guest still has to recognise their own device.
+ */
+export async function nearbyDevices(conn) {
+  const [hosts, leases] = await Promise.all([
+    conn.write('/ip/hotspot/host/print', []).catch(() => []),
+    conn.write('/ip/dhcp-server/lease/print', []).catch(() => []),
+  ]);
+  const hostnameByMac = new Map(
+    leases.map((l) => [String(l['mac-address'] ?? '').toUpperCase(), l['host-name'] || null])
+  );
+
+  return hosts
+    // 'user' is set once RouterOS has actually authenticated the host —
+    // already-online devices (including the guest's own phone) have no
+    // business showing up as something still to add.
+    .filter((h) => !h.user && !['true', 'yes'].includes(String(h.bypassed)))
+    .map((h) => {
+      const mac = String(h['mac-address'] ?? '').toUpperCase();
+      return {
+        mac,
+        address: h.address ?? null,
+        vendor: vendorFor(mac),
+        hostname: hostnameByMac.get(mac) ?? null,
+        idleSeconds: h['idle-time'] ? hhmmssToSeconds(h['idle-time']) : null,
+      };
+    })
+    .filter((d) => d.mac);
+}
+
+/** "01:23:45" (RouterOS uptime/idle-time shape) -> seconds, for sorting by how recently a device was active. */
+function hhmmssToSeconds(v) {
+  const parts = String(v).match(/(\d+)d|(\d+)h|(\d+)m|(\d+)s/g) ?? [];
+  let total = 0;
+  for (const p of parts) {
+    const n = parseInt(p, 10);
+    if (p.endsWith('d')) total += n * 86400;
+    else if (p.endsWith('h')) total += n * 3600;
+    else if (p.endsWith('m')) total += n * 60;
+    else if (p.endsWith('s')) total += n;
+  }
+  return total;
+}
+
+/**
  * Who is connected right now, asked of the router rather than inferred.
  *
  * The authoritative answer to "is this customer online". RADIUS accounting is

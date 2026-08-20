@@ -117,6 +117,22 @@ create table vouchers (
 );
 create index if not exists vouchers_tenant_id_status_expires_at_idx on vouchers (tenant_id, status, expires_at);
 
+-- A second (or third) device sharing one voucher — a TV that has no way to
+-- type the code but does have some browser, added from the guest's own
+-- phone once it is online. voucher.mac is the device the code was bought
+-- from; this is everything added after, capped per voucher by
+-- hotspot_settings.devices_per_voucher. Each row is its own RADIUS identity
+-- (see radius.lockVoucherDevice) so the router can tell them apart even
+-- though they authenticate with the same code.
+create table if not exists voucher_devices (
+  id         uuid primary key default gen_random_uuid(),
+  voucher_id uuid not null references vouchers on delete cascade,
+  mac        macaddr not null,
+  label      text,
+  added_at   timestamptz not null default now(),
+  unique (voucher_id, mac)
+);
+
 -- ─────────────── money ───────────────
 create table invoices (
   id          uuid primary key default gen_random_uuid(),

@@ -494,7 +494,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   // redirect_url was configurable there but never read here — set, saved,
   // and silently ignored by the page it was meant to change.
   const { rows: [hs] } = await pool.query(
-    'select banner_headline, banner_subtext, template, redirect_url from hotspot_settings where tenant_id=$1',
+    'select banner_headline, banner_subtext, template, redirect_url, multi_device from hotspot_settings where tenant_id=$1',
     [tenant.id]);
 
   res.type('html').send(loginPage({
@@ -516,6 +516,19 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
     prefillCode: /^[A-Za-z0-9-]{1,20}$/.test(String(req.query.code ?? '')) ? req.query.code : null,
+    multiDevice: !!hs?.multi_device,
+  }));
+}));
+
+/** "Connecting a TV or console too?" — see devicesPage() for what this actually does. */
+app.get('/hotspot/devices', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const { devicesPage } = await import('./hotspot-portal.js');
+  res.type('html').send(devicesPage({
+    company: tenant?.name ?? 'WiFi',
+    apiBase: tenant?.subdomain ? `https://${tenant.subdomain}.${root}` : '',
   }));
 }));
 
@@ -746,13 +759,149 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
       where tenant_id=$1 and status='in_use' and expires_at is not null and expires_at < now()`,
     [tenant.id]);
 
+  // A second device (see /hotspot/nearby-devices below) shares the same
+  // code as the voucher it was added to, so this has to recognise its MAC
+  // too — not just the one the voucher was originally bought from.
   const { rows: [v] } = await pool.query(
-    `select code from vouchers
-      where tenant_id=$1 and lower(mac::text)=$2 and status='in_use'
-        and (expires_at is null or expires_at > now())
-      order by created_at desc limit 1`,
+    `select v.code from vouchers v
+      where v.tenant_id=$1 and lower(v.mac::text)=$2 and v.status='in_use'
+        and (v.expires_at is null or v.expires_at > now())
+      union all
+      select v.code from voucher_devices d
+      join vouchers v on v.id = d.voucher_id
+      where v.tenant_id=$1 and lower(d.mac::text)=$2 and v.status='in_use'
+        and (v.expires_at is null or v.expires_at > now())
+      limit 1`,
     [tenant.id, mac]);
   res.json({ code: v?.code ?? null });
+}));
+
+/**
+ * Shared by both device-adding routes: find the guest's own voucher and the
+ * router it is actually online through right now — everything after this
+ * needs both, and getting the router wrong means reading the wrong box's
+ * host list entirely.
+ */
+async function voucherAndRouter(tenantId, code) {
+  const { rows: [v] } = await pool.query(
+    `select * from vouchers where tenant_id=$1 and code=$2 and status='in_use'
+       and (expires_at is null or expires_at > now())`,
+    [tenantId, code]);
+  if (!v) return { error: 'That code is not an active voucher.' };
+
+  const { rows: [session] } = await pool.query(
+    `select host(nasipaddress) as nas from radacct
+      where username=$1 and acctstoptime is null
+      order by acctstarttime desc limit 1`, [code]);
+  if (!session?.nas) return { error: 'That device does not look connected right now — try again once it is online.' };
+
+  const { rows: [r] } = await pool.query(
+    `select id, name, host, api_port, service_user, service_password_enc
+       from routers where tenant_id=$1 and host(host)=$2`, [tenantId, session.nas]);
+  if (!r?.service_user || !r.service_password_enc) {
+    return { error: 'This router has not been configured for the billing system yet.' };
+  }
+  return { voucher: v, router: r };
+}
+
+/**
+ * Devices on the same hotspot that have not logged in yet — a TV or console
+ * a guest cannot type a code into themselves, found from a device that can:
+ * their own already-connected phone. Only reachable with a real, currently
+ * active voucher code, which is the same proof of purchase the code itself
+ * already is; nothing here is guessable the login form was not already.
+ */
+app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const code = String(req.query.code ?? '').trim();
+  if (!code) return res.status(400).json({ error: 'no code' });
+
+  const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
+  if (!hs?.multi_device) {
+    return res.status(403).json({ error: 'Multiple devices per code is off — ask the operator to turn it on in Hotspot settings.' });
+  }
+
+  const found = await voucherAndRouter(tenant.id, code);
+  if (found.error) return res.status(404).json({ error: found.error });
+
+  const { rows: existing } = await pool.query(
+    `select mac from voucher_devices where voucher_id=$1
+     union all select $2::macaddr`, [found.voucher.id, found.voucher.mac]);
+  const taken = new Set(existing.map((r) => String(r.mac).toUpperCase()).filter(Boolean));
+  // 3 mirrors the shared-users the router push already gives a multi_device
+  // voucher (see the sharedUsers ternary elsewhere) — the device list would
+  // otherwise let a guest add more devices than the router will actually let
+  // authenticate at once.
+  const slotsLeft = Math.max(0, 3 - taken.size);
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const r = found.router;
+  try {
+    const password = secrets.decrypt(r.service_password_enc);
+    const conn = await ros.connect({
+      host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+      user: r.service_user, password, timeoutSec: 8,
+    });
+    let devices;
+    try { devices = await ros.nearbyDevices(conn); } finally { ros.close(conn); }
+    res.json({ devices: devices.filter((d) => !taken.has(d.mac)), slotsLeft });
+  } catch (e) {
+    res.status(502).json({ error: `Could not read the router: ${e.message}` });
+  }
+}));
+
+/** Add one of those devices to the same voucher, so it authenticates with the same code. */
+app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const code = String(req.body?.code ?? '').trim();
+  const mac = String(req.body?.mac ?? '').trim().toUpperCase();
+  if (!code || !mac) return res.status(400).json({ error: 'code and mac are required' });
+
+  const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
+  if (!hs?.multi_device) return res.status(403).json({ error: 'Multiple devices per code is off.' });
+
+  const found = await voucherAndRouter(tenant.id, code);
+  if (found.error) return res.status(404).json({ error: found.error });
+
+  const { rows: [{ count }] } = await pool.query(
+    'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
+  if (count + 1 >= 3) {   // +1 for the voucher's own original device
+    return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
+  }
+
+  // Re-read the router's own host list rather than trusting the mac the
+  // client sent — the earlier GET is a convenience list, not a permission
+  // slip, and binding a mac nobody actually saw on this network would let
+  // a guest grant free access to any device whose address they could guess.
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const r = found.router;
+  try {
+    const password = secrets.decrypt(r.service_password_enc);
+    const conn = await ros.connect({
+      host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+      user: r.service_user, password, timeoutSec: 8,
+    });
+    let devices;
+    try { devices = await ros.nearbyDevices(conn); } finally { ros.close(conn); }
+    if (!devices.some((d) => d.mac === mac)) {
+      return res.status(404).json({ error: 'That device is not currently on this network.' });
+    }
+  } catch (e) {
+    return res.status(502).json({ error: `Could not confirm that device with the router: ${e.message}` });
+  }
+
+  await pool.query(
+    `insert into voucher_devices (voucher_id, mac) values ($1,$2)
+     on conflict (voucher_id, mac) do nothing`, [found.voucher.id, mac]);
+  res.json({ ok: true });
 }));
 
 /**

@@ -57,7 +57,7 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
-  redirectUrl = null, prefillCode = null,
+  redirectUrl = null, prefillCode = null, multiDevice = false,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
@@ -272,6 +272,10 @@ export function loginPage({
     <!-- Support, before paying. A guest whose code will not work cannot buy
          their way to an answer, and the operator would rather hear it now than
          from somebody who gave up and left. -->
+    ${multiDevice ? `
+    <!-- Only once the guest already has a working code — the page itself
+         asks for it, so nothing here needs to know it in advance. -->
+    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices">Connecting a TV or console too?</a></p>` : ''}
     <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
     <div class="chat" id="chat">
       <div class="log" id="chatLog"></div>
@@ -514,6 +518,124 @@ export function loginPage({
           note.textContent = 'Could not reach the billing system from here.';
         });
     });
+  }());
+  </script>
+</body>
+</html>`;
+}
+
+/**
+ * "Add this device" — reached from an already-connected phone, for a TV or
+ * console that has some browser but no way to type a 6-digit code onto a
+ * screen with a remote. The guest enters the code they already have, and
+ * this lists other devices seen on the same network for them to pick from —
+ * see /hotspot/nearby-devices and /hotspot/nearby-devices/bind in server.js.
+ *
+ * Served directly to the guest's own already-online browser, not fetched
+ * and cached by the router the way the login page is, so none of RouterOS's
+ * $(...) substitution applies here.
+ */
+export function devicesPage({ company = 'WiFi', apiBase = '' }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add a device — ${esc(company)}</title>
+<style>
+  :root { --ink:#161a17; --muted:#8a9186; --line:rgba(128,128,128,.25); --green:#0f7a5f; --bg:#f5f6f3; --card:#fff; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); padding:20px;
+         font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { max-width:440px; margin:0 auto; background:var(--card); border:1px solid var(--line);
+          border-radius:14px; padding:22px; }
+  h1 { margin:0 0 4px; font-size:20px; }
+  .sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
+  input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
+          border-radius:9px; background:#fafbf9; color:#161a17; }
+  button { width:100%; margin-top:12px; padding:13px; font-size:16px; font-weight:600;
+           color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
+  .device { display:flex; justify-content:space-between; align-items:center; gap:12px;
+            padding:12px 0; border-bottom:1px solid var(--line); }
+  .device:last-child { border-bottom:0; }
+  .device-name { font-weight:600; font-size:14.5px; }
+  .device-meta { color:var(--muted); font-size:13px; }
+  .add { width:auto; margin-top:0; padding:8px 14px; font-size:13.5px; }
+  .hint { margin:10px 0 0; font-size:13.5px; color:var(--muted); text-align:center; }
+  .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:14px;
+         color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Add a device</h1>
+    <p class="sub">Enter your voucher code, then pick the TV or console from the list.</p>
+    <div id="step1">
+      <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
+      <button id="find">Find devices</button>
+      <div id="err1"></div>
+    </div>
+    <div id="list" style="display:none"></div>
+  </div>
+  <script>
+  (function () {
+    var API = ${JSON.stringify(apiBase)};
+    var code = '';
+
+    document.getElementById('find').addEventListener('click', function () {
+      code = document.getElementById('code').value.trim();
+      if (!code) return;
+      var err = document.getElementById('err1');
+      err.innerHTML = '';
+      fetch(API + '/hotspot/nearby-devices?code=' + encodeURIComponent(code))
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { err.innerHTML = '<p class="err">' + (res.d.error || 'Could not check that code.') + '</p>'; return; }
+          render(res.d.devices, res.d.slotsLeft);
+        })
+        .catch(function () { err.innerHTML = '<p class="err">Could not reach the billing system from here.</p>'; });
+    });
+
+    function render(devices, slotsLeft) {
+      document.getElementById('step1').style.display = 'none';
+      var list = document.getElementById('list');
+      list.style.display = 'block';
+      if (!slotsLeft) {
+        list.innerHTML = '<p class="hint">This code already has as many devices as it can take.</p>';
+        return;
+      }
+      if (!devices.length) {
+        list.innerHTML = '<p class="hint">No other devices seen on this network yet — make sure the TV is connected to the WiFi first.</p>';
+        return;
+      }
+      list.innerHTML = devices.map(function (d, i) {
+        var name = d.vendor || d.hostname || 'Unknown device';
+        var meta = [d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · ');
+        return '<div class="device"><div><div class="device-name">' + name + '</div>' +
+          '<div class="device-meta">' + (meta || d.mac) + '</div></div>' +
+          '<button class="add" data-i="' + i + '">Add</button></div>';
+      }).join('') + '<p class="hint" id="bindNote"></p>';
+      list.querySelectorAll('.add').forEach(function (btn) {
+        btn.addEventListener('click', function () { bind(devices[Number(btn.getAttribute('data-i'))].mac, btn); });
+      });
+    }
+
+    function bind(mac, btn) {
+      btn.disabled = true;
+      btn.textContent = 'Adding…';
+      var note = document.getElementById('bindNote');
+      fetch(API + '/hotspot/nearby-devices/bind', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: code, mac: mac }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { note.textContent = res.d.error || 'Could not add that device.'; btn.disabled = false; btn.textContent = 'Add'; return; }
+          btn.textContent = 'Added';
+          note.textContent = 'Done — open a browser on that device and it should connect on its own within a minute.';
+        })
+        .catch(function () { note.textContent = 'Could not reach the billing system from here.'; btn.disabled = false; btn.textContent = 'Add'; });
+    }
   }());
   </script>
 </body>
