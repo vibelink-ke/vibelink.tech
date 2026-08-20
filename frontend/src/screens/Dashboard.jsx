@@ -122,6 +122,14 @@ export default function Dashboard() {
     return at && at.toDateString() === new Date().toDateString();
   });
   const collected = appliedToday.reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  // PPPoE only: a payment applied to a subscriber's account, not a hotspot
+  // voucher sale. subscriber_id/voucher_id are mutually exclusive on a
+  // payment row (server.js's GET /api/payments joins both, one is always
+  // null), which is a firmer split than guessing from the channel/provider —
+  // a till or bank STK payment can settle either kind of account.
+  const collectedPppoeToday = appliedToday
+    .filter((p) => p.subscriber_id && !p.voucher_id)
+    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
   // The "last 7 days" chart heading was paired with the same "today" total
   // above it — right label, wrong number underneath it.
   const collected7d = (store.mpesaTx ?? [])
@@ -241,6 +249,11 @@ export default function Dashboard() {
           label="COLLECTED TODAY"
           value={`KES ${kes(collected)}`}
           hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
+        />
+        <Tile
+          label="PPPOE INCOME TODAY"
+          value={`KES ${kes(collectedPppoeToday)}`}
+          hint={collected ? `${Math.round((collectedPppoeToday / collected) * 100)}% of today's total` : 'no collections yet'}
         />
         <Tile
           label="ONLINE NOW"
