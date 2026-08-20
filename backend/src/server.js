@@ -3828,12 +3828,15 @@ app.get('/api/invoices', wrap(async (req, res) => {
 }));
 
 app.post('/api/invoices', wrap(async (req, res) => {
-  const { subscriberId, amount, dueDate } = req.body;
+  const { subscriberId, amount, dueDate, reason, planId } = req.body;
+  if (!reason || !String(reason).trim()) {
+    return res.status(400).json({ error: 'Say what this invoice is for' });
+  }
   const { rows: [i] } = await pool.query(
-    `insert into invoices (tenant_id, subscriber_id, number, amount, due_date)
-     values ($1,$2,'INV-' || to_char(now(),'YYMM') || '-' || substr(gen_random_uuid()::text,1,6),$3,$4)
+    `insert into invoices (tenant_id, subscriber_id, plan_id, number, amount, due_date, reason)
+     values ($1,$2,$3,'INV-' || to_char(now(),'YYMM') || '-' || substr(gen_random_uuid()::text,1,6),$4,$5,$6)
      returning *`,
-    [req.tenant.id, subscriberId ?? null, amount, dueDate]);
+    [req.tenant.id, subscriberId ?? null, planId ?? null, amount, dueDate, String(reason).trim()]);
   res.json(i);
 }));
 

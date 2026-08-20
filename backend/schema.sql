@@ -1184,6 +1184,10 @@ alter table hotspot_settings add column if not exists hotspot_network text
 --   day 5  read-only: they can see everything, change nothing
 alter table invoices add column if not exists dunning_stage int not null default 0;
 alter table invoices add column if not exists notified_at   timestamptz;
+-- What the invoice is actually for — every one raised by hand looked
+-- identical on screen but for the amount and due date, with nothing to
+-- say why it existed once the person who created it forgot.
+alter table invoices add column if not exists reason text;
 
 -- Which invoices are the platform's own, rather than a subscriber's.
 create index if not exists invoices_saas_open

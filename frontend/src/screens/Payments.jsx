@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
@@ -39,8 +38,7 @@ const when = (d) => (d ? new Date(d).toLocaleString('en-KE', { day: '2-digit', m
 
 export default function Payments() {
   const store = useStore();
-  const location = useLocation();
-  const [tab, setTab] = useState(location.pathname === '/invoices' ? 'invoices' : 'unmatched');
+  const [tab, setTab] = useState('unmatched');
   const [resolving, setResolving] = useState(null);
   const [assignTo, setAssignTo] = useState('');
   const [busy, setBusy] = useState(false);
@@ -124,11 +122,14 @@ export default function Payments() {
 
   const createInvoice = async () => {
     if (!invoiceForm.amount) return store.toast('Enter an amount');
+    if (!invoiceForm.reason?.trim()) return store.toast('Say what this invoice is for');
     try {
       const made = await api.createInvoice({
         subscriberId: invoiceForm.subscriberId || null,
+        planId: invoiceForm.planId || null,
         amount: Number(invoiceForm.amount),
         dueDate: invoiceForm.dueDate || new Date().toISOString().slice(0, 10),
+        reason: invoiceForm.reason.trim(),
       });
       store.setCollection('invoices', (xs) => [made, ...xs]);
       store.toast(`${made.number} raised for KES ${kes(made.amount)}`);
@@ -216,7 +217,7 @@ export default function Payments() {
       subtitle="Confirmed payments are matched and applied automatically. Anything ambiguous waits here."
       actions={
         <>
-          <Button variant="primary" onClick={() => setInvoiceForm({ subscriberId: '', amount: '', dueDate: '' })}>
+          <Button variant="primary" onClick={() => setInvoiceForm({ subscriberId: '', planId: '', amount: '', dueDate: '', reason: '' })}>
             + Create invoice
           </Button>
           <Button
@@ -398,6 +399,7 @@ export default function Payments() {
               rows={invoices}
               columns={[
                 { key: 'number', label: 'Invoice', render: (r) => <span style={{ fontFamily: font.mono }}>{r.number}</span> },
+                { key: 'reason', label: 'Reason', render: (r) => r.reason || '—' },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
                 { key: 'paid', label: 'Paid', align: 'right', render: (r) => money(r.paid) },
                 { key: 'due_date', label: 'Due', render: (r) => (r.due_date ? new Date(r.due_date).toLocaleDateString('en-KE') : '—') },
@@ -573,6 +575,24 @@ export default function Payments() {
                 options={[
                   { value: '', label: 'Not client-specific' },
                   ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
+                ]}
+              />
+            </Field>
+            <Field label="Reason" hint="What this invoice is for — shown to whoever looks at it later">
+              <Textarea
+                value={invoiceForm.reason}
+                onChange={(e) => setInvoiceForm((s) => ({ ...s, reason: e.target.value }))}
+                rows={3}
+                placeholder="e.g. Router relocation callout fee, or Equipment deposit"
+              />
+            </Field>
+            <Field label="Plan" hint="Optional — links this invoice to a specific bundle">
+              <Select
+                value={invoiceForm.planId}
+                onChange={(e) => setInvoiceForm((s) => ({ ...s, planId: e.target.value }))}
+                options={[
+                  { value: '', label: 'Not plan-specific' },
+                  ...(store.plans ?? []).map((p) => ({ value: p.id, label: p.title })),
                 ]}
               />
             </Field>
