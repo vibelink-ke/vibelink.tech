@@ -1472,12 +1472,54 @@ export async function applyExpiredPool(conn, { cidr } = {}) {
   } else {
     // Near the top: a forward-chain accept rule earlier in the list (NAT
     // masquerade setups often have one) would otherwise let the traffic
-    // through before this is ever reached.
-    await cmd(conn, 'ispblocking rule', '/ip/firewall/filter/add', [...wantRule, '=place-before=0']);
+    // through before this is ever reached. "0" is a position in the router's
+    // whole filter list, not the forward chain alone — on a router with no
+    // firewall filter rules at all yet, that position does not exist and
+    // RouterOS rejects the add with "no such item" (same failure as the WAN
+    // DNS block above). Only meaningful, and only valid, once a rule exists
+    // to land ahead of.
+    await cmd(conn, 'ispblocking rule', '/ip/firewall/filter/add',
+      rules.length ? [...wantRule, '=place-before=0'] : wantRule);
     done.push('filter rule dropping forward traffic from ' + LIST);
   }
   for (const dupe of mineRules.slice(1)) {
     await cmd(conn, 'remove duplicate ispblocking rule', '/ip/firewall/filter/remove',
+      [`=.id=${idOf(dupe)}`]);
+  }
+
+  /**
+   * Belt and braces: expired customers are also excluded from NAT itself, not
+   * only dropped at the forward filter. A masquerade rule covering the whole
+   * PPPoE pool sits right next to this — visible on the router as "NAT for
+   * the blocked customers' pool" even though the forward-drop rule above is
+   * what actually stops them today. If that filter rule is ever missing,
+   * reordered behind something that accepts first, or fails to apply (as it
+   * could on an empty ruleset before the fix above), masquerade would still
+   * hand an expired customer a working route out. An srcnat accept rule for
+   * the same address list stops NAT processing for that traffic outright —
+   * the packet keeps its private source address and gets nowhere, a second,
+   * independent block rather than relying on the filter rule alone.
+   */
+  const natRules = await conn.write('/ip/firewall/nat/print', []);
+  const mineNat = natRules.filter((r) => isManaged(r)
+    && String(r.chain) === 'srcnat' && r['src-address-list'] === LIST);
+  const wantNat = ['=chain=srcnat', `=src-address-list=${LIST}`, '=action=accept',
+    `=comment=${managed('ispBlocking expired customers — no NAT')}`];
+  if (mineNat.length) {
+    if (!unchanged(mineNat[0], wantNat)) {
+      await cmd(conn, 'ispblocking no-NAT rule', '/ip/firewall/nat/set',
+        [`=.id=${idOf(mineNat[0])}`, ...wantNat]);
+    }
+  } else {
+    // Ahead of the masquerade rule for the same reason as above: an accept
+    // rule after masquerade never gets reached, because masquerade itself
+    // already terminated processing for every packet it translated.
+    await cmd(conn, 'ispblocking no-NAT rule', '/ip/firewall/nat/add',
+      natRules.length ? [...wantNat, '=place-before=0'] : wantNat);
+    done.push('NAT rule excluding expired customers from masquerade');
+  }
+  for (const dupe of mineNat.slice(1)) {
+    await cmd(conn, 'remove duplicate ispblocking no-NAT rule', '/ip/firewall/nat/remove',
       [`=.id=${idOf(dupe)}`]);
   }
 
