@@ -41,7 +41,25 @@ export async function applyPayment(tenantId, tx) {
   });
 }
 
-/** Extend service, handle partial payment as pro-rated days + credit. */
+/**
+ * Extend service by however many full periods the payment plus whatever
+ * was already sitting as credit adds up to; anything left under a full
+ * period's price stays as visible wallet credit rather than converting
+ * immediately into a sliver of extra time.
+ *
+ * This used to pro-rate a partial payment into minutes on the spot and
+ * reset credit to 0 — so a KES 1 payment against a KES 1,500 plan bought
+ * a few minutes of service and vanished from the balance entirely, with
+ * nothing to show for it except a payment-history row. A customer paying
+ * in small amounts over several days had no way to see what they'd
+ * already put in; every partial payment before the one that finally
+ * tipped the balance over the plan price looked, from the wallet, like it
+ * had done nothing at all. Now it accumulates instead, and service only
+ * extends once enough of it adds up to actually cover a period — which is
+ * also why status only moves to 'active' when that happens, not on every
+ * payment regardless of size: a partial payment does not yet entitle
+ * anyone to service, only to a bigger balance.
+ */
 async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
   const { rows: [sub] } = await c.query(
     'select s.*, p.price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1',
@@ -53,14 +71,20 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
   );
   const available = Number(amount) + Number(sub.credit);
   const price = Number(inv?.amount ?? sub.price);
-  const full = available >= price;
-  const minutes = full ? sub.duration_min : Math.floor(sub.duration_min * (available / price));
-  const base = new Date(Math.max(Date.now(), new Date(sub.expires_at ?? Date.now()).getTime()));
-  const expires = new Date(base.getTime() + minutes * 60000);
-  const leftover = full ? available - price : 0;
+  const periods = Math.floor(available / price);
+  const full = periods >= 1;
 
-  await c.query("update subscribers set expires_at=$2, status='active', credit=$3 where id=$1",
-    [subId, expires, leftover]);
+  let expires = sub.expires_at;
+  const credit = full ? available - periods * price : available;
+  if (full) {
+    const minutes = periods * sub.duration_min;
+    const base = new Date(Math.max(Date.now(), new Date(sub.expires_at ?? Date.now()).getTime()));
+    expires = new Date(base.getTime() + minutes * 60000);
+  }
+
+  await c.query(
+    `update subscribers set expires_at=$2, credit=$3${full ? ", status='active'" : ''} where id=$1`,
+    [subId, expires, credit]);
   if (inv) {
     await c.query(
       "update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1",
@@ -69,7 +93,7 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
   }
   await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, applied_at=now() where id=$1",
     [paymentId, subId, inv?.id ?? null]);
-  return { expires, partial: !full, balance: full ? 0 : price - available };
+  return { expires, partial: !full, balance: credit };
 }
 
 /** Fuzzy match for till/typo'd references. Learns the payer phone on success. */
