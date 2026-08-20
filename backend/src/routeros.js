@@ -385,14 +385,14 @@ export async function applyPpp(conn, { interimSeconds = 30 } = {}) {
  */
 export async function applyHotspot(conn, { interimSeconds = 30 } = {}) {
   const profiles = await cmd(conn, 'read hotspot profiles', '/ip/hotspot/profile/print', []);
+  const fields = ['=use-radius=yes', `=radius-interim-update=${hhmmss(interimSeconds)}`];
+  let changed = 0;
   for (const p of profiles) {
-    await conn.write('/ip/hotspot/profile/set', [
-      `=.id=${idOf(p)}`,
-      '=use-radius=yes',
-      `=radius-interim-update=${hhmmss(interimSeconds)}`,
-    ]);
+    if (unchanged(p, fields)) continue;
+    await conn.write('/ip/hotspot/profile/set', [`=.id=${idOf(p)}`, ...fields]);
+    changed++;
   }
-  return { profiles: profiles.length };
+  return { profiles: changed };
 }
 
 /**
