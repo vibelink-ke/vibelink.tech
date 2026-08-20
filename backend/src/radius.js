@@ -83,7 +83,7 @@ export async function activateSubscriber(c, tenantId, subId) {
  */
 export async function syncSubscriberCredentials(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    `select s.pppoe_user, s.pppoe_pass, s.static_ip,
+    `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac,
             p.rate_down, p.rate_up, p.radius_profile,
             r.pppoe_pool
        from subscribers s
@@ -97,6 +97,11 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
      values ($3,$1,'Cleartext-Password',':=',$2)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, s.pppoe_pass, tenantId]);
+
+  // A credential edit (new username, reset password) must not quietly drop an
+  // existing MAC lock — otherwise "reset this customer's password" becomes an
+  // accidental way to unlock a line nobody meant to unlock.
+  if (s.locked_mac) await lockPppoeMac(c, tenantId, s.pppoe_user, s.locked_mac);
 
   /**
    * Reply attributes decide what the router does with the session. Anything not
@@ -293,6 +298,31 @@ function inPool(address, poolRange) {
     if (from === null) return false;
     return value >= from && value <= (to ?? from);
   });
+}
+
+/**
+ * Lock a PPPoE line to the MAC address it is currently dialling from.
+ *
+ * A shared password is otherwise usable from anywhere — a customer's old
+ * router kept as a spare, resold to a neighbour, a technician's laptop left
+ * plugged in after a fault visit. Op '==' is a real comparison (unlike the
+ * ':=' "set" semantics the rest of radcheck uses for Cleartext-Password and
+ * friends), so once this row exists FreeRADIUS itself refuses a login whose
+ * Calling-Station-Id does not match — before it ever reaches this app.
+ */
+export async function lockPppoeMac(c, tenantId, username, mac) {
+  await c.query(
+    `insert into radcheck (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Calling-Station-Id','==',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [username, mac, tenantId]);
+}
+
+/** Free a line to relock onto whichever router dials in next. */
+export async function clearPppoeMacLock(c, tenantId, username) {
+  await c.query(
+    "delete from radcheck where tenant_id=$2 and username=$1 and attribute='Calling-Station-Id'",
+    [username, tenantId]);
 }
 
 /** Remove a username from RADIUS entirely — used when credentials are renamed. */
@@ -533,7 +563,7 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false) {
     // Matches the static address-list name applyExpiredPool provisions on the
     // router, so a session moved here right now (before it reconnects onto the
     // expired pool's own range) still hits the same firewall filter rule.
-    addressList: mode === 'expired' ? 'expired-customers' : undefined,
+    addressList: mode === 'expired' ? 'ispblocking' : undefined,
     sessionId,
     disconnect,
   });

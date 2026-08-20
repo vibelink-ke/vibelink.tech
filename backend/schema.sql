@@ -786,6 +786,14 @@ alter table subscribers add constraint subscribers_status_check
 -- not the person who notices it is down. Both numbers get every notification.
 alter table subscribers add column if not exists phone_alt text;
 
+-- The MAC a PPPoE line first successfully dialled from. Once set, FreeRADIUS
+-- itself refuses the login from anywhere else — see radius.lockPppoeMac —
+-- so a shared password stops being usable from a different router, a
+-- reseller, or after the customer's own CPE is swapped without telling
+-- anyone. Null means not yet locked (a fresh line, or one an admin cleared
+-- to let a new router dial in after an equipment change).
+alter table subscribers add column if not exists locked_mac macaddr;
+
 -- When a pause started. A pause froze the status but not the clock: expires_at
 -- kept counting down underneath it, so a customer paused for a week came back
 -- to find their remaining days had quietly burned away regardless. On resume,

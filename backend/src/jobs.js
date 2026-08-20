@@ -52,6 +52,34 @@ export function startJobs() {
   // someone gets billed twice and suspended over an invoice they already paid
   // elsewhere. Only licence_ends remains — WHMCS moves it, this acts on it.
   cron.schedule('0 7 * * *',  safely('expireTenantLicences', expireTenantLicences));
+  cron.schedule('*/5 * * * *', safely('lockNewPppoeMacs', lockNewPppoeMacs));
+}
+
+/**
+ * Lock a fresh PPPoE line to whatever MAC it first actually dials in from.
+ *
+ * Nothing in the login path itself can do this — FreeRADIUS authenticates
+ * directly against radcheck/radreply without this app in the loop, so there
+ * is no single moment a "first successful login" event reaches here. What
+ * does reach here is radacct, which FreeRADIUS's own accounting query
+ * writes to on every session start — this just notices the ones belonging
+ * to a line that has not been locked yet and locks them.
+ */
+async function lockNewPppoeMacs() {
+  const { rows } = await pool.query(`
+    select s.id, s.tenant_id, s.pppoe_user,
+           (select a.callingstationid from radacct a
+             where a.username = s.pppoe_user and a.callingstationid is not null
+             order by a.acctstarttime desc limit 1) as mac
+      from subscribers s
+     where s.service = 'pppoe' and s.pppoe_user is not null and s.locked_mac is null
+       and s.tenant_id in (${enabledTenants})`, ['lockNewPppoeMacs']);
+  const radius = await import('./radius.js');
+  for (const s of rows) {
+    if (!s.mac) continue;
+    await pool.query('update subscribers set locked_mac=$2 where id=$1', [s.id, s.mac]);
+    await radius.lockPppoeMac(pool, s.tenant_id, s.pppoe_user, s.mac).catch(() => {});
+  }
 }
 
 

@@ -3889,6 +3889,30 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
 }));
 
 /**
+ * Free a PPPoE line to lock onto whichever router dials in next.
+ *
+ * A line gets locked to its first router's MAC automatically (see the
+ * lockNewPppoeMacs job) so a shared password stops working from anywhere
+ * else. That is exactly wrong the moment the customer's own equipment
+ * changes for a legitimate reason — a tech swapping a dead router, the
+ * customer buying a new one — so an admin has to be able to say "this next
+ * MAC is fine" without waiting for someone to invent a workaround.
+ */
+app.post('/api/subscribers/:id/clear-mac-lock', wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    'update subscribers set locked_mac=null where id=$1 and tenant_id=$2 returning pppoe_user',
+    [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+
+  if (s.pppoe_user) {
+    const radius = await import('./radius.js');
+    await radius.clearPppoeMacLock(pool, req.tenant.id, s.pppoe_user)
+      .catch((e) => console.warn('clear-mac-lock: radius not updated —', e?.message ?? e));
+  }
+  res.json({ ok: true });
+}));
+
+/**
  * Read back everything a customer needs to get online or sign in.
  *
  * Separate from GET /api/subscribers on purpose: the list is loaded constantly by
@@ -5479,6 +5503,7 @@ const AUTOMATION_JOBS = [
   { job: 'watchdog', name: 'Router watchdog', cron: '*/1 * * * *', detail: 'Pings every NAS and flags the ones that stop answering' },
   { job: 'ownerBrief', name: 'Owner brief', cron: '0 20 * * *', detail: 'Evening SMS: collected, new clients, routers down' },
   { job: 'expireTenantLicences', name: 'Tenant licences', cron: '0 7 * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
+  { job: 'lockNewPppoeMacs', name: 'PPPoE MAC lock', cron: '*/5 * * * *', detail: 'Locks a fresh line to the first router it actually dials in from' },
   /**
    * Two jobs that have been running all along without appearing here.
    *

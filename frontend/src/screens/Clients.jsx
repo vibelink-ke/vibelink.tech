@@ -218,6 +218,25 @@ export default function Clients() {
     }
   };
 
+  /**
+   * A PPPoE line locks to whichever router it first dials in from — see the
+   * PPPoE MAC lock job — so a shared password stops working from a
+   * different site. That is exactly wrong after a legitimate equipment
+   * change (a tech swaps a dead router, the customer buys their own), so
+   * this is the escape hatch: clear it, and the next dial-in locks fresh.
+   */
+  const clearMacLock = async (c) => {
+    if (!window.confirm(`Clear the MAC lock for ${c.name}? Whichever router dials in next will be the new locked one.`)) return;
+    try {
+      await api.clearMacLock(c.id);
+      store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, locked_mac: null } : x)));
+      setDetail((d) => (d?.id === c.id ? { ...d, locked_mac: null } : d));
+      store.toast(`MAC lock cleared for ${c.name}`);
+    } catch (e) {
+      store.toast(`Could not clear the lock: ${e.message}`);
+    }
+  };
+
   const bulkCompensate = async () => {
     const picked = selectedClients();
     if (!picked.length) return store.toast('Select at least one client first');
@@ -725,6 +744,13 @@ export default function Clients() {
             ? [{ label: `Send STK to ${detail.phone}`, onClick: () => stkPush(detail) }]
             : []),
           { label: 'Give free days', onClick: () => giveDays(detail), title: 'Outage credit or a grace period — extends their expiry' },
+          ...(detail.service === 'pppoe' && detail.locked_mac
+            ? [{
+                label: 'Clear MAC lock',
+                onClick: () => clearMacLock(detail),
+                title: 'Let this line dial in from a different router — a tech swapped equipment, or the customer moved',
+              }]
+            : []),
           {
             label: 'Add another line',
             title: 'A second connection for this same customer — same account number, a new line tag',
@@ -744,6 +770,14 @@ export default function Clients() {
             <KV k="Phone" v={detail.phone} />
             <KV k="Service" v={detail.service} />
             <KV k="PPPoE user" v={detail.pppoe_user ?? '—'} />
+            {detail.service === 'pppoe' && (
+              <KV
+                k="MAC lock"
+                v={detail.locked_mac
+                  ? `${detail.locked_mac} — locked`
+                  : 'Not locked yet — sets on first dial-in'}
+              />
+            )}
             <KV k="Static IP" v={detail.static_ip ?? '—'} />
             <KV k="Location" v={detail.location ?? '—'} />
             {/* A link rather than an embedded map: this drawer is opened dozens

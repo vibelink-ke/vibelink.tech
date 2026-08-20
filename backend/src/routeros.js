@@ -72,8 +72,24 @@ const { RouterOSAPI } = pkg;
   }
 }
 
-/** Tags every object we own, so we can find ours again and humans leave it alone. */
-export const MANAGED_COMMENT = 'vibelink billing - do not delete';
+/**
+ * Tags every object we own — with what it is actually for, not one identical
+ * blanket comment on every rule the push touches. An operator reading the
+ * router's own config should be able to tell an anti-sharing mangle rule from
+ * a DNS block from the expired-customer block at a glance, the same as they
+ * would for anything they wrote themselves.
+ *
+ * The (vibelink) tail is the only part our own idempotency checks rely on —
+ * isManaged() matches on that, not on the label before it, so every rule can
+ * carry its own description and still be found, updated, and left alone by
+ * the next push exactly as before.
+ */
+const TAG = '(vibelink)';
+const managed = (label) => `${label} ${TAG}`;
+const isManaged = (row) => typeof row?.comment === 'string' && row.comment.endsWith(TAG);
+
+/** Back-compat for anywhere still asking for the old blanket tag directly. */
+export const MANAGED_COMMENT = managed('vibelink-managed');
 
 /** The service account. Same name on every router; the password differs per router. */
 export const SERVICE_USER = 'vibelink-svc';
@@ -275,7 +291,7 @@ export async function ensureServiceUser(conn, { user = SERVICE_USER, password })
       `=.id=${idOf(existing[0])}`,
       `=password=${password}`,
       '=group=full',
-      `=comment=${MANAGED_COMMENT}`,
+      `=comment=${managed('ispBilling login')}`,
     ]);
     return { created: false };
   }
@@ -283,7 +299,7 @@ export async function ensureServiceUser(conn, { user = SERVICE_USER, password })
     `=name=${user}`,
     `=password=${password}`,
     '=group=full',
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispBilling login')}`,
   ]);
   return { created: true };
 }
@@ -312,7 +328,7 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
     `=address=${serverIp}`,
     `=secret=${secret}`,
     '=timeout=3s',
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispBilling RADIUS')}`,
   ];
 
   if (mine.length) {
@@ -461,7 +477,7 @@ export async function applyHotspotServer(conn, {
   const existing = addrs.find((a) => String(a.address).startsWith(`${gateway}/`));
   if (!existing) {
     await cmd(conn, 'gateway address', '/ip/address/add', [
-      `=address=${gateway}/${bits}`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
+      `=address=${gateway}/${bits}`, `=interface=${bridge}`, `=comment=${managed('ispHotspot gateway')}`,
     ]);
     done.push(`address ${gateway}/${bits} on ${bridge}`);
   }
@@ -492,7 +508,7 @@ export async function applyHotspotServer(conn, {
   const DHCP = 'hotspot-dhcp';
   const dhcp = (await conn.write('/ip/dhcp-server/print', [`?name=${DHCP}`]))[0];
   const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
-                      `=lease-time=1h`, `=comment=${MANAGED_COMMENT}`];
+                      `=lease-time=1h`, `=comment=${managed('ispHotspot DHCP')}`];
   if (dhcp) {
     if (!unchanged(dhcp, dhcpFields)) {
       await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
@@ -508,7 +524,7 @@ export async function applyHotspotServer(conn, {
   const nets = await conn.write('/ip/dhcp-server/network/print', []);
   const netRow = nets.find((n) => String(n.address) === cidr);
   const netFields = [`=address=${cidr}`, `=gateway=${gateway}`, `=dns-server=${gateway}`,
-                     `=comment=${MANAGED_COMMENT}`];
+                     `=comment=${managed('ispHotspot DHCP network')}`];
   if (netRow) {
     if (!unchanged(netRow, netFields)) {
       await cmd(conn, 'DHCP network', '/ip/dhcp-server/network/set', [`=.id=${idOf(netRow)}`, ...netFields]);
@@ -706,11 +722,11 @@ export async function applyDnsProxy(conn) {
   }
 
   const rules = await conn.write('/ip/firewall/filter/print', []);
-  const mine = rules.filter((r) => r.comment === MANAGED_COMMENT
+  const mine = rules.filter((r) => isManaged(r)
     && String(r.chain) === 'input' && String(r['dst-port']) === '53');
   const fields = [
     '=chain=input', `=in-interface=${wan}`, '=protocol=udp', '=dst-port=53',
-    '=action=drop', `=comment=${MANAGED_COMMENT}`,
+    '=action=drop', `=comment=${managed('ispBlocking WAN DNS')}`,
   ];
   if (mine.length) {
     if (!unchanged(mine[0], fields)) {
@@ -755,7 +771,7 @@ export async function applyNat(conn, { subnet, wan = null }) {
     '=chain=srcnat',
     `=src-address=${subnet}`,
     '=action=masquerade',
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispNat subscriber masquerade')}`,
     // out-interface is deliberately omitted when the uplink cannot be
     // determined: masquerading out of every interface is wrong in principle but
     // still gets customers online, whereas naming the wrong interface does
@@ -780,19 +796,19 @@ export async function applyNat(conn, { subnet, wan = null }) {
  * hotspot is a shop with the door locked from the inside. The billing portal
  * itself has to be reachable for the same reason.
  *
- * Entries we manage carry MANAGED_COMMENT and are replaced wholesale on each
- * run; anything an operator added by hand is left alone.
+ * Entries we manage are tagged and replaced wholesale on each run; anything
+ * an operator added by hand is left alone.
  */
 export async function applyWalledGarden(conn, hosts = []) {
   const wanted = [...new Set(hosts.map((h) => String(h).trim()).filter(Boolean))];
 
   const current = await conn.write('/ip/hotspot/walled-garden/print', []);
-  for (const row of current.filter((r) => r.comment === MANAGED_COMMENT)) {
+  for (const row of current.filter((r) => isManaged(r))) {
     await conn.write('/ip/hotspot/walled-garden/remove', [`=.id=${idOf(row)}`]);
   }
   for (const host of wanted) {
     await conn.write('/ip/hotspot/walled-garden/add', [
-      `=dst-host=${host}`, '=action=allow', `=comment=${MANAGED_COMMENT}`,
+      `=dst-host=${host}`, '=action=allow', `=comment=${managed('ispHotspot walled garden')}`,
     ]);
   }
   return { allowed: wanted.length };
@@ -828,7 +844,7 @@ export async function ensureHotspotUserProfile(conn, {
      * honoured. A day covers the common bundles and expires on its own.
      */
     ...(bindMac ? ['=add-mac-cookie=yes', '=mac-cookie-timeout=1d'] : ['=add-mac-cookie=no']),
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispHotspot user profile')}`,
   ];
   if (found) {
     if (!unchanged(found, fields)) {
@@ -856,7 +872,7 @@ export async function ensureHotspotUserProfile(conn, {
  */
 export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
   const rules = await conn.write('/ip/firewall/mangle/print', []);
-  const mine = rules.filter((r) => r.comment === MANAGED_COMMENT
+  const mine = rules.filter((r) => isManaged(r)
     && String(r.chain) === 'postrouting' && String(r['out-interface']) === bridge);
 
   const fields = [
@@ -864,7 +880,7 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
     `=out-interface=${bridge}`,
     '=action=change-ttl',
     '=new-ttl=set:1',
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispHotspot anti-sharing')}`,
   ];
   if (mine.length) {
     if (!unchanged(mine[0], fields)) {
@@ -1151,7 +1167,7 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
   const bridges = await conn.write('/interface/bridge/print', []);
   const existing = bridges.find((b) => b.name === name);
   if (!existing) {
-    await cmd(conn, 'create bridge', '/interface/bridge/add', [`=name=${name}`, `=comment=${MANAGED_COMMENT}`]);
+    await cmd(conn, 'create bridge', '/interface/bridge/add', [`=name=${name}`, `=comment=${managed('ispLan bridge')}`]);
     bridges.push({ '.id': undefined, name });   // placeholder; re-read below only if needed
   }
 
@@ -1237,7 +1253,7 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
     if (elsewhere.has(port)) { skipped.push(`${port} (already in ${elsewhere.get(port)})`); continue; }
     try {
       await conn.write('/interface/bridge/port/add', [
-        `=bridge=${name}`, `=interface=${port}`, `=comment=${MANAGED_COMMENT}`,
+        `=bridge=${name}`, `=interface=${port}`, `=comment=${managed('ispLan bridge port')}`,
       ]);
     } catch (e) {
       // Name the port. Enslaving one is the step most likely to cut the very
@@ -1290,7 +1306,7 @@ export async function applyPppoeServer(conn, {
   const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
   if (!addrs.some((a) => String(a.address).startsWith(`${gateway}/`))) {
     await cmd(conn, 'gateway address for PPPoE', '/ip/address/add', [
-      `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${MANAGED_COMMENT}`,
+      `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${managed('ispPppoe gateway')}`,
     ]);
   }
 
@@ -1316,7 +1332,7 @@ export async function applyPppoeServer(conn, {
     '=use-compression=no',
     '=use-encryption=no',
     '=only-one=yes',        // one session per subscriber, so a shared password is obvious
-    `=comment=${MANAGED_COMMENT}`,
+    `=comment=${managed('ispPppoe profile')}`,
   ];
   const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
   if (profile) {
@@ -1381,44 +1397,48 @@ export async function applyPppoeServer(conn, {
  */
 export async function applyExpiredPool(conn, { cidr } = {}) {
   if (!cidr) return { configured: false };
-  const LIST = 'expired-customers';
+  const LIST = 'ispblocking';
   const done = [];
 
   const entries = await conn.write('/ip/firewall/address-list/print', [`?list=${LIST}`]);
-  const mine = entries.filter((e) => e.comment === MANAGED_COMMENT);
-  const wantAddr = ['=list=' + LIST, `=address=${cidr}`, `=comment=${MANAGED_COMMENT}`];
+  const mine = entries.filter((e) => isManaged(e));
+  const wantAddr = ['=list=' + LIST, `=address=${cidr}`, `=comment=${managed('ispBlocking expired customers')}`];
   if (mine.length) {
     if (!unchanged(mine[0], wantAddr)) {
-      await cmd(conn, 'expired-customers address list', '/ip/firewall/address-list/set',
+      await cmd(conn, 'ispblocking address list', '/ip/firewall/address-list/set',
         [`=.id=${idOf(mine[0])}`, ...wantAddr]);
     }
   } else {
-    await cmd(conn, 'expired-customers address list', '/ip/firewall/address-list/add', wantAddr);
+    await cmd(conn, 'ispblocking address list', '/ip/firewall/address-list/add', wantAddr);
     done.push(`address list ${LIST} = ${cidr}`);
   }
   for (const dupe of mine.slice(1)) {
-    await cmd(conn, 'remove duplicate expired-customers entry', '/ip/firewall/address-list/remove',
+    await cmd(conn, 'remove duplicate ispblocking entry', '/ip/firewall/address-list/remove',
       [`=.id=${idOf(dupe)}`]);
   }
 
   const rules = await conn.write('/ip/firewall/filter/print', []);
-  const mineRules = rules.filter((r) => r.comment === MANAGED_COMMENT
+  const mineRules = rules.filter((r) => isManaged(r)
     && String(r.chain) === 'forward' && r['src-address-list'] === LIST);
-  const wantRule = ['=chain=forward', `=src-address-list=${LIST}`, '=action=drop', `=comment=${MANAGED_COMMENT}`];
+  // action, then chain, then src-address-list — no in-/out-interface: this has
+  // to catch an expired customer regardless of which physical port or bridge
+  // they come in on, not just one interface.
+  const wantRule = ['=action=drop', '=chain=forward', `=src-address-list=${LIST}`,
+    `=comment=${managed('ispBlocking expired customers')}`];
   if (mineRules.length) {
     if (!unchanged(mineRules[0], wantRule)) {
-      await cmd(conn, 'expired-customers block rule', '/ip/firewall/filter/set',
+      await cmd(conn, 'ispblocking rule', '/ip/firewall/filter/set',
         [`=.id=${idOf(mineRules[0])}`, ...wantRule]);
     }
   } else {
     // Near the top: a forward-chain accept rule earlier in the list (NAT
     // masquerade setups often have one) would otherwise let the traffic
     // through before this is ever reached.
-    await cmd(conn, 'expired-customers block rule', '/ip/firewall/filter/add', [...wantRule, '=place-before=0']);
+    await cmd(conn, 'ispblocking rule', '/ip/firewall/filter/add', [...wantRule, '=place-before=0']);
     done.push('filter rule dropping forward traffic from ' + LIST);
   }
   for (const dupe of mineRules.slice(1)) {
-    await cmd(conn, 'remove duplicate expired-customers block rule', '/ip/firewall/filter/remove',
+    await cmd(conn, 'remove duplicate ispblocking rule', '/ip/firewall/filter/remove',
       [`=.id=${idOf(dupe)}`]);
   }
 
