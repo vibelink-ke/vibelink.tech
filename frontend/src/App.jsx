@@ -182,6 +182,11 @@ export default function App() {
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
 
             <Route path="/payments" element={<Payments />} />
+            {/* Same screen, opened straight to the Invoices tab — invoices lived
+                only as a tab inside Payments with no nav entry of its own, so
+                the only way to find them was already knowing to click
+                Payments first. */}
+            <Route path="/invoices" element={<Payments />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
             <Route path="/site-profiles" element={<SiteProfiles />} />
             <Route path="/automation" element={<Automation />} />

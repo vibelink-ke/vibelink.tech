@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
@@ -38,7 +39,8 @@ const when = (d) => (d ? new Date(d).toLocaleString('en-KE', { day: '2-digit', m
 
 export default function Payments() {
   const store = useStore();
-  const [tab, setTab] = useState('unmatched');
+  const location = useLocation();
+  const [tab, setTab] = useState(location.pathname === '/invoices' ? 'invoices' : 'unmatched');
   const [resolving, setResolving] = useState(null);
   const [assignTo, setAssignTo] = useState('');
   const [busy, setBusy] = useState(false);
