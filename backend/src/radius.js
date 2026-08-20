@@ -1,5 +1,25 @@
 import * as coaClient from './coa.js';
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/**
+ * The date format FreeRADIUS's Expiration check-item actually parses:
+ * "Aug 19 2026 23:39:05 GMT" — no weekday, no comma, month first. This used
+ * to be `date.toUTCString()`, which produces "Wed, 19 Aug 2026 23:39:05 GMT"
+ * — valid HTTP-date, but not what FreeRADIUS's date parser accepts, so every
+ * check against it failed with "Error parsing value: failed to parse time
+ * string" and the login was rejected outright, indistinguishable from a
+ * wrong password. Every account with an Expiration attribute hit this — not
+ * one router or one tenant, any voucher or PPPoE login checked against an
+ * expiry date written this way.
+ */
+function radiusDate(date) {
+  const d = new Date(date);
+  return `${MONTHS[d.getUTCMonth()]} ${pad2(d.getUTCDate())} ${d.getUTCFullYear()} `
+    + `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} GMT`;
+}
+
 /**
  * The hotspot user profile the router push creates.
  *
@@ -453,7 +473,7 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
     `insert into radcheck (tenant_id, username, attribute, op, value)
      values ($3,$1,'Expiration',':=',$2)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [code, expires.toUTCString(), tenantId]);
+    [code, radiusDate(expires), tenantId]);
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value) values
        ($4,$1,'Mikrotik-Rate-Limit',':=',$2),
@@ -561,7 +581,7 @@ export async function startVoucherClock(c, tenantId, code) {
     await c.query(
       `insert into radcheck (tenant_id, username, attribute, op, value) values
          ($1,$2,'Expiration',':=',$3)`,
-      [tenantId, code, new Date(expiresAt).toUTCString()]);
+      [tenantId, code, radiusDate(expiresAt)]);
   }
 }
 
