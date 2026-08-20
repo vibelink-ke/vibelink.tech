@@ -316,8 +316,11 @@ export default function AddClient() {
                 <Button onClick={genCredentials}>Generate</Button>
               </div>
             </Field>
-            <Field label="Service type">
-              <Select value={f.service} onChange={set('service')} options={SERVICES} />
+            <Field
+              label="Service type"
+              hint={linkedAccount ? 'A second line on this account is PPPoE — hotspot vouchers don\'t use an account number' : undefined}
+            >
+              <Select value={f.service} onChange={set('service')} options={SERVICES} disabled={!!linkedAccount} />
             </Field>
             <Field label="Plan" hint="subscribers.plan_id — drives the RADIUS rate limit and billing cycle">
               <Select
