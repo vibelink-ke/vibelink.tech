@@ -57,12 +57,19 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
-  redirectUrl = null,
+  redirectUrl = null, prefillCode = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
   // where the page is already being served by the billing system itself.
   const apiBase = portalUrl ?? '';
+  // $(link-orig) only means something when the guest was genuinely
+  // intercepted mid-request; a guest who opened the portal directly has
+  // nothing there to return to and it ends up pointing at the login page
+  // itself, which reads exactly like the redirect not happening. Our own
+  // confirmation page always resolves, so it is the default rather than
+  // link-orig — an operator-set redirectUrl still wins over both.
+  const fallbackDst = apiBase ? `${apiBase}/hotspot/connected` : '$(link-orig)';
 
   /**
    * The failed-login message, and only for the copy the router will serve.
@@ -228,12 +235,11 @@ export function loginPage({
       <!--
         Where the guest lands once connected. An operator's configured
         redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
-        destination they chose, so it wins when set; $(link-orig) — RouterOS's
-        own placeholder for "wherever the guest was originally headed" — is
-        the fallback, and was previously the only behavior this ever had,
-        with the setting saved to the database but never once read.
+        destination they chose, so it wins when set; our own confirmation
+        page is the fallback rather than $(link-orig) — see fallbackDst above
+        for why link-orig is not reliable enough to depend on by default.
       -->
-      <input type="hidden" name="dst" value="${redirectUrl ? esc(redirectUrl) : '$(link-orig)'}">
+      <input type="hidden" name="dst" value="${redirectUrl ? esc(redirectUrl) : fallbackDst}">
       <label for="username">Voucher code</label>
       <input id="username" name="username" type="text" inputmode="numeric"
              autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
@@ -312,7 +318,17 @@ export function loginPage({
      */
     var mac = ${JSON.stringify(macToken)};
     var hadError = ${hadError};
-    if (mac && mac.indexOf('\$') !== 0 && !hadError) {
+    // The SMS a guest gets on payment carries the code as text and as a tap
+    // link to this page with ?code=... attached — for someone who would
+    // rather tap than type it back in on a small keyboard. Takes priority
+    // over the MAC lookup below: it names an exact voucher, nothing to look
+    // up first.
+    var prefillCode = ${JSON.stringify(prefillCode ?? '')};
+    if (prefillCode && !hadError) {
+      document.getElementById('username').value = prefillCode;
+      document.getElementById('password').value = prefillCode;
+      document.getElementById('loginForm').submit();
+    } else if (mac && mac.indexOf('\$') !== 0 && !hadError) {
       fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
         .then(function (r) { return r.json(); })
         .then(function (d) {

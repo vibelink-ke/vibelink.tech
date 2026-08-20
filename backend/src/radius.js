@@ -430,18 +430,36 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
      values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
     [tenantId, code, planId, phone, mac,
      fromCreation ? 'in_use' : 'unused', fromCreation ? new Date() : null, expires]);
+  /**
+   * on conflict, not a bare insert: uniqueCode() only checks the vouchers
+   * table, not radcheck directly — so a fresh code that happens to collide
+   * with an existing username (another radcheck row from a PPPoE account
+   * whose login was set to something short and numeric, say) would otherwise
+   * throw here on the unique (tenant_id, username, attribute) constraint and
+   * abort this entire transaction: the customer's payment still applied, but
+   * the voucher and its radcheck/radreply rows would roll back with it,
+   * leaving them charged with no way to log in — "invalid username" on a
+   * voucher they just bought, indistinguishable from one that was simply
+   * never written. Resolving in our favour here is correct: this code was
+   * just proven unique in vouchers, so whatever radcheck row it collided
+   * with is stale and safe to overwrite.
+   */
   await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value) values
-       ($2,$1,'Cleartext-Password',':=',$1)`, [code, tenantId]);
+       ($2,$1,'Cleartext-Password',':=',$1)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [code, tenantId]);
   if (expires) await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value)
-     values ($3,$1,'Expiration',':=',$2)`,
+     values ($3,$1,'Expiration',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [code, expires.toUTCString(), tenantId]);
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value) values
        ($4,$1,'Mikrotik-Rate-Limit',':=',$2),
        ($4,$1,'Session-Timeout',':=',$3),
-       ($4,$1,'Mikrotik-Group',':=',$5)`,
+       ($4,$1,'Mikrotik-Group',':=',$5)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId,
      HOTSPOT_PROFILE]);
   return v;
@@ -468,7 +486,17 @@ export function generateCode({ code_type = 'numeric', code_length = 6 }) {
 async function uniqueCode(c, tenantId, prefs) {
   for (;;) {
     const code = generateCode(prefs);
-    const { rowCount } = await c.query('select 1 from vouchers where tenant_id=$1 and code=$2', [tenantId, code]);
+    // Checked against radcheck too, not just vouchers: a code is also a
+    // RADIUS username the moment it is issued, and a PPPoE account's login
+    // lives in the very same table under the very same tenant. Missing this
+    // was harmless until the on-conflict above started resolving in the
+    // new code's favour — before that fix it merely crashed; this is what
+    // stops it from ever silently overwriting somebody's real login instead.
+    const { rowCount } = await c.query(
+      `select 1 from vouchers where tenant_id=$1 and code=$2
+       union all
+       select 1 from radcheck where tenant_id=$1 and username=$2 limit 1`,
+      [tenantId, code]);
     if (!rowCount) return code;
   }
 }

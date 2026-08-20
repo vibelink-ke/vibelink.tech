@@ -512,7 +512,42 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // Only the copy destined for the router carries RouterOS template syntax.
     // A person opening this in a browser gets a page with no raw $(...) in it.
     forRouter: req.query.router === '1',
+    // The tap-to-connect link in the payment SMS — see notifyVoucher in
+    // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
+    // username on submit, so anything else is dropped rather than trusted.
+    prefillCode: /^[A-Za-z0-9-]{1,20}$/.test(String(req.query.code ?? '')) ? req.query.code : null,
   }));
+}));
+
+/**
+ * Where a login lands when the operator has not set Hotspot -> Settings ->
+ * "Redirect after login".
+ *
+ * The fallback used to be RouterOS's own $(link-orig) — wherever the guest's
+ * browser was originally headed. That is only reliable when the guest was
+ * genuinely intercepted mid-request; a guest who opened the portal directly
+ * (typed the hotspot DNS name, used a bookmark, tapped the SMS link below)
+ * has no "original" request to return to, and $(link-orig) then points back
+ * at the login page itself — a login that "succeeds" and reloads the same
+ * sign-in form, which reads exactly like the redirect not happening at all.
+ * A page on our own walled-garden-reachable host always resolves, so this
+ * replaces link-orig as the default rather than depending on it.
+ */
+app.get('/hotspot/connected', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  res.type('html').send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connected</title>
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+background:#f5f6f3;color:#161a17;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px}
+.card{max-width:360px;text-align:center;background:#fff;border:1px solid rgba(128,128,128,.25);
+border-radius:14px;padding:34px 26px}
+h1{margin:0 0 8px;font-size:22px}p{margin:0;color:#8a9186;font-size:14.5px}</style>
+</head><body><div class="card">
+<h1>You're connected</h1>
+<p>${tenant?.name ? `Enjoy your internet from ${tenant.name}.` : 'Enjoy your internet.'}</p>
+</div></body></html>`);
 }));
 
 /**

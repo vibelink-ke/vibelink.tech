@@ -36,7 +36,20 @@ export async function applyPayment(tenantId, tx) {
 
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
     await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
-    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires: v.expires_at });
+
+    // {ssid} was never actually filled in here — send() only ever received
+    // {code} and {expires}, so every voucher SMS read "Connect to  and enter
+    // it" with the network name silently missing. {link} is new: a tap
+    // target for the same code, for a guest who would rather not retype a
+    // 6-digit code on a phone keyboard, or whose device dropped back to the
+    // sign-in page and just needs one tap to get back on.
+    const { rows: [t] } = await c.query('select subdomain from tenants where id=$1', [tenantId]);
+    const { rows: [hs] } = await c.query('select ssid from hotspot_settings where tenant_id=$1', [tenantId]);
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    const link = t?.subdomain
+      ? `https://${t.subdomain}.${root}/hotspot/login.html?code=${encodeURIComponent(v.code)}`
+      : '';
+    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires: v.expires_at, ssid: hs?.ssid ?? '', link });
     return { paymentId, applied: true, voucher: v };
   });
 }
