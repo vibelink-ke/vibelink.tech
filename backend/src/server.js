@@ -3260,6 +3260,26 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
       const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
       const hsLoginUrl = tt?.subdomain ? `https://${tt.subdomain}.${rootDomain}/hotspot/login.html?router=1` : null;
 
+      /**
+       * The user profile every voucher names, ensured on every Configure —
+       * not only when LAN ports are chosen below. It used to live entirely
+       * inside applyHotspotServer, which this handler only calls when ports
+       * are selected, so a router whose bridge already existed and was
+       * Configured again without touching ports never got hs-default at all.
+       * A voucher then fails at login with "unknown user profile <hs-default>"
+       * on a router that otherwise looks fully configured — nothing on the
+       * Routers screen says a profile is missing, only a guest trying to
+       * connect finds out. Idempotent like everything else here, so running
+       * it again inside applyHotspotServer too, when ports are chosen, costs
+       * nothing.
+       */
+      const profileResult = await ros.ensureHotspotUserProfile(conn, {
+        sharedUsers: hs?.multi_device ? 3 : 1,
+        idleMinutes: hs?.idle_timeout_min ?? 10,
+        bindMac: hs?.bind_mac ?? true,
+      });
+      if (profileResult.created) done.push(`hotspot user profile ${profileResult.profile}`);
+
       // Building the hotspot needs a bridge to build it on. Same rule as PPPoE:
       // only when ports were chosen, because inventing a bridge unasked can
       // swallow the uplink and take the site off the internet.
