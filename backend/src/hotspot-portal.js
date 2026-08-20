@@ -79,6 +79,13 @@ export function loginPage({
   const errorBlock = forRouter
     ? '$(if error)<p class="err">$(error)</p>$(endif)'
     : '';
+
+  // RouterOS's own $(mac) — the guest's device, not a real value in the
+  // preview or the copy a person opens directly, same reasoning as $(error).
+  const macToken = forRouter ? '$(mac)' : '';
+  // A failed attempt just bounced back here with $(error) set — auto-login
+  // would otherwise immediately resubmit the same voucher and loop.
+  const hadError = forRouter ? '$(if error)true$(else)false$(endif)' : 'false';
   // Each bundle carries its own button. A single "buy" link elsewhere on the
   // page made the guest choose twice — once here and again on another screen —
   // and the price they had just read was no longer in front of them.
@@ -292,6 +299,30 @@ export function loginPage({
     // garden, so it is reachable before the
     // guest has paid; that is the whole point of putting it there.
     var API = ${JSON.stringify(apiBase)};
+
+    /**
+     * Recognise a device that already paid, without depending on the
+     * router's own add-mac-cookie table — that one lives in RAM and is
+     * exactly what a power outage wipes, which is the whole reason a
+     * customer who is still well within their paid time lands back on this
+     * page instead of being waved straight through.
+     *
+     * Skipped after a just-failed attempt ($(if error)), so a wrong code
+     * cannot loop into auto-resubmitting itself forever.
+     */
+    var mac = ${JSON.stringify(macToken)};
+    var hadError = ${hadError};
+    if (mac && mac.indexOf('\$') !== 0 && !hadError) {
+      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.code) return;
+          document.getElementById('username').value = d.code;
+          document.getElementById('password').value = d.code;
+          document.getElementById('loginForm').submit();
+        })
+        .catch(function () { /* stay on the manual form — nothing to recover from here */ });
+    }
 
     document.querySelectorAll('.buy').forEach(function (b) {
       b.addEventListener('click', function () {

@@ -163,7 +163,13 @@ export default function Networks() {
                     <RowAction tone={color.green} onClick={() => setEditing({ ...p, routerId: p.router_id ?? '' })}>
                       Edit
                     </RowAction>
-                    <RowAction tone={color.rust} onClick={() => removePool(p)}>Delete</RowAction>
+                    {p.locked && p.router_id ? (
+                      <span style={{ fontSize: 11.5, color: color.muted }} title="Created automatically for its router — delete the router to free it up">
+                        🔒 Locked
+                      </span>
+                    ) : (
+                      <RowAction tone={color.rust} onClick={() => removePool(p)}>Delete</RowAction>
+                    )}
                   </RowActions>
                 </span>
               ),
@@ -222,10 +228,14 @@ export default function Networks() {
             <Field label="CIDR" hint={editing.cidr ? `${cidrHosts(editing.cidr)} usable addresses` : ''}>
               <Input value={editing.cidr} onChange={(e) => setEditing((s) => ({ ...s, cidr: e.target.value }))} />
             </Field>
-            <Field label="Router">
+            <Field
+              label="Router"
+              hint={editing.locked ? 'Locked to this router — delete the router to free the pool up' : undefined}
+            >
               <Select
                 value={editing.routerId ?? ''}
                 onChange={(e) => setEditing((s) => ({ ...s, routerId: e.target.value }))}
+                disabled={editing.locked}
                 options={[{ value: '', label: 'Any router' },
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
               />

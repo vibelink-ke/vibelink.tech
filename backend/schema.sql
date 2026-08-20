@@ -800,6 +800,15 @@ alter table ip_pools add column if not exists purpose text not null default 'nor
 alter table ip_pools drop constraint if exists ip_pools_purpose_check;
 alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal', 'expired'));
 
+-- Every router now gets its own expired-customers pool the moment it's
+-- created — an operator forgetting to set one up was the actual cause of
+-- "0kb" quietly downgrading to a rate-limit-only fallback. Locked so it
+-- can't be deleted out from under that router by mistake; the delete route
+-- refuses while it's still attached to one. Detached automatically (see the
+-- existing ip_pools_router_id_fkey ON DELETE SET NULL) if the router itself
+-- is removed, at which point it is just an ordinary unlocked pool.
+alter table ip_pools add column if not exists locked boolean not null default false;
+
 -- What a customer signs in to the portal with. Hashed like a staff password —
 -- the plaintext is shown once when it is generated and never stored, so a
 -- database dump does not hand someone every customer's account.

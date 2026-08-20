@@ -686,6 +686,41 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
 }));
 
 /**
+ * "Does this MAC already have paid time left?" — the login page calls this
+ * on load and auto-submits if so, which is the actual fix for a guest
+ * getting the sign-in form again after their router loses power.
+ *
+ * The router's own answer to that ("has this device logged in before?") is
+ * add-mac-cookie, and that table lives in RAM: RouterOS forgets it on
+ * reboot, which is a documented MikroTik limitation, not something this
+ * router push got wrong. Driving it from our own database instead means the
+ * guest is recognised again the moment the billing system is reachable,
+ * with no dependency on what state the router's own cookie table survived a
+ * power cut in.
+ */
+app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const mac = String(req.query.mac ?? '').trim().toLowerCase();
+  if (!mac || mac === '00:00:00:00:00:00') return res.json({ code: null });
+
+  await pool.query(
+    `update vouchers set status='expired'
+      where tenant_id=$1 and status='in_use' and expires_at is not null and expires_at < now()`,
+    [tenant.id]);
+
+  const { rows: [v] } = await pool.query(
+    `select code from vouchers
+      where tenant_id=$1 and lower(mac::text)=$2 and status='in_use'
+        and (expires_at is null or expires_at > now())
+      order by created_at desc limit 1`,
+    [tenant.id, mac]);
+  res.json({ code: v?.code ?? null });
+}));
+
+/**
  * Live chat for people with no account.
  *
  * A hotspot guest has not paid yet and a customer may not have a portal
@@ -3239,8 +3274,50 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
     `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret)
      values ($1,$2,$3,$4,$5,$6,$7) returning *`,
     [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
+
+  // Every router shares one physical WAN and cannot route another site's
+  // expired-pool range — the operator has to set one aside per router anyway
+  // — so it may as well already exist rather than depend on remembering to
+  // add it before the firewall block does anything. Soft-fails: a tenant who
+  // has somehow claimed all sixteen candidate blocks still gets their router.
+  try {
+    const cidr = await autoExpiredCidr(req.tenant.id);
+    if (cidr) {
+      await pool.query(
+        `insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, locked)
+         values ($1,$2,$3,$4,'pppoe','expired',true)`,
+        [req.tenant.id, `${name} — expired customers`, cidr, r.id]);
+    }
+  } catch (e) {
+    console.warn('auto expired-pool for router', r.id, e.message);
+  }
+
   res.json(r);
 }));
+
+/**
+ * The next free /20 (4096 addresses) out of a block set aside purely for
+ * auto-created expired-customer pools — a tenant's own address plan lives
+ * under Networks and is never touched here, so this can never collide with
+ * ranges they chose themselves. Sixteen /20s fit in 10.250.0.0/16, which is
+ * sixteen routers before a tenant would need to set one up by hand instead.
+ */
+async function autoExpiredCidr(tenantId) {
+  const { rows: existing } = await pool.query('select cidr from ip_pools where tenant_id=$1', [tenantId]);
+  const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
+  const { rows: [hs] } = await pool.query(
+    'select hotspot_network from hotspot_settings where tenant_id=$1', [tenantId]);
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  for (let i = 0; i < 16; i++) {
+    const cidr = `10.250.${i * 16}.0/20`;
+    if (existing.some((e) => poolsOverlap(e.cidr, cidr))) continue;
+    if (tunnelConflict(cidr, t?.tunnel_subnet, SERVER_IP)) continue;
+    if (hs?.hotspot_network && poolsOverlap(hs.hotspot_network, cidr)) continue;
+    return cidr;
+  }
+  return null;   // every candidate block taken — an operator has to set one up by hand
+}
 
 /**
  * Revoke a tunnel credential.
@@ -3347,6 +3424,16 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
   if (purpose !== undefined && !['normal', 'expired'].includes(purpose)) {
     return res.status(400).json({ error: 'purpose must be normal or expired' });
   }
+
+  const { rows: [existing] } = await pool.query(
+    'select locked, router_id from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!existing) return res.status(404).json({ error: 'No such pool' });
+  // Unassigning a locked pool's router is how the "can't be deleted" guard
+  // gets sidestepped — set it, unset it, then delete an unlocked orphan. The
+  // router_id itself simply cannot move for a locked pool; everything else
+  // about it (name, range) is still editable.
+  const routerIdInput = existing.locked ? undefined : routerId;
+
   const { rows: [p] } = await pool.query(
     `update ip_pools set
        name      = coalesce(nullif($3,''), name),
@@ -3358,8 +3445,7 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
        purpose   = coalesce(nullif($7,''), purpose)
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, name ?? '', cidr ?? '',
-     routerId === undefined ? null : String(routerId), service ?? '', purpose ?? '']);
-  if (!p) return res.status(404).json({ error: 'No such pool' });
+     routerIdInput === undefined ? null : String(routerIdInput), service ?? '', purpose ?? '']);
   res.json(p);
 }));
 
@@ -3374,6 +3460,13 @@ app.delete('/api/ip-pools/:id', wrap(async (req, res) => {
   const { rows: [p] } = await pool.query(
     'select * from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!p) return res.status(404).json({ error: 'No such pool' });
+
+  if (p.locked && p.router_id) {
+    return res.status(409).json({
+      error: 'This pool was created automatically for its router and can\'t be deleted directly. '
+        + 'Delete the router (or unassign it there) to free this pool up.',
+    });
+  }
 
   const { rows: [{ count }] } = await pool.query(
     `select count(*)::int from subscribers
