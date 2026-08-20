@@ -116,6 +116,8 @@ function formatUsage(mb) {
   return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${n} MB`;
 }
 
+const IDLE_LOGOUT_MS = 15 * 60 * 1000;
+
 const INVOICE_TONE = { paid: pc.teal, open: pc.amber, partial: pc.amber, void: pc.muted };
 const TICKET_TONE = { resolved: pc.teal, in_progress: pc.amber, open: pc.rust };
 
@@ -286,6 +288,35 @@ export default function CustomerPortal() {
   // showing it any other way here just invites someone to "correct" it back.
   useEffect(() => {
     if (me?.phone) setPayPhone(String(me.phone).replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254'));
+  }, [me]);
+
+  /**
+   * Signs a customer out after a stretch of inactivity — this page shows a
+   * wallet balance and a "Pay now" button, and stays signed in for 30 days
+   * (PORTAL_DAYS in server.js) unless something ends the session sooner. On
+   * a shared or public device that's a balance left open for whoever uses it
+   * next; on the customer's own device it's harmless, since any real activity
+   * resets the clock.
+   */
+  useEffect(() => {
+    if (!me) return undefined;
+    let timer;
+    const idleLogout = () => {
+      api.logout().catch(() => {});
+      setMe(null);
+      setNote('Signed out after 15 minutes of inactivity.');
+    };
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(idleLogout, IDLE_LOGOUT_MS);
+    };
+    const events = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, reset, { passive: true }));
+    reset();
+    return () => {
+      clearTimeout(timer);
+      events.forEach((ev) => window.removeEventListener(ev, reset));
+    };
   }, [me]);
 
   const payNow = async () => {
