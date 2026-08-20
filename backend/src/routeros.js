@@ -438,7 +438,7 @@ export async function applyHotspotServer(conn, {
   bridge = 'bridge-lan',
   network = '10.5.50.0/24',
   interimSeconds = 30,
-  dnsName = 'wifi.local',
+  dnsName = 'billing.spot',
   sharedUsers = 1,
   idleMinutes = 10,
   bindMac = true,

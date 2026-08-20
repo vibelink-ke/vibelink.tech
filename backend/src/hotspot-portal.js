@@ -286,9 +286,10 @@ export function loginPage({
     var planId = null;
     var timer = null;
 
-    // Absolute, not relative. The router serves this page from wifi.local, so a
-    // relative URL would post to the router itself — which knows nothing about
-    // bundles. This host is in the walled garden, so it is reachable before the
+    // Absolute, not relative. The router serves this page from its own hotspot
+    // DNS name (billing.spot), so a relative URL would post to the router
+    // itself — which knows nothing about bundles. This host is in the walled
+    // garden, so it is reachable before the
     // guest has paid; that is the whole point of putting it there.
     var API = ${JSON.stringify(apiBase)};
 
