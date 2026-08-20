@@ -81,6 +81,12 @@ services:
       DARAJA_WEBHOOK_SECRET: ${DARAJA_WEBHOOK_SECRET}
       # Same role for KopoKopo's X-KopoKopo-Signature HMAC.
       KOPOKOPO_WEBHOOK_SECRET: ${KOPOKOPO_WEBHOOK_SECRET}
+      # Nightly pg_dump destination (backend/src/backup.js). Unset = the job
+      # logs a warning and skips rather than failing.
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_BUCKET: ${R2_BUCKET:-vibelink-db-backups}
       # WireGuard onboarding. Optional: without them the button says what to set
       # rather than minting a peer that could never hand shake. The endpoint is
       # where routers dial, and the public key is the server's own — the private
