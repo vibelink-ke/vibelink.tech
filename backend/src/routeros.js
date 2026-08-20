@@ -747,7 +747,13 @@ export async function applyDnsProxy(conn) {
     // whatever earlier rule already accepts the traffic in question, and an
     // established/related accept near the top of a typical input chain would
     // otherwise let a DNS reply through before this rule is ever reached.
-    await cmd(conn, 'block WAN DNS', '/ip/firewall/filter/add', [...fields, '=place-before=0']);
+    // "0" is a position in the router's whole filter list, not the input
+    // chain alone — on a fresh or freshly-reset router with no firewall
+    // rules at all yet, that position doesn't exist, and RouterOS rejects it
+    // with "no such item" rather than just appending. Only meaningful (and
+    // only valid) when there is an existing rule to land ahead of.
+    await cmd(conn, 'block WAN DNS', '/ip/firewall/filter/add',
+      rules.length ? [...fields, '=place-before=0'] : fields);
   }
   for (const dupe of mine.slice(1)) {
     await cmd(conn, 'remove duplicate WAN DNS block', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
