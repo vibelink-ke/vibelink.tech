@@ -70,12 +70,29 @@ sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || \
 # every existing tunnel anyway, so there is nothing valid left to keep, and
 # starting clean means a leftover rule from a bug can never survive a restart.
 if command -v iptables >/dev/null 2>&1; then
-  iptables -F VIBELINK_TUNNEL_ISOLATION 2>/dev/null
-  iptables -N VIBELINK_TUNNEL_ISOLATION 2>/dev/null
-  iptables -D FORWARD -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION 2>/dev/null
-  iptables -I FORWARD 1 -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION
-  iptables -A VIBELINK_TUNNEL_ISOLATION -j DROP
-  echo "tunnel isolation chain ready (default deny, per-connection holes only)"
+  # Every line here needs `|| true`, not just `2>/dev/null` — under `set -e`
+  # (line 7) a redirected-but-nonzero exit still kills the script. -F fails on
+  # the very first run (chain doesn't exist yet); -N fails on every run after
+  # that (chain already does). Both are expected, not errors, but without
+  # `|| true` the container died on this line on every single start — taking
+  # every router's tunnel down with it, platform-wide, not just one tenant's.
+  iptables -F VIBELINK_TUNNEL_ISOLATION 2>/dev/null || true
+  iptables -N VIBELINK_TUNNEL_ISOLATION 2>/dev/null || true
+  iptables -D FORWARD -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION 2>/dev/null || true
+  iptables -I FORWARD 1 -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION || true
+  iptables -A VIBELINK_TUNNEL_ISOLATION -j DROP || true
+  # The -I/-A steps above are the ones that actually matter — if either was
+  # silently swallowed by `|| true`, client-to-client is on with no isolation
+  # behind it, which is worse than not having the feature. Loud on failure,
+  # rather than a platform quietly running open between tenants.
+  if iptables -C FORWARD -i tun0 -o tun0 -j VIBELINK_TUNNEL_ISOLATION 2>/dev/null \
+     && iptables -C VIBELINK_TUNNEL_ISOLATION -j DROP 2>/dev/null; then
+    echo "tunnel isolation chain ready (default deny, per-connection holes only)"
+  else
+    echo "WARNING: tunnel isolation chain did not verify — client-to-client is on" \
+         "and peers may be able to reach across tenants. Do not issue staff VPN" \
+         "peers until this is investigated." >&2
+  fi
 else
   echo "iptables not available — tunnel isolation chain NOT set up; " \
        "client-to-client is on, so do not issue staff VPN peers until this is fixed" >&2
