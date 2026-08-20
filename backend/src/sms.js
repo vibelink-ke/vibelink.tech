@@ -111,7 +111,7 @@ const accepted = (provider, res) => {
 
 export const DEFAULTS = {
   receipt:  'Thank you. KES {amount} received, ref {code}. Active until {expires}.',
-  voucher:  'Your code is {code}. Valid until {expires}. Connect to {ssid} and enter it, or tap {link}',
+  voucher:  'Your code is {code}. Valid until {expires}. Tap {link} to connect.',
   reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
   partial:  'Received KES {amount}. Balance KES {balance}. You have {days} day(s) of service.',
   outage:   'Outage at {site}. Engineers are on it, ETA {eta}. Sorry for the trouble.',

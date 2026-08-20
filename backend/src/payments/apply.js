@@ -37,19 +37,23 @@ export async function applyPayment(tenantId, tx) {
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
     await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
 
-    // {ssid} was never actually filled in here — send() only ever received
-    // {code} and {expires}, so every voucher SMS read "Connect to  and enter
-    // it" with the network name silently missing. {link} is new: a tap
-    // target for the same code, for a guest who would rather not retype a
-    // 6-digit code on a phone keyboard, or whose device dropped back to the
-    // sign-in page and just needs one tap to get back on.
+    // {link} is a tap target for the same code, for a guest who would rather
+    // not retype a 6-digit code on a phone keyboard, or whose device dropped
+    // back to the sign-in page and just needs one tap to get back on.
     const { rows: [t] } = await c.query('select subdomain from tenants where id=$1', [tenantId]);
-    const { rows: [hs] } = await c.query('select ssid from hotspot_settings where tenant_id=$1', [tenantId]);
     const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
     const link = t?.subdomain
       ? `https://${t.subdomain}.${root}/hotspot/login.html?code=${encodeURIComponent(v.code)}`
       : '';
-    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires: v.expires_at, ssid: hs?.ssid ?? '', link });
+    // v.expires_at arrives as a real JS Date — interpolated raw into a
+    // template it prints as its full toString(), timezone offset and all
+    // ("Thu Aug 20 2026 18:30:00 GMT+0300 (East Africa Time)"), which reads
+    // like a jumble of numbers in a text message. A guest needs a day and a
+    // time, not a timezone name.
+    const expires = v.expires_at
+      ? new Date(v.expires_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })
+      : '';
+    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link });
     return { paymentId, applied: true, voucher: v };
   });
 }
