@@ -1330,7 +1330,7 @@ export async function ensureBridge(conn, { name = 'bridge-lan', ports = [] }) {
  */
 export async function applyPppoeServer(conn, {
   bridge = 'bridge-lan',
-  gateway = '10.100.0.1',
+  gateway = null,
   profileName = 'vibelink-pppoe',
   serviceName = 'vibelink',
   natSubnet = null,
@@ -1341,12 +1341,30 @@ export async function applyPppoeServer(conn, {
     await cmd(conn, 'remove the old PPPoE pool', '/ip/pool/remove', [`=.id=${idOf(stale)}`]);
   }
 
-  // The gateway address has to exist on the bridge or clients get a route to nowhere.
+  /**
+   * Only ever pushed when a real pool exists under Networks — this used to
+   * default to 10.100.0.1 and push that address to the bridge on every
+   * Configure, even with no pool defined at all, no operator having asked for
+   * it, and nothing on the router that would ever use it. An address showing
+   * up on a router nobody put there is exactly the kind of thing that should
+   * never happen silently. Without a pool, the only address this whole push
+   * is allowed to add anywhere is the expired-pool block in
+   * applyExpiredPool — this step adds none.
+   */
   const addrs = await conn.write('/ip/address/print', [`?interface=${bridge}`]);
-  if (!addrs.some((a) => String(a.address).startsWith(`${gateway}/`))) {
-    await cmd(conn, 'gateway address for PPPoE', '/ip/address/add', [
-      `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${managed('ispPppoe gateway')}`,
-    ]);
+  if (gateway) {
+    if (!addrs.some((a) => String(a.address).startsWith(`${gateway}/`))) {
+      await cmd(conn, 'gateway address for PPPoE', '/ip/address/add', [
+        `=address=${gateway}/24`, `=interface=${bridge}`, `=comment=${managed('ispPppoe gateway')}`,
+      ]);
+    }
+  } else {
+    // Cleans up a gateway address a previous version of this push already
+    // left behind — no pool configured means no gateway belongs here at all,
+    // not merely that this run won't add another one.
+    for (const stray of addrs.filter((a) => isManaged(a) && a.comment?.startsWith('ispPppoe gateway'))) {
+      await cmd(conn, 'remove stray PPPoE gateway', '/ip/address/remove', [`=.id=${idOf(stray)}`]);
+    }
   }
 
   /**
@@ -1367,7 +1385,11 @@ export async function applyPppoeServer(conn, {
    * which is the bug this whole approach exists to prevent.
    */
   const profileFields = [
-    `=local-address=${gateway}`,
+    // Same reasoning as remote-address just below: without a real gateway
+    // there is nothing to set local-address to, and `!local-address=` clears
+    // any value left over from a pool that existed on an earlier push and
+    // has since been removed under Networks.
+    ...(gateway ? [`=local-address=${gateway}`] : ['=!local-address=']),
     '=use-compression=no',
     '=use-encryption=no',
     '=only-one=yes',        // one session per subscriber, so a shared password is obvious
@@ -1380,7 +1402,12 @@ export async function applyPppoeServer(conn, {
       await cmd(conn, 'PPP profile', '/ppp/profile/set', [`=.id=${idOf(profile)}`, ...want]);
     }
   } else {
-    await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...profileFields]);
+    // A brand-new profile has no local-address to clear, and RouterOS 7
+    // rejects `!local-address=` on /add the same way it rejects
+    // `!remote-address=` there — "unset" only makes sense against something
+    // that could already hold a value.
+    const addFields = gateway ? profileFields : profileFields.filter((f) => f !== '=!local-address=');
+    await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...addFields]);
   }
 
   const serverFields = [

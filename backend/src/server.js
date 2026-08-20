@@ -3211,7 +3211,8 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
           }), 40000);
         done.push(confPool
           ? `PPPoE server on ${pppoe.bridge}; addresses come from ${confPool.cidr} here, not from the router`
-          : `PPPoE server on ${pppoe.bridge} — no PPPoE pool defined under Networks, so no addresses can be issued`);
+          : `PPPoE server on ${pppoe.bridge} — no PPPoE pool defined under Networks, so no gateway address `
+            + 'or NAT was pushed to the router at all; add one under Networks and Configure again');
         await ros.sleep(500);
 
         // Recorded so RADIUS can refuse a static IP this router cannot serve.
