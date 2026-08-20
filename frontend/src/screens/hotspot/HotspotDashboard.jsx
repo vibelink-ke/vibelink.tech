@@ -19,8 +19,15 @@ export default function HotspotDashboard() {
   const unused = vouchers.filter((v) => v.status === 'unused');
   const expired = vouchers.filter((v) => v.status === 'expired');
 
+  // Revenue today summed every applied hotspot payment ever returned, with
+  // no date filter — it never actually reset at midnight, the same bug the
+  // main Dashboard's Collected Today tile had.
   const revenue = (store.mpesaTx ?? [])
-    .filter((p) => p.voucher_id && p.status === 'applied')
+    .filter((p) => {
+      if (!p.voucher_id || p.status !== 'applied') return false;
+      const at = p.received_at ? new Date(p.received_at) : null;
+      return at && at.toDateString() === new Date().toDateString();
+    })
     .reduce((a, p) => a + Number(p.amount ?? 0), 0);
 
   // Issued since midnight. A voucher exists because somebody paid for it, so

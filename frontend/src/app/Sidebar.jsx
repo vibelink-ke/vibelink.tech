@@ -1,5 +1,5 @@
-import React from 'react';
-import { NavLink } from 'react-router-dom';
+import React, { useState } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { color, font, radius, SIDEBAR_W } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { NAV_SECTIONS } from './nav';
@@ -12,6 +12,45 @@ const heading = {
   letterSpacing: '.1em',
   color: color.sideHeading,
 };
+
+/**
+ * A collapsible parent row — Support used to be four separate top-level
+ * rows (Tickets, Live support, Service outages, SLA management), each
+ * claiming its own line in a sidebar that already runs to 20+ items.
+ * Nesting them under one toggle keeps them exactly as reachable while
+ * only costing a line when actually open. Starts open when the current
+ * page is one of its own children, so navigating here directly (a
+ * bookmark, a reload) doesn't hide the very item that's active.
+ */
+function Group({ item, store }) {
+  const location = useLocation();
+  const startsOpen = item.children.some((c) => location.pathname === c.to);
+  const [open, setOpen] = useState(startsOpen);
+  return (
+    <div>
+      <div
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+          padding: '9px 10px', borderRadius: radius.md, cursor: 'pointer',
+          fontSize: 13.5, fontWeight: 500, color: color.sideFg,
+        }}
+      >
+        <span>{item.label}</span>
+        <span style={{ fontSize: 10, color: color.sideMuted, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .12s ease' }}>
+          ▸
+        </span>
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingLeft: 12 }}>
+          {item.children.map((child) => (
+            <Row key={child.to} item={child} store={store} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Row({ item, store }) {
   const count = item.count?.(store);
@@ -165,7 +204,9 @@ export default function Sidebar() {
           <React.Fragment key={section.heading}>
             <div style={{ ...heading, paddingTop: si === 0 ? 10 : 16 }}>{section.heading}</div>
             {section.items.map((item) => (
-              <Row key={item.to} item={item} store={store} />
+              item.children
+                ? <Group key={item.label} item={item} store={store} />
+                : <Row key={item.to} item={item} store={store} />
             ))}
           </React.Fragment>
         ))}

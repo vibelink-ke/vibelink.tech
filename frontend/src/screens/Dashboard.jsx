@@ -47,8 +47,6 @@ function Tile({ label, value, hint, onClick, valueColor }) {
 const greeting = (h = new Date().getHours()) =>
   h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 export default function Dashboard() {
   // Its own request: the dashboard should still render if the run log cannot
   // be read, since everything else on it comes from elsewhere.
@@ -133,6 +131,41 @@ export default function Dashboard() {
   // many individual transactions came in — "across 6 payments" read like six
   // separate gateways when it was six M-Pesa STK receipts on the one till.
   const channelsUsed = new Set(appliedToday.map((p) => p.provider)).size;
+
+  /**
+   * The chart under "Collections by channel · last 7 days" never actually
+   * drew anything — each day column was a flat 1px line and a label, sized
+   * from nothing, so the chart looked identical whether collections were
+   * zero or ten thousand shillings. Real per-day, per-channel totals for
+   * the trailing 7 days, stacked in the same order CHANNELS lists them.
+   */
+  const chartDays = useMemo(() => {
+    const days = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() - i);
+      days.push(d);
+    }
+    return days.map((d) => {
+      const dayPayments = (store.mpesaTx ?? []).filter((p) => {
+        if (p.status !== 'applied' || !p.received_at) return false;
+        return new Date(p.received_at).toDateString() === d.toDateString();
+      });
+      const segments = CHANNELS.map((c) => ({
+        swatch: c.swatch,
+        total: dayPayments
+          .filter((p) => c.providers.includes(p.provider))
+          .reduce((a, p) => a + Number(p.amount ?? 0), 0),
+      }));
+      return {
+        label: d.toLocaleDateString('en-KE', { weekday: 'short' }),
+        total: segments.reduce((a, s) => a + s.total, 0),
+        segments,
+      };
+    });
+  }, [store.mpesaTx]);
+  const chartPeak = Math.max(1, ...chartDays.map((d) => d.total));
 
   const expiring = useMemo(() => {
     const limit = Date.now() + 72 * 3600 * 1000;
@@ -250,10 +283,25 @@ export default function Dashboard() {
             <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected7d)}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
-            {WEEKDAYS.map((d) => (
-              <div key={d} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%' }}>
-                <div style={{ height: 1, background: '#c3ccc6' }} />
-                <span style={{ textAlign: 'center', fontSize: 11, color: color.muted, paddingTop: 5 }}>{d}</span>
+            {chartDays.map((day, i) => (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%' }}>
+                {day.total > 0 ? (
+                  <div
+                    title={`KES ${kes(day.total)}`}
+                    style={{
+                      height: `${Math.max(2, (day.total / chartPeak) * 100)}%`,
+                      display: 'flex', flexDirection: 'column-reverse',
+                      borderRadius: '3px 3px 0 0', overflow: 'hidden',
+                    }}
+                  >
+                    {day.segments.filter((s) => s.total > 0).map((s, si) => (
+                      <div key={si} style={{ background: s.swatch, height: `${(s.total / day.total) * 100}%` }} />
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ height: 1, background: '#c3ccc6' }} />
+                )}
+                <span style={{ textAlign: 'center', fontSize: 11, color: color.muted, paddingTop: 5 }}>{day.label}</span>
               </div>
             ))}
           </div>

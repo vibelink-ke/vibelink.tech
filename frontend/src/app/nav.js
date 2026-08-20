@@ -20,12 +20,21 @@ export const NAV_SECTIONS = [
   {
     heading: 'SUPPORT',
     items: [
-      { to: '/tickets', label: 'Tickets', count: (s) => s.tickets.length },
+      // Tickets, Live support, Service outages and SLA management collapse
+      // under one "Support" group instead of sitting as four separate rows —
+      // the same pages, just nested rather than each claiming its own line
+      // in an already-long sidebar.
+      {
+        label: 'Support',
+        children: [
+          { to: '/tickets', label: 'Tickets', count: (s) => s.tickets.length },
+          { to: '/live-support', label: 'Live support', dot: true },
+          { to: '/outages', label: 'Service outages', count: (s) => s.outages.length },
+          { to: '/sla', label: 'SLA management', count: (s) => s.slaPolicies.length },
+        ],
+      },
       { to: '/leads', label: 'Leads', count: (s) => s.leads.length },
       { to: '/messaging', label: 'Messaging' },
-      { to: '/live-support', label: 'Live support', dot: true },
-      { to: '/outages', label: 'Service outages', count: (s) => s.outages.length },
-      { to: '/sla', label: 'SLA management', count: (s) => s.slaPolicies.length },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],
   },
