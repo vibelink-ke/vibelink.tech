@@ -19,6 +19,11 @@ export default function Tenants() {
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
+  const [staffFor, setStaffFor] = useState(null);
+  const [staffList, setStaffList] = useState([]);
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [resetting, setResetting] = useState(null);
+  const [resetResult, setResetResult] = useState(null);
 
   if (!store.isPlatformOwner) {
     return (
@@ -83,6 +88,36 @@ export default function Tenants() {
       store.toast(`${t.name} → ${status}`);
     } catch (e) {
       store.toast(`Could not update: ${e.message}`);
+    }
+  };
+
+  const openStaff = async (t) => {
+    setStaffFor(t);
+    setStaffLoading(true);
+    try {
+      const rows = await api.tenantStaff(t.id);
+      setStaffList(rows);
+    } catch (e) {
+      store.toast(`Could not load staff: ${e.message}`);
+      setStaffFor(null);
+    } finally {
+      setStaffLoading(false);
+    }
+  };
+
+  const submitReset = async () => {
+    try {
+      const body = {
+        email: resetting.email || undefined,
+        username: resetting.username || undefined,
+        password: resetting.genPassword ? true : undefined,
+      };
+      const result = await api.resetTenantStaffLogin(staffFor.id, resetting.id, body);
+      setStaffList((rows) => rows.map((r) => (r.id === resetting.id ? { ...r, email: result.email, username: result.username } : r)));
+      setResetResult(result);
+      store.toast(`${resetting.name}'s login updated`);
+    } catch (e) {
+      store.toast(`Could not reset login: ${e.message}`);
     }
   };
 
@@ -158,6 +193,7 @@ export default function Tenants() {
               render: (t) => (
                 <span style={{ whiteSpace: 'nowrap' }}>
                   <span onClick={() => setViewing(t)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>View</span>
+                  <span onClick={() => openStaff(t)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Staff logins</span>
                   <span
                     onClick={() =>
                       setEditing({
@@ -301,6 +337,101 @@ export default function Tenants() {
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
             </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Drawer open={!!staffFor} title={`Staff logins — ${staffFor?.name ?? ''}`} onClose={() => setStaffFor(null)}>
+        {staffLoading ? (
+          <Empty>Loading…</Empty>
+        ) : staffList.length === 0 ? (
+          <Empty>No staff accounts on this tenant yet.</Empty>
+        ) : (
+          <Table
+            rowKey={(s) => s.id}
+            rows={staffList}
+            columns={[
+              {
+                key: 'name',
+                label: 'Name',
+                render: (s) => (
+                  <span>
+                    {s.name}{' '}
+                    {s.role === 'platform_admin' && (
+                      <Badge tone={{ bg: '#fff9ec', fg: color.amberInk }}>maintenance</Badge>
+                    )}
+                  </span>
+                ),
+              },
+              { key: 'role', label: 'Role' },
+              { key: 'email', label: 'Email', render: (s) => s.email ?? '—' },
+              { key: 'username', label: 'Username', render: (s) => s.username ?? '—' },
+              {
+                key: 'last_seen',
+                label: 'Last seen',
+                render: (s) => (s.last_seen ? new Date(s.last_seen).toLocaleString('en-KE') : '—'),
+              },
+              {
+                key: 'act',
+                label: '',
+                align: 'right',
+                render: (s) => (
+                  <span
+                    onClick={() => {
+                      setResetResult(null);
+                      setResetting({ id: s.id, name: s.name, email: s.email ?? '', username: s.username ?? '', genPassword: false });
+                    }}
+                    style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Reset login
+                  </span>
+                ),
+              },
+            ]}
+          />
+        )}
+      </Drawer>
+
+      <Modal
+        open={!!resetting}
+        title={`Reset login — ${resetting?.name ?? ''}`}
+        onClose={() => { setResetting(null); setResetResult(null); }}
+        footer={
+          resetResult ? (
+            <Button variant="primary" onClick={() => { setResetting(null); setResetResult(null); }}>Done</Button>
+          ) : (
+            <>
+              <Button onClick={() => setResetting(null)}>Cancel</Button>
+              <Button variant="primary" onClick={submitReset}>Save</Button>
+            </>
+          )
+        }
+      >
+        {resetting && !resetResult && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <Field label="Email">
+              <Input value={resetting.email} onChange={(e) => setResetting((s) => ({ ...s, email: e.target.value }))} />
+            </Field>
+            <Field label="Username">
+              <Input value={resetting.username} onChange={(e) => setResetting((s) => ({ ...s, username: e.target.value }))} />
+            </Field>
+            <Field label="Password" hint="Generates a new random password and signs this account out everywhere.">
+              <Button onClick={() => setResetting((s) => ({ ...s, genPassword: !s.genPassword }))}>
+                {resetting.genPassword ? '✓ Will generate a new password' : 'Generate new password'}
+              </Button>
+            </Field>
+          </div>
+        )}
+        {resetResult && (
+          <div style={{ display: 'grid', gap: 10 }}>
+            <KV k="Email" v={resetResult.email ?? '—'} />
+            <KV k="Username" v={resetResult.username ?? '—'} />
+            {resetResult.password && (
+              <div style={{ background: '#f4f8f5', border: `1px solid ${color.line}`, borderRadius: 9, padding: '11px 13px' }}>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>New password (shown once)</div>
+                <div style={{ fontFamily: font.mono, fontSize: 14, fontWeight: 600 }}>{resetResult.password}</div>
+              </div>
+            )}
           </div>
         )}
       </Modal>
