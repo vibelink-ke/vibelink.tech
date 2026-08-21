@@ -81,6 +81,9 @@ services:
       DARAJA_WEBHOOK_SECRET: ${DARAJA_WEBHOOK_SECRET}
       # Same role for KopoKopo's X-KopoKopo-Signature HMAC.
       KOPOKOPO_WEBHOOK_SECRET: ${KOPOKOPO_WEBHOOK_SECRET}
+      # Same role again for Equity/Co-op/KCB's bank STK callbacks — none of
+      # them sign their webhooks either.
+      BANKSTK_WEBHOOK_SECRET: ${BANKSTK_WEBHOOK_SECRET:-}
       # Nightly pg_dump destination (backend/src/backup.js). Unset = the job
       # logs a warning and skips rather than failing.
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
