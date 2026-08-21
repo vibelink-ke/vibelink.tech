@@ -248,8 +248,17 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
    * message; this is what gives it one.
    */
   try {
+    /**
+     * The amount credited is what we asked the gateway to charge, recorded
+     * in stk_requests when the push went out — never tx.amount, whatever
+     * the callback claims. bankstk.js's webhook had no signature at all
+     * until this was found, which meant amount was, in effect, however
+     * much anyone who could reach the URL cared to name; even signed
+     * callbacks (daraja, kopokopo) have no reason to trust a number the
+     * far end supplies when the correct one is already sitting in this row.
+     */
     await applyPayment(req.tenant_id, {
-      provider, ref: tx.ref, amount: Number(tx.amount), phone: tx.phone, name: null,
+      provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
       rawAccount: null, payload: { checkoutId },
       target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id }
                               : { type: 'hotspot', planId: p.plan_id, mac: p.mac }
