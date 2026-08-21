@@ -78,8 +78,22 @@ export async function applyPayment(tenantId, tx) {
  * anyone to service, only to a bigger balance.
  */
 async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
+  /**
+   * `for update` on the subscriber row — without it, two payments landing
+   * close together (a portal STK and an operator keying in the same
+   * transaction manually, or a retry racing the original) both read the
+   * same starting credit/expires_at, compute independently, and the second
+   * UPDATE overwrites the first's instead of building on it. The first
+   * payment's own `payments`/`invoices` rows still look correct — this is
+   * already inside applyPayment's transaction (withTenant), so the lock
+   * just makes the second call wait for the first to commit and read its
+   * result, rather than a customer who paid twice only having it counted
+   * once. The invoice update below already does this correctly on its own
+   * (`paid=paid+$2`, atomic) — this brings the subscriber row's
+   * credit/expires_at up to the same standard.
+   */
   const { rows: [sub] } = await c.query(
-    'select s.*, p.price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1',
+    'select s.*, p.price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1 for update of s',
     [subId]
   );
   const { rows: [inv] } = await c.query(
