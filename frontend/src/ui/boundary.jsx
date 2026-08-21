@@ -23,13 +23,47 @@ export default class ErrorBoundary extends React.Component {
     return { error };
   }
 
+  /**
+   * A stale tab, not a broken screen — every Vite build hashes each screen's
+   * chunk filename fresh, so a tab left open across a deploy is still holding
+   * the old hash. Clicking into that screen fetches a file that no longer
+   * exists ("Failed to fetch dynamically imported module") and lands here
+   * looking exactly like a real crash, with a stack trace that says nothing
+   * about the actual cause: the code was fine, the file just isn't there
+   * under that name any more.
+   *
+   * A single automatic reload fetches the current index.html and the correct
+   * current hash, which is the fix every time this is the real cause — so do
+   * it once, silently, rather than making someone read a scary-looking error
+   * and click Reload themselves for something that was never their bug.
+   *
+   * Guarded to exactly once per tab: if reloading did not clear the error
+   * (session storage still holds the flag on the next mount), this is a real
+   * failure — a network problem, a genuinely broken build — and reloading on
+   * a loop would just hide that behind an infinite spinner. Falls through to
+   * the normal screen below in that case.
+   */
   componentDidCatch(error, info) {
     // Still log it: the stack is worth more than the message when someone can
     // open the console, and the message alone is what goes on screen.
     console.error('screen crashed', error, info?.componentStack);
+
+    const stale = /Failed to fetch dynamically imported module|error loading dynamically imported module/i
+      .test(String(error?.message ?? ''));
+    if (stale && !sessionStorage.getItem('vibelink_stale_reload')) {
+      sessionStorage.setItem('vibelink_stale_reload', '1');
+      window.location.reload();
+    }
   }
 
   componentDidUpdate(prev) {
+    // Any update where nothing is currently erroring means something rendered
+    // successfully — clear the once-per-tab reload flag so a *future* stale
+    // chunk (the next deploy) gets its own automatic reload rather than being
+    // silently left as a stuck error screen because this tab already spent
+    // its one attempt on a previous, unrelated deploy.
+    if (!this.state.error) sessionStorage.removeItem('vibelink_stale_reload');
+
     // Navigating away must clear the error, or the boundary keeps showing the
     // old failure over a screen that would have rendered perfectly well.
     if (prev.resetKey !== this.props.resetKey && this.state.error) {
