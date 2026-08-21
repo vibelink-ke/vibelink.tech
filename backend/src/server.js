@@ -207,14 +207,37 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   const who = String(identifier ?? email ?? '').trim();
   if (!who || !password) return res.status(400).json({ error: 'Enter your email or username and password.' });
 
+  /**
+   * Scoped to whichever tenant this hostname belongs to, when one resolves.
+   *
+   * Email and username are unique across the whole platform, not per tenant,
+   * so this query used to match on identity alone — valid credentials for a
+   * DIFFERENT tenant than the subdomain you were sitting on still signed you
+   * in, just into that other tenant's portal, rendered under this one's
+   * hostname with nothing to say the two did not match. A subdomain is that
+   * tenant's own front door; credentials that do not belong to it must fail
+   * here exactly like a wrong password would, not open somebody else's.
+   *
+   * Falls back to an unscoped lookup only when no tenant resolves from the
+   * hostname at all (the platform apex, local dev without DEV_TENANT) —
+   * there is no tenant's door to enforce there, and this stays how anybody
+   * ever reaches one to begin with.
+   */
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+
   const { rows: [acct] } = await pool.query(
-    `select st.*, t.status as tenant_status from staff st
+    `select st.*, t.status as tenant_status, t.subdomain from staff st
      join tenants t on t.id = st.tenant_id
-     where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
+     where (lower(st.email) = lower($1) or lower(st.username) = lower($1))
+       and ($2::uuid is null or st.tenant_id = $2)`,
+    [who, tenant?.id ?? null]);
 
   // Same message for "no such account" and "wrong password" would be friendlier to
   // attackers only marginally here, and the design shows distinct copy — keep the
   // design's wording but verify against a dummy hash so timing does not leak.
+  // A real account that exists for a DIFFERENT tenant lands here too, by design:
+  // "no account" is the honest answer for this hostname, not "wrong password".
   if (!acct) {
     await auth.verifyPassword(password, null);
     return res.status(401).json({ error: 'No account found for that email or username. Create one first.' });
@@ -232,25 +255,12 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
 
   const s = await auth.readSession(token);
 
-  /**
-   * Send them to their own portal if they signed in from somewhere else.
-   *
-   * Email and username are unique across the whole platform, not per tenant,
-   * so this route never checked which subdomain the request arrived on — it
-   * only ever needed the credentials to resolve to somebody. That is correct
-   * for login itself, but the response used to stop there: the cookie this
-   * sets is host-only, so a session created while sitting on the wrong
-   * tenant's subdomain (the platform owner testing another tenant's reset
-   * credentials, someone with two tenants who forgot which one they were on)
-   * left that subdomain rendering a completely different tenant's data under
-   * its own name and branding, with nothing to say the two did not match.
-   * Same handoff signup already uses to leave the apex domain — a one-use
-   * ticket the correct subdomain trades for its own cookie, so they land in
-   * the right place without having to sign in a second time.
-   */
+  // Only reached when no tenant resolved from this hostname above (the apex,
+  // local dev) — send them on to their own portal rather than leaving them
+  // signed in on a domain that owns no tenant at all.
   let redirectTo = null;
   const root = process.env.ROOT_DOMAIN?.trim();
-  if (root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
+  if (!tenant && root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
     const handoff = await auth.createHandoff(token);
     redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
   }
