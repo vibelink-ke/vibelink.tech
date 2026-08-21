@@ -437,7 +437,14 @@ export async function walledGarden(c, tenantId, subId) {
 }
 
 export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
-  const { rows: [plan] } = await c.query('select * from plans where id=$1', [planId]);
+  // Scoped defensively — every call site today already passes a planId that
+  // was itself looked up under this tenant, so this has never been reachable
+  // with a foreign plan, but a future caller only needs to trust the wrong
+  // input once for that to stop being true. Same shape as the tenant scoping
+  // gaps found and fixed elsewhere today (login, ticket notes) — a query
+  // that could be scoped by tenant should be, not just wherever it happens
+  // to matter yet.
+  const { rows: [plan] } = await c.query('select * from plans where id=$1 and tenant_id=$2', [planId, tenantId]);
   const { rows: [cfg] } = await c.query('select * from hotspot_settings where tenant_id=$1', [tenantId]);
   const prefs = cfg ?? { code_type: 'numeric', code_length: 6, voucher_expiry: 'login' };
   const code = await uniqueCode(c, tenantId, prefs);
