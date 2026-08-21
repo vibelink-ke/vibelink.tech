@@ -5745,19 +5745,33 @@ app.get('/api/tickets/:id', wrap(async (req, res) => {
      left join staff st on st.id = tk.assigned_to
      where tk.tenant_id=$1 and tk.id=$2`, [req.tenant.id, req.params.id]);
   if (!t) return res.status(404).json({ error: 'not found' });
+  // ticket_notes.ticket_id is a plain FK to tickets(id), not composite on
+  // (tenant_id, id) — without this filter, a note written into another
+  // tenant's ticket (see the insert below, which had the same gap) would
+  // read back here as if it were this tenant's own.
   const { rows: notes } = await pool.query(
-    'select * from ticket_notes where ticket_id=$1 order by at', [req.params.id]);
+    'select * from ticket_notes where tenant_id=$1 and ticket_id=$2 order by at', [req.tenant.id, req.params.id]);
   res.json({ ...t, notes });
 }));
 
 app.post('/api/tickets/:id/notes', wrap(async (req, res) => {
   const { body, internal = true } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'Write something first' });
+  // The ticket named in the URL must actually belong to this tenant before
+  // anything is written against it — this used to insert straight from
+  // req.params.id with no check at all, so any authenticated staff member
+  // on any tenant who knew or was given another tenant's ticket id could
+  // write a note into that tenant's support queue and silently bump its
+  // updated_at, and that tenant would then read the forged note back as
+  // their own (see the select above).
+  const { rows: [owned] } = await pool.query(
+    'select 1 from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!owned) return res.status(404).json({ error: 'not found' });
   const { rows: [n] } = await pool.query(
     `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
      values ($1,$2,$3,$4,$5) returning *`,
     [req.tenant.id, req.params.id, req.session?.name ?? 'system', body, internal]);
-  await pool.query('update tickets set updated_at=now() where id=$1', [req.params.id]);
+  await pool.query('update tickets set updated_at=now() where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   res.json(n);
 }));
 
