@@ -231,7 +231,31 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   auth.pruneHandoffs();
 
   const s = await auth.readSession(token);
-  res.json(auth.publicSession(s));
+
+  /**
+   * Send them to their own portal if they signed in from somewhere else.
+   *
+   * Email and username are unique across the whole platform, not per tenant,
+   * so this route never checked which subdomain the request arrived on — it
+   * only ever needed the credentials to resolve to somebody. That is correct
+   * for login itself, but the response used to stop there: the cookie this
+   * sets is host-only, so a session created while sitting on the wrong
+   * tenant's subdomain (the platform owner testing another tenant's reset
+   * credentials, someone with two tenants who forgot which one they were on)
+   * left that subdomain rendering a completely different tenant's data under
+   * its own name and branding, with nothing to say the two did not match.
+   * Same handoff signup already uses to leave the apex domain — a one-use
+   * ticket the correct subdomain trades for its own cookie, so they land in
+   * the right place without having to sign in a second time.
+   */
+  let redirectTo = null;
+  const root = process.env.ROOT_DOMAIN?.trim();
+  if (root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
+    const handoff = await auth.createHandoff(token);
+    redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
+  }
+
+  res.json({ ...auth.publicSession(s), redirectTo });
 }));
 
 /** Provisions a tenant plus its owner in one transaction. */

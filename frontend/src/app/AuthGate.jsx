@@ -134,6 +134,19 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     try {
       const session = await api.login({ identifier: f.identifier, password: f.password, remember: f.remember });
       clearSecrets();
+
+      // Same reasoning as signup's redirect below: email/username are unique
+      // platform-wide, not per tenant, so credentials for a different tenant
+      // than the one this subdomain belongs to authenticate fine here — and
+      // used to just render that other tenant's data under this hostname,
+      // with nothing on screen to say the two didn't match. The ticket in
+      // redirectTo lets the right subdomain adopt the session without
+      // signing in twice.
+      if (session.redirectTo) {
+        window.location.assign(session.redirectTo);
+        return;
+      }
+
       onSignedIn(session, `Signed in as ${session.company}`);
     } catch (e) {
       setError(e.message);
