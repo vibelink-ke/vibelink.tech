@@ -203,6 +203,23 @@ export function loginPage({
   .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:14.5px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   a { color:var(--green); }
+  /* A quiet inline note was easy to miss on a phone screen that had just
+     been handed off to M-Pesa and back — a guest who glanced away for the
+     PIN prompt came back to text that had already changed, with nothing
+     drawing the eye to it. This sits over everything until dismissed or
+     timed out, the same weight a "payment successful" moment deserves. */
+  .popup-overlay { position:fixed; inset:0; background:rgba(15,20,17,.5);
+                    display:flex; align-items:center; justify-content:center;
+                    padding:20px; z-index:50; }
+  .popup { width:100%; max-width:360px; background:var(--card); border-radius:var(--rad);
+           padding:26px 22px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+  .popup .icon { width:52px; height:52px; margin:0 auto 12px; border-radius:50%;
+                 display:flex; align-items:center; justify-content:center; font-size:26px; }
+  .popup.success .icon { background:#e8f3ee; color:var(--green); }
+  .popup.notice .icon { background:#fdf3dc; color:#a9790f; }
+  .popup h3 { margin:0 0 6px; font-size:18px; }
+  .popup p { margin:0; color:var(--muted); font-size:14.5px; }
+  .popup button { margin-top:16px; }
 </style>
 </head>
 <body>
@@ -308,8 +325,39 @@ export function loginPage({
          wants it; nothing on this page links to it any more. -->
   </div>
 
+  <div class="popup-overlay" id="popupOverlay" style="display:none">
+    <div class="popup" id="popup">
+      <div class="icon" id="popupIcon"></div>
+      <h3 id="popupTitle"></h3>
+      <p id="popupBody"></p>
+    </div>
+  </div>
+
   <script>
   (function () {
+    /**
+     * A quiet inline note next to the pay button was easy to miss — a guest
+     * who hands their phone to M-Pesa for the PIN prompt and comes back
+     * finds text that already changed, nothing drawing the eye to it. This
+     * covers the screen instead, for a moment, the way a real "payment
+     * successful" confirmation should. kind picks the icon/color:
+     * "success" (green check) or "notice" (amber, session-ended). Auto-
+     * hides after ms unless ms is 0, in which case it waits for the tap
+     * anywhere to dismiss — used for success, where the guest is about to
+     * be connected and dismissing early would just hide useful status text.
+     */
+    function popup(kind, title, body, ms) {
+      var overlay = document.getElementById('popupOverlay');
+      var box = document.getElementById('popup');
+      box.className = 'popup ' + kind;
+      document.getElementById('popupIcon').textContent = kind === 'success' ? '✓' : '!';
+      document.getElementById('popupTitle').textContent = title;
+      document.getElementById('popupBody').textContent = body;
+      overlay.style.display = 'flex';
+      overlay.onclick = function () { overlay.style.display = 'none'; };
+      if (ms) setTimeout(function () { overlay.style.display = 'none'; }, ms);
+    }
+
     var pay = document.getElementById('pay');
     var title = document.getElementById('payTitle');
     var phone = document.getElementById('payPhone');
@@ -396,6 +444,10 @@ export function loginPage({
             codeBox.style.display = 'block';
             document.getElementById('username').value = d.code;
             watchVoucher(d.code);
+            // 0 = stays up until tapped, not timed out — this is the moment
+            // that matters most on the whole page, and the guest is about
+            // to be sent through the auto-connect below regardless.
+            popup('success', 'Payment successful', 'Your code is ' + d.code + '. Connecting you now…', 0);
             // The code being visible and correct was never in question — what
             // was missing is that nothing ever submitted the form on the
             // guest's behalf, so "paid" and "online" were two separate steps
@@ -415,7 +467,7 @@ export function loginPage({
             }, 1200);
             /**
              * A successful hotspot login navigates the guest away from this
-             * page entirely — RouterOS redirects to `dst` the instant it
+             * page entirely — RouterOS redirects to dst the instant it
              * accepts the credentials. So if this script is still running
              * several seconds later, the submit above did not actually get
              * them online, whatever the reason (a $(...) token RouterOS
@@ -450,10 +502,13 @@ export function loginPage({
      * this tab open just quietly lost internet with no explanation once time
      * ran out, and had to work out on their own that reloading would get them
      * back to a sign-in form. This polls the same status this page's own
-     * server-side sweep updates on every read, and reloads the instant it
-     * sees anything other than in_use — the reload is what puts the sign-in
-     * form back in front of them, since RouterOS itself has already stopped
-     * treating them as authenticated by then.
+     * server-side sweep updates on every read, and the instant it sees
+     * anything other than in_use, shows a plain "your time has ended" notice
+     * and then sends them to a fresh copy of the sign-in page — RouterOS
+     * itself has already stopped treating them as authenticated by then, so
+     * that fresh load is what actually puts the sign-in form back in front
+     * of them, same as a reload would, just with an explicit reason shown
+     * first instead of the page just silently changing under them.
      */
     function watchVoucher(code) {
       var watchTimer = setInterval(function () {
@@ -462,7 +517,8 @@ export function loginPage({
           .then(function (d) {
             if (d.status && d.status !== 'in_use') {
               clearInterval(watchTimer);
-              location.reload();
+              popup('notice', 'Your time has ended', 'Taking you back to sign in…', 0);
+              setTimeout(function () { window.location.href = API + '/hotspot/login.html'; }, 1800);
             }
           })
           .catch(function () { /* keep watching; a dropped check is not expiry */ });
@@ -619,6 +675,18 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
   .toggle { text-align:center; font-size:13px; color:var(--muted); }
   .toggle a { color:var(--green); font-weight:600; text-decoration:none; }
   .add { width:auto; margin-top:0; padding:8px 14px; font-size:13.5px; }
+  /* Same popup as the sign-in page — see its stylesheet for why this
+     replaces a quiet inline note for a moment that matters this much. */
+  .popup-overlay { position:fixed; inset:0; background:rgba(15,20,17,.5);
+                    display:flex; align-items:center; justify-content:center;
+                    padding:20px; z-index:50; }
+  .popup { width:100%; max-width:360px; background:var(--card); border-radius:14px;
+           padding:26px 22px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+  .popup .icon { width:52px; height:52px; margin:0 auto 12px; border-radius:50%;
+                 display:flex; align-items:center; justify-content:center; font-size:26px; }
+  .popup.success .icon { background:#e8f3ee; color:var(--green); }
+  .popup h3 { margin:0 0 6px; font-size:18px; }
+  .popup p { margin:0; color:var(--muted); font-size:14.5px; }
 </style>
 </head>
 <body>
@@ -654,6 +722,14 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
     <div id="list" style="display:none"></div>
   </div>
 
+  <div class="popup-overlay" id="popupOverlay" style="display:none">
+    <div class="popup success" id="popup">
+      <div class="icon">✓</div>
+      <h3 id="popupTitle"></h3>
+      <p id="popupBody"></p>
+    </div>
+  </div>
+
   <script>
   (function () {
     var API = ${JSON.stringify(apiBase)};
@@ -665,6 +741,16 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
     // guest-controlled, not tenant-controlled, unlike a plan title. Escaped
     // before going into innerHTML so a device cannot inject markup by
     // setting its own hostname to something like "<img onerror=...>".
+    // Same popup as the sign-in page — see its script for why this replaces
+    // a quiet inline note for the one moment on this page that matters most.
+    function popup(title, body) {
+      document.getElementById('popupTitle').textContent = title;
+      document.getElementById('popupBody').textContent = body;
+      var overlay = document.getElementById('popupOverlay');
+      overlay.style.display = 'flex';
+      overlay.onclick = function () { overlay.style.display = 'none'; };
+    }
+
     function esc(s) {
       return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
         return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -770,7 +856,8 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
           .then(function (d) {
             if (d.code) {
               clearInterval(timer);
-              note.textContent = 'Paid — connecting that device now. It may take a few seconds to come online.';
+              note.textContent = 'Paid — connecting that device now.';
+              popup('Payment successful', 'Connecting that device now — it may take a few seconds to come online.');
               return;
             }
             if (d.status === 'failed' || d.status === 'cancelled') {
