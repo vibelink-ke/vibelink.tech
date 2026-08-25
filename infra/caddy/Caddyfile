@@ -43,6 +43,15 @@
 	handle /webhooks/* {
 		reverse_proxy net:8080
 	}
+	# The captive-portal support widget (hotspot-portal.js's chat, and the
+	# customer portal's own copy of it). No admin screen lives under /chat,
+	# so unlike /hotspot below this can be the whole prefix — nothing to
+	# disambiguate from. Same missing-proxy-rule bug as /hotspot/devices:
+	# these routes existed and worked in dev-stack, and 404'd through to
+	# index.html here because nothing sent them to the API at all.
+	handle /chat/* {
+		reverse_proxy net:8080
+	}
 	# The captive-portal endpoints only — named one by one, not /hotspot/*.
 	#
 	# The API renders the login page per tenant, and without a proxy rule it fell
@@ -54,7 +63,17 @@
 	# proxying the whole prefix sent /hotspot/vouchers to Express, which answered
 	# "Cannot GET". Only these paths belong to the API; everything else under
 	# /hotspot is a page in the app.
-	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/*
+	#
+	# The list has to be kept in sync with every app.get/app.post('/hotspot/...')
+	# in server.js by hand — there is no wildcard-minus-admin-routes rule in
+	# Caddy's matcher syntax. It drifted once already (this comment's own
+	# history) and drifted again silently as devices/connected/voucher-status/
+	# voucher-for-mac/nearby-devices were added later without ever being added
+	# here: each of those routes existed, worked in dev-stack, and 200'd from
+	# curl — and fell straight through to index.html in production, which
+	# looks exactly like the button that calls it doing nothing at all,
+	# because that is precisely what a guest clicking it sees.
+	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/* /hotspot/devices /hotspot/connected /hotspot/voucher-status /hotspot/voucher-for-mac /hotspot/nearby-devices /hotspot/nearby-devices/bind
 	handle @captive {
 		reverse_proxy net:8080
 	}
