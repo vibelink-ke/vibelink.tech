@@ -355,6 +355,22 @@ export async function forgetSubscriberCredentials(c, username, tenantId) {
 }
 
 /**
+ * The plural, batch form of forgetSubscriberCredentials — for deleting a set
+ * of voucher codes at once, each of which is also a RADIUS username.
+ * Shared by the manual delete/purge routes in server.js and jobs.js's
+ * automatic purgeExpiredVouchers, so there is exactly one place that knows
+ * a voucher's access lives in radcheck/radreply too, not only in vouchers.
+ */
+export async function forgetVoucherAccess(c, codes, tenantId) {
+  if (!codes.length) return 0;
+  const { rowCount } = await c.query(
+    'delete from radcheck where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+  await c.query(
+    'delete from radreply where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+  return rowCount;
+}
+
+/**
  * Drop a subscriber to their fair-use speed without cutting the session.
  * Same mechanism as the walled garden: rewrite the reply attribute, then CoA so
  * it takes effect on the live session instead of at next auth.

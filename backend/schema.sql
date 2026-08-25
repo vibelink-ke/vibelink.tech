@@ -1250,6 +1250,16 @@ update hotspot_settings set idle_timeout_sec = idle_timeout_min * 60 where idle_
 alter table hotspot_settings alter column idle_timeout_sec set default 30;
 alter table hotspot_settings alter column idle_timeout_sec set not null;
 
+-- The Vouchers screen has always shown an "Auto-purge expired vouchers"
+-- toggle, checked by default, with a detail line naming the expiry job by
+-- name — reading as if it were already wired to something. It never
+-- persisted anywhere and nothing ever read it: flipping it did precisely
+-- nothing, on or off, and the only thing that actually deleted an expired
+-- voucher was an operator remembering to press "Purge expired" by hand.
+-- This column, jobs.js's new purgeExpiredVouchers, and the toggle's real
+-- wiring together make it true rather than decorative.
+alter table hotspot_settings add column if not exists auto_purge_vouchers boolean not null default true;
+
 -- ─────────────── platform billing and dunning ───────────────
 -- Every tenant is billed on the 1st. A tenant that signs up mid-month gets the
 -- rest of that month free, which needs no special case: billTenants only runs on

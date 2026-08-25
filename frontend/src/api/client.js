@@ -98,6 +98,7 @@ export const api = {
   createVouchers: (v) => post('/api/vouchers', v),
   deleteVouchers: (ids) => post('/api/vouchers/delete', { ids }),
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),
+  setAutoPurgeVouchers: (enabled) => patch('/api/hotspot/settings/auto-purge', { enabled }),
 
   // ── hotspot ──
   hotspotSettings: () => get('/api/hotspot/settings'),

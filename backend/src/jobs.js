@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
-import { walledGarden } from './radius.js';
+import { walledGarden, forgetVoucherAccess } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
@@ -57,6 +57,7 @@ export function startJobs() {
   // 3am local — after the day's invoicing/charging runs, before the 6am invoice
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
+  cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
 }
 
 /**
@@ -133,6 +134,50 @@ async function expireAndSuspend() {
     `update vouchers set status='expired'
      where status='in_use' and expires_at < now() and tenant_id in (${enabledTenants})`,
     ['expireAndSuspend']);
+}
+
+/**
+ * The "Auto-purge expired vouchers" toggle on the Vouchers screen used to
+ * be pure decoration — checked by default, describing this exact job by
+ * name in its own detail text, and wired to nothing at all. Flipping it did
+ * nothing either way; the only thing that ever deleted an expired voucher
+ * was an operator remembering to press "Purge expired" themselves. This is
+ * what makes the toggle true.
+ *
+ * A day's delay (expires_at < now() - 24h, not just status='expired') on
+ * purpose: expireAndSuspend above marks a voucher expired the moment its
+ * time runs out, but a customer disputing a charge or an operator checking
+ * "did this code ever actually get used" needs it to still be there
+ * shortly after, not gone within the same 5-minute sweep that expired it.
+ * tenant_id in (${enabledTenants}) already means suspended/readonly tenants
+ * are skipped, same as every other job here.
+ */
+async function purgeExpiredVouchers() {
+  // left join, not join: a tenant with no hotspot_settings row yet (the
+  // column's own default is true) must still get the default behaviour,
+  // not be silently skipped for having no row to match at all.
+  const { rows: doomed } = await pool.query(
+    `select v.id, v.code, v.tenant_id from vouchers v
+       left join hotspot_settings hs on hs.tenant_id = v.tenant_id
+      where v.status='expired' and v.expires_at < now() - interval '24 hours'
+        and coalesce(hs.auto_purge_vouchers, true) = true
+        and v.tenant_id in (${enabledTenants})`,
+    ['purgeExpiredVouchers']);
+  if (!doomed.length) return;
+
+  await pool.query('delete from vouchers where id = any($1::uuid[])', [doomed.map((v) => v.id)]);
+
+  // One tenant at a time — codes are only unique per tenant, so a batch
+  // DELETE across tenants would need the same WHERE username=... AND
+  // tenant_id=... pairing forgetVoucherAccess already does per call.
+  const byTenant = new Map();
+  for (const v of doomed) {
+    if (!byTenant.has(v.tenant_id)) byTenant.set(v.tenant_id, []);
+    byTenant.get(v.tenant_id).push(v.code);
+  }
+  for (const [tenantId, codes] of byTenant) {
+    await forgetVoucherAccess(pool, codes, tenantId);
+  }
 }
 
 async function generateInvoices() {

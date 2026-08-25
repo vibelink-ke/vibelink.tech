@@ -1958,6 +1958,21 @@ app.put('/api/hotspot/settings', async (req, res) => {
   res.json(s);
 });
 
+/**
+ * Just the one field, from the Vouchers screen's own toggle — not folded
+ * into the big PUT above, which every other caller already posts the whole
+ * settings form back to. Vouchers has never had that form and should not
+ * need to fetch and resend fifteen unrelated fields to flip one switch.
+ */
+app.patch('/api/hotspot/settings/auto-purge', wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `insert into hotspot_settings (tenant_id, auto_purge_vouchers) values ($1,$2)
+     on conflict (tenant_id) do update set auto_purge_vouchers=excluded.auto_purge_vouchers
+     returning auto_purge_vouchers`,
+    [req.tenant.id, !!req.body?.enabled]);
+  res.json(s);
+}));
+
 // ─────────────── email gateway ───────────────
 
 /** Config without the password, plus whether one is stored. Never returns it. */
@@ -5136,7 +5151,8 @@ app.post('/api/vouchers/delete', wrap(async (req, res) => {
   const { rowCount } = await pool.query(
     'delete from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
 
-  const revoked = await forgetVoucherAccess(doomed.map((v) => v.code), req.tenant.id);
+  const { forgetVoucherAccess } = await import('./radius.js');
+  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id);
   res.json({ deleted: rowCount, revoked });
 }));
 
@@ -5145,19 +5161,10 @@ app.post('/api/vouchers/purge-expired', wrap(async (req, res) => {
     "select code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
   const { rowCount } = await pool.query(
     "delete from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
-  const revoked = await forgetVoucherAccess(doomed.map((v) => v.code), req.tenant.id);
+  const { forgetVoucherAccess } = await import('./radius.js');
+  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id);
   res.json({ deleted: rowCount, revoked });
 }));
-
-/** Remove the RADIUS rows a set of voucher codes authenticate against. */
-async function forgetVoucherAccess(codes, tenantId) {
-  if (!codes.length) return 0;
-  const { rowCount: check } = await pool.query(
-    'delete from radcheck where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
-  await pool.query(
-    'delete from radreply where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
-  return check;
-}
 
 // ── staff (Staff & roles) ─────────────────────────
 app.get('/api/staff', wrap(async (req, res) => {

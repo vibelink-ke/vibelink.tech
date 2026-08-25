@@ -15,7 +15,19 @@ export default function Vouchers() {
   const store = useStore();
   const [filter, setFilter] = useState({ status: 'All status', type: 'All types', from: '', to: '' });
   const [selected, setSelected] = useState(() => new Set());
-  const [autoPurge, setAutoPurge] = useState(true);
+  // Backed by hotspot_settings.auto_purge_vouchers now, not local-only
+  // state — this used to reset to "on" on every visit and do nothing when
+  // flipped either way, which read as already working when it never was.
+  const autoPurge = store.hotspotSettings?.auto_purge_vouchers ?? true;
+  const setAutoPurge = async (enabled) => {
+    store.setHotspotSettings((s) => ({ ...s, auto_purge_vouchers: enabled }));
+    try {
+      await api.setAutoPurgeVouchers(enabled);
+    } catch (e) {
+      store.setHotspotSettings((s) => ({ ...s, auto_purge_vouchers: !enabled }));
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
 
   const vouchers = store.vouchers ?? [];
 
@@ -246,7 +258,7 @@ export default function Vouchers() {
             checked={autoPurge}
             onChange={setAutoPurge}
             label="Auto-purge expired vouchers"
-            detail="The expireAndSuspend job marks them expired every 5 minutes"
+            detail="Deletes them, and their RADIUS access, a day after they expire — off leaves them for Purge expired above"
           />
         </div>
       </Card>
