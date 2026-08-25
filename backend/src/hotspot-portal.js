@@ -90,9 +90,31 @@ export function loginPage({
   // RouterOS's own $(mac) — the guest's device, not a real value in the
   // preview or the copy a person opens directly, same reasoning as $(error).
   const macToken = forRouter ? '$(mac)' : '';
-  // A failed attempt just bounced back here with $(error) set — auto-login
-  // would otherwise immediately resubmit the same voucher and loop.
-  const hadError = forRouter ? '$(if error)true$(else)false$(endif)' : 'false';
+  /**
+   * A failed attempt just bounced back here with $(error) set — auto-login
+   * would otherwise immediately resubmit the same voucher and loop.
+   *
+   * This used to be substituted as a bare, unquoted JS boolean —
+   * `$(if error)true$(else)false$(endif)` spliced directly into `var
+   * hadError = ...;` with no quotes around it. If RouterOS ever failed to
+   * evaluate that conditional for any reason (a quirk of $(if)/$(endif)
+   * inside a <script> block rather than HTML body, a version difference,
+   * anything), the literal, un-substituted text landed in the page exactly
+   * as written and browsers threw "Unexpected token 'if'" trying to parse
+   * it as JavaScript — which is fatal to the *entire* inline script, not
+   * just this line: every button on the page (Buy, Talk to support,
+   * Connect) silently stopped doing anything, because none of the code
+   * defining their click handlers ever ran at all.
+   *
+   * Wrapped in quotes now instead, the same way mac and prefillCode already
+   * are below — a single $(if error)yes$(endif) block (no $(else) needed;
+   * RouterOS omits the block entirely when the condition is false) that
+   * becomes a quoted string either way. Un-substituted, it is still a
+   * harmless string literal, not a syntax error: "$(if error)yes$(endif)"
+   * is valid JS, it just isn't "yes", so hadError degrades to false instead
+   * of taking the whole script down with it.
+   */
+  const hadErrorToken = forRouter ? '$(if error)yes$(endif)' : '';
   // Each bundle carries its own button. A single "buy" link elsewhere on the
   // page made the guest choose twice — once here and again on another screen —
   // and the price they had just read was no longer in front of them.
@@ -398,7 +420,7 @@ export function loginPage({
      * cannot loop into auto-resubmitting itself forever.
      */
     var mac = ${JSON.stringify(macToken)};
-    var hadError = ${hadError};
+    var hadError = ${JSON.stringify(hadErrorToken)} === 'yes';
     // The SMS a guest gets on payment carries the code as text and as a tap
     // link to this page with ?code=... attached — for someone who would
     // rather tap than type it back in on a small keyboard. Takes priority
