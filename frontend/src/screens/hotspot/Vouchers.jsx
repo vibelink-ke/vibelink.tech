@@ -47,8 +47,8 @@ export default function Vouchers() {
 
   const exportCsv = () => {
     const rows = [
-      ['code', 'phone', 'plan', 'mpesa_ref', 'batch', 'status', 'data_used_mb', 'starts_at', 'expires_at', 'created_at'],
-      ...visible.map((v) => [v.code, v.phone, v.plan_title, v.mpesa_ref, v.batch, v.status, v.data_used_mb, v.starts_at, v.expires_at, v.created_at]),
+      ['code', 'phone', 'plan', 'mpesa_ref', 'batch', 'device_label', 'device_mac', 'online', 'status', 'data_used_mb', 'starts_at', 'expires_at', 'created_at'],
+      ...visible.map((v) => [v.code, v.phone, v.plan_title, v.mpesa_ref, v.batch, v.device_label, v.device_mac, v.online, v.status, v.data_used_mb, v.starts_at, v.expires_at, v.created_at]),
     ];
     const n = downloadCsv(`vouchers-${new Date().toISOString().slice(0, 10)}.csv`, rows);
     store.toast(n ? `Exported ${n} voucher(s)` : 'Nothing to export');
@@ -214,6 +214,24 @@ export default function Vouchers() {
               render: (v) => v.mpesa_ref ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{v.mpesa_ref}</span> : '—',
             },
             { key: 'batch', label: 'Batch', render: (v) => v.batch ?? '—' },
+            {
+              // A device added via "Adding a TV or console?" is never a
+              // hotspot login — it's a static ip-binding, so nothing else on
+              // this screen names it. Label first (what the guest typed),
+              // MAC as the fallback for a device nobody named.
+              key: 'device',
+              label: 'Device',
+              render: (v) => v.device_mac
+                ? <span>{v.device_label || <span style={{ fontFamily: font.mono, fontSize: 12 }}>{v.device_mac}</span>}</span>
+                : '—',
+            },
+            {
+              key: 'online',
+              label: 'Online',
+              render: (v) => v.online
+                ? <Badge tone={{ bg: '#eef7f1', fg: color.green }}>online</Badge>
+                : <span style={{ color: color.muted }}>—</span>,
+            },
             { key: 'status', label: 'Status', render: (v) => <Badge tone={v.status}>{STATUS_LABEL[v.status] ?? v.status}</Badge> },
             { key: 'data_used_mb', label: 'Used', align: 'right', render: (v) => `${v.data_used_mb ?? 0} MB` },
             {

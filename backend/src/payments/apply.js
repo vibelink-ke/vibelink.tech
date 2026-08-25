@@ -47,11 +47,30 @@ export async function applyPayment(tenantId, tx) {
      * already exist by this point, and the SMS below still gives a human a
      * way to type the code in by hand if the router push fails here — a
      * guest who paid is never left with literally nothing to show for it.
+     *
+     * The voucher_devices row is not optional bookkeeping — it is the only
+     * thing that makes this device visible or accountable at all afterward.
+     * jobs.js's expireAndSuspend finds every device to unbind by joining
+     * voucher_devices to routers; without a row here, an ip-bound TV had a
+     * static bypass on the router that nothing ever removed, so it kept
+     * working long after the voucher it was paid through had expired — the
+     * router had no concept of "this voucher's time is up," only "this MAC
+     * is bypassed," and nothing was telling it otherwise. The vouchers list
+     * also has nowhere else to learn a device is attached at all, which is
+     * why one never showed as active despite genuinely being online. Only
+     * written once the bind above has actually succeeded — a row claiming a
+     * binding that was never made would tell expiry cleanup to unbind
+     * something that was never bound.
      */
     if (target.mac && target.routerId) {
-      await bindDeviceOnRouter(target.routerId, target.mac, v.plan_id).catch((e) => {
-        console.error('auto-bind device', target.mac, 'on', target.routerId, '—', e.message);
-      });
+      await bindDeviceOnRouter(target.routerId, target.mac, v.plan_id)
+        .then(() => c.query(
+          `insert into voucher_devices (voucher_id, mac, router_id, label) values ($1,$2,$3,$4)
+           on conflict (voucher_id, mac) do update set label=coalesce(excluded.label, voucher_devices.label)`,
+          [v.id, target.mac, target.routerId, target.label ?? null]))
+        .catch((e) => {
+          console.error('auto-bind device', target.mac, 'on', target.routerId, '—', e.message);
+        });
     }
 
     // {link} is a tap target for the same code, for a guest who would rather

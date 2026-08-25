@@ -261,7 +261,7 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
       provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
       rawAccount: null, payload: { checkoutId },
       target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id }
-                              : { type: 'hotspot', planId: p.plan_id, mac: p.mac, routerId: p.router_id }
+                              : { type: 'hotspot', planId: p.plan_id, mac: p.mac, routerId: p.router_id, label: p.label }
     });
   } catch (e) {
     await pool.query(

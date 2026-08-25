@@ -926,6 +926,11 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   const mac = String(req.body?.mac ?? '').trim().toUpperCase();
   const routerId = String(req.body?.routerId ?? '').trim();
   const planId = String(req.body?.planId ?? '');
+  // Guest-chosen, shown back to them and to the operator wherever this
+  // device turns up (vouchers list, expiry logs) — "Living room TV" beats
+  // hunting for a MAC address later. Length-capped, not otherwise
+  // validated: it is display text, never interpreted as anything.
+  const label = String(req.body?.label ?? '').trim().slice(0, 60) || null;
   let phone = String(req.body?.phone ?? '').trim();
   if (!mac || !routerId) return res.status(400).json({ error: 'Pick a device from the list first.' });
   if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
@@ -992,7 +997,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
     if (kk) {
       const gw = await import('./payments/kopokopo.js');
       checkoutId = await gw.stkPush(tenant.id, {
-        phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, service: 'hotspot',
+        phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, label, service: 'hotspot',
       });
     } else {
       const gw = await import('./payments/daraja.js');
@@ -1008,7 +1013,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
         `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
          values ($1,'daraja',$2,$3,$4,$5)
          on conflict (tenant_id, provider, checkout_id) do nothing`,
-        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, mac, router_id: router.id }]);
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, mac, router_id: router.id, label }]);
     }
     res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
   } catch (e) {
@@ -1080,6 +1085,7 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
 
   const code = String(req.body?.code ?? '').trim();
   const mac = String(req.body?.mac ?? '').trim().toUpperCase();
+  const label = String(req.body?.label ?? '').trim().slice(0, 60) || null;
   if (!code || !mac) return res.status(400).json({ error: 'code and mac are required' });
 
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
@@ -1139,9 +1145,10 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   // ip-binding above already handles entirely on its own. router_id is what
   // lets expiry cleanup find its way back to this exact box later.
   await pool.query(
-    `insert into voucher_devices (voucher_id, mac, router_id) values ($1,$2,$3)
-     on conflict (voucher_id, mac) do update set router_id = excluded.router_id`,
-    [found.voucher.id, mac, r.id]);
+    `insert into voucher_devices (voucher_id, mac, router_id, label) values ($1,$2,$3,$4)
+     on conflict (voucher_id, mac) do update set router_id = excluded.router_id,
+       label = coalesce(excluded.label, voucher_devices.label)`,
+    [found.voucher.id, mac, r.id, label]);
   res.json({ ok: true });
 }));
 
@@ -5023,7 +5030,24 @@ app.delete('/api/tariffs/:id', wrap(async (req, res) => {
 app.get('/api/vouchers', wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select v.*,
-           (a.framedipaddress is not null or live.username is not null) as online,
+           /**
+            * A device added through "Adding a TV or console?" never touches
+            * RADIUS at all — it is a static ip-binding on the router, not a
+            * hotspot login, so radacct and live_sessions (both keyed on the
+            * code as a RADIUS username) never see it and it always read as
+            * offline here despite genuinely having a live, working
+            * connection. There is no traffic-based signal available for an
+            * ip-bound device without polling its router on every list load,
+            * so this treats "bound, and the voucher itself is still valid"
+            * as the online signal for that case — which is the honest
+            * answer to what an operator actually wants to know: is this
+            * customer's access currently live, not literally "sent a packet
+            * in the last few minutes."
+            */
+           (a.framedipaddress is not null or live.username is not null
+             or (dev.mac is not null and v.status = 'in_use'
+                 and (v.expires_at is null or v.expires_at > now()))) as online,
+           dev.mac as device_mac, dev.label as device_label,
            -- Which bundle this code actually was, and at what speed — a
            -- voucher only ever carried plan_id, an id an operator cannot
            -- read, so the table had no way to say what somebody bought.
@@ -5044,6 +5068,9 @@ app.get('/api/vouchers', wrap(async (req, res) => {
         select username from live_sessions
          where tenant_id = v.tenant_id and username = v.code
            and seen_at > now() - interval '5 minutes') live on true
+      left join lateral (
+        select mac, label from voucher_devices where voucher_id = v.id
+         order by added_at desc limit 1) dev on true
      where v.tenant_id=$1
      order by v.created_at desc
      limit 1000`, [req.tenant.id]);

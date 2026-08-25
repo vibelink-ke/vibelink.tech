@@ -610,6 +610,8 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
       <div id="devices"></div>
       <p class="label" id="planLabel">Choose a bundle</p>
       <div id="plans"></div>
+      <p class="label">Name this device <span style="font-weight:400">(optional)</span></p>
+      <input id="deviceName" type="text" placeholder="e.g. Living room TV" maxlength="60" autocomplete="off">
       <p class="label">Your phone number (M-Pesa)</p>
       <input id="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxx" autocomplete="tel">
       <button id="pay">Pay with M-Pesa</button>
@@ -724,7 +726,10 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
       note.textContent = 'Sending…';
       fetch(API + '/hotspot/tv-buy', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ mac: pickedDevice.mac, routerId: pickedDevice.routerId, planId: pickedPlan.id, phone: phone }),
+        body: JSON.stringify({
+          mac: pickedDevice.mac, routerId: pickedDevice.routerId, planId: pickedPlan.id,
+          phone: phone, label: document.getElementById('deviceName').value.trim(),
+        }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -803,12 +808,13 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
     }
 
     function bind(mac, btn) {
+      var name = window.prompt('Name this device (optional) — e.g. "Living room TV"', '') || '';
       btn.disabled = true;
       btn.textContent = 'Adding…';
       var note = document.getElementById('bindNote');
       fetch(API + '/hotspot/nearby-devices/bind', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: code, mac: mac }),
+        body: JSON.stringify({ code: code, mac: mac, label: name.trim() }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
