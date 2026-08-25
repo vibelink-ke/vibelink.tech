@@ -796,7 +796,11 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
     function renderDevices() {
       var el = document.getElementById('devices');
       el.innerHTML = devices.map(function (d, i) {
-        var name = esc(d.vendor || d.hostname || 'Unknown device');
+        // A name typed in on a past purchase wins over the router's own
+        // guess — the router has no memory of it at all, only the name a
+        // customer actually chose says "this is my TV" rather than
+        // "TCL" or a bare MAC.
+        var name = esc(d.knownLabel || d.vendor || d.hostname || 'Unknown device');
         var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
         return '<div class="device" data-i="' + i + '"><div><div class="device-name">' + name + '</div>' +
           '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div></div>';
@@ -806,6 +810,10 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
           el.querySelectorAll('.device').forEach(function (r) { r.classList.remove('on'); });
           row.classList.add('on');
           pickedDevice = devices[Number(row.getAttribute('data-i'))];
+          // Pre-filled, not locked — a returning device shows the name it
+          // already has so the guest is not asked to retype it every time,
+          // but the field stays editable for anyone who wants to rename it.
+          document.getElementById('deviceName').value = pickedDevice.knownLabel || '';
         });
       });
       if (devices.length === 1) el.querySelector('.device').click();

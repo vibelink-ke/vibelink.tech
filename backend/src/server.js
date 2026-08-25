@@ -888,6 +888,22 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
       where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
     [tenant.id]);
 
+  // Whatever name this device was given last time it was bought for — a
+  // returning TV should not read back as "Unknown device" or a bare MAC
+  // just because this is a fresh trip through the buy flow rather than the
+  // same browser tab as before; the router has no memory of the name at
+  // all, only we do. distinct on (mac): a device can carry a different
+  // label across several past purchases if it was renamed, and the most
+  // recent one someone actually typed is the one worth showing.
+  const { rows: knownLabels } = await pool.query(
+    `select distinct on (d.mac) d.mac, d.label
+       from voucher_devices d
+       join vouchers v on v.id = d.voucher_id
+      where v.tenant_id=$1 and d.label is not null
+      order by d.mac, d.added_at desc`,
+    [tenant.id]);
+  const labelByMac = new Map(knownLabels.map((r) => [String(r.mac).toUpperCase(), r.label]));
+
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const devices = [];
@@ -900,7 +916,9 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
       });
       try {
         const found = await ros.nearbyDevices(conn);
-        for (const d of found) devices.push({ ...d, routerId: r.id });
+        for (const d of found) {
+          devices.push({ ...d, routerId: r.id, knownLabel: labelByMac.get(String(d.mac).toUpperCase()) ?? null });
+        }
       } finally {
         ros.close(conn);
       }
