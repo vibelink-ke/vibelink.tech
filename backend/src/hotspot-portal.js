@@ -294,8 +294,18 @@ export function loginPage({
     ${tvMode ? '' : `
     <!-- Smart TVs and set-top boxes: same page, sized to be read from a sofa
          and typed with a remote. A link rather than sniffing the user agent,
-         which gets it wrong on exactly the devices that matter. -->
-    <p class="hint"><a href="?tv=1">Using a TV or set-top box?</a></p>`}
+         which gets it wrong on exactly the devices that matter.
+
+         Absolute, not "?tv=1" — RouterOS fetches this page once and serves
+         its own cached static copy from then on (that's the whole reason
+         pushHotspotPage exists), so a relative link reloaded from that
+         cache just re-serves the identical file: RouterOS's captive-portal
+         handler doesn't run this template per request, it has no ?tv=1 to
+         notice. Guests see the tap appear to do nothing, forever, until the
+         next Configure/Hotspot push happens to overwrite the cache. Pointed
+         at the live server instead, the same tap actually reaches this
+         function again with tvMode set, every time, cache or no cache. -->
+    <p class="hint"><a href="${esc(apiBase)}/hotspot/login.html?tv=1">Using a TV or set-top box?</a></p>`}
   </div>
 
   <script>
