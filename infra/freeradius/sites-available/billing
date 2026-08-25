@@ -89,8 +89,21 @@ server billing {
 
         # Tell the app a voucher has been used, so voucher_expiry='login' can
         # start its clock. Fire-and-forget; a failure here must not block auth.
+        #
+        # This used to just set a control attribute (Tmp-String-0) that went
+        # nowhere at all — described as "tell the app," doing none of it. No
+        # request of any kind ever reached the api container; every
+        # 'login'-mode voucher (hotspot_settings' own default) had its clock
+        # never start via this path, full stop. post-auth-hook.sh does the
+        # actual telling: an exec'd shell call to POST /radius/post-auth,
+        # backgrounded there so a slow api never delays this response.
+        #
+        # /bin/sh explicitly, matching how entrypoint.sh is invoked for this
+        # same compose service — the script's own executable bit is not
+        # something a read-only bind mount from a host checkout can be
+        # trusted to carry.
         update control {
-            &Tmp-String-0 := "%{User-Name}"
+            &Tmp-String-0 := "%{exec:/bin/sh /config/post-auth-hook.sh %{User-Name}}"
         }
 
         Post-Auth-Type REJECT {

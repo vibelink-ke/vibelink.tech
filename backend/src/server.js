@@ -1242,6 +1242,55 @@ app.get('/chat/:id', wrap(async (req, res) => {
   res.json({ status: chat.status, messages: rows });
 }));
 
+/**
+ * FreeRADIUS post-auth hook: starts the clock when voucher_expiry = 'login'.
+ *
+ * Two separate bugs here, previously: sites-available/billing's post-auth
+ * section never actually called this at all — it set a control attribute
+ * (Tmp-String-0) that goes nowhere, described in a comment as "tell the app
+ * a voucher has been used" while doing nothing of the kind. startVoucherClock
+ * existed, was fully correct, and was simply never invoked by anything, for
+ * any tenant, ever — 'login' is hotspot_settings' own default, so this was
+ * not an edge case. And this route used to sit after the generic tenant-
+ * resolution middleware further down, which requires req.tenant to resolve
+ * from the request's *hostname* — fine for a browser on a tenant's own
+ * subdomain, meaningless for FreeRADIUS calling this internally with no
+ * tenant subdomain to send as a Host header at all. Fixed by moving the
+ * route above that middleware (same reason /chat/* and /portal/* already
+ * live up here) and resolving tenant_id from the voucher code itself —
+ * which this needs anyway, since a code is only unique per tenant.
+ *
+ * Fires on every successful auth, not only hotspot ones (FreeRADIUS's
+ * post-auth section has no way to tell PPPoE and hotspot apart before this
+ * runs) — a PPPoE username simply matches no voucher and this is a no-op,
+ * same as it already was for a 'creation'-mode or already-started voucher.
+ *
+ * The only thing stopping a stranger from hitting this is Caddy simply
+ * never proxying /radius/* from the public listener — correct, but a single
+ * point of failure: one wildcard `handle` block in the Caddyfile and this
+ * becomes a public "start any voucher's clock" endpoint with no auth of its
+ * own. RADIUS_INTERNAL_SECRET is a second, independent layer: set it and
+ * configure FreeRADIUS's post-auth call to send it as X-Internal-Secret, and
+ * a Caddy misconfiguration alone is no longer enough. Left optional so this
+ * does not silently break an existing FreeRADIUS deployment that predates it.
+ */
+app.post('/radius/post-auth', wrap(async (req, res) => {
+  const secret = process.env.RADIUS_INTERNAL_SECRET;
+  if (secret && req.get('X-Internal-Secret') !== secret) return res.status(403).end();
+
+  const username = String(req.body?.username ?? '').trim();
+  if (!username) return res.json({ ok: true });
+
+  const { rows: [v] } = await pool.query(
+    'select tenant_id from vouchers where code=$1', [username]);
+  if (!v) return res.json({ ok: true });   // not a voucher — a PPPoE login, most likely
+
+  const { startVoucherClock } = await import('./radius.js');
+  const { withTenant } = await import('./db.js');
+  await withTenant(v.tenant_id, (c) => startVoucherClock(c, v.tenant_id, username));
+  res.json({ ok: true });
+}));
+
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
 // portal and webhooks, which have no session. DEV_TENANT lets the Vite dev server
@@ -2126,26 +2175,6 @@ app.post('/api/sms/test', async (req, res) => {
   res.json({ ok: true });
 });
 
-/**
- * FreeRADIUS post-auth hook: starts the clock when voucher_expiry = 'login'.
- *
- * The only thing stopping a stranger from hitting this today is Caddy simply
- * never proxying /radius/* from the public listener — correct, but a single
- * point of failure: one wildcard `handle` block in the Caddyfile and this
- * becomes a public "start any voucher's clock" endpoint with no auth of its
- * own. RADIUS_INTERNAL_SECRET is a second, independent layer: set it and
- * configure FreeRADIUS's post-auth call to send it as X-Internal-Secret, and
- * a Caddy misconfiguration alone is no longer enough. Left optional so this
- * does not silently break an existing FreeRADIUS deployment that predates it.
- */
-app.post('/radius/post-auth', async (req, res) => {
-  const secret = process.env.RADIUS_INTERNAL_SECRET;
-  if (secret && req.get('X-Internal-Secret') !== secret) return res.status(403).end();
-  const { startVoucherClock } = await import('./radius.js');
-  const { withTenant } = await import('./db.js');
-  await withTenant(req.tenant.id, (c) => startVoucherClock(c, req.tenant.id, req.body.username));
-  res.json({ ok: true });
-});
 
 // ── tickets, leads, messaging, live support, tariffs, IP pools ──
 // All scoped by req.tenant.id — the tenant resolver above 404s unknown hosts and
