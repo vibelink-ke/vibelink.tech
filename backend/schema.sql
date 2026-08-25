@@ -1140,6 +1140,23 @@ alter table sessions drop constraint if exists sessions_subscriber_id_fkey;
 alter table sessions add constraint sessions_subscriber_id_fkey
   foreign key (subscriber_id) references subscribers on delete set null;
 
+-- Same problem, same fix, for vouchers: payments.voucher_id and
+-- sessions.voucher_id had no delete rule either, so deleting a voucher —
+-- "Purge expired" on the Vouchers screen, or the automatic purge job —
+-- failed outright on any voucher that had ever actually been paid for,
+-- which in practice is nearly all of them. "Could not purge: update or
+-- delete on table 'vouchers' violates foreign key constraint
+-- 'payments_voucher_id_fkey'" is what that looks like on screen. Same
+-- reasoning as above: a payment is a financial record and must outlive the
+-- voucher it paid for, so this detaches rather than cascades.
+alter table payments drop constraint if exists payments_voucher_id_fkey;
+alter table payments add constraint payments_voucher_id_fkey
+  foreign key (voucher_id) references vouchers on delete set null;
+
+alter table sessions drop constraint if exists sessions_voucher_id_fkey;
+alter table sessions add constraint sessions_voucher_id_fkey
+  foreign key (voucher_id) references vouchers on delete set null;
+
 -- ─────────────── RADIUS tenant scoping ───────────────
 -- Which tenant a RADIUS credential belongs to.
 --
