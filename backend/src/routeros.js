@@ -1684,7 +1684,22 @@ export async function bindDeviceByMac(conn, { mac, downKbps, upKbps, comment = '
   return { mac: MAC, ip };
 }
 
-/** Undo bindDeviceByMac — called once the underlying voucher/device expires. */
+/**
+ * Undo bindDeviceByMac — called once the underlying voucher/device expires.
+ *
+ * Removing the ip-binding stops the *next* connection from bypassing again,
+ * but RouterOS already decided this MAC was bypassed the moment it first saw
+ * it, and keeps forwarding its traffic under that decision until something
+ * makes it look again — deleting the config it originally checked does not
+ * reopen that check. That is the whole bug this once was: the DB moved to
+ * 'expired', the ip-binding and queue were gone, and the TV kept browsing
+ * anyway, because nothing had ever told the router this specific device was
+ * still live and needed kicking. /ip/hotspot/active is that live table for a
+ * bypassed host exactly as much as an authenticated one; removing this MAC's
+ * row from it is what actually drops the session. /ip/hotspot/host is then
+ * cleared too so a stale cache entry can't let it slide back through
+ * bypassed on its very next packet before DHCP/ARP even notices it's gone.
+ */
 export async function unbindDeviceByMac(conn, { mac }) {
   const MAC = String(mac).toUpperCase();
   const bindings = await conn.write('/ip/hotspot/ip-binding/print', [`?mac-address=${MAC}`]);
@@ -1698,6 +1713,15 @@ export async function unbindDeviceByMac(conn, { mac }) {
     for (const q of queues) {
       if (isManaged(q)) await cmd(conn, 'remove device speed cap', '/queue/simple/remove', [`=.id=${idOf(q)}`]);
     }
+  }
+
+  const active = await conn.write('/ip/hotspot/active/print', [`?mac-address=${MAC}`]).catch(() => []);
+  for (const a of active) {
+    await cmd(conn, 'kick live hotspot session', '/ip/hotspot/active/remove', [`=.id=${idOf(a)}`]);
+  }
+  const hosts = await conn.write('/ip/hotspot/host/print', [`?mac-address=${MAC}`]).catch(() => []);
+  for (const h of hosts) {
+    await cmd(conn, 'clear stale hotspot host cache', '/ip/hotspot/host/remove', [`=.id=${idOf(h)}`]);
   }
 }
 
