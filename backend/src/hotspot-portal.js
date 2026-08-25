@@ -96,6 +96,13 @@ export function loginPage({
   // Each bundle carries its own button. A single "buy" link elsewhere on the
   // page made the guest choose twice — once here and again on another screen —
   // and the price they had just read was no longer in front of them.
+  //
+  // Price and Buy are two separate elements, not one button doing both jobs —
+  // the price used to be the button itself, so a guest scanning bundles by
+  // price had nothing to actually read: every number on the page was already
+  // a tappable "buy this now," which reads as more decisive than "how much
+  // is this" is meant to be. Price sits still now; Buy is its own explicit
+  // action next to it.
   const planCards = plans.length
     ? plans.map((p) => `
       <li class="plan">
@@ -103,8 +110,9 @@ export function loginPage({
           <strong>${esc(p.title)}</strong>
           <span class="meta">${esc(duration(p.duration_min))} · ${esc(String(p.rate_down / 1000))} Mbps</span>
         </div>
+        <span class="price">${esc(money(p.price))}</span>
         <button type="button" class="buy" data-plan="${esc(p.id ?? '')}"
-                data-title="${esc(p.title)}">${esc(money(p.price))}</button>
+                data-title="${esc(p.title)}">Buy</button>
       </li>`).join('')
     : '<li class="plan"><span class="meta">No bundles are on sale right now.</span></li>';
 
@@ -165,13 +173,17 @@ export function loginPage({
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
   .plans-title { font-size:14px; color:var(--muted); margin:0 0 10px; }
-  .plan { display:flex; justify-content:space-between; align-items:center; gap:14px;
+  /* Three parts now, not two: name (grows to fill the row), then price and
+     Buy sitting together at the end — price is no longer the button, so
+     space-between alone would strand it in the middle of the row instead of
+     next to the action it describes. */
+  .plan { display:flex; align-items:center; gap:14px;
           padding:10px 0; border-bottom:1px solid var(--line); }
   .plan:last-child { border-bottom:0; }
-  .plan-name { min-width:0; }
+  .plan-name { min-width:0; flex:1 1 auto; }
   .plan-name strong { display:block; font-size:16px; }
   .meta { display:block; color:var(--muted); font-size:14px; white-space:nowrap; }
-  .price { font-weight:600; white-space:nowrap; }
+  .price { font-weight:600; white-space:nowrap; flex:0 0 auto; }
   /* width:auto and margin-top:0 undo the global button rule above, which exists
      for Connect. Without them every price button stretched to the full width of
      the card and squeezed the bundle name into a two-line column. */
