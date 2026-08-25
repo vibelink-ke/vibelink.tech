@@ -63,7 +63,16 @@ export async function applyPayment(tenantId, tx) {
      * something that was never bound.
      */
     if (target.mac && target.routerId) {
-      await bindDeviceOnRouter(target.routerId, target.mac, v.plan_id)
+      // What actually identifies this binding when an operator is looking
+      // straight at the router (Winbox: IP -> Hotspot -> IP Bindings/Hosts,
+      // since a bypassed device is real to look at there — it just never
+      // shows under Active, which only ever lists devices that went through
+      // hotspot's own login, and bypass is specifically what skips that).
+      // A hardcoded "auto" told nobody which of a dozen identical-looking
+      // rows was which customer; the voucher code always does, and the
+      // guest's own device name does better still, when they gave one.
+      const routerComment = target.label ? `${v.code} — ${target.label}` : v.code;
+      await bindDeviceOnRouter(target.routerId, target.mac, v.plan_id, routerComment)
         .then(() => c.query(
           `insert into voucher_devices (voucher_id, mac, router_id, label) values ($1,$2,$3,$4)
            on conflict (voucher_id, mac) do update set label=coalesce(excluded.label, voucher_devices.label)`,
@@ -210,7 +219,7 @@ async function match(c, tenantId, tx) {
  * than from the route that took the payment because a webhook callback and
  * a route handler both need it and neither should duplicate it.
  */
-async function bindDeviceOnRouter(routerId, mac, planId) {
+async function bindDeviceOnRouter(routerId, mac, planId, comment) {
   const { rows: [r] } = await pool.query(
     'select host, api_port, service_user, service_password_enc from routers where id=$1',
     [routerId]);
@@ -227,7 +236,7 @@ async function bindDeviceOnRouter(routerId, mac, planId) {
   });
   try {
     await ros.bindDeviceByMac(conn, {
-      mac, downKbps: plan?.rate_down ?? 2000, upKbps: plan?.rate_up ?? 1000, comment: 'auto',
+      mac, downKbps: plan?.rate_down ?? 2000, upKbps: plan?.rate_up ?? 1000, comment: comment ?? 'auto',
     });
   } finally {
     ros.close(conn);

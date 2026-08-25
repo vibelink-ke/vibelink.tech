@@ -1148,9 +1148,13 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
       if (!devices.some((d) => d.mac === mac)) {
         return res.status(404).json({ error: 'That device is not currently on this network.' });
       }
+      // Same identification the direct-buy flow's binding carries — code
+      // plus whatever name the guest gave it, so this device reads the same
+      // way on the router itself (Winbox: IP -> Hotspot -> IP Bindings)
+      // regardless of which of the two flows actually bound it.
       await ros.bindDeviceByMac(conn, {
         mac, downKbps: plan?.rate_down ?? 2000, upKbps: plan?.rate_up ?? 1000,
-        comment: found.voucher.code,
+        comment: label ? `${found.voucher.code} — ${label}` : found.voucher.code,
       });
     } finally {
       ros.close(conn);
