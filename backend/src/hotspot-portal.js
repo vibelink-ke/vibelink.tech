@@ -268,6 +268,14 @@ export function loginPage({
         <b id="payCodeValue"></b>
         Type it above to get online.
       </div>
+      <!-- Shown only if the in-place auto-submit below did not actually get
+           the guest online within a few seconds — see the fallback timer in
+           poll(). A fresh page load, not another form.submit() attempt: it
+           reuses the exact same auto-login path the SMS's tap-to-connect
+           link already relies on ($(...) tokens re-resolved fresh by
+           RouterOS on that new request), rather than retrying whatever
+           already failed once on this same page load. -->
+      <button type="button" id="connectNow" style="display:none">Connect now</button>
     </div>
     <!-- Support, before paying. A guest whose code will not work cannot buy
          their way to an answer, and the operator would rather hear it now than
@@ -291,21 +299,13 @@ export function loginPage({
       <p class="hint" id="chatNote"></p>
     </div>
     ${help}
-    ${tvMode ? '' : `
-    <!-- Smart TVs and set-top boxes: same page, sized to be read from a sofa
-         and typed with a remote. A link rather than sniffing the user agent,
-         which gets it wrong on exactly the devices that matter.
-
-         Absolute, not "?tv=1" — RouterOS fetches this page once and serves
-         its own cached static copy from then on (that's the whole reason
-         pushHotspotPage exists), so a relative link reloaded from that
-         cache just re-serves the identical file: RouterOS's captive-portal
-         handler doesn't run this template per request, it has no ?tv=1 to
-         notice. Guests see the tap appear to do nothing, forever, until the
-         next Configure/Hotspot push happens to overwrite the cache. Pointed
-         at the live server instead, the same tap actually reaches this
-         function again with tvMode set, every time, cache or no cache. -->
-    <p class="hint"><a href="${esc(apiBase)}/hotspot/login.html?tv=1">Using a TV or set-top box?</a></p>`}
+    <!-- The old "Using a TV or set-top box?" link (a bigger-text version of
+         this same code-entry form, for reading across a room) is gone —
+         "Adding a TV or console?" above replaces it: pick the device, pick a
+         bundle, pay, nothing to type on the TV at all, which is strictly
+         better than a bigger font on a form the TV still could not fill in
+         itself. tvMode/?tv=1 stays reachable directly for anyone who still
+         wants it; nothing on this page links to it any more. -->
   </div>
 
   <script>
@@ -413,6 +413,28 @@ export function loginPage({
               document.getElementById('password').value = d.code;
               document.getElementById('loginForm').submit();
             }, 1200);
+            /**
+             * A successful hotspot login navigates the guest away from this
+             * page entirely — RouterOS redirects to `dst` the instant it
+             * accepts the credentials. So if this script is still running
+             * several seconds later, the submit above did not actually get
+             * them online, whatever the reason (a $(...) token RouterOS
+             * resolved differently for this request than for the original
+             * page load, a slow router, anything). Rather than leave a paid
+             * guest staring at a page that looks stuck, with "go back and
+             * try again" as a fact they'd have to discover for themselves, a
+             * fresh load of this same page with the code attached goes
+             * through the exact path the SMS's own tap-to-connect link
+             * already uses successfully — new request, tokens resolved
+             * fresh, same auto-login script at the top of the page.
+             */
+            setTimeout(function () {
+              var btn = document.getElementById('connectNow');
+              btn.style.display = 'block';
+              btn.addEventListener('click', function () {
+                window.location.href = API + '/hotspot/login.html?code=' + encodeURIComponent(d.code);
+              });
+            }, 5000);
             return;
           }
           if (d.status === 'failed' || d.status === 'cancelled') {
