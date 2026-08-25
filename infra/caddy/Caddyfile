@@ -73,7 +73,7 @@
 	# curl — and fell straight through to index.html in production, which
 	# looks exactly like the button that calls it doing nothing at all,
 	# because that is precisely what a guest clicking it sees.
-	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/* /hotspot/devices /hotspot/connected /hotspot/voucher-status /hotspot/voucher-for-mac /hotspot/nearby-devices /hotspot/nearby-devices/bind
+	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/* /hotspot/devices /hotspot/connected /hotspot/voucher-status /hotspot/voucher-for-mac /hotspot/nearby-devices /hotspot/nearby-devices/bind /hotspot/tv-options /hotspot/tv-buy
 	handle @captive {
 		reverse_proxy net:8080
 	}

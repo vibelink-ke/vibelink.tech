@@ -532,11 +532,21 @@ export function loginPage({
 }
 
 /**
- * "Add this device" — reached from an already-connected phone, for a TV or
- * console that has some browser but no way to type a 6-digit code onto a
- * screen with a remote. The guest enters the code they already have, and
- * this lists other devices seen on the same network for them to pick from —
- * see /hotspot/nearby-devices and /hotspot/nearby-devices/bind in server.js.
+ * "Adding a TV or console?" — reached from an already-connected phone, for a
+ * TV or console that has some browser but no way to type a 6-digit code onto
+ * a screen with a remote.
+ *
+ * Pick the device, pick a bundle, pay — nothing is typed onto the TV at any
+ * point, because the device is bound on its router the instant the payment
+ * applies (see apply.js's bindDeviceOnRouter), the same ip-binding/queue
+ * mechanism the old "already bought a code" flow used, just reached without
+ * ever needing a code to exist first. See /hotspot/tv-options and
+ * /hotspot/tv-buy in server.js.
+ *
+ * A second, collapsed section still covers the older case — a code already
+ * bought, on a multi-device plan, adding one more device to it — since that
+ * is a different transaction (no new payment) and /hotspot/nearby-devices
+ * still exists for exactly that.
  *
  * Served directly to the guest's own already-online browser, not fetched
  * and cached by the router the way the login page is, so none of RouterOS's
@@ -554,40 +564,196 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); padding:20px;
          font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { max-width:440px; margin:0 auto; background:var(--card); border:1px solid var(--line);
+  .card { max-width:440px; margin:0 auto 14px; background:var(--card); border:1px solid var(--line);
           border-radius:14px; padding:22px; }
   h1 { margin:0 0 4px; font-size:20px; }
+  h2 { margin:0 0 4px; font-size:15px; }
   .sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
   input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
           border-radius:9px; background:#fafbf9; color:#161a17; }
   button { width:100%; margin-top:12px; padding:13px; font-size:16px; font-weight:600;
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
-  .device { display:flex; justify-content:space-between; align-items:center; gap:12px;
-            padding:12px 0; border-bottom:1px solid var(--line); }
-  .device:last-child { border-bottom:0; }
-  .device-name { font-weight:600; font-size:14.5px; }
-  .device-meta { color:var(--muted); font-size:13px; }
-  .add { width:auto; margin-top:0; padding:8px 14px; font-size:13.5px; }
+  button:disabled { opacity:.6; cursor:default; }
+  .device, .plan { display:flex; justify-content:space-between; align-items:center; gap:12px;
+            padding:12px 10px; border:1px solid var(--line); border-radius:10px; margin-top:8px; cursor:pointer; }
+  .device.on, .plan.on { border-color:var(--green); background:#eef7f1; }
+  .device-name, .plan-name { font-weight:600; font-size:14.5px; }
+  .device-meta, .plan-meta { color:var(--muted); font-size:13px; }
+  .plan-price { font-weight:700; color:var(--green); font-size:14.5px; white-space:nowrap; }
+  .label { margin:16px 0 0; font-size:13px; font-weight:600; color:var(--muted); }
   .hint { margin:10px 0 0; font-size:13.5px; color:var(--muted); text-align:center; }
-  .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:14px;
+  .err { margin:10px 0 0; padding:9px 11px; border-radius:8px; font-size:14px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
+  .toggle { text-align:center; font-size:13px; color:var(--muted); }
+  .toggle a { color:var(--green); font-weight:600; text-decoration:none; }
+  .add { width:auto; margin-top:0; padding:8px 14px; font-size:13.5px; }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>Add a device</h1>
-    <p class="sub">Enter your voucher code, then pick the TV or console from the list.</p>
-    <div id="step1">
-      <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
-      <button id="find">Find devices</button>
-      <div id="err1"></div>
+    <p class="sub">Pick your TV or console, choose a bundle, and pay — nothing to type on it.</p>
+    <div id="loading" class="hint">Looking for devices on this network…</div>
+    <div id="err0"></div>
+    <div id="buyForm" style="display:none">
+      <p class="label" id="deviceLabel">Which device is it?</p>
+      <div id="devices"></div>
+      <p class="label" id="planLabel">Choose a bundle</p>
+      <div id="plans"></div>
+      <p class="label">Your phone number (M-Pesa)</p>
+      <input id="phone" type="tel" inputmode="tel" placeholder="07xx xxx xxx" autocomplete="tel">
+      <button id="pay">Pay with M-Pesa</button>
+      <p class="hint" id="payNote"></p>
     </div>
+  </div>
+
+  <div class="card toggle" id="oldFlow">
+    <a href="#" id="haveCode">Already have a code and just adding an extra device?</a>
+  </div>
+
+  <div class="card" id="step1" style="display:none">
+    <h2>Add an extra device to a code</h2>
+    <p class="sub">For a bundle that already allows more than one device.</p>
+    <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
+    <button id="find">Find devices</button>
+    <div id="err1"></div>
     <div id="list" style="display:none"></div>
   </div>
+
   <script>
   (function () {
     var API = ${JSON.stringify(apiBase)};
+    var devices = [], plans = [];
+    var pickedDevice = null, pickedPlan = null;
+
+    // Device vendor/hostname come off the router's own ARP/lease table, and
+    // a hostname is whatever the device itself announced when it joined —
+    // guest-controlled, not tenant-controlled, unlike a plan title. Escaped
+    // before going into innerHTML so a device cannot inject markup by
+    // setting its own hostname to something like "<img onerror=...>".
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    fetch(API + '/hotspot/tv-options')
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        document.getElementById('loading').style.display = 'none';
+        if (!res.ok) { document.getElementById('err0').innerHTML = '<p class="err">' + (res.d.error || 'Could not reach the billing system.') + '</p>'; return; }
+        devices = res.d.devices || [];
+        plans = res.d.plans || [];
+        if (!devices.length) {
+          document.getElementById('err0').innerHTML = '<p class="hint">No devices seen on this network yet — make sure the TV is connected to the WiFi first, then reload this page.</p>';
+          return;
+        }
+        if (!plans.length) {
+          document.getElementById('err0').innerHTML = '<p class="hint">No bundles are on sale right now.</p>';
+          return;
+        }
+        renderDevices();
+        renderPlans();
+        document.getElementById('buyForm').style.display = 'block';
+      })
+      .catch(function () {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('err0').innerHTML = '<p class="err">Could not reach the billing system from here.</p>';
+      });
+
+    function renderDevices() {
+      var el = document.getElementById('devices');
+      el.innerHTML = devices.map(function (d, i) {
+        var name = esc(d.vendor || d.hostname || 'Unknown device');
+        var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
+        return '<div class="device" data-i="' + i + '"><div><div class="device-name">' + name + '</div>' +
+          '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div></div>';
+      }).join('');
+      el.querySelectorAll('.device').forEach(function (row) {
+        row.addEventListener('click', function () {
+          el.querySelectorAll('.device').forEach(function (r) { r.classList.remove('on'); });
+          row.classList.add('on');
+          pickedDevice = devices[Number(row.getAttribute('data-i'))];
+        });
+      });
+      if (devices.length === 1) el.querySelector('.device').click();
+    }
+
+    function renderPlans() {
+      var el = document.getElementById('plans');
+      el.innerHTML = plans.map(function (p, i) {
+        return '<div class="plan" data-i="' + i + '"><div><div class="plan-name">' + esc(p.title) + '</div>' +
+          '<div class="plan-meta">' + duration(p.duration_min) + ' · ' + (p.rate_down / 1000) + ' Mbps</div></div>' +
+          '<div class="plan-price">KES ' + Number(p.price) + '</div></div>';
+      }).join('');
+      el.querySelectorAll('.plan').forEach(function (row) {
+        row.addEventListener('click', function () {
+          el.querySelectorAll('.plan').forEach(function (r) { r.classList.remove('on'); });
+          row.classList.add('on');
+          pickedPlan = plans[Number(row.getAttribute('data-i'))];
+        });
+      });
+      el.querySelector('.plan').click();
+    }
+
+    function duration(min) {
+      var m = Number(min) || 0;
+      if (m >= 1440) return Math.round(m / 1440) + ' day' + (m >= 2880 ? 's' : '');
+      if (m >= 60) return Math.round(m / 60) + ' hour' + (m >= 120 ? 's' : '');
+      return m + ' minutes';
+    }
+
+    document.getElementById('pay').addEventListener('click', function () {
+      var note = document.getElementById('payNote');
+      var phone = document.getElementById('phone').value.trim();
+      if (!pickedDevice) { note.textContent = 'Pick which device this is for.'; return; }
+      if (!pickedPlan) { note.textContent = 'Pick a bundle.'; return; }
+      if (!phone) { note.textContent = 'Enter the M-Pesa number to pay from.'; return; }
+      var btn = document.getElementById('pay');
+      btn.disabled = true;
+      note.textContent = 'Sending…';
+      fetch(API + '/hotspot/tv-buy', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ mac: pickedDevice.mac, routerId: pickedDevice.routerId, planId: pickedPlan.id, phone: phone }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok) { btn.disabled = false; note.textContent = res.d.error || 'Could not start the payment.'; return; }
+          note.textContent = 'Check your phone and enter your M-Pesa PIN.';
+          poll(res.d.checkoutId);
+        })
+        .catch(function () { btn.disabled = false; note.textContent = 'Could not reach the billing system from here.'; });
+    });
+
+    function poll(checkoutId) {
+      var note = document.getElementById('payNote');
+      var timer = setInterval(function () {
+        fetch(API + '/hotspot/buy/' + encodeURIComponent(checkoutId))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.code) {
+              clearInterval(timer);
+              note.textContent = 'Paid — connecting that device now. It may take a few seconds to come online.';
+              return;
+            }
+            if (d.status === 'failed' || d.status === 'cancelled') {
+              clearInterval(timer);
+              document.getElementById('pay').disabled = false;
+              note.textContent = d.detail || 'The payment did not go through.';
+            }
+          })
+          .catch(function () { /* keep polling; a dropped request is not a failure */ });
+      }, 3000);
+    }
+
+    // ── the older, code-first flow: adding an extra device to a code that
+    // already allows more than one ──────────────────────────────────────
     var code = '';
+    document.getElementById('haveCode').addEventListener('click', function (e) {
+      e.preventDefault();
+      document.getElementById('oldFlow').style.display = 'none';
+      document.getElementById('step1').style.display = 'block';
+    });
 
     document.getElementById('find').addEventListener('click', function () {
       code = document.getElementById('code').value.trim();
@@ -598,32 +764,31 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           if (!res.ok) { err.innerHTML = '<p class="err">' + (res.d.error || 'Could not check that code.') + '</p>'; return; }
-          render(res.d.devices, res.d.slotsLeft);
+          renderOldList(res.d.devices, res.d.slotsLeft);
         })
         .catch(function () { err.innerHTML = '<p class="err">Could not reach the billing system from here.</p>'; });
     });
 
-    function render(devices, slotsLeft) {
-      document.getElementById('step1').style.display = 'none';
+    function renderOldList(oldDevices, slotsLeft) {
       var list = document.getElementById('list');
       list.style.display = 'block';
       if (!slotsLeft) {
         list.innerHTML = '<p class="hint">This code already has as many devices as it can take.</p>';
         return;
       }
-      if (!devices.length) {
+      if (!oldDevices.length) {
         list.innerHTML = '<p class="hint">No other devices seen on this network yet — make sure the TV is connected to the WiFi first.</p>';
         return;
       }
-      list.innerHTML = devices.map(function (d, i) {
-        var name = d.vendor || d.hostname || 'Unknown device';
-        var meta = [d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · ');
+      list.innerHTML = oldDevices.map(function (d, i) {
+        var name = esc(d.vendor || d.hostname || 'Unknown device');
+        var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
         return '<div class="device"><div><div class="device-name">' + name + '</div>' +
-          '<div class="device-meta">' + (meta || d.mac) + '</div></div>' +
+          '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div>' +
           '<button class="add" data-i="' + i + '">Add</button></div>';
       }).join('') + '<p class="hint" id="bindNote"></p>';
       list.querySelectorAll('.add').forEach(function (btn) {
-        btn.addEventListener('click', function () { bind(devices[Number(btn.getAttribute('data-i'))].mac, btn); });
+        btn.addEventListener('click', function () { bind(oldDevices[Number(btn.getAttribute('data-i'))].mac, btn); });
       });
     }
 

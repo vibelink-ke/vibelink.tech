@@ -859,6 +859,164 @@ async function voucherAndRouter(tenantId, code) {
 }
 
 /**
+ * Everything the "Adding a TV or console?" page needs to sell a bundle
+ * straight to a device that was never going to type a code in — every
+ * device currently seen on any of this tenant's hotspot routers, and every
+ * bundle on sale, in one call, before any payment has happened at all.
+ *
+ * Every one of the tenant's hotspot-capable routers is queried and merged
+ * rather than picking "the" router, because nothing about this request says
+ * which physical site the guest is standing at. In practice a MAC only ever
+ * shows up on the one router it is actually near — hotspot sites are
+ * separate physical locations, not bridged together — so merging is safe;
+ * router_id travels with each device so the purchase below knows which box
+ * to bind it on once it is chosen. One unreachable router logs and is
+ * skipped rather than blanking the whole list for every other site.
+ */
+app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const { rows: plans } = await pool.query(
+    `select id, title, price, duration_min, rate_down from plans
+      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
+    [tenant.id]);
+
+  const { rows: routers } = await pool.query(
+    `select id, host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
+    [tenant.id]);
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const devices = [];
+  for (const r of routers) {
+    try {
+      const password = secrets.decrypt(r.service_password_enc);
+      const conn = await ros.connect({
+        host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+        user: r.service_user, password, timeoutSec: 8,
+      });
+      try {
+        const found = await ros.nearbyDevices(conn);
+        for (const d of found) devices.push({ ...d, routerId: r.id });
+      } finally {
+        ros.close(conn);
+      }
+    } catch (e) {
+      console.error('tv-options: could not read router', r.id, e.message);
+    }
+  }
+
+  res.json({ devices, plans });
+}));
+
+/**
+ * Pay for a bundle and a device in one step — no voucher code changes
+ * hands at any point. The device is bound on its router the moment the
+ * payment applies (see apply.js's bindDeviceOnRouter), which is the entire
+ * point for a TV: nothing here ever asks it to submit anything.
+ */
+app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const mac = String(req.body?.mac ?? '').trim().toUpperCase();
+  const routerId = String(req.body?.routerId ?? '').trim();
+  const planId = String(req.body?.planId ?? '');
+  let phone = String(req.body?.phone ?? '').trim();
+  if (!mac || !routerId) return res.status(400).json({ error: 'Pick a device from the list first.' });
+  if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
+
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  const { rows: [plan] } = await pool.query(
+    `select id, title, price from plans
+      where id=$1 and tenant_id=$2 and service='hotspot' and active`,
+    [planId, tenant.id]);
+  if (!plan) return res.status(404).json({ error: 'That bundle is no longer on sale' });
+
+  const { rows: [router] } = await pool.query(
+    `select id, host, api_port, service_user, service_password_enc from routers
+      where id=$1 and tenant_id=$2`, [routerId, tenant.id]);
+  if (!router?.service_user) return res.status(404).json({ error: 'That router is not set up for this yet.' });
+
+  // Re-checked against the router's own list, not trusted from the request —
+  // same reasoning as /hotspot/nearby-devices/bind below: the tv-options GET
+  // is a convenience list, not a permission slip, and paying for a MAC
+  // nobody actually saw on this network would be a free-access hole.
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  try {
+    const password = secrets.decrypt(router.service_password_enc);
+    const conn = await ros.connect({
+      host: String(router.host).split('/')[0], port: router.api_port ?? 8728,
+      user: router.service_user, password, timeoutSec: 8,
+    });
+    let devices;
+    try { devices = await ros.nearbyDevices(conn); } finally { ros.close(conn); }
+    if (!devices.some((d) => d.mac === mac)) {
+      return res.status(404).json({ error: 'That device is not currently on this network — refresh and try again.' });
+    }
+  } catch (e) {
+    return res.status(502).json({ error: `Could not reach the router: ${e.message}` });
+  }
+
+  const { config } = await import('./db.js');
+  const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
+  const method = hs?.payment_method ?? 'kopokopo';
+
+  let kk = null, daraja = null;
+  if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
+  else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
+  else {
+    return res.status(503).json({
+      error: `Hotspot payment method "${method}" does not support in-page STK push. `
+        + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
+    });
+  }
+  if (!kk && !daraja) {
+    return res.status(503).json({
+      error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
+        + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
+    });
+  }
+
+  try {
+    let checkoutId;
+    if (kk) {
+      const gw = await import('./payments/kopokopo.js');
+      checkoutId = await gw.stkPush(tenant.id, {
+        phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, service: 'hotspot',
+      });
+    } else {
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(tenant.id, {
+        phone, amount: Number(plan.price),
+        accountRef: 'HOTSPOT', description: plan.title,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, mac, router_id: router.id }]);
+    }
+    res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/**
  * Devices on the same hotspot that have not logged in yet — a TV or console
  * a guest cannot type a code into themselves, found from a device that can:
  * their own already-connected phone. Only reachable with a real, currently

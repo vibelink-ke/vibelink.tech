@@ -26,7 +26,7 @@ export async function testAuth(tenantId) {
 }
 
 /** HOTSPOT ONLY. Guarded here so a misconfiguration can't route PPPoE through KopoKopo. */
-export async function stkPush(tenantId, { phone, amount, planId, mac, service }) {
+export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, service }) {
   if (service !== 'hotspot') throw new Error('KopoKopo STK is enabled for hotspot only');
   const cfg = await config(tenantId, 'kopokopo');
   const { data, headers } = await axios.post(`${BASE}/api/v1/incoming_payments`, {
@@ -39,10 +39,13 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, service })
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
 
   const checkoutId = (headers.location ?? '').split('/').pop() ?? data?.data?.id;
+  // router_id rides along with mac — the "pick a device, pay direct" flow
+  // (POST /hotspot/tv-buy) needs to know which physical router to bind the
+  // device on once payment lands, and nothing else in this row says so.
   await pool.query(
     `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
      values ($1,'kopokopo',$2,$3,$4,$5)`,
-    [tenantId, checkoutId, phone, amount, { plan_id: planId, mac }]
+    [tenantId, checkoutId, phone, amount, { plan_id: planId, mac, router_id: routerId ?? null }]
   );
   return checkoutId;
 }

@@ -1,4 +1,4 @@
-import { withTenant } from '../db.js';
+import { withTenant, pool } from '../db.js';
 import { activateSubscriber, issueVoucherAccess } from '../radius.js';
 import { send } from '../sms.js';
 
@@ -7,7 +7,7 @@ import { send } from '../sms.js';
  * Idempotent: unique (tenant_id, provider, provider_ref) makes a replayed webhook a no-op.
  *
  * tx = { provider, ref, amount, phone, name, rawAccount, payload, target }
- * target = { type:'subscriber', id } | { type:'hotspot', planId, mac } | null (=> matcher)
+ * target = { type:'subscriber', id } | { type:'hotspot', planId, mac, routerId? } | null (=> matcher)
  */
 export async function applyPayment(tenantId, tx) {
   return withTenant(tenantId, async (c) => {
@@ -36,6 +36,23 @@ export async function applyPayment(tenantId, tx) {
 
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
     await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
+
+    /**
+     * The device itself, bound on the router right now — not left for the
+     * guest to submit a login form, because the whole point of the "pick a
+     * device, pay direct" flow (POST /hotspot/tv-buy) is a TV that has no
+     * way to submit one. routerId only ever arrives from that flow; the
+     * ordinary "buy a code, type it in" purchase never sets it, so this is
+     * a no-op there. Best-effort and never fatal: the voucher and its code
+     * already exist by this point, and the SMS below still gives a human a
+     * way to type the code in by hand if the router push fails here — a
+     * guest who paid is never left with literally nothing to show for it.
+     */
+    if (target.mac && target.routerId) {
+      await bindDeviceOnRouter(target.routerId, target.mac, v.plan_id).catch((e) => {
+        console.error('auto-bind device', target.mac, 'on', target.routerId, '—', e.message);
+      });
+    }
 
     // {link} is a tap target for the same code, for a guest who would rather
     // not retype a 6-digit code on a phone keyboard, or whose device dropped
@@ -166,4 +183,34 @@ async function match(c, tenantId, tx) {
   );
   if (plans[0] && tx.phone) return { type: 'hotspot', planId: plans[0].id, mac: null };
   return null;
+}
+
+/**
+ * IP-bind a device on a specific router the moment its plan is paid for —
+ * the router-facing half of ros.bindDeviceByMac, called from here rather
+ * than from the route that took the payment because a webhook callback and
+ * a route handler both need it and neither should duplicate it.
+ */
+async function bindDeviceOnRouter(routerId, mac, planId) {
+  const { rows: [r] } = await pool.query(
+    'select host, api_port, service_user, service_password_enc from routers where id=$1',
+    [routerId]);
+  if (!r?.service_user || !r.service_password_enc) throw new Error('router not configured for the billing system');
+
+  const { rows: [plan] } = await pool.query('select rate_down, rate_up from plans where id=$1', [planId]);
+
+  const ros = await import('../routeros.js');
+  const secrets = await import('../secrets.js');
+  const password = secrets.decrypt(r.service_password_enc);
+  const conn = await ros.connect({
+    host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+    user: r.service_user, password, timeoutSec: 8,
+  });
+  try {
+    await ros.bindDeviceByMac(conn, {
+      mac, downKbps: plan?.rate_down ?? 2000, upKbps: plan?.rate_up ?? 1000, comment: 'auto',
+    });
+  } finally {
+    ros.close(conn);
+  }
 }
