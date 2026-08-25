@@ -465,8 +465,22 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
   const prefs = cfg ?? { code_type: 'numeric', code_length: 6, voucher_expiry: 'login' };
   const code = await uniqueCode(c, tenantId, prefs);
 
-  // "creation" starts the clock now; "login" leaves expires_at null until first RADIUS auth.
-  const fromCreation = prefs.voucher_expiry === 'creation';
+  /**
+   * "creation" starts the clock now; "login" leaves expires_at null until
+   * first RADIUS auth — except when this voucher has a mac at all, which
+   * only ever happens for a device that will be bound via router-side ip
+   * bypass (bindDeviceOnRouter / bindDeviceByMac), not one that will ever
+   * submit the hotspot login form. "Expire from login" has no login event
+   * to wait for there — for a tenant with that preference set, an ip-bound
+   * TV's voucher sat at status='unused', expires_at=null forever, which
+   * expireAndSuspend's own query (status='in_use' and expires_at < now())
+   * can never match. The clock never started, the voucher never expired,
+   * and the device kept its bypass indefinitely — "still working after
+   * expiry" was literal: there was no expiry to reach. A mac-bound device
+   * always starts on creation regardless of the tenant's own preference,
+   * because binding it right now already is the moment it starts using it.
+   */
+  const fromCreation = prefs.voucher_expiry === 'creation' || !!mac;
   const expires = fromCreation ? new Date(Date.now() + plan.duration_min * 60000) : null;
   const { rows: [v] } = await c.query(
     `insert into vouchers (tenant_id, code, plan_id, phone, mac, status, starts_at, expires_at)
