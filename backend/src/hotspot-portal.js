@@ -57,7 +57,7 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
-  redirectUrl = null, prefillCode = null, multiDevice = false,
+  redirectUrl = null, prefillCode = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
@@ -272,10 +272,17 @@ export function loginPage({
     <!-- Support, before paying. A guest whose code will not work cannot buy
          their way to an answer, and the operator would rather hear it now than
          from somebody who gave up and left. -->
-    ${multiDevice ? `
-    <!-- Only once the guest already has a working code — the page itself
-         asks for it, so nothing here needs to know it in advance. -->
-    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices">Connecting a TV or console too?</a></p>` : ''}
+    <!--
+      No longer gated on multiDevice. /hotspot/devices lists MACs seen on
+      the network and lets the guest pick the TV off that list rather than
+      typing a code onto it with a remote — useful for the very first
+      device on any code, not only an extra one on a sharing-enabled code.
+      The route itself still caps how many devices a code can carry (1
+      without sharing, 3 with it), so this is safe to offer unconditionally;
+      only once the guest already has a working code, which the page itself
+      asks for, so nothing here needs to know it in advance.
+    -->
+    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices">Adding a TV or console?</a></p>
     <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
     <div class="chat" id="chat">
       <div class="log" id="chatLog"></div>

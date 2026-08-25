@@ -571,11 +571,10 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
     prefillCode: /^[A-Za-z0-9-]{1,20}$/.test(String(req.query.code ?? '')) ? req.query.code : null,
-    multiDevice: !!hs?.multi_device,
   }));
 }));
 
-/** "Connecting a TV or console too?" — see devicesPage() for what this actually does. */
+/** "Adding a TV or console?" — see devicesPage() for what this actually does. */
 app.get('/hotspot/devices', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
@@ -875,9 +874,6 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
   if (!code) return res.status(400).json({ error: 'no code' });
 
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
-  if (!hs?.multi_device) {
-    return res.status(403).json({ error: 'Multiple devices per code is off — ask the operator to turn it on in Hotspot settings.' });
-  }
 
   const found = await voucherAndRouter(tenant.id, code);
   if (found.error) return res.status(404).json({ error: found.error });
@@ -886,11 +882,20 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
     `select mac from voucher_devices where voucher_id=$1
      union all select $2::macaddr`, [found.voucher.id, found.voucher.mac]);
   const taken = new Set(existing.map((r) => String(r.mac).toUpperCase()).filter(Boolean));
-  // 3 mirrors the shared-users the router push already gives a multi_device
-  // voucher (see the sharedUsers ternary elsewhere) — the device list would
-  // otherwise let a guest add more devices than the router will actually let
-  // authenticate at once.
-  const slotsLeft = Math.max(0, 3 - taken.size);
+  /**
+   * This used to require multi_device to be on at all — but this list is a
+   * MAC-picker for whichever device the guest is registering, not the
+   * device-sharing feature itself. A single-device code still only ever
+   * bought one device's worth of access; a TV that cannot type a code
+   * benefits from picking it off a list exactly as much whether or not
+   * sharing is enabled, it just gets one slot instead of three. 3 mirrors
+   * the shared-users the router push already gives a multi_device voucher
+   * (see the sharedUsers ternary elsewhere) — the device list must not
+   * offer more devices than the router will actually let authenticate at
+   * once, in either case.
+   */
+  const limit = hs?.multi_device ? 3 : 1;
+  const slotsLeft = Math.max(0, limit - taken.size);
 
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -920,14 +925,17 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   if (!code || !mac) return res.status(400).json({ error: 'code and mac are required' });
 
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
-  if (!hs?.multi_device) return res.status(403).json({ error: 'Multiple devices per code is off.' });
 
   const found = await voucherAndRouter(tenant.id, code);
   if (found.error) return res.status(404).json({ error: found.error });
 
+  // Same limit as the list above: 3 slots when sharing is on, 1 when it's
+  // not — a single-device code registering its one device through the MAC
+  // picker instead of typing it in, not an extra device beyond what was paid for.
+  const limit = hs?.multi_device ? 3 : 1;
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
-  if (count + 1 >= 3) {   // +1 for the voucher's own original device
+  if (count + 1 >= limit) {   // +1 for the voucher's own original device
     return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
   }
 
