@@ -1596,3 +1596,15 @@ create table if not exists lead_notes (
   at        timestamptz not null default now()
 );
 create index if not exists lead_notes_lead_idx on lead_notes (lead_id, at);
+
+-- ─────────────── retire the dedicated expired-customers IP pool ───────────────
+-- Suspended/expired/paused subscribers are now cut off by a single firewall
+-- rule matched on a RADIUS-assigned address-list membership (radius.js's
+-- walledGarden, applyIspBlockRule in routeros.js) rather than by parking them
+-- in a whole IP range set aside for the purpose. Nothing left to reinterpret
+-- when a range this shape existed: fold any 'expired'-purpose pool back into
+-- an ordinary unlocked 'normal' one so the addresses in it stay usable and
+-- the operator can rename, reassign, or delete it like any other pool.
+update ip_pools set purpose = 'normal', locked = false where purpose = 'expired';
+alter table ip_pools drop constraint if exists ip_pools_purpose_check;
+alter table ip_pools add constraint ip_pools_purpose_check check (purpose = 'normal');

@@ -62,9 +62,10 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate, tenantId]);
 
-  // Reassigns off the expired pool back onto the normal one if that is where
-  // they were parked while suspended/expired/paused — status is already
-  // 'active' by the time this runs, so framedAddress reads that back correctly.
+  // Off the block list they were put on while suspended/expired/paused, if any.
+  await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+    [s.pppoe_user, 'Mikrotik-Address-List', tenantId]);
+
   const address = await framedAddress(c, tenantId, subId, s);
   if (address == null) {
     await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
@@ -204,33 +205,21 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
  * break anything pointed at it.
  */
 /**
- * Suspended/expired/paused subscribers are allocated from a separate pool —
- * see "expired pools" below — so the whole range can be dropped by one static
- * firewall rule instead of the router needing to know who, individually, is
- * cut off.
+ * Suspended/expired/paused subscribers keep their normal-pool address — what
+ * cuts them off is the Mikrotik-Address-List reply attribute walledGarden
+ * sets, which a single firewall rule (applyIspBlockRule in routeros.js) drops
+ * regardless of which address they hold. No separate IP range to carve out
+ * or keep in sync.
  */
 async function framedAddress(c, tenantId, subId, s) {
-  const purpose = ['expired', 'suspended', 'paused'].includes(s.status) ? 'expired' : 'normal';
-
-  const poolFor = async (p) => {
-    const { rows: [row] } = await c.query(
-      `select cidr from ip_pools
-        where tenant_id=$1 and service='pppoe' and purpose=$2
-        order by (router_id is not null) desc limit 1`, [tenantId, p]);
-    return row;
-  };
-
-  // A tenant who has not set aside a dedicated expired-customers range yet
-  // still needs an address to hand out — falling back to the normal pool costs
-  // them the IP-range block, not connectivity outright. Mikrotik-Rate-Limit
-  // still applies regardless of which pool answered.
-  const pool = (await poolFor(purpose)) ?? (purpose === 'expired' ? await poolFor('normal') : null);
+  const { rows: [pool] } = await c.query(
+    `select cidr from ip_pools
+      where tenant_id=$1 and service='pppoe' and purpose='normal'
+      order by (router_id is not null) desc limit 1`, [tenantId]);
   if (!pool) return null;
 
   // Whatever they already hold, provided it is still inside both the router's
-  // servable range and the pool that matches their current purpose — a
-  // customer moving from active to expired (or back) must not simply keep an
-  // address from the other range.
+  // servable range and the pool.
   if (s.static_ip) {
     const { rows: [held] } = await c.query('select host($1::inet) as a', [s.static_ip]);
     if (held?.a && inPool(held.a, s.pppoe_pool) && inPool(held.a, pool.cidr)) return held.a;
@@ -410,11 +399,14 @@ export async function clearFupThrottle(c, tenantId, subId) {
 // RouterOS treats a literal 0 as "no limit" — the opposite of a cut-off
 // account — so this is the practical floor: a page will not load, which is
 // the point. Real blocking is the firewall filter rule against the
-// expired-customers address list (see applyExpiredPool in routeros.js); this
-// is only the fallback for a tenant who has not provisioned that rule yet.
+// ispblocking address list (see applyIspBlockRule in routeros.js), which the
+// Mikrotik-Address-List reply attribute below puts them on at every login —
+// this rate is only the fallback for the moment before the router picks that
+// attribute up (or the rare case its filter rule has not been pushed yet).
 const EXPIRED_RATE = '1k/1k';
+const BLOCK_LIST = 'ispblocking';
 
-/** Move a suspended/expired/paused subscriber onto the expired pool at effectively zero speed. */
+/** Cut a suspended/expired/paused subscriber off at the firewall and to near-zero speed. */
 export async function walledGarden(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
     `select s.*, r.host, r.secret, r.pppoe_pool
@@ -427,8 +419,15 @@ export async function walledGarden(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, EXPIRED_RATE, tenantId]);
 
-  // Framed-IP-Address here moves them into the expired pool (or clears it, if
-  // no dedicated pool is configured and none is free) — see framedAddress.
+  // Puts them on the blocked address list at every future login too, not just
+  // this session — durable across reconnects, unlike the CoA push below which
+  // only reaches a session already in progress.
+  await c.query(
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($2,$1,'Mikrotik-Address-List',':=','${BLOCK_LIST}')
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, tenantId]);
+
   const address = await framedAddress(c, tenantId, subId, s);
   if (address == null) {
     await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
@@ -677,9 +676,10 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false) {
 
   const result = await coaClient.send({
     host, secret, username: user, rate,
-    // Matches the static address-list name applyExpiredPool provisions on the
-    // router, so a session moved here right now (before it reconnects onto the
-    // expired pool's own range) still hits the same firewall filter rule.
+    // Matches the address-list name applyIspBlockRule's firewall rule drops —
+    // and the Mikrotik-Address-List reply attribute walledGarden sets for
+    // future logins — so a session already in progress is cut off right now
+    // rather than only from its next reconnect.
     addressList: mode === 'expired' ? 'ispblocking' : undefined,
     sessionId,
     disconnect,

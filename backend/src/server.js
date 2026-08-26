@@ -3858,26 +3858,15 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         await pool.query('update routers set pppoe_pool=$2 where id=$1',
           [r.id, confPool?.cidr ?? null]);
 
-        // The expired-customers range, if the tenant has set one aside under
-        // Networks — same lookup shape as the normal pool above. Provisioned
-        // once per push: after this, radius.js only ever has to put a
-        // subscriber's address inside the range, nothing more to push here.
-        const { rows: [expiredPool] } = await pool.query(
-          `select cidr from ip_pools
-            where tenant_id=$1 and service='pppoe' and purpose='expired'
-              and (router_id = $2 or router_id is null)
-            order by (router_id = $2) desc
-            limit 1`, [req.tenant.id, r.id]);
-        if (expiredPool) {
-          const blocked = await tryStep('expired-customers firewall block', () =>
-            ros.applyExpiredPool(conn, { cidr: expiredPool.cidr }), 20000);
-          done.push(blocked.done?.length
-            ? `expired customers (${expiredPool.cidr}) blocked at the firewall: ${blocked.done.join('; ')}`
-            : `expired customers (${expiredPool.cidr}) already blocked at the firewall`);
-        } else {
-          done.push('no expired-customers pool defined under Networks — suspended/expired accounts '
-            + 'fall back to a near-zero speed limit instead of a firewall block');
-        }
+        // One firewall rule, not tied to any IP range — radius.js puts a
+        // suspended/expired/paused subscriber on the block list at login via
+        // a RADIUS reply attribute, so no dedicated pool needs setting aside
+        // under Networks for this to work.
+        const blocked = await tryStep('expired-customers firewall block', () =>
+          ros.applyIspBlockRule(conn), 20000);
+        done.push(blocked.done?.length
+          ? `expired/suspended customers blocked at the firewall: ${blocked.done.join('; ')}`
+          : 'expired/suspended customers already blocked at the firewall');
       }
     }
     /**
@@ -4196,49 +4185,8 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
      values ($1,$2,$3,$4,$5,$6,$7) returning *`,
     [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
 
-  // Every router shares one physical WAN and cannot route another site's
-  // expired-pool range — the operator has to set one aside per router anyway
-  // — so it may as well already exist rather than depend on remembering to
-  // add it before the firewall block does anything. Soft-fails: a tenant who
-  // has somehow claimed all sixteen candidate blocks still gets their router.
-  try {
-    const cidr = await autoExpiredCidr(req.tenant.id);
-    if (cidr) {
-      await pool.query(
-        `insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, locked)
-         values ($1,$2,$3,$4,'pppoe','expired',true)`,
-        [req.tenant.id, `${name} — expired customers`, cidr, r.id]);
-    }
-  } catch (e) {
-    console.warn('auto expired-pool for router', r.id, e.message);
-  }
-
   res.json(r);
 }));
-
-/**
- * The next free /20 (4096 addresses) out of a block set aside purely for
- * auto-created expired-customer pools — a tenant's own address plan lives
- * under Networks and is never touched here, so this can never collide with
- * ranges they chose themselves. Sixteen /20s fit in 10.250.0.0/16, which is
- * sixteen routers before a tenant would need to set one up by hand instead.
- */
-async function autoExpiredCidr(tenantId) {
-  const { rows: existing } = await pool.query('select cidr from ip_pools where tenant_id=$1', [tenantId]);
-  const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
-  const { rows: [hs] } = await pool.query(
-    'select hotspot_network from hotspot_settings where tenant_id=$1', [tenantId]);
-  const { SERVER_IP } = await import('./tunnel.js');
-
-  for (let i = 0; i < 16; i++) {
-    const cidr = `10.250.${i * 16}.0/20`;
-    if (existing.some((e) => poolsOverlap(e.cidr, cidr))) continue;
-    if (tunnelConflict(cidr, t?.tunnel_subnet, SERVER_IP)) continue;
-    if (hs?.hotspot_network && poolsOverlap(hs.hotspot_network, cidr)) continue;
-    return cidr;
-  }
-  return null;   // every candidate block taken — an operator has to set one up by hand
-}
 
 /**
  * Revoke a tunnel credential.
@@ -4342,8 +4290,8 @@ app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
  */
 app.put('/api/ip-pools/:id', wrap(async (req, res) => {
   const { name, cidr, routerId, service, purpose } = req.body ?? {};
-  if (purpose !== undefined && !['normal', 'expired'].includes(purpose)) {
-    return res.status(400).json({ error: 'purpose must be normal or expired' });
+  if (purpose !== undefined && purpose !== 'normal') {
+    return res.status(400).json({ error: 'purpose must be normal' });
   }
 
   const { rows: [existing] } = await pool.query(
@@ -4432,13 +4380,10 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const { rows } = await pool.query(`
     with pools as (
-      -- Not the expired-customers pool: that range exists to be firewalled
-      -- off, not offered as a normal client's assigned address.
       select cidr from ip_pools
        where tenant_id = $1
          and (router_id = $2 or router_id is null)
          and service = 'pppoe'
-         and purpose != 'expired'
     )
     select host(network(p.cidr) + i) as ip, text(p.cidr) as pool
       from pools p,
@@ -4523,7 +4468,7 @@ function tunnelConflict(cidr, tunnelSubnet, serverIp) {
 app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe', purpose = 'normal' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
-  if (!['normal', 'expired'].includes(purpose)) return res.status(400).json({ error: 'purpose must be normal or expired' });
+  if (purpose !== 'normal') return res.status(400).json({ error: 'purpose must be normal' });
 
   const { rows: existing } = await pool.query(
     'select name, cidr, service from ip_pools where tenant_id=$1', [req.tenant.id]);

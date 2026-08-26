@@ -1543,38 +1543,17 @@ export async function applyPppoeServer(conn, {
 }
 
 /**
- * The static half of "suspended/expired customers get 0kb": one address-list
- * entry covering the whole expired-pool range, and one filter rule dropping
- * forward traffic from it. Both are set-and-forget — after this runs once,
- * radius.js only ever has to put a subscriber's address inside the range;
- * nothing per-subscriber needs pushing to the router again.
- *
- * `cidr` is the range from Networks → the tenant's ip_pools row with
- * purpose='expired', e.g. "10.100.250.0/24". Skipped entirely if the tenant
- * has not set one up — radius.js falls back to the normal pool at a near-zero
- * rate limit in that case, which is real but weaker than an IP-range block.
+ * The static half of "suspended/expired customers get 0kb": one filter rule
+ * dropping forward traffic from the ispblocking address list. Set-and-forget
+ * — after this runs once, radius.js only ever has to put a subscriber on
+ * that list (Mikrotik-Address-List reply attribute, set at every login while
+ * they're suspended/expired/paused); nothing per-subscriber or per-range
+ * needs pushing to the router again, and no dedicated IP pool has to be
+ * carved out under Networks for this to work.
  */
-export async function applyExpiredPool(conn, { cidr } = {}) {
-  if (!cidr) return { configured: false };
+export async function applyIspBlockRule(conn) {
   const LIST = 'ispblocking';
   const done = [];
-
-  const entries = await conn.write('/ip/firewall/address-list/print', [`?list=${LIST}`]);
-  const mine = entries.filter((e) => isManaged(e));
-  const wantAddr = ['=list=' + LIST, `=address=${cidr}`, `=comment=${managed('ispBlocking expired customers')}`];
-  if (mine.length) {
-    if (!unchanged(mine[0], wantAddr)) {
-      await cmd(conn, 'ispblocking address list', '/ip/firewall/address-list/set',
-        [`=.id=${idOf(mine[0])}`, ...wantAddr]);
-    }
-  } else {
-    await cmd(conn, 'ispblocking address list', '/ip/firewall/address-list/add', wantAddr);
-    done.push(`address list ${LIST} = ${cidr}`);
-  }
-  for (const dupe of mine.slice(1)) {
-    await cmd(conn, 'remove duplicate ispblocking entry', '/ip/firewall/address-list/remove',
-      [`=.id=${idOf(dupe)}`]);
-  }
 
   const rules = await conn.write('/ip/firewall/filter/print', []);
   const mineRules = rules.filter((r) => isManaged(r)
@@ -1643,7 +1622,7 @@ export async function applyExpiredPool(conn, { cidr } = {}) {
       [`=.id=${idOf(dupe)}`]);
   }
 
-  return { configured: true, list: LIST, cidr, done };
+  return { configured: true, list: LIST, done };
 }
 
 /**
