@@ -391,6 +391,11 @@ export default function Routers() {
         username: name.trim(),
         nasIp: res.assignedIp,
         defaultApiPort: 8728,
+        // Carried through to confirmRouter so the router row it creates can
+        // link back to this peer — minted before any router row exists
+        // (the operator has to paste the script and bring the tunnel up
+        // first), so nothing could set wg_peers.router_id until now.
+        wgPeerId: res.peerId,
       });
       setDial((d) => ({ ...d, open: false }));
     } catch (e) {
@@ -419,6 +424,7 @@ export default function Routers() {
         username: res.ovpnUsername,
         nasIp: res.assignedIp,
         defaultApiPort: 8728,
+        wgPeerId: res.peerId,
       });
       setDial((d) => ({ ...d, open: false }));
     } catch (e) {
@@ -808,6 +814,11 @@ Revoke anyway?`
         secret: form.secret,
         apiPort: Number(form.apiPort) || 8728,
         role: form.role,
+        // Set once the router this peer was minted for actually exists —
+        // wg_peers had no router row to point at until this exact moment,
+        // which is why a WireGuard-onboarded router showed "Unassigned" in
+        // the WireGuard peers list even though the tunnel worked fine.
+        wgPeerId: ovpn?.wgPeerId,
       });
       store.setCollection('routers', (rs) => [...rs, created]);
       store.toast(`${created.name} onboarded`);

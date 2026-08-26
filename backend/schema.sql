@@ -1675,3 +1675,15 @@ create index if not exists push_subscriptions_tenant_id_idx on push_subscription
 -- getting lost inside the general open-ticket count is worse than a staff
 -- one, since nobody else necessarily knows it exists yet.
 alter table tickets add column if not exists source text not null default 'staff';
+
+-- Every WireGuard/failover-onboarded router before this fix left its peer's
+-- router_id unset — there was no router row to point at yet when the peer
+-- was minted, and nothing ever went back to link them once one existed
+-- (see POST /api/routers' new wgPeerId handling). Backfilled here by the
+-- one fact that does tie them together: the router's own NAS address is
+-- exactly the tunnel address the peer was assigned.
+update wg_peers p set router_id = r.id
+  from routers r
+ where p.router_id is null
+   and host(r.host)::text = host(p.assigned_ip)::text
+   and r.tenant_id = p.tenant_id;

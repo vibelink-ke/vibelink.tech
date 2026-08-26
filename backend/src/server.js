@@ -4459,7 +4459,7 @@ app.get('/api/routers', async (req, res) => {
 
 /** Confirm the router after the OVPN tunnel is up: nickname, NAS secret, API port (default 8728). */
 app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
-  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both' } = req.body;
+  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both', wgPeerId } = req.body;
 
   // Nobody needs to invent this. It is a shared secret between us and one router,
   // it is never typed by a human now that Configure pushes it, and a chosen one
@@ -4471,6 +4471,15 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
     `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret)
      values ($1,$2,$3,$4,$5,$6,$7) returning *`,
     [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
+
+  // The peer this router's WireGuard/failover onboarding minted, before
+  // this row existed to point at — the WireGuard peers list showed
+  // "Unassigned" for every onboarded router until this ran, even once its
+  // tunnel worked perfectly.
+  if (wgPeerId) {
+    await pool.query('update wg_peers set router_id=$1 where id=$2 and tenant_id=$3',
+      [r.id, wgPeerId, req.tenant.id]);
+  }
 
   // Every router shares one physical WAN and cannot route another site's
   // expired-pool range — the operator has to set one aside per router anyway
