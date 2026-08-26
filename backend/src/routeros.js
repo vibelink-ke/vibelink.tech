@@ -79,10 +79,16 @@ const { RouterOSAPI } = pkg;
  * a DNS block from the expired-customer block at a glance, the same as they
  * would for anything they wrote themselves.
  *
- * The (vibelink) tail is the only part our own idempotency checks rely on —
+ * The (managed) tail is the only part our own idempotency checks rely on —
  * isManaged() matches on that, not on the label before it, so every rule can
  * carry its own description and still be found, updated, and left alone by
  * the next push exactly as before.
+ *
+ * Kept brand-neutral on purpose — this shows up in the router's own config,
+ * which a tenant's own technician reads, not just us. OLD_TAG stays matched
+ * (not written) so a router tagged by an older push before this rename still
+ * gets recognised as ours and relabelled the next time each rule is touched,
+ * rather than orphaned and duplicated.
  */
 /**
  * A short breather between heavy config-push steps (bridge, PPPoE server,
@@ -94,12 +100,14 @@ const { RouterOSAPI } = pkg;
  */
 export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const TAG = '(vibelink)';
+const TAG = '(managed)';
+const OLD_TAG = '(vibelink)';
 const managed = (label) => `${label} ${TAG}`;
-const isManaged = (row) => typeof row?.comment === 'string' && row.comment.endsWith(TAG);
+const isManaged = (row) => typeof row?.comment === 'string'
+  && (row.comment.endsWith(TAG) || row.comment.endsWith(OLD_TAG));
 
 /** Back-compat for anywhere still asking for the old blanket tag directly. */
-export const MANAGED_COMMENT = managed('vibelink-managed');
+export const MANAGED_COMMENT = managed('managed');
 
 /** The service account. Same name on every router; the password differs per router. */
 export const SERVICE_USER = 'vibelink-svc';

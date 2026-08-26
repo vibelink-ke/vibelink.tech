@@ -75,7 +75,9 @@ try {
         conns.set(r.id, conn);
         const bindings = await conn.write('/ip/hotspot/ip-binding/print', []);
         for (const b of bindings) {
-          if (typeof b.comment === 'string' && b.comment.endsWith('(vibelink)') && b['mac-address']) {
+          if (typeof b.comment === 'string'
+              && (b.comment.endsWith('(managed)') || b.comment.endsWith('(vibelink)'))
+              && b['mac-address']) {
             macToRouter.set(String(b['mac-address']).toUpperCase(), r.id);
           }
         }

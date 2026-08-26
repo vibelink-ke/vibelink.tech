@@ -2525,9 +2525,10 @@ app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res)
      * — it would hide every customer behind the router's own single address
      * — which is why this is scoped to the interface, not a subnet.
      */
+    '/ip firewall nat remove [find where comment="ispVpn tunnel egress (managed)"]',
     '/ip firewall nat remove [find where comment="ispVpn tunnel egress (vibelink)"]',
     '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade '
-      + 'comment="ispVpn tunnel egress (vibelink)"',
+      + 'comment="ispVpn tunnel egress (managed)"',
     ':log info "Billing OVPN client added - waiting for tunnel IP"',
   ].join('\n');
 
