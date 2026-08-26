@@ -9,6 +9,7 @@ import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
+import { api } from './api/client';
 import { color, font } from './theme/tokens';
 
 import Dashboard from './screens/Dashboard';
@@ -90,6 +91,25 @@ export default function App() {
     document.title = session?.company ? `${session.company} · Vibelink` : 'Vibelink';
   }, [session?.company]);
 
+  /**
+   * The sign-in card itself, before any of that — a staff member typing
+   * their password on jovex.vibelink.tech/login was looking at "Vibelink"
+   * the whole time, the platform running underneath their own ISP rather
+   * than the ISP itself. There is no session yet to read a company name
+   * from, but the hostname alone already says which tenant this is, the
+   * same fact /hotspot/login already uses to brand the captive portal
+   * pre-login — /api/public/brand exists for exactly this, and it fails
+   * closed to the undefined default (AuthGate's own "Vibelink") on the
+   * platform's marketing domain, where there is no tenant to name at all.
+   */
+  const [tenantBrand, setTenantBrand] = React.useState(null);
+  useEffect(() => {
+    if (session !== null || isPlatformHost()) return undefined;
+    let cancelled = false;
+    api.publicBrand().then((b) => { if (!cancelled) setTenantBrand(b?.name ?? null); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session]);
+
   // Customers get their own page, before any staff session is considered. It is
   // a different audience on the same hostname: no sidebar, no admin store, and a
   // cookie the admin routes do not accept. Checked first so a subscriber never
@@ -137,7 +157,15 @@ export default function App() {
 
   // A tenant's own subdomain: sign in only. Registering a second account from
   // inside a working portal splits an operator's customers across two of them.
-  if (session === null) return <AuthGate onSignedIn={signInToDashboard} only="login" />;
+  if (session === null) {
+    return (
+      <AuthGate
+        onSignedIn={signInToDashboard}
+        only="login"
+        {...(tenantBrand ? { brandName: tenantBrand } : {})}
+      />
+    );
+  }
 
   return (
     // `om-dark` is the mockup's rootClass: it inverts the whole tree, and

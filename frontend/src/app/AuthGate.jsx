@@ -91,8 +91,11 @@ const cta = {
   width: '100%',
 };
 
-// Before sign-in there is no tenant, so this is the platform's own brand. Once
-// signed in the sidebar switches to the tenant's company name.
+// Before sign-in there is no session to read a company name from, but
+// App.jsx already resolves one from the hostname via /api/public/brand and
+// passes it down — this default is only what's shown while that fetch is
+// still in flight, or on the platform's own marketing domain, which belongs
+// to no tenant at all.
 export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = null }) {
   // `only` pins the card to one purpose: sign-in on a tenant's own subdomain,
   // registration on the platform domain. Offering both on a tenant portal

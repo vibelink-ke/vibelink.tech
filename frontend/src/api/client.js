@@ -45,6 +45,9 @@ export const api = {
   // ── auth ──
   // The session lives in an httpOnly cookie; nothing sensitive is returned here.
   session: () => get('/api/auth/session'),
+  // Public, no session needed — just enough to brand the sign-in screen
+  // itself, before there's anyone signed in to know a tenant from.
+  publicBrand: () => get('/api/public/brand'),
   login: (creds) => post('/api/auth/login', creds),
   signup: (form) => post('/api/auth/signup', form),
   logout: () => post('/api/auth/logout', {}),

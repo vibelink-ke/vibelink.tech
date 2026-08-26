@@ -579,6 +579,25 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   }));
 }));
 
+/**
+ * Just enough to brand the sign-in screen before anyone has signed in.
+ *
+ * AuthGate has no session yet at that point — no staff row, no tenant_id,
+ * nothing — but the hostname alone already says which ISP this is
+ * (<subdomain>.vibelink.tech), the same fact /hotspot/login already relies
+ * on to brand the captive portal pre-login. Ahead of the generic
+ * tenant-resolution middleware and its session lookup/suspension check on
+ * purpose: this is one cosmetic string, not a gate anything should have to
+ * pass through, and a suspended tenant's own staff still deserve to see
+ * their own company name on the screen they need to log in from.
+ */
+app.get('/api/public/brand', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'unknown tenant' });
+  res.json({ name: tenant.name ?? null });
+}));
+
 /** "Adding a TV or console?" — see devicesPage() for what this actually does. */
 app.get('/hotspot/devices', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
