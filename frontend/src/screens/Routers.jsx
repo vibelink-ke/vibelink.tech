@@ -55,6 +55,17 @@ const bitrate = (bps) => {
  */
 function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
   const menuWidth = 184;
+  // Clamping `top` to the viewport bottom stopped the menu from starting past
+  // the edge, but did nothing about it still opening *downward* from there —
+  // a row with little room below it (a tenant with only a router or two, so
+  // the table sits low on the page with no scroll to speak of) got a menu
+  // whose seven items rendered mostly below the fold. Flip upward instead
+  // whenever there is more room above the button than below it; either way,
+  // maxHeight + its own scroll is the backstop for a viewport too short for
+  // the full list regardless of which side it opens on.
+  const spaceBelow = open && anchorRect ? window.innerHeight - anchorRect.bottom : 0;
+  const spaceAbove = open && anchorRect ? anchorRect.top : 0;
+  const openUpward = open && anchorRect && spaceBelow < 260 && spaceAbove > spaceBelow;
   return (
     <div style={{ display: 'inline-block' }}>
       <Button onClick={onToggle}>Actions ▾</Button>
@@ -65,7 +76,10 @@ function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
           style={{
             position: 'fixed',
             left: Math.max(8, Math.min(anchorRect.right - menuWidth, window.innerWidth - menuWidth - 8)),
-            top: Math.min(anchorRect.bottom + 4, window.innerHeight - 8),
+            ...(openUpward
+              ? { bottom: window.innerHeight - anchorRect.top + 4, maxHeight: anchorRect.top - 12 }
+              : { top: anchorRect.bottom + 4, maxHeight: window.innerHeight - anchorRect.bottom - 12 }),
+            overflowY: 'auto',
             zIndex: 1000,
             background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.md,
             boxShadow: '0 10px 28px rgba(20,26,23,.16)', width: menuWidth, padding: 6,
