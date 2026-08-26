@@ -3517,118 +3517,17 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         }
       }
     }
-    if (r.role === 'both' || r.role === 'hotspot') {
-      // Existing profiles first: a router that was already serving a hotspot
-      // before we arrived keeps working, just pointed at us.
-      const { profiles } = await ros.applyHotspot(conn);
-      if (profiles) done.push(`switched ${profiles} hotspot profile${profiles === 1 ? '' : 's'} to RADIUS`);
-
-      // Every column this handler actually reads below (multi_device, bind_mac,
-      // idle_timeout_sec too) — this used to select only walled_garden and
-      // hotspot_network, so every other preference read from `hs` a few lines
-      // down was always undefined and silently fell back to its hardcoded
-      // default, regardless of what the tenant had saved under Hotspot →
-      // Settings. Configure looked like it respected those settings; it never
-      // read them at all.
-      const { rows: [hs] } = await pool.query(
-        'select walled_garden, hotspot_network, multi_device, bind_mac, idle_timeout_sec '
-        + 'from hotspot_settings where tenant_id=$1',
-        [req.tenant.id]);
-
-      // Fetched once, up front, so the reachability check and the local-copy
-      // install below use the same URL rather than computing it twice.
-      const { rows: [tt] } = await pool.query(
-        'select subdomain from tenants where id=$1', [req.tenant.id]);
-      const rootDomain = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
-      const hsLoginUrl = tt?.subdomain ? `https://${tt.subdomain}.${rootDomain}/hotspot/login.html?router=1` : null;
-
-      /**
-       * The user profile every voucher names, ensured on every Configure —
-       * not only when LAN ports are chosen below. It used to live entirely
-       * inside applyHotspotServer, which this handler only calls when ports
-       * are selected, so a router whose bridge already existed and was
-       * Configured again without touching ports never got hs-default at all.
-       * A voucher then fails at login with "unknown user profile <hs-default>"
-       * on a router that otherwise looks fully configured — nothing on the
-       * Routers screen says a profile is missing, only a guest trying to
-       * connect finds out. Idempotent like everything else here, so running
-       * it again inside applyHotspotServer too, when ports are chosen, costs
-       * nothing.
-       */
-      const profileResult = await ros.ensureHotspotUserProfile(conn, {
-        sharedUsers: hs?.multi_device ? 3 : 1,
-        idleSeconds: hs?.idle_timeout_sec ?? 30,
-        bindMac: hs?.bind_mac ?? true,
-      });
-      if (profileResult.created) done.push(`hotspot user profile ${profileResult.profile}`);
-
-      // Building the hotspot needs a bridge to build it on. Same rule as PPPoE:
-      // only when ports were chosen, because inventing a bridge unasked can
-      // swallow the uplink and take the site off the internet.
-      const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
-      if (lanPorts?.length) {
-        const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
-        const hotspotNet = req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24';
-        // Same guard as the PPPoE pool: this address lands on a bridge, and a
-        // bridge route that covers the tunnel takes the router off the air.
-        const unsafeHs = tunnelConflict(hotspotNet, req.tenant.tunnel_subnet, SERVER_IP);
-        if (unsafeHs) throw new Error(unsafeHs);
-
-        const bridge = await ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts });
-        const built = await ros.applyHotspotServer(conn, {
-          bridge: bridge.bridge,
-          network: hotspotNet,
-          sharedUsers: hs?.multi_device ? 3 : 1,
-          idleSeconds: hs?.idle_timeout_sec ?? 30,
-          bindMac: hs?.bind_mac ?? true,
-        });
-        done.push(built.changed.length
-          ? `hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool} — created ${built.changed.join(', ')}`
-          : `hotspot on ${bridge.bridge} already set up at ${built.gateway}`);
-        await ros.sleep(500);
-      } else if (!profiles) {
-        done.push('no hotspot profiles on this router, and no LAN ports chosen to build one on');
-      }
-
-      // Also goes on regardless, and before the walled garden: a guest who
-      // cannot resolve a hostname at all never gets far enough to need one
-      // allowed. This is usually why the captive-portal popup does not
-      // appear — a DNS problem, not a page problem, and one that reading the
-      // walled garden or the login page alone will not show.
-      const dnsProxy = await ros.applyDnsProxy(conn);
-      done.push(dnsProxy.protected
-        ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}`
-        : dnsProxy.enabled
-          ? 'DNS proxy open to guests — could not confirm the uplink to firewall it, so check this by hand'
-          : 'could not enable the DNS proxy safely (no uplink identified) — guests will not be able to resolve names, and the popup will not appear');
-      await ros.sleep(400);
-
-      // The walled garden goes on regardless: it is what lets an unpaid guest
-      // reach M-Pesa, and it applies to a hotspot we inherited just as much as
-      // to one we built.
-      const garden = await ros.applyWalledGarden(conn, hs?.walled_garden ?? []);
-      done.push(garden.allowed
-        ? `walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'} before login`
-        : 'walled garden is empty — guests cannot reach M-Pesa before paying');
-
-      // Also here, not only behind the Hotspot button. An operator who presses
-      // Configure has every reason to expect a configured hotspot, and leaving
-      // MikroTik's stock page behind looks like the push did nothing at all.
-      // tt and rootDomain were already fetched above, for the profile's own
-      // redirect setting — reused here rather than queried a second time.
-      if (tt?.subdomain) {
-        try {
-          const url = hsLoginUrl;
-          const unreachable = await loginPageReachable(url);
-          if (unreachable) throw new Error(unreachable);
-
-          const page = await ros.pushHotspotPage(conn, { url });
-          done.push(`installed the login page at ${page.path} (${page.bytes} bytes)`);
-        } catch (e) {
-          done.push(`could not install the login page (${e.message}) — the stock page stays`);
-        }
-      }
-    }
+    /**
+     * Hotspot settings — DHCP, the hotspot server itself, its user profile,
+     * the DNS proxy, the walled garden, the login page — used to be pushed
+     * from here too, on every Configure/Refresh, for any router with role
+     * hotspot or both, duplicating the dedicated Hotspot button
+     * (/api/routers/:id/hotspot above) with its own separate copy of the
+     * same steps. The two could drift, and a plain Configure silently
+     * rewrote a guest-facing setup the operator only meant to touch through
+     * the Hotspot action. Hotspot config is pushed from exactly one place
+     * now — the Hotspot button — never as a side effect of Configure.
+     */
 
     await pool.query(
       `update routers set autoconfig_last_at=now(), autoconfig_last_ok=true, autoconfig_last_error=null,
