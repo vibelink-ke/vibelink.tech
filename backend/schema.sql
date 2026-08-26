@@ -268,7 +268,7 @@ create table hotspot_settings (
 create table tenant_sms_config (
   id          uuid primary key default gen_random_uuid(),
   tenant_id   uuid not null references tenants on delete cascade,
-  provider    text not null,     -- hostpinnacle | africastalking | textsms | ujumbe | mobitech | twilio | custom
+  provider    text not null,     -- hostpinnacle | africastalking | textsms | ujumbe | mobitech | twilio | twilio_whatsapp | custom
   credentials jsonb not null default '{}'::jsonb,
   templates   jsonb not null default '{}'::jsonb,
   priority    int not null default 1,

@@ -40,6 +40,16 @@ const PROVIDERS = {
     new URLSearchParams({ To: '+' + to, From: c.from, Body: msg }),
     { auth: { username: c.account_sid, password: c.auth_token } }),
 
+  // Same API as plain Twilio SMS — only the whatsapp: prefix on both numbers
+  // differs. The operator's "from" field is just their WhatsApp-enabled
+  // number (Twilio's own sandbox number while testing, or an approved
+  // WhatsApp Business sender in production); the prefix is added here so
+  // it never has to be typed or remembered.
+  twilio_whatsapp: async (c, to, msg) => axios.post(
+    `https://api.twilio.com/2010-04-01/Accounts/${c.account_sid}/Messages.json`,
+    new URLSearchParams({ To: `whatsapp:+${to}`, From: `whatsapp:${c.from}`, Body: msg }),
+    { auth: { username: c.account_sid, password: c.auth_token } }),
+
   custom: async (c, to, msg) => axios.post(c.url,
     JSON.parse(String(c.body_template ?? '{}').replace('{to}', to).replace('{message}', msg)),
     { headers: c.headers ?? {} })
@@ -100,6 +110,7 @@ const ACCEPTED = {
     return String(r?.status_code ?? r?.status ?? '') === '1000' || /success/i.test(String(r?.message ?? ''));
   },
   twilio: (d) => !['failed', 'undelivered'].includes(String(d?.status ?? '').toLowerCase()),
+  twilio_whatsapp: (d) => !['failed', 'undelivered'].includes(String(d?.status ?? '').toLowerCase()),
   custom: () => true,   // whatever the operator pointed us at
 };
 
@@ -334,6 +345,15 @@ const BALANCE = {
     return Math.floor(Number(data?.balance ?? 0));
   },
 
+  // Same account, same balance — WhatsApp and SMS both spend from one
+  // Twilio account, there's nothing separate to read here.
+  twilio_whatsapp: async (c) => {
+    const { data } = await axios.get(
+      `https://api.twilio.com/2010-04-01/Accounts/${c.account_sid}/Balance.json`,
+      { auth: { username: c.account_sid, password: c.auth_token } });
+    return Math.floor(Number(data?.balance ?? 0));
+  },
+
   custom: async (c) => {
     if (!c.balance_url) return null;
     const { data } = await axios.get(c.balance_url, { headers: c.headers ?? {} });
@@ -380,6 +400,11 @@ export const PROVIDER_FIELDS = {
     { key: 'account_sid', label: 'Account SID', required: true },
     { key: 'auth_token', label: 'Auth token', required: true, secret: true },
     { key: 'from', label: 'From number', required: true },
+  ],
+  twilio_whatsapp: [
+    { key: 'account_sid', label: 'Account SID', required: true },
+    { key: 'auth_token', label: 'Auth token', required: true, secret: true },
+    { key: 'from', label: 'WhatsApp number (e.g. +14155238886 — no "whatsapp:" prefix)', required: true },
   ],
   custom: [
     { key: 'url', label: 'Send URL', required: true },
