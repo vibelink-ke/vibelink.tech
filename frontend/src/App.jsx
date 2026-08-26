@@ -43,7 +43,6 @@ const MapScreen = lazy(() => import('./screens/Map'));
 const PlatformMonitor = lazy(() => import('./screens/PlatformMonitor'));
 const Analytics = lazy(() => import('./screens/Analytics'));
 const Leads = lazy(() => import('./screens/Leads'));
-const Referrals = lazy(() => import('./screens/Referrals'));
 const Messaging = lazy(() => import('./screens/Messaging'));
 const LiveSupport = lazy(() => import('./screens/LiveSupport'));
 const Outages = lazy(() => import('./screens/Outages'));
@@ -244,7 +243,6 @@ export default function App() {
 
             <Route path="/tickets" element={<Tickets />} />
             <Route path="/leads" element={<Leads />} />
-            <Route path="/referrals" element={<Referrals />} />
             <Route path="/messaging" element={<Messaging />} />
             <Route path="/live-support" element={<LiveSupport />} />
             <Route path="/outages" element={<Outages />} />

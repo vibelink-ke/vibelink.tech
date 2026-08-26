@@ -33,17 +33,11 @@ export const NAV_SECTIONS = [
           { to: '/sla', label: 'SLA management', count: (s) => s.slaPolicies.length },
         ],
       },
-      // Referrals nests under Leads rather than sitting on its own — a
-      // referrer is where a lead's "referral" channel actually points, so
-      // the two pages are two views of the same relationship, not separate
-      // concerns.
-      {
-        label: 'Leads',
-        children: [
-          { to: '/leads', label: 'Pipeline', count: (s) => s.leads.length },
-          { to: '/referrals', label: 'Referrers', count: (s) => s.referrers.length },
-        ],
-      },
+      // Referrals lives inside Leads itself now (a "Referrers" tab on the
+      // same screen) rather than as a separate page — a referrer is where a
+      // lead's "referral" channel actually points, not a separate concern,
+      // so one count covers both.
+      { to: '/leads', label: 'Leads', count: (s) => s.leads.length + s.referrers.length },
       { to: '/messaging', label: 'Messaging' },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],

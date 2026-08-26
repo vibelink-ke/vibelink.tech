@@ -2330,6 +2330,34 @@ app.post('/api/tickets', async (req, res) => {
   res.json(t);
 });
 
+/**
+ * A lead referred by an active customer often names someone who has never
+ * been entered as a referrer on their own — picking them straight off the
+ * client list (rather than requiring a trip to Referrals first to create
+ * them) is often the very first time that relationship exists anywhere in
+ * the system. Reuses an existing customer-type referrer row for this
+ * subscriber if the Referrals screen (or an earlier lead) already made one;
+ * otherwise creates it, seeded from the client's own name, with no
+ * commission rate set yet — the operator can give it one later from
+ * Referrals without losing the link made here.
+ */
+async function referrerForSubscriber(tenantId, subscriberId) {
+  const { rows: [existing] } = await pool.query(
+    'select id from referrers where tenant_id=$1 and subscriber_id=$2', [tenantId, subscriberId]);
+  if (existing) return existing.id;
+
+  const { rows: [sub] } = await pool.query(
+    'select name, phone from subscribers where id=$1 and tenant_id=$2', [subscriberId, tenantId]);
+  if (!sub) return null;
+
+  const { rows: [created] } = await pool.query(
+    `insert into referrers (tenant_id, subscriber_id, name, phone, commission_type, commission_rate, notes)
+     values ($1,$2,$3,$4,'percent',0,'Added automatically — first named as a referrer from a lead')
+     returning id`,
+    [tenantId, subscriberId, sub.name, sub.phone]);
+  return created.id;
+}
+
 app.get('/api/leads', async (req, res) => {
   const { rows } = await pool.query(
     `select l.*, r.name as referrer_name
@@ -2341,7 +2369,7 @@ app.get('/api/leads', async (req, res) => {
   res.json(rows);
 });
 app.post('/api/leads', async (req, res) => {
-  const { name, phone, source, referrerId } = req.body;
+  const { name, phone, source, referrerId, referredByClientId } = req.body;
 
   let referrer = null;
   if (referrerId) {
@@ -2349,6 +2377,11 @@ app.post('/api/leads', async (req, res) => {
       'select 1 from referrers where id=$1 and tenant_id=$2', [referrerId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
     referrer = referrerId;
+  } else if (referredByClientId) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [referredByClientId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+    referrer = await referrerForSubscriber(req.tenant.id, referredByClientId);
   }
 
   const { rows: [l] } = await pool.query(
@@ -5462,6 +5495,16 @@ app.delete('/api/tickets/:id', wrap(async (req, res) => {
 }));
 
 app.patch('/api/leads/:id', wrap(async (req, res) => {
+  // referred_by_client_id is not a real column — resolved to a referrer_id
+  // (finding or creating a customer-type referrer for that subscriber, same
+  // as the create route) before it ever reaches the update below.
+  if (req.body.referred_by_client_id) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [req.body.referred_by_client_id, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+    req.body.referrer_id = await referrerForSubscriber(req.tenant.id, req.body.referred_by_client_id);
+  }
+
   const allowed = ['status', 'name', 'phone', 'source', 'referrer_id'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
