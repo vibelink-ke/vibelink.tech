@@ -42,6 +42,7 @@ export function startJobs() {
   cron.schedule('*/5 * * * *', safely('expireAndSuspend', expireAndSuspend));
   cron.schedule('*/15 * * * *', safely('enforceFup', enforceFup));
   cron.schedule('*/15 * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
+  cron.schedule('*/3 * * * *', safely('expireStuckStkRequests', expireStuckStkRequests));
   cron.schedule('0 6 * * *',  safely('generateInvoices', generateInvoices));
   cron.schedule('0 8,12,18 * * *', safely('autoCharge', autoCharge));
   cron.schedule('0 9 * * *',  safely('remind', remind));
@@ -305,6 +306,41 @@ async function enforceHotspotDataCaps() {
       }
     }
   }
+}
+
+/**
+ * A gateway callback (Safaricom's, KopoKopo's, a bank's) sometimes just
+ * never arrives — nothing wrong on our side, no error to catch, the
+ * webhook simply never fires: a dropped connection on their end, a phone
+ * that went out of range mid-prompt, anything. stk_requests' own status
+ * column has anticipated 'timeout' since the table was designed
+ * (`pending | success | failed | timeout`), and daraja.js's webhook handler
+ * has referenced "the failure path handled by jobs.retryStk" the whole
+ * time — this is that function, under its actual name. Neither the column
+ * value nor the function existed until now; a request stuck on 'pending'
+ * stayed that way forever, and the guest's own poll of
+ * /hotspot/buy/:checkoutId (or the customer portal's equivalent) kept
+ * reading a status its page does not treat as finished, sitting on "check
+ * your phone" indefinitely for a prompt that may have already expired on
+ * their handset.
+ *
+ * Deliberately does not re-push a second STK prompt. That looked like the
+ * obvious next step, but it risks the one thing worth being careful about
+ * here: if the original prompt is only *late*, not lost — the webhook
+ * still arrives after this runs — a customer who approved a second prompt
+ * as well would be charged twice for one voucher, with only one side of it
+ * ever applied automatically. Marking the request as timed out, so the
+ * guest sees a clear "try again" instead of a page stuck forever, is the
+ * safe half of this fix; an operator can always see a genuinely stuck
+ * attempt on the Payments screen and decide whether to follow up.
+ */
+async function expireStuckStkRequests() {
+  await pool.query(
+    `update stk_requests set status='timeout',
+            result_desc='No response from the payment gateway — try again'
+      where status='pending' and created_at < now() - interval '3 minutes'
+        and tenant_id in (${enabledTenants})`,
+    ['expireStuckStkRequests']);
 }
 
 async function generateInvoices() {

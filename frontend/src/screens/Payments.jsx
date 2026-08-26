@@ -530,8 +530,8 @@ export default function Payments() {
               <div
                 style={{
                   gridColumn: '1 / -1',
-                  background: stkResult.status === 'success' ? '#eef7f2' : stkResult.status === 'failed' ? '#fdf1ec' : color.tileBg,
-                  border: `1px solid ${stkResult.status === 'failed' ? '#f0d8ce' : color.line}`,
+                  background: stkResult.status === 'success' ? '#eef7f2' : ['failed', 'timeout'].includes(stkResult.status) ? '#fdf1ec' : color.tileBg,
+                  border: `1px solid ${['failed', 'timeout'].includes(stkResult.status) ? '#f0d8ce' : color.line}`,
                   borderRadius: 9,
                   padding: '11px 13px',
                   fontSize: 12.5,

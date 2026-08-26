@@ -600,8 +600,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
             }, 5000);
             return;
           }
-          if (d.status === 'failed' || d.status === 'cancelled') {
+          if (d.status === 'failed' || d.status === 'cancelled' || d.status === 'timeout') {
             clearInterval(payPollTimer);
+            payGo.disabled = false;
             payNote.textContent = d.detail || 'The payment did not go through.';
           }
         })
@@ -954,7 +955,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
               popup('Payment successful', 'Connecting that device now — it may take a few seconds to come online.');
               return;
             }
-            if (d.status === 'failed' || d.status === 'cancelled') {
+            if (d.status === 'failed' || d.status === 'cancelled' || d.status === 'timeout') {
               clearInterval(timer);
               document.getElementById('pay').disabled = false;
               note.textContent = d.detail || 'The payment did not go through.';

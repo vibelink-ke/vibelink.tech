@@ -211,7 +211,9 @@ router.post('/stk', verifyWebhook, async (req, res) => {
   const cb = req.body?.Body?.stkCallback;
   if (!cb) return;
   const items = Object.fromEntries((cb.CallbackMetadata?.Item ?? []).map(i => [i.Name, i.Value]));
-  // stk_requests row carries tenant + purpose; failure path is handled by jobs.retryStk
+  // stk_requests row carries tenant + purpose; a callback that never
+  // arrives at all (as opposed to arriving with a failure code, handled
+  // right here) is caught instead by jobs.js's expireStuckStkRequests.
   await handleStkResult('daraja', cb.CheckoutRequestID, cb.ResultCode, cb.ResultDesc, {
     ref: items.MpesaReceiptNumber, amount: items.Amount, phone: String(items.PhoneNumber ?? '')
   }).catch(console.error);

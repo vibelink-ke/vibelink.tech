@@ -345,7 +345,7 @@ export default function CustomerPortal() {
             setPayMsg('Paid — thank you.');
             setPayBusy(false);
             load();
-          } else if (s.status === 'failed') {
+          } else if (s.status === 'failed' || s.status === 'timeout') {
             clearInterval(payPoll.current);
             setPayMsg(s.result_desc || 'The payment did not go through.');
             setPayBusy(false);
