@@ -1,4 +1,5 @@
 import cron from 'node-cron';
+import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
 import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession } from './radius.js';
@@ -61,6 +62,40 @@ export function startJobs() {
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
+  cron.schedule('*/1 * * * *', safely('pollWireguardStatus', pollWireguardStatus));
+}
+
+/**
+ * wg_peers.last_handshake/rx_bytes/tx_bytes existed as columns and were
+ * already returned by GET /api/routers/wg-peers, but nothing ever wrote to
+ * them — `wg show` only means anything from inside the wireguard container,
+ * which this one is not. The wireguard container's own custom-cont-init.d
+ * script (infra/wireguard/custom-cont-init.d/wg-sync-loop.sh) drops the
+ * result to a file on the host directory both containers mount at
+ * /config/wg_confs; this just reads it back and reconciles by public key.
+ *
+ * Missing entirely (container not yet updated, or genuinely never
+ * handshaked) is not an error — every peer just keeps whatever it last had,
+ * same as a router this job has never heard from.
+ */
+async function pollWireguardStatus() {
+  let entries;
+  try {
+    const raw = await fs.readFile('/config/wg_confs/status.json', 'utf8');
+    entries = JSON.parse(raw);
+  } catch { return; }
+  if (!Array.isArray(entries)) return;
+
+  for (const e of entries) {
+    if (!e?.publicKey) continue;
+    const handshake = Number(e.latestHandshake) || 0;
+    await pool.query(
+      `update wg_peers set
+         last_handshake = case when $2 > 0 then to_timestamp($2) else last_handshake end,
+         rx_bytes = coalesce($3, rx_bytes), tx_bytes = coalesce($4, tx_bytes)
+       where public_key = $1`,
+      [e.publicKey, handshake, Number(e.rxBytes) || 0, Number(e.txBytes) || 0]);
+  }
 }
 
 /**

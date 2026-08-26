@@ -201,6 +201,87 @@ function WinboxAccess({ store }) {
   );
 }
 
+// A handshake this stale means the tunnel is down, not just quiet — the
+// mikrotikScript sets persistent-keepalive=25s, so a live peer re-handshakes
+// at least that often even carrying no real traffic.
+const WG_STALE_MINUTES = 3;
+
+/**
+ * Per-peer connectivity, filled in from the actual protocol rather than
+ * inferred: last_handshake/rx_bytes/tx_bytes come from `wg show` inside the
+ * wireguard container itself (see jobs.js's pollWireguardStatus) — a peer
+ * existing in the database has never meant its key reached the live
+ * interface, only that this side minted one.
+ */
+function WireguardPeers({ store }) {
+  const [peers, setPeers] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try { setPeers(await api.wgPeers()); } catch { /* shown as empty */ } finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const remove = async (p) => {
+    if (!window.confirm(`Remove the WireGuard peer "${p.name}"? Its router loses the tunnel until re-onboarded.`)) return;
+    try {
+      await api.deleteWgPeer(p.id);
+      store.toast('Peer removed');
+      load();
+    } catch (e) {
+      store.toast(`Could not remove: ${e.message}`);
+    }
+  };
+
+  if (!loading && peers.length === 0) return null;
+
+  return (
+    <Card title="WireGuard peers" actions={<Button onClick={load}>Refresh</Button>}>
+      <Table
+        rowKey={(p) => p.id}
+        rows={peers}
+        columns={[
+          { key: 'name', label: 'Peer', render: (p) => <span style={{ fontWeight: 600 }}>{p.name}</span> },
+          { key: 'router_name', label: 'Router', render: (p) => p.router_name ?? <span style={{ color: color.muted }}>Unassigned</span> },
+          { key: 'assigned_ip', label: 'Address', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{String(p.assigned_ip).split('/')[0]}</span> },
+          {
+            key: 'status',
+            label: 'Status',
+            render: (p) => {
+              const mins = p.last_handshake ? (Date.now() - new Date(p.last_handshake)) / 60000 : Infinity;
+              const up = mins <= WG_STALE_MINUTES;
+              return (
+                <span style={{ fontSize: 11.5, fontWeight: 600, color: up ? color.green : color.rust }}>
+                  {up ? 'Connected' : p.last_handshake ? 'Disconnected' : 'Never connected'}
+                </span>
+              );
+            },
+          },
+          {
+            key: 'last_handshake', label: 'Last handshake',
+            render: (p) => (p.last_handshake ? new Date(p.last_handshake).toLocaleString('en-KE') : 'never'),
+          },
+          {
+            key: 'traffic', label: 'Traffic', align: 'right',
+            render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>
+              {formatBytes(p.rx_bytes)} ↓ / {formatBytes(p.tx_bytes)} ↑
+            </span>,
+          },
+          { key: 'actions', label: '', align: 'right', render: (p) => <Button onClick={() => remove(p)}>Remove</Button> },
+        ]}
+      />
+    </Card>
+  );
+}
+
+function formatBytes(n) {
+  const v = Number(n) || 0;
+  if (v < 1024) return `${v} B`;
+  if (v < 1024 ** 2) return `${(v / 1024).toFixed(1)} KB`;
+  if (v < 1024 ** 3) return `${(v / 1024 ** 2).toFixed(1)} MB`;
+  return `${(v / 1024 ** 3).toFixed(1)} GB`;
+}
+
 export default function Routers() {
   const store = useStore();
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
@@ -795,6 +876,7 @@ Revoke anyway?`
       )}
 
       <WinboxAccess store={store} />
+      <WireguardPeers store={store} />
 
       {/* A router hammering the tunnel with a credential we no longer have.
           Revoking does not stop it trying — RouterOS retries every few seconds

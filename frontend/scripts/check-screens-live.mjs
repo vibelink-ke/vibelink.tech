@@ -103,6 +103,10 @@ const COLLECTIONS = {
  */
 const ROUTES = [
   [/\/api\/(auth\/)?session$/, { id: 's1', name: 'Administrator', email: 'admin@example.com', role: 'owner', company: 'Vibelink ISP', superAdmin: true }],
+  [/\/api\/routers\/wg-peers$/, [
+    { id: 'wg1', name: 'Main 1', router_name: 'Main 1', assigned_ip: '10.90.0.2/24', last_handshake: iso(0), rx_bytes: 128000, tx_bytes: 64000, enabled: true },
+    { id: 'wg2', name: 'Branch 2', router_name: null, assigned_ip: '10.90.0.3/24', last_handshake: null, rx_bytes: 0, tx_bytes: 0, enabled: true },
+  ]],
   [/\/api\/licence$/, { status: 'active', readOnly: false, licenceEnds: iso(30), daysLeft: 30, expiringSoon: false }],
   // The shape behind the Messaging crash: token/desc, not key/describes.
   [/\/api\/sms\/templates$/, {

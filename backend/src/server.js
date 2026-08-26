@@ -6511,6 +6511,7 @@ const AUTOMATION_JOBS = [
   { job: 'checkSlaBreaches', name: 'SLA breach alerts', cron: '*/5 * * * *', detail: 'Texts whoever an SLA policy names to escalate to (or the owner) the moment a ticket passes its resolve-by time' },
   { job: 'enforceHotspotDataCaps', name: 'Hotspot data caps', cron: '*/15 * * * *', detail: 'Tracks usage against a plan’s data cap and cuts a voucher off the moment it’s hit' },
   { job: 'expireStuckStkRequests', name: 'Time out stuck M-Pesa prompts', cron: '*/3 * * * *', detail: 'Marks an STK push as timed out if the gateway never calls back, so a guest is not left staring at "check your phone" forever' },
+  { job: 'pollWireguardStatus', name: 'WireGuard status', cron: '*/1 * * * *', system: true, detail: 'Reads handshake/traffic stats from the wireguard container and updates each peer' },
 ];
 
 /**
