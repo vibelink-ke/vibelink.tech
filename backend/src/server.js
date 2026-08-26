@@ -1292,6 +1292,70 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
 }));
 
 /**
+ * A public help center — every published kb_articles row for this tenant,
+ * reachable without signing in at all. Existed only inside the admin app
+ * before this (GET /api/kb-articles, behind a staff session), which meant a
+ * customer could never actually be pointed at it — the chat_offline
+ * auto-reply linking here is the reason this exists now, but it stands on
+ * its own too (a "how do I..." page worth bookmarking, not just a fallback
+ * for when nobody's online).
+ */
+app.get('/help', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).send('Unknown network');
+
+  const { rows: articles } = await pool.query(
+    `select title, category, body from kb_articles
+      where tenant_id=$1 and published order by category nulls last, title`,
+    [tenant.id]);
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const byCategory = new Map();
+  for (const a of articles) {
+    const cat = a.category || 'General';
+    if (!byCategory.has(cat)) byCategory.set(cat, []);
+    byCategory.get(cat).push(a);
+  }
+
+  res.type('html').send(`<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${esc(tenant.name)} — Help</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 640px; margin: 0 auto; padding: 24px 16px 60px; color: #17231d; background: #fafaf7; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 14px; margin-bottom: 24px; }
+  input[type=search] { width: 100%; box-sizing: border-box; padding: 11px 14px; border: 1px solid #ddd; border-radius: 10px; font-size: 15px; margin-bottom: 20px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #888; margin: 24px 0 8px; }
+  details { background: #fff; border: 1px solid #e6e6e0; border-radius: 10px; padding: 12px 14px; margin-bottom: 8px; }
+  summary { font-weight: 600; cursor: pointer; }
+  .body { margin-top: 8px; font-size: 14.5px; line-height: 1.6; white-space: pre-wrap; }
+  .empty { color: #888; text-align: center; padding: 40px 0; }
+</style></head><body>
+<h1>${esc(tenant.name)} — Help</h1>
+<div class="sub">Common answers, any time — no need to wait for a reply.</div>
+${articles.length ? '<input type="search" id="q" placeholder="Search…" onkeyup="filter()">' : ''}
+<div id="list">
+${articles.length === 0 ? '<div class="empty">Nothing published yet.</div>' : [...byCategory.entries()].map(([cat, items]) => `
+  <h2>${esc(cat)}</h2>
+  ${items.map((a) => `<details class="art" data-t="${esc(a.title.toLowerCase())}">
+    <summary>${esc(a.title)}</summary>
+    <div class="body">${esc(a.body)}</div>
+  </details>`).join('')}
+`).join('')}
+</div>
+<script>
+function filter(){
+  var q=document.getElementById('q').value.toLowerCase();
+  document.querySelectorAll('.art').forEach(function(el){
+    el.style.display = el.dataset.t.indexOf(q) === -1 ? 'none' : '';
+  });
+}
+</script>
+</body></html>`);
+}));
+
+/**
  * Live chat for people with no account.
  *
  * A hotspot guest has not paid yet and a customer may not have a portal
@@ -1330,8 +1394,35 @@ app.post('/chat/start', wrap(async (req, res) => {
     if (!online.any) {
       const sms = await import('./sms.js');
       const org = await sms.orgVars(tenant.id);
-      sms.send(tenant.id, phone, 'chat_offline', { company: org.company, support_phone: org.supportPhone })
-        .catch((e) => console.error('chat_offline auto-reply failed', e.message));
+      const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+
+      // The single most common thing a chat opens with is "am I still
+      // active / what do I owe" — if this visitor is a signed-in customer,
+      // answer that directly rather than making them wait for a human to
+      // say what the system already knows. Best-effort: no session at all
+      // (an anonymous hotspot guest, or someone not signed in) just skips
+      // this, same as a wrong/expired portal cookie would.
+      let accountStatus = '';
+      try {
+        const session = await portalSession(req);
+        if (session) {
+          const days = session.expires_at
+            ? Math.ceil((new Date(session.expires_at).getTime() - Date.now()) / 86400000) : null;
+          accountStatus = ` Your account ${session.account_code} is ${session.status}`
+            + (days == null ? '.' : days > 0 ? `, ${days} day(s) left.` : ', expired.');
+        }
+      } catch { /* no session — skip the account line, not the whole auto-reply */ }
+
+      // Only when the tenant has actually published something — a link to
+      // an empty help page is worse than no link at all.
+      const { rows: [kb] } = await pool.query(
+        'select 1 from kb_articles where tenant_id=$1 and published limit 1', [tenant.id]);
+      const helpLink = kb && tenant.subdomain ? ` Common answers: https://${tenant.subdomain}.${root}/help.` : '';
+
+      sms.send(tenant.id, phone, 'chat_offline', {
+        company: org.company, support_phone: org.supportPhone,
+        account_status: accountStatus, help_link: helpLink,
+      }).catch((e) => console.error('chat_offline auto-reply failed', e.message));
     }
   }
 

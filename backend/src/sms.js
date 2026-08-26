@@ -137,8 +137,13 @@ export const DEFAULTS = {
   // visitor typing into what looks like silence. Deliberately sets an
   // expectation ("as soon as we're back") rather than promising a time
   // nobody configured.
+  // {account_status} and {help_link} are always passed (empty string when
+  // not applicable — a signed-out visitor, or a tenant with no published
+  // articles) rather than only sometimes included, so the template stays
+  // one plain editable string instead of needing conditional logic.
   chat_offline: 'Thanks for reaching out to {company}. Our team is offline right now — we saw your '
-              + 'message and will reply as soon as we\'re back. For anything urgent, call {support_phone}.',
+              + 'message and will reply as soon as we\'re back.{account_status}{help_link} '
+              + 'Urgent? Call {support_phone}.',
 };
 
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
@@ -189,6 +194,8 @@ export const PLACEHOLDERS = [
   { token: 'paybill',       desc: 'Your default paybill or till' },
   { token: 'router',        desc: 'Router they are connected to' },
   { token: 'portal',        desc: 'Link to their customer portal sign-in page' },
+  { token: 'account_status', desc: 'A signed-in chat visitor\'s own status/days-left, or blank' },
+  { token: 'help_link',      desc: 'Link to the public help center, or blank if nothing is published' },
 ];
 
 /** The joins a row needs before subscriberVars can fill every token. */
