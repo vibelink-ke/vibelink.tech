@@ -213,7 +213,11 @@ services:
       - ovpn-run:/run/openvpn
 
   wireguard:
-    image: linuxserver/wireguard:latest
+    # Built rather than the stock image directly, only to bake in the
+    # sync-loop init script with root ownership — the base image refuses to
+    # run a custom-cont-init.d script that isn't root-owned, and a bind
+    # mount can never guarantee that (see infra/wireguard-init/Dockerfile).
+    build: ./infra/wireguard-init
     container_name: billing-wg
     restart: unless-stopped
     cap_add:
@@ -231,11 +235,6 @@ services:
     volumes:
       - ./infra/wireguard:/config
       - /lib/modules:/lib/modules:ro
-      # Keeps wg0 actually in sync with wg_confs/wg0.conf after boot — see
-      # the script's own comment for why this exists at all. A separate
-      # directory from infra/wireguard itself: that one is gitignored
-      # (it holds live keys and rendered configs), and this script is code.
-      - ./infra/wireguard-init:/custom-cont-init.d:ro
 
 volumes:
   billing-pgdata:
