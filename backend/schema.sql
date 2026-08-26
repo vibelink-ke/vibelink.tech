@@ -1649,3 +1649,21 @@ create index if not exists vouchers_router_id_idx on vouchers (router_id) where 
 -- hand. DELETE /api/routers/:id now drops it outright instead; this clears
 -- any left behind before that fix.
 delete from ip_pools where purpose='expired' and router_id is null;
+
+-- ─────────────── web push (installed PWA notifications) ───────────────
+-- One row per browser install that opted in, not per staff member — the
+-- same person on their phone and their laptop gets two independent
+-- subscriptions, and each is pushed to separately. endpoint is unique
+-- because it already uniquely identifies one browser's one subscription
+-- (assigned by the browser's own push service), which is what makes
+-- upserting on it safe: resubscribing the same install updates in place
+-- rather than piling up duplicates.
+create table if not exists push_subscriptions (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  staff_id   uuid references staff on delete cascade,
+  endpoint   text not null unique,
+  keys       jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_tenant_id_idx on push_subscriptions (tenant_id);

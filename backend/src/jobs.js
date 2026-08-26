@@ -478,10 +478,18 @@ async function notifyOwner(tenantId, body) {
                 (select nullif(alert_phone,'') from app_settings where tenant_id=$1),
                 (select phone from staff where tenant_id=$1 and role='owner'
                   and phone is not null limit 1)) as phone`, [tenantId]);
-    if (!pick?.phone) return;
-    await send(tenantId, pick.phone, 'custom', { body });
+    if (pick?.phone) await send(tenantId, pick.phone, 'custom', { body });
   } catch (e) {
     console.error('watchdog notify failed', tenantId, e.message);
+  }
+  // Alongside SMS/WhatsApp, not instead of it — a subscribed staff member's
+  // phone/laptop gets an instant notification even with no tab open, but a
+  // tenant with nobody subscribed yet still gets the text either way.
+  try {
+    const push = await import('./push.js');
+    await push.sendPush(tenantId, { title: 'Vibelink alert', body, url: '/routers' });
+  } catch (e) {
+    console.error('watchdog push failed', tenantId, e.message);
   }
 }
 

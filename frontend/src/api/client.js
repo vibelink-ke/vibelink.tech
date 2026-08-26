@@ -116,6 +116,9 @@ export const api = {
   // ── SMS ──
   smsGateways: () => get('/api/sms/gateways'),
   saveSmsGateway: (provider, cfg) => put(`/api/sms/gateways/${provider}`, cfg),
+  vapidPublicKey: () => get('/api/push/vapid-public-key'),
+  pushSubscribe: (subscription) => post('/api/push/subscribe', { subscription }),
+  pushUnsubscribe: (endpoint) => post('/api/push/unsubscribe', { endpoint }),
   deleteSmsGateway: (provider) => del(`/api/sms/gateways/${provider}`),
   smsBalance: (force) => get(`/api/sms/balance${force ? '?force=1' : ''}`),
   sendTestSms: (phone) => post('/api/sms/test', { phone }),

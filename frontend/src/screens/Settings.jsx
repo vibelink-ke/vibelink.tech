@@ -163,6 +163,99 @@ function FaviconCard({ store, onChanged, version }) {
   );
 }
 
+/** A VAPID key arrives base64url-encoded; the Push API wants raw bytes. */
+function urlBase64ToUint8Array(base64) {
+  const padding = '='.repeat((4 - (base64.length % 4)) % 4);
+  const raw = window.atob((base64 + padding).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+/**
+ * Push notifications for this browser — a router-down/SLA/payment alert
+ * arriving even with no tab open, the same way a native app's would. Per
+ * browser install, not a single per-account toggle: signing in on a second
+ * phone needs its own permission grant and its own subscription, which is
+ * exactly why this reads its own state from the browser rather than from
+ * anything the server already knows about the staff member.
+ */
+function NotificationsCard({ store }) {
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && window.isSecureContext;
+  const [sub, setSub] = useState(null);   // undefined = not checked yet, null = none, object = subscribed
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!supported) return;
+    navigator.serviceWorker.ready
+      .then((reg) => reg.pushManager.getSubscription())
+      .then(setSub)
+      .catch(() => setSub(null));
+  }, [supported]);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') {
+        store.toast('Notifications were not allowed — check your browser\'s site settings to enable them');
+        return;
+      }
+      const { key } = await api.vapidPublicKey();
+      if (!key) {
+        store.toast('Push is not configured on this server yet — ask whoever runs Vibelink to set it up');
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(key),
+      });
+      await api.pushSubscribe(subscription.toJSON());
+      setSub(subscription);
+      store.toast('Notifications enabled on this device');
+    } catch (e) {
+      store.toast(`Could not enable notifications: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disable = async () => {
+    setBusy(true);
+    try {
+      const endpoint = sub?.endpoint;
+      await sub?.unsubscribe();
+      if (endpoint) await api.pushUnsubscribe(endpoint);
+      setSub(null);
+      store.toast('Notifications turned off on this device');
+    } catch (e) {
+      store.toast(`Could not turn off: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Notifications" subtitle="Router-down, SLA and payment alerts on this device">
+      {!supported ? (
+        <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+          This browser does not support push notifications, or the page was not opened over HTTPS.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+            {sub
+              ? 'Enabled on this device — you\'ll get alerts here even with the tab closed.'
+              : 'Off. Alerts still go by SMS/WhatsApp either way; this adds a notification on this device too.'}
+          </p>
+          <Button variant={sub ? undefined : 'primary'} onClick={sub ? disable : enable} disabled={busy}>
+            {busy ? 'Working…' : sub ? 'Turn off on this device' : 'Enable on this device'}
+          </Button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Settings() {
   const store = useStore();
   const [params] = useSearchParams();
@@ -471,6 +564,8 @@ export default function Settings() {
               </Button>
             </div>
           </Card>
+
+          <NotificationsCard store={store} />
         </div>
       )}
 

@@ -14,3 +14,15 @@ createRoot(document.getElementById('root')).render(
     </BrowserRouter>
   </React.StrictMode>
 );
+
+// Registered from the app shell rather than left to the browser to notice
+// on its own — makes the app installable (the manifest link alone is not
+// enough without a controlling service worker) and is what push
+// notifications arrive through even with no tab open. Skipped outside a
+// secure context: an http:// dev server throws on register() rather than
+// quietly doing nothing.
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((e) => console.warn('service worker not registered:', e.message));
+  });
+}
