@@ -1482,3 +1482,12 @@ begin
       using (tenant_id = current_setting('app.tenant_id', true)::uuid);
   end if;
 end $$;
+
+-- ─────────────── per-tenant favicon ───────────────
+-- Stored in the row rather than on disk or in object storage: these are a
+-- few KB each, there is exactly one per tenant, and every other per-tenant
+-- asset this app has (branding strings, templates) already lives in the
+-- database rather than the filesystem. Small enough that a bytea column and
+-- one query is simpler than standing up anything else for it.
+alter table tenants add column if not exists favicon bytea;
+alter table tenants add column if not exists favicon_mime text;

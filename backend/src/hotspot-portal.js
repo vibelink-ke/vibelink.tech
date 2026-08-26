@@ -173,6 +173,7 @@ export function loginPage({
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(company)} WiFi</title>
+${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 <style>
   :root { --ink:${t.ink}; --muted:#8a9186; --line:rgba(128,128,128,.25);
           --green:${t.accent}; --greenDark:${t.accent}; --bg:${t.bg};
@@ -717,6 +718,7 @@ export function devicesPage({ company = 'WiFi', apiBase = '' }) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Add a device — ${esc(company)}</title>
+${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 <style>
   :root { --ink:#161a17; --muted:#8a9186; --line:rgba(128,128,128,.25); --green:#0f7a5f; --bg:#f5f6f3; --card:#fff; }
   * { box-sizing: border-box; }

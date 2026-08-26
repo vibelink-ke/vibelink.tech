@@ -101,14 +101,40 @@ export default function App() {
    * pre-login — /api/public/brand exists for exactly this, and it fails
    * closed to the undefined default (AuthGate's own "Vibelink") on the
    * platform's marketing domain, where there is no tenant to name at all.
+   *
+   * The browser-tab icon rides along on the same call. Unlike the sign-in
+   * card's name, the icon has to apply everywhere on this hostname, signed
+   * in or not — index.html's static favicon.svg was the last thing on any
+   * tenant's pages that still said "the platform," not "this ISP," once the
+   * title, the sign-in card and every notification already carried their
+   * own name. Fetched once per app load rather than gated on session, since
+   * the hostname it depends on cannot change mid-session anyway.
    */
   const [tenantBrand, setTenantBrand] = React.useState(null);
   useEffect(() => {
-    if (session !== null || isPlatformHost()) return undefined;
+    if (isPlatformHost()) return undefined;
     let cancelled = false;
-    api.publicBrand().then((b) => { if (!cancelled) setTenantBrand(b?.name ?? null); }).catch(() => {});
+    api.publicBrand().then((b) => {
+      if (cancelled) return;
+      setTenantBrand(b?.name ?? null);
+      if (b?.hasFavicon) {
+        let link = document.querySelector('link[rel="icon"]');
+        if (!link) {
+          link = document.createElement('link');
+          link.rel = 'icon';
+          document.head.appendChild(link);
+        }
+        // index.html's own tag declares type="image/svg+xml" for the
+        // platform default — left in place, that mismatched type on
+        // whatever mime a tenant actually uploaded (PNG, ICO, JPEG…) is
+        // enough for some browsers to ignore the icon entirely. Removing it
+        // leaves the response's real Content-Type to say what it is.
+        link.removeAttribute('type');
+        link.href = '/api/public/favicon';
+      }
+    }).catch(() => {});
     return () => { cancelled = true; };
-  }, [session]);
+  }, []);
 
   // Customers get their own page, before any staff session is considered. It is
   // a different audience on the same hostname: no sidebar, no admin store, and a

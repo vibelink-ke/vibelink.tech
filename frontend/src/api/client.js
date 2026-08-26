@@ -234,6 +234,8 @@ export const api = {
   updateMe: (me) => patch('/api/me', me),
   changePassword: (current, next) => post('/api/me/password', { current, next }),
   saveSettings: (s) => put('/api/settings', s),
+  saveFavicon: (dataUrl) => put('/api/settings/favicon', { dataUrl }),
+  deleteFavicon: () => del('/api/settings/favicon'),
 
   // ── platform owner ──
   tenants: () => get('/api/tenants'),

@@ -54,11 +54,121 @@ const FALLBACK_FIELDS = {
   ],
 };
 
+/**
+ * The browser-tab icon shown on this tenant's sign-in screen, dashboard and
+ * hotspot pages — the last piece of branding that still said "the platform"
+ * rather than "this ISP" once every page/title/notice already carried the
+ * tenant's own name (see App.jsx's own comment on the /api/public/brand
+ * fetch that applies whatever gets uploaded here).
+ *
+ * `version` bumps from the parent on every successful save/remove — the
+ * server sends this a day-long Cache-Control, so without a change to the
+ * URL itself the <img> preview would keep showing whatever the browser
+ * already had cached for /api/public/favicon rather than what was just
+ * uploaded or removed.
+ */
+function FaviconCard({ store, onChanged, version }) {
+  const [busy, setBusy] = useState(false);
+  const [broken, setBroken] = useState(false);
+
+  const onFile = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (file.size > 50 * 1024) {
+      store.toast('That file is too large — keep it under 50KB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setBusy(true);
+      try {
+        await api.saveFavicon(reader.result);
+        setBroken(false);
+        onChanged();
+        store.toast('Favicon updated');
+      } catch (err) {
+        store.toast(`Could not save: ${err.message}`);
+      } finally {
+        setBusy(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    try {
+      await api.deleteFavicon();
+      setBroken(true);
+      onChanged();
+      store.toast('Favicon removed — back to the default');
+    } catch (err) {
+      store.toast(`Could not remove: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="Browser tab icon">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+          Shown in the browser tab on your sign-in screen, dashboard and hotspot pages.
+          PNG, ICO, SVG, JPEG or WebP, under 50KB.
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {!broken ? (
+            <img
+              src={`/api/public/favicon?v=${version}`}
+              alt=""
+              width={32}
+              height={32}
+              style={{ borderRadius: 6, border: `1px solid ${color.line}`, objectFit: 'contain' }}
+              onError={() => setBroken(true)}
+            />
+          ) : (
+            <div
+              style={{
+                width: 32, height: 32, borderRadius: 6, border: `1px dashed ${color.line}`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 9.5, color: color.muted, textAlign: 'center', lineHeight: 1.1,
+              }}
+            >
+              none
+            </div>
+          )}
+          <label
+            style={{
+              padding: '7px 13px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+              cursor: busy ? 'default' : 'pointer', border: `1px solid ${color.line}`,
+              background: color.cardBg, color: color.ink, opacity: busy ? 0.6 : 1,
+            }}
+          >
+            {busy ? 'Working…' : 'Upload'}
+            <input
+              type="file"
+              accept="image/png,image/x-icon,image/vnd.microsoft.icon,image/svg+xml,image/jpeg,image/webp"
+              onChange={onFile}
+              disabled={busy}
+              style={{ display: 'none' }}
+            />
+          </label>
+          {!broken && (
+            <Button onClick={remove} disabled={busy}>Remove</Button>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function Settings() {
   const store = useStore();
   const [params] = useSearchParams();
   const [tab, setTab] = useState(params.get('tab') ?? 'general');
 
+  const [faviconVersion, setFaviconVersion] = useState(0);
   const [org, setOrg] = useState({ name: '', domain: '', currency: CURRENCIES[0], timezone: TIMEZONES[0], kraPin: '', whatsapp: '' });
   const [smtp, setSmtp] = useState({ host: '', port: '587', security: SECURITY[0], user: '', pass: '', from: '', fromName: '' });
   const [prefs, setPrefs] = useState({ hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps' });
@@ -348,6 +458,8 @@ export default function Settings() {
               </Button>
             </div>
           </Card>
+
+          <FaviconCard store={store} version={faviconVersion} onChanged={() => setFaviconVersion((v) => v + 1)} />
 
           <Card title="Locale">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

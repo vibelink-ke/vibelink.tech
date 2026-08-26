@@ -595,7 +595,29 @@ app.get('/api/public/brand', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'unknown tenant' });
-  res.json({ name: tenant.name ?? null });
+  const { rows: [row] } = await pool.query('select favicon_mime from tenants where id=$1', [tenant.id]);
+  res.json({ name: tenant.name ?? null, hasFavicon: !!row?.favicon_mime });
+}));
+
+/**
+ * The actual bytes for the above. Same pre-middleware placement and the
+ * same reasoning — a tab icon has to load on the sign-in screen too, before
+ * there is any session to gate it behind, and it has to load for a
+ * suspended tenant's own staff the same as their company name does.
+ *
+ * Cached for a day: an operator who just uploaded a new one can hard-refresh
+ * to see it immediately, and everyone else's browser tab catches up within a
+ * day rather than this being fetched fresh on every single page load.
+ */
+app.get('/api/public/favicon', wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).end();
+  const { rows: [row] } = await pool.query(
+    'select favicon, favicon_mime from tenants where id=$1', [tenant.id]);
+  if (!row?.favicon_mime) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=86400');
+  res.type(row.favicon_mime).send(row.favicon);
 }));
 
 /** "Adding a TV or console?" — see devicesPage() for what this actually does. */
@@ -627,9 +649,13 @@ app.get('/hotspot/devices', wrap(async (req, res) => {
 app.get('/hotspot/connected', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const iconTag = tenant?.subdomain
+    ? `<link rel="icon" href="https://${tenant.subdomain}.${root}/api/public/favicon">` : '';
   res.type('html').send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Connected</title>
+${iconTag}
 <style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
 background:#f5f6f3;color:#161a17;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px}
 .card{max-width:360px;text-align:center;background:#fff;border:1px solid rgba(128,128,128,.25);
@@ -6330,6 +6356,41 @@ app.put('/api/settings', wrap(async (req, res) => {
          smtp = coalesce($2, app_settings.smtp), prefs = coalesce($3, app_settings.prefs)`,
       [req.tenant.id, smtp ?? null, prefs ?? null]);
   }
+  res.json({ ok: true });
+}));
+
+const FAVICON_MIME = new Set(['image/png', 'image/x-icon', 'image/vnd.microsoft.icon', 'image/svg+xml', 'image/jpeg', 'image/webp']);
+// 50KB raw, comfortably under express.json()'s default 100kb request-body cap
+// once base64'd (~+33%) and wrapped in JSON — a favicon has no business being
+// bigger than this, and failing here with a clear message beats the body
+// parser itself rejecting the request with a bare 413 before this ever runs.
+const FAVICON_MAX_BYTES = 50 * 1024;
+
+/**
+ * A tenant's own browser-tab icon, everywhere their staff and their guests
+ * see this platform — the sign-in screen, the dashboard, the hotspot login
+ * page. One shared favicon.svg for every ISP was the last piece of branding
+ * that still said "this is the platform," not "this is my ISP," once every
+ * page/title/notice already read the tenant's own name.
+ */
+app.put('/api/settings/favicon', requireRole('owner'), wrap(async (req, res) => {
+  const dataUrl = String(req.body?.dataUrl ?? '');
+  const m = /^data:([\w./+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return res.status(400).json({ error: 'Not a recognisable image file.' });
+  const [, mime, b64] = m;
+  if (!FAVICON_MIME.has(mime)) {
+    return res.status(400).json({ error: 'Use a PNG, ICO, SVG, JPEG or WebP file.' });
+  }
+  const buf = Buffer.from(b64, 'base64');
+  if (buf.length > FAVICON_MAX_BYTES) {
+    return res.status(400).json({ error: `That file is too large — keep it under ${Math.round(FAVICON_MAX_BYTES / 1024)}KB.` });
+  }
+  await pool.query('update tenants set favicon=$2, favicon_mime=$3 where id=$1', [req.tenant.id, buf, mime]);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/settings/favicon', requireRole('owner'), wrap(async (req, res) => {
+  await pool.query('update tenants set favicon=null, favicon_mime=null where id=$1', [req.tenant.id]);
   res.json({ ok: true });
 }));
 
