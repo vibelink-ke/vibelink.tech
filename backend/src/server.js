@@ -346,7 +346,9 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
       `insert into staff (tenant_id, name, phone, email, username, role, password_hash)
        values ($1,$2,$3,$4,$5,'owner',$6) returning *`,
       [tenant.id, name, phone ?? sub, String(email).trim(), user, password_hash]));
-    await c.query('insert into hotspot_settings (tenant_id) values ($1) on conflict do nothing', [tenant.id]);
+    await c.query(
+      `insert into hotspot_settings (tenant_id, walled_garden) values ($1,$2) on conflict do nothing`,
+      [tenant.id, [`${sub}.${(process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase()}`]]);
     await c.query('commit');
 
     // Starter help articles, after the commit and never fatal: a new ISP should
@@ -2115,13 +2117,20 @@ function walledGardenWarnings(hosts) {
 app.put('/api/hotspot/settings', async (req, res) => {
   const f = req.body;
   const warnings = Array.isArray(f.walled_garden) ? walledGardenWarnings(f.walled_garden) : [];
+  // The only host a guest's browser ever needs pre-auth is this tenant's own
+  // portal — the login page, its status polling, and the STK-push prompt it
+  // shows. M-Pesa itself never needs a walled-garden entry: Daraja is called
+  // from our backend, not the guest's browser, and the actual approval
+  // happens over the phone's own SIM/USSD channel outside this network
+  // entirely, so a Safaricom domain here was never doing anything.
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const defaultWalledGarden = req.tenant.subdomain ? [`${req.tenant.subdomain}.${root}`] : [];
   const { rows: [s] } = await pool.query(`
     insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_sec, bind_mac,
       payment_method, voucher_expiry, code_type, code_length, sms_voucher, auto_login, multi_device,
       template, banner_headline, banner_subtext, walled_garden, hotspot_network)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
-            coalesce($17, array['*.safaricom.co.ke','api.safaricom.co.ke',
-                                'sandbox.safaricom.co.ke','*.vibelink.tech']),
+            coalesce($17, $19::text[]),
             coalesce($18, '10.5.50.0/24'))
     on conflict (tenant_id) do update set
       ssid=excluded.ssid, redirect_url=excluded.redirect_url, trial_minutes=excluded.trial_minutes,
@@ -2140,7 +2149,7 @@ app.put('/api/hotspot/settings', async (req, res) => {
      f.payment_method, f.voucher_expiry, f.code_type, f.code_length, f.sms_voucher, f.auto_login,
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
-     f.hotspot_network ?? null]);
+     f.hotspot_network ?? null, defaultWalledGarden]);
   res.json({ ...s, warnings });
 });
 

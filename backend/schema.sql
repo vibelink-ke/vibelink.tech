@@ -1246,17 +1246,30 @@ create table if not exists email_log (
 create index if not exists email_log_tenant_idx on email_log (tenant_id, created_at desc);
 
 -- ─────────────── hotspot walled garden ───────────────
--- What a guest can reach before they have paid. Empty means nothing, which turns
--- the hotspot into a shop locked from the inside: no credit, no way to reach
--- M-Pesa to buy any. The defaults are Safaricom's endpoints and this platform,
--- because those are the two things every customer needs on the way to paying.
-alter table hotspot_settings add column if not exists walled_garden text[]
-  not null default array[
-    '*.safaricom.co.ke',
-    'api.safaricom.co.ke',
-    'sandbox.safaricom.co.ke',
-    '*.vibelink.tech'
-  ];
+-- What a guest can reach before they have paid. The only thing a guest's
+-- browser actually needs pre-auth is this tenant's own portal — the login
+-- page, its status polling, and the STK-push prompt. M-Pesa itself needs
+-- nothing here: Daraja is called from our backend, and the approval happens
+-- over the phone's own SIM/USSD channel, outside this network entirely.
+-- The tenant's subdomain is set explicitly wherever a hotspot_settings row
+-- is created (onboarding, the Hotspot settings save) — this bare column
+-- default only covers a row inserted some other way and stays empty rather
+-- than guess at a hostname that belongs to a different tenant.
+alter table hotspot_settings add column if not exists walled_garden text[] not null default '{}';
+-- add column if not exists only sets a default for a column that doesn't
+-- exist yet — it does not change the default of one already there, so this
+-- has to be stated explicitly for a database that's had this column since
+-- before the Safaricom/blanket-*.vibelink.tech default was retired.
+alter table hotspot_settings alter column walled_garden set default '{}';
+-- Any tenant still sitting on exactly that old default (never edited it
+-- themselves) gets moved onto their own subdomain instead — the thing that
+-- default always should have been, one tenant at a time rather than a
+-- platform-wide wildcard that let every tenant's guests reach every other
+-- tenant's portal before paying.
+update hotspot_settings hs set walled_garden = array[t.subdomain || '.vibelink.tech']
+  from tenants t
+ where t.id = hs.tenant_id and t.subdomain is not null
+   and hs.walled_garden = array['*.safaricom.co.ke','api.safaricom.co.ke','sandbox.safaricom.co.ke','*.vibelink.tech'];
 
 -- The LAN the hotspot serves. Kept per tenant because two sites behind the same
 -- platform must not be told to use the same subnet by default.

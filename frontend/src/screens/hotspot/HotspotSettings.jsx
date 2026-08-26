@@ -166,7 +166,7 @@ export default function HotspotSettings() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <Field
               label="Allowed hosts"
-              hint="One per line. Wildcards allowed, e.g. *.safaricom.co.ke"
+              hint="One per line — your own portal subdomain is enough for M-Pesa STK to work; wildcards allowed"
             >
               <textarea
                 value={f.walled_garden_text ?? ''}
