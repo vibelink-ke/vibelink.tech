@@ -82,7 +82,10 @@ export default function HotspotSettings() {
           .split(NL).map((x) => x.trim()).filter(Boolean),
       });
       store.setHotspotSettings(saved ?? f);
-      store.toast('Hotspot settings saved');
+      // Saved either way — this is a warning about what was just allowed
+      // through the walled garden, not a validation failure blocking the save.
+      if (saved?.warnings?.length) store.toast(saved.warnings[0]);
+      else store.toast('Hotspot settings saved');
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {

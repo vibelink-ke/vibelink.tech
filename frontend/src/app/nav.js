@@ -33,7 +33,17 @@ export const NAV_SECTIONS = [
           { to: '/sla', label: 'SLA management', count: (s) => s.slaPolicies.length },
         ],
       },
-      { to: '/leads', label: 'Leads', count: (s) => s.leads.length },
+      // Referrals nests under Leads rather than sitting on its own — a
+      // referrer is where a lead's "referral" channel actually points, so
+      // the two pages are two views of the same relationship, not separate
+      // concerns.
+      {
+        label: 'Leads',
+        children: [
+          { to: '/leads', label: 'Pipeline', count: (s) => s.leads.length },
+          { to: '/referrals', label: 'Referrers', count: (s) => s.referrers.length },
+        ],
+      },
       { to: '/messaging', label: 'Messaging' },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],
@@ -42,7 +52,6 @@ export const NAV_SECTIONS = [
     heading: 'MONEY',
     items: [
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
-      { to: '/referrals', label: 'Referrals', count: (s) => s.referrers.length },
       { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length },
       { to: '/automation', label: 'Automation' },
     ],

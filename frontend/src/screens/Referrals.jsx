@@ -9,23 +9,31 @@ const kes = (n) => `KES ${Number(n ?? 0).toLocaleString('en-KE')}`;
 const commissionText = (r) =>
   r.commission_type === 'fixed' ? kes(r.commission_rate) : `${Number(r.commission_rate)}%`;
 
-const BLANK = { name: '', phone: '', staffId: '', commissionType: 'percent', commissionRate: '', notes: '' };
+const BLANK = { name: '', phone: '', refType: 'external', staffId: '', subscriberId: '', commissionType: 'percent', commissionRate: '', notes: '' };
+
+const typeOf = (r) => (r.staff_id ? 'staff' : r.subscriber_id ? 'customer' : 'external');
+const typeTone = (t) =>
+  t === 'staff' ? { bg: color.tileBg, fg: color.neutralInk }
+    : t === 'customer' ? { bg: color.amberBg, fg: color.amberInk }
+    : { bg: '#e2ebe5', fg: color.green };
 
 /**
  * Who brought in each client, and what they're owed for it.
  *
- * A referrer is either one of the team (staffId links back to their staff
- * row) or someone entirely outside it — a shop owner, a happy customer —
- * who only ever exists in this table. Either way the commission itself is
- * one-time: it's credited automatically, server-side, the moment a referred
- * client's very first payment is applied (see settleSubscriber/
- * creditReferral in payments/apply.js) — nothing here computes or edits
- * that figure directly, only marks it paid once it's actually handed over.
+ * A referrer is one of the team (staffId), an existing customer sending
+ * their own friends and neighbours your way (subscriberId), or someone
+ * entirely outside the business (neither set). Either way the commission
+ * itself is one-time: it's credited automatically, server-side, the moment
+ * a referred client's very first payment is applied (see
+ * settleSubscriber/creditReferral in payments/apply.js) — nothing here
+ * computes or edits that figure directly, only marks it paid once it's
+ * actually handed over.
  */
 export default function Referrals() {
   const store = useStore();
   const referrers = store.referrers ?? [];
   const staff = store.staff ?? [];
+  const clients = store.clients ?? [];
 
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState(null);
@@ -49,7 +57,7 @@ export default function Referrals() {
   const openEdit = (r) => {
     setEdit(r);
     setF({
-      name: r.name, phone: r.phone ?? '', staffId: r.staff_id ?? '',
+      name: r.name, phone: r.phone ?? '', refType: typeOf(r), staffId: r.staff_id ?? '', subscriberId: r.subscriber_id ?? '',
       commissionType: r.commission_type, commissionRate: String(r.commission_rate), notes: r.notes ?? '',
     });
     setOpen(true);
@@ -70,7 +78,11 @@ export default function Referrals() {
         store.setCollection('referrers', (rs) => rs.map((x) => (x.id === edit.id ? { ...x, ...updated } : x)));
         store.toast(`${updated.name} updated`);
       } else {
-        const created = await api.createReferrer({ ...body, staffId: f.staffId || null });
+        const created = await api.createReferrer({
+          ...body,
+          staffId: f.refType === 'staff' ? f.staffId || null : null,
+          subscriberId: f.refType === 'customer' ? f.subscriberId || null : null,
+        });
         store.setCollection('referrers', (rs) => [created, ...rs]);
         store.toast(`${created.name} added as a referrer`);
       }
@@ -120,7 +132,7 @@ export default function Referrals() {
   return (
     <Screen
       title="Referrals"
-      subtitle="Whoever brings in a client — staff or not — and what they're owed for it. Commission is credited automatically on that client's first payment."
+      subtitle="Whoever brings in a client — staff, an existing customer, or someone outside the business — and what they're owed for it. Commission is credited automatically on that client's first payment."
       actions={
         <Button variant="primary" onClick={openAdd}>
           + Add referrer
@@ -153,11 +165,7 @@ export default function Referrals() {
             {
               key: 'type',
               label: 'Type',
-              render: (r) => (
-                <Badge tone={r.staff_id ? { bg: color.tileBg, fg: color.neutralInk } : { bg: '#e2ebe5', fg: color.green }}>
-                  {r.staff_id ? 'staff' : 'external'}
-                </Badge>
-              ),
+              render: (r) => <Badge tone={typeTone(typeOf(r))}>{typeOf(r)}</Badge>,
             },
             { key: 'commission', label: 'Commission', render: (r) => commissionText(r) },
             { key: 'clients_referred', label: 'Clients', align: 'right', render: (r) => r.clients_referred ?? 0 },
@@ -206,13 +214,37 @@ export default function Referrals() {
             <Input value={f.phone} onChange={set('phone')} placeholder="07xx xxx xxx" />
           </Field>
           {!edit && (
-            <Field label="Link to a staff member" hint="Leave blank for someone outside your team">
-              <Select
-                value={f.staffId}
-                onChange={set('staffId')}
-                options={[{ value: '', label: '— external —' }, ...staff.map((s) => ({ value: s.id, label: `${s.name} (${s.role})` }))]}
-              />
-            </Field>
+            <>
+              <Field label="Who is this?">
+                <Select
+                  value={f.refType}
+                  onChange={set('refType')}
+                  options={[
+                    { value: 'external', label: 'Someone outside your team' },
+                    { value: 'staff', label: 'A staff member' },
+                    { value: 'customer', label: 'An existing client' },
+                  ]}
+                />
+              </Field>
+              {f.refType === 'staff' && (
+                <Field label="Staff member">
+                  <Select
+                    value={f.staffId}
+                    onChange={set('staffId')}
+                    options={[{ value: '', label: '— choose —' }, ...staff.map((s) => ({ value: s.id, label: `${s.name} (${s.role})` }))]}
+                  />
+                </Field>
+              )}
+              {f.refType === 'customer' && (
+                <Field label="Client" hint="An active or past client referring their own friends and neighbours">
+                  <Select
+                    value={f.subscriberId}
+                    onChange={set('subscriberId')}
+                    options={[{ value: '', label: '— choose —' }, ...clients.map((c) => ({ value: c.id, label: `${c.name} (${c.account_code})` }))]}
+                  />
+                </Field>
+              )}
+            </>
           )}
           <Field label="Commission type">
             <Select
@@ -245,7 +277,8 @@ export default function Referrals() {
         {viewing && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <div>
-              <KV k="Type" v={viewing.staff_id ? 'Staff member' : 'External'} />
+              <KV k="Type" v={{ staff: 'Staff member', customer: 'Existing client', external: 'External' }[typeOf(viewing)]} />
+              {viewing.subscriber_account && <KV k="Account" v={viewing.subscriber_account} />}
               <KV k="Phone" v={viewing.phone ?? '—'} />
               <KV k="Clients referred" v={viewing.clients_referred ?? 0} />
               <KV k="Owed" v={kes(viewing.owed)} />

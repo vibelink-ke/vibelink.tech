@@ -2026,8 +2026,53 @@ app.get('/api/hotspot/settings', async (req, res) => {
   res.json(s ?? {});
 });
 
+/**
+ * Domains documented, repeatedly, as abused to bypass a captive portal for
+ * free — generic hosting/CDN platforms where anyone can stand up a page or
+ * a redirect under the same domain a walled garden trusts, or public tools
+ * (Google Translate, Google Docs viewer) that already act as an open
+ * fetch-and-relay proxy for arbitrary URLs. An operator adding
+ * "*.example.com" here is trusting every tenant of that platform, not just
+ * their own payment gateway — the walled garden matches by host, and has no
+ * way to tell "the page we meant" from "a stranger's page on the same
+ * domain."
+ */
+const RISKY_WALLED_GARDEN_HOSTS = [
+  'amazonaws.com', 'cloudfront.net', 'googleusercontent.com', 'appspot.com',
+  'herokuapp.com', 'workers.dev', 'pages.dev', 'github.io', 'githubusercontent.com',
+  'firebaseapp.com', 'web.app', 'azurewebsites.net', 'ngrok.io', 'ngrok-free.app',
+  'ngrok.app', 'vercel.app', 'netlify.app', 'translate.google.com', 'translate.googleapis.com',
+  'docs.google.com', 'drive.google.com', 'cdn.jsdelivr.net', 'raw.githubusercontent.com',
+];
+
+/**
+ * A soft check, not a hard block — a tenant might have a real, narrow reason
+ * to allow one of these, and refusing outright would be guessing at intent
+ * this endpoint has no way to actually know. Surfaced back to the caller as
+ * `warnings` so Settings can show it without the save itself failing.
+ */
+function walledGardenWarnings(hosts) {
+  const warnings = [];
+  for (const raw of hosts ?? []) {
+    const host = String(raw).trim().toLowerCase();
+    if (!host) continue;
+    const bare = host.replace(/^\*\./, '');
+    if (!bare.includes('.') || bare === '*') {
+      warnings.push(`"${raw}" is too broad — this would allow almost anything, not just your payment gateway.`);
+      continue;
+    }
+    if (RISKY_WALLED_GARDEN_HOSTS.some((r) => bare === r || bare.endsWith(`.${r}`))) {
+      warnings.push(`"${raw}" is a shared hosting/CDN or open-relay domain — anyone can put a page there, `
+        + 'not just you, which is a documented way a captive portal gets bypassed for free. Only add it if you '
+        + 'specifically need it, and prefer the narrowest hostname that actually works.');
+    }
+  }
+  return warnings;
+}
+
 app.put('/api/hotspot/settings', async (req, res) => {
   const f = req.body;
+  const warnings = Array.isArray(f.walled_garden) ? walledGardenWarnings(f.walled_garden) : [];
   const { rows: [s] } = await pool.query(`
     insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_sec, bind_mac,
       payment_method, voucher_expiry, code_type, code_length, sms_voucher, auto_login, multi_device,
@@ -2054,7 +2099,7 @@ app.put('/api/hotspot/settings', async (req, res) => {
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
      f.hotspot_network ?? null]);
-  res.json(s);
+  res.json({ ...s, warnings });
 });
 
 /**
@@ -2244,14 +2289,29 @@ app.post('/api/tickets', async (req, res) => {
 });
 
 app.get('/api/leads', async (req, res) => {
-  const { rows } = await pool.query('select * from leads where tenant_id=$1 order by created_at desc', [req.tenant.id]);
+  const { rows } = await pool.query(
+    `select l.*, r.name as referrer_name
+       from leads l
+       left join referrers r on r.id = l.referrer_id
+      where l.tenant_id=$1
+      order by l.created_at desc`,
+    [req.tenant.id]);
   res.json(rows);
 });
 app.post('/api/leads', async (req, res) => {
-  const { name, phone, source } = req.body;
+  const { name, phone, source, referrerId } = req.body;
+
+  let referrer = null;
+  if (referrerId) {
+    const { rowCount } = await pool.query(
+      'select 1 from referrers where id=$1 and tenant_id=$2', [referrerId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
+    referrer = referrerId;
+  }
+
   const { rows: [l] } = await pool.query(
-    'insert into leads (tenant_id, name, phone, source) values ($1,$2,$3,$4) returning *',
-    [req.tenant.id, name, phone, source ?? 'manual']);
+    'insert into leads (tenant_id, name, phone, source, referrer_id) values ($1,$2,$3,$4,$5) returning *',
+    [req.tenant.id, name, phone, source ?? 'manual', referrer]);
   res.json(l);
 });
 
@@ -2263,25 +2323,29 @@ app.post('/api/leads', async (req, res) => {
  */
 app.get('/api/referrers', wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `select r.*,
+    `select r.*, sub.account_code as subscriber_account,
             count(s.id) as clients_referred,
             coalesce(sum(rc.amount) filter (where rc.status='owed'), 0) as owed,
             coalesce(sum(rc.amount) filter (where rc.status='paid'), 0) as paid
        from referrers r
+       left join subscribers sub on sub.id = r.subscriber_id
        left join subscribers s on s.referred_by = r.id
        left join referral_commissions rc on rc.referrer_id = r.id
       where r.tenant_id=$1
-      group by r.id
+      group by r.id, sub.account_code
       order by r.created_at desc`,
     [req.tenant.id]);
   res.json(rows);
 }));
 
 app.post('/api/referrers', wrap(async (req, res) => {
-  const { name, phone, staffId, commissionType = 'percent', commissionRate = 0, notes } = req.body ?? {};
+  const { name, phone, staffId, subscriberId, commissionType = 'percent', commissionRate = 0, notes } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
   if (!['percent', 'fixed'].includes(commissionType)) {
     return res.status(400).json({ error: 'commissionType must be percent or fixed' });
+  }
+  if (staffId && subscriberId) {
+    return res.status(400).json({ error: 'A referrer is staff, an existing customer, or external — not more than one at once' });
   }
   const rate = Number(commissionRate);
   if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: 'Enter a valid commission rate' });
@@ -2289,19 +2353,23 @@ app.post('/api/referrers', wrap(async (req, res) => {
     return res.status(400).json({ error: 'A percentage commission cannot be over 100%' });
   }
 
-  // A staff-type referrer is scoped to this tenant's own team, the same
-  // guarantee every other staff_id foreign key on this platform carries —
-  // never trusted bare off the request body.
+  // Scoped to this tenant, the same guarantee every other foreign key taken
+  // bare off a request body carries on this platform.
   if (staffId) {
     const { rowCount } = await pool.query(
       'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
   }
+  if (subscriberId) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+  }
 
   const { rows: [r] } = await pool.query(
-    `insert into referrers (tenant_id, staff_id, name, phone, commission_type, commission_rate, notes)
-     values ($1,$2,$3,$4,$5,$6,$7) returning *, 0 as clients_referred, 0 as owed, 0 as paid`,
-    [req.tenant.id, staffId || null, String(name).trim(), phone || null, commissionType, rate, notes || null]);
+    `insert into referrers (tenant_id, staff_id, subscriber_id, name, phone, commission_type, commission_rate, notes)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *, 0 as clients_referred, 0 as owed, 0 as paid`,
+    [req.tenant.id, staffId || null, subscriberId || null, String(name).trim(), phone || null, commissionType, rate, notes || null]);
   res.json(r);
 }));
 
@@ -5352,15 +5420,27 @@ app.delete('/api/tickets/:id', wrap(async (req, res) => {
 }));
 
 app.patch('/api/leads/:id', wrap(async (req, res) => {
-  const allowed = ['status', 'name', 'phone', 'source'];
+  const allowed = ['status', 'name', 'phone', 'source', 'referrer_id'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  if (sets.includes('referrer_id') && req.body.referrer_id) {
+    const { rowCount } = await pool.query(
+      'select 1 from referrers where id=$1 and tenant_id=$2', [req.body.referrer_id, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
+  }
+
   const { rows: [l] } = await pool.query(
     `update leads set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}
      where tenant_id=$1 and id=$2 returning *`,
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!l) return res.status(404).json({ error: 'not found' });
   res.json(l);
+}));
+
+app.delete('/api/leads/:id', wrap(async (req, res) => {
+  await pool.query('delete from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  res.json({ ok: true });
 }));
 
 // ── service outages ───────────────────────────────
