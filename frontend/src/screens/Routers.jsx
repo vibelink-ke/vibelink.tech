@@ -54,6 +54,8 @@ const bitrate = (bps) => {
  * portal escapes that ancestor entirely.
  */
 function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
+  // TEMPORARY — remove once the "Actions does nothing" report is diagnosed.
+  console.log('[ActionMenu render]', { open, anchorRect: anchorRect ? { top: anchorRect.top, bottom: anchorRect.bottom, left: anchorRect.left, right: anchorRect.right } : null });
   const menuWidth = 184;
   // Clamping `top` to the viewport bottom stopped the menu from starting past
   // the edge, but did nothing about it still opening *downward* from there —
@@ -898,6 +900,8 @@ Revoke anyway?`
                     anchorRect={menuFor === r.id ? menuRect : null}
                     menuRef={menuNodeRef}
                     onToggle={(e) => {
+                      // TEMPORARY — remove once the "Actions does nothing" report is diagnosed.
+                      console.log('[ActionMenu onToggle]', r.id, e.currentTarget);
                       const rect = e.currentTarget.getBoundingClientRect();
                       setMenuFor((id) => (id === r.id ? null : r.id));
                       setMenuRect(rect);
