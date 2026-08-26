@@ -1833,7 +1833,7 @@ app.get('/portal/plans-pppoe', wrap(async (req, res) => {
   const s = await portalSession(req);
   if (!s) return res.status(401).json({ error: 'not signed in' });
   const { rows } = await pool.query(
-    `select id, title, price, speed_down, speed_up from plans
+    `select id, title, price, rate_down, rate_up from plans
       where tenant_id=$1 and service='pppoe' and active
       order by price`, [s.tenant_id]);
   res.json(rows);

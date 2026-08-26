@@ -710,7 +710,7 @@ export default function CustomerPortal() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.title}</span>
                       <span style={{ fontSize: 12, color: pc.muted }}>
-                        {p.speed_down ? `${p.speed_down}/${p.speed_up} Mbps · ` : ''}KES {p.price}/mo
+                        {p.rate_down ? `${Math.round(p.rate_down / 1000)}/${Math.round(p.rate_up / 1000)} Mbps · ` : ''}KES {p.price}/mo
                       </span>
                     </div>
                     {current ? (
