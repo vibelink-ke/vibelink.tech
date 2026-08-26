@@ -54,8 +54,6 @@ const bitrate = (bps) => {
  * portal escapes that ancestor entirely.
  */
 function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
-  // TEMPORARY — remove once the "Actions does nothing" report is diagnosed.
-  console.log('[ActionMenu render]', { open, anchorRect: anchorRect ? { top: anchorRect.top, bottom: anchorRect.bottom, left: anchorRect.left, right: anchorRect.right } : null });
   const menuWidth = 184;
   // Clamping `top` to the viewport bottom stopped the menu from starting past
   // the edge, but did nothing about it still opening *downward* from there —
@@ -228,14 +226,26 @@ export default function Routers() {
   // menu itself is portalled to document.body, so it is not a DOM descendant
   // of anything in the table — checking menuNodeRef.current directly is what
   // tells a click on a menu item apart from a click genuinely elsewhere.
+  //
+  // The listener is attached a tick late, on purpose. Confirmed by logging
+  // it directly: the very click that opens the menu (onToggle sets menuFor)
+  // was itself being caught by this same effect before the click had finished
+  // dispatching, closing the menu in the same gesture that opened it — open
+  // and close, one user action apart from zero, indistinguishable from the
+  // button doing nothing at all. Registering via setTimeout(…, 0) pushes the
+  // addEventListener call to the next macrotask, after the opening click has
+  // fully finished bubbling, so it can only ever catch a later, separate click.
   useEffect(() => {
     if (!menuFor) return undefined;
     const close = (e) => {
       if (menuNodeRef.current?.contains(e.target)) return;
       setMenuFor(null);
     };
-    document.addEventListener('click', close);
-    return () => document.removeEventListener('click', close);
+    const id = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', close);
+    };
   }, [menuFor]);
 
   // Prefill the dial address when the dialog opens. The server knows it — either
@@ -900,8 +910,6 @@ Revoke anyway?`
                     anchorRect={menuFor === r.id ? menuRect : null}
                     menuRef={menuNodeRef}
                     onToggle={(e) => {
-                      // TEMPORARY — remove once the "Actions does nothing" report is diagnosed.
-                      console.log('[ActionMenu onToggle]', r.id, e.currentTarget);
                       const rect = e.currentTarget.getBoundingClientRect();
                       setMenuFor((id) => (id === r.id ? null : r.id));
                       setMenuRect(rect);
