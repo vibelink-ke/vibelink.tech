@@ -206,6 +206,15 @@ export default function CustomerPortal() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  // index.html's static <title>Vibelink</title> otherwise survives untouched
+  // for the whole life of this tab — App.jsx's own title effect reads the
+  // staff session, which a customer visiting their self-service portal never
+  // has. The page itself already shows the right company in its header; the
+  // browser tab just never caught up to it.
+  useEffect(() => {
+    if (me?.company) document.title = me.company;
+  }, [me?.company]);
+
   /**
    * Moved here from after the signed-out early return below, where it broke
    * the Rules of Hooks: a customer who already holds a valid portal session
