@@ -1641,3 +1641,11 @@ alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('n
 -- existed, or without a known router, simply has nothing to attribute.
 alter table vouchers add column if not exists router_id uuid references routers on delete set null;
 create index if not exists vouchers_router_id_idx on vouchers (router_id) where router_id is not null;
+
+-- A router-scoped expired-customers pool detached (router_id set to null)
+-- rather than deleted when its router was removed — an orphan by
+-- definition, since one is only ever created for exactly one router and is
+-- never offered under Networks for an operator to notice or clean up by
+-- hand. DELETE /api/routers/:id now drops it outright instead; this clears
+-- any left behind before that fix.
+delete from ip_pools where purpose='expired' and router_id is null;

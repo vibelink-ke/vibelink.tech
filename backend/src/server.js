@@ -4115,6 +4115,13 @@ app.delete('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
   }
 
   await pool.query('delete from wg_peers where tenant_id=$1 and router_id=$2', [req.tenant.id, r.id]);
+  // The auto-created expired-customers pool is this router's alone — never
+  // offered under Networks, so detaching it would leave a locked, invisible
+  // row nobody could ever see or remove again, permanently eating one of
+  // the sixteen candidate ranges autoExpiredCidr can hand out. Drop it
+  // outright rather than orphaning it.
+  await pool.query("delete from ip_pools where tenant_id=$1 and router_id=$2 and purpose='expired'",
+    [req.tenant.id, r.id]);
   // ip_pools.router_id has no ON DELETE, so a pool assigned to this router blocked
   // the delete outright with a raw foreign-key error. Detach rather than drop: the
   // address range is still the operator's to reassign.
