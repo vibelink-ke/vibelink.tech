@@ -1667,3 +1667,11 @@ create table if not exists push_subscriptions (
   created_at timestamptz not null default now()
 );
 create index if not exists push_subscriptions_tenant_id_idx on push_subscriptions (tenant_id);
+
+-- Which side raised this ticket — 'staff' (the default, for every existing
+-- row and every ticket raised from the Tickets screen) or 'portal' (the
+-- customer's own "report a problem"/plan-change request). The Dashboard
+-- highlights open 'portal' tickets separately: a customer's own report
+-- getting lost inside the general open-ticket count is worse than a staff
+-- one, since nobody else necessarily knows it exists yet.
+alter table tickets add column if not exists source text not null default 'staff';

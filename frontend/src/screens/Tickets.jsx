@@ -170,8 +170,19 @@ export default function Tickets() {
               key: 'subject',
               label: 'Subject',
               render: (t) => (
-                <span onClick={() => openDetail(t)} style={{ fontWeight: 600, color: color.green, cursor: 'pointer' }}>
-                  {t.subject}
+                <span onClick={() => openDetail(t)} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+                  <span style={{ fontWeight: 600, color: color.green }}>{t.subject}</span>
+                  {t.source === 'portal' && (
+                    <span
+                      title="Raised by the customer themselves, not staff"
+                      style={{
+                        fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.03em',
+                        padding: '2px 6px', borderRadius: radius.pill, background: color.rust, color: '#fff',
+                      }}
+                    >
+                      Customer
+                    </span>
+                  )}
                 </span>
               ),
             },

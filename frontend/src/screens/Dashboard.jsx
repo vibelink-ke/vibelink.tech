@@ -182,6 +182,11 @@ export default function Dashboard() {
 
   const atRisk = expiring.reduce((a, c) => a + Number(c.credit ?? 0), 0);
   const openTickets = (store.tickets ?? []).filter((t) => t.status !== 'resolved').length;
+  // A customer's own report (source='portal' — "report a problem", a plan
+  // change request) getting lost inside the general open-ticket count is
+  // worse than a staff-raised one: nobody else necessarily knows it exists
+  // yet, unlike a ticket a staff member just raised themselves.
+  const newFromCustomers = (store.tickets ?? []).filter((t) => t.source === 'portal' && t.status === 'open').length;
 
   const exportCsv = () => {
     const rows = [['metric', 'value'], ['range', range], ['collected', collected], ['online', active.length], ['unmatched', store.unmatched.length]];
@@ -387,8 +392,30 @@ export default function Dashboard() {
           </span>
         </div>
 
-        <div style={{ ...card, gap: 12 }}>
+        <div
+          style={{
+            ...card, gap: 12,
+            // Same card, but a customer waiting on a reply nobody has seen
+            // yet gets a border that actually stands out against the rest
+            // of a dashboard that's otherwise all neutral tones.
+            border: newFromCustomers > 0 ? `1px solid ${color.rust}` : card.border,
+          }}
+        >
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Support inbox</span>
+          {newFromCustomers > 0 && (
+            <button
+              onClick={() => navigate('/tickets')}
+              style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                fontSize: 13, fontWeight: 700, color: '#fff', background: color.rust,
+                border: 'none', borderRadius: radius.md, padding: '8px 11px', cursor: 'pointer',
+                font: 'inherit', textAlign: 'left', width: '100%',
+              }}
+            >
+              <span>New from customers</span>
+              <span style={{ fontFamily: font.mono }}>{newFromCustomers}</span>
+            </button>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
               <span>Open tickets</span>

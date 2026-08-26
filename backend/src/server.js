@@ -1883,8 +1883,8 @@ app.post('/portal/support', wrap(async (req, res) => {
   const body = String(req.body?.body ?? '').trim().slice(0, 2000);
 
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
-     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium')
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, source)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium', 'portal')
      returning id, number`, [s.tenant_id, subject, s.subscriber_id]);
   if (body) {
     // internal=false: this is the customer's own account of the problem,
@@ -1931,9 +1931,9 @@ app.post('/portal/request-plan-change', wrap(async (req, res) => {
   if (!plan) return res.status(404).json({ error: 'That plan is not available.' });
 
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, source)
      values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6),
-             $2, $3, 'medium')
+             $2, $3, 'medium', 'portal')
      returning id, number`,
     [s.tenant_id, `Plan change request: ${s.plan_title ?? 'current plan'} → ${plan.title}`, s.subscriber_id]);
   await pool.query(
