@@ -26,6 +26,13 @@ const card = {
   minWidth: 0,
 };
 
+const Row = ({ k, v }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13.5 }}>
+    <span style={{ color: color.muted }}>{k}</span>
+    <span style={{ fontWeight: 600 }}>{v}</span>
+  </div>
+);
+
 const Tile = ({ label, value, hint, dim }) => (
   <div style={card}>
     <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>{label}</span>
@@ -134,6 +141,7 @@ export default function Payments() {
   };
 
   const [invoiceForm, setInvoiceForm] = useState(null);
+  const [invoiceView, setInvoiceView] = useState(null);
   const [recordForm, setRecordForm] = useState(null);
   const [reconcileText, setReconcileText] = useState(null);
 
@@ -141,19 +149,42 @@ export default function Payments() {
     if (!invoiceForm.amount) return store.toast('Enter an amount');
     if (!invoiceForm.reason?.trim()) return store.toast('Say what this invoice is for');
     try {
-      const made = await api.createInvoice({
-        subscriberId: invoiceForm.subscriberId || null,
-        planId: invoiceForm.planId || null,
-        amount: Number(invoiceForm.amount),
-        dueDate: invoiceForm.dueDate || new Date().toISOString().slice(0, 10),
-        reason: invoiceForm.reason.trim(),
-      });
-      store.setCollection('invoices', (xs) => [made, ...xs]);
-      store.toast(`${made.number} raised for KES ${kes(made.amount)}`);
+      if (invoiceForm.id) {
+        const saved = await api.updateInvoice(invoiceForm.id, {
+          amount: Number(invoiceForm.amount),
+          dueDate: invoiceForm.dueDate || undefined,
+          reason: invoiceForm.reason.trim(),
+          status: invoiceForm.paid ? 'paid' : (invoiceForm.status === 'paid' ? 'open' : invoiceForm.status),
+        });
+        store.setCollection('invoices', (xs) => xs.map((x) => (x.id === saved.id ? saved : x)));
+        store.toast(`${saved.number} updated`);
+      } else {
+        const made = await api.createInvoice({
+          subscriberId: invoiceForm.subscriberId || null,
+          planId: invoiceForm.planId || null,
+          amount: Number(invoiceForm.amount),
+          dueDate: invoiceForm.dueDate || new Date().toISOString().slice(0, 10),
+          reason: invoiceForm.reason.trim(),
+          paid: invoiceForm.paid,
+        });
+        store.setCollection('invoices', (xs) => [made, ...xs]);
+        store.toast(`${made.number} raised for KES ${kes(made.amount)}`);
+      }
       setInvoiceForm(null);
       setTab('invoices');
     } catch (e) {
-      store.toast(`Could not create: ${e.message}`);
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
+
+  const deleteInvoice = async (inv) => {
+    if (!window.confirm(`Delete invoice ${inv.number}? This cannot be undone.`)) return;
+    try {
+      await api.deleteInvoice(inv.id);
+      store.setCollection('invoices', (xs) => xs.filter((x) => x.id !== inv.id));
+      store.toast(`${inv.number} deleted`);
+    } catch (e) {
+      store.toast(`Could not delete: ${e.message}`);
     }
   };
 
@@ -234,7 +265,7 @@ export default function Payments() {
       subtitle="Confirmed payments are matched and applied automatically. Anything ambiguous waits here."
       actions={
         <>
-          <Button variant="primary" onClick={() => setInvoiceForm({ subscriberId: '', planId: '', amount: '', dueDate: '', reason: '' })}>
+          <Button variant="primary" onClick={() => setInvoiceForm({ subscriberId: '', planId: '', amount: '', dueDate: '', reason: '', paid: false })}>
             + Create invoice
           </Button>
           <Button
@@ -421,6 +452,24 @@ export default function Payments() {
                 { key: 'paid', label: 'Paid', align: 'right', render: (r) => money(r.paid) },
                 { key: 'due_date', label: 'Due', render: (r) => (r.due_date ? new Date(r.due_date).toLocaleDateString('en-KE') : '—') },
                 { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+                {
+                  key: 'actions', label: '', align: 'right',
+                  render: (r) => (
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                      <Button onClick={() => setInvoiceView(r)}>View</Button>
+                      <Button
+                        onClick={() => setInvoiceForm({
+                          id: r.id, subscriberId: r.subscriber_id ?? '', planId: r.plan_id ?? '',
+                          amount: String(r.amount), dueDate: (r.due_date ?? '').slice(0, 10),
+                          reason: r.reason ?? '', status: r.status, paid: r.status === 'paid',
+                        })}
+                      >
+                        Edit
+                      </Button>
+                      <Button onClick={() => deleteInvoice(r)}>Delete</Button>
+                    </div>
+                  ),
+                },
               ]}
             />
           )}
@@ -601,27 +650,41 @@ export default function Payments() {
 
       <Modal
         open={!!invoiceForm}
-        title="Create invoice"
+        title={invoiceForm?.id ? `Edit ${invoiceForm.number ?? 'invoice'}` : 'Create invoice'}
         onClose={() => setInvoiceForm(null)}
         footer={
           <>
             <Button onClick={() => setInvoiceForm(null)}>Cancel</Button>
-            <Button variant="primary" onClick={createInvoice}>Raise invoice</Button>
+            <Button variant="primary" onClick={createInvoice}>{invoiceForm?.id ? 'Save changes' : 'Raise invoice'}</Button>
           </>
         }
       >
         {invoiceForm && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Field label="Client">
-              <Select
-                value={invoiceForm.subscriberId}
-                onChange={(e) => setInvoiceForm((s) => ({ ...s, subscriberId: e.target.value }))}
-                options={[
-                  { value: '', label: 'Not client-specific' },
-                  ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
-                ]}
-              />
-            </Field>
+            {!invoiceForm.id && (
+              <>
+                <Field label="Client">
+                  <Select
+                    value={invoiceForm.subscriberId}
+                    onChange={(e) => setInvoiceForm((s) => ({ ...s, subscriberId: e.target.value }))}
+                    options={[
+                      { value: '', label: 'Not client-specific' },
+                      ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
+                    ]}
+                  />
+                </Field>
+                <Field label="Plan" hint="Optional — links this invoice to a specific bundle">
+                  <Select
+                    value={invoiceForm.planId}
+                    onChange={(e) => setInvoiceForm((s) => ({ ...s, planId: e.target.value }))}
+                    options={[
+                      { value: '', label: 'Not plan-specific' },
+                      ...(store.plans ?? []).map((p) => ({ value: p.id, label: `${p.title} (${p.service})` })),
+                    ]}
+                  />
+                </Field>
+              </>
+            )}
             <Field label="Reason" hint="What this invoice is for — shown to whoever looks at it later">
               <Textarea
                 value={invoiceForm.reason}
@@ -630,22 +693,41 @@ export default function Payments() {
                 placeholder="e.g. Router relocation callout fee, or Equipment deposit"
               />
             </Field>
-            <Field label="Plan" hint="Optional — links this invoice to a specific bundle">
-              <Select
-                value={invoiceForm.planId}
-                onChange={(e) => setInvoiceForm((s) => ({ ...s, planId: e.target.value }))}
-                options={[
-                  { value: '', label: 'Not plan-specific' },
-                  ...(store.plans ?? []).map((p) => ({ value: p.id, label: p.title })),
-                ]}
-              />
-            </Field>
             <Field label="Amount (KES)">
               <Input type="number" value={invoiceForm.amount} onChange={(e) => setInvoiceForm((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
-            <Field label="Due date" hint="Defaults to today">
+            <Field label="Due date" hint={invoiceForm.id ? undefined : 'Defaults to today'}>
               <Input type="date" value={invoiceForm.dueDate} onChange={(e) => setInvoiceForm((s) => ({ ...s, dueDate: e.target.value }))} />
             </Field>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={!!invoiceForm.paid}
+                onChange={(e) => setInvoiceForm((s) => ({ ...s, paid: e.target.checked }))}
+              />
+              {invoiceForm.id
+                ? 'Mark as paid (unticking returns it to open)'
+                : 'Already paid — record it as settled rather than something still owed'}
+            </label>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!invoiceView}
+        title={invoiceView?.number ?? 'Invoice'}
+        onClose={() => setInvoiceView(null)}
+        footer={<Button onClick={() => setInvoiceView(null)}>Close</Button>}
+      >
+        {invoiceView && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <Row k="Reason" v={invoiceView.reason || '—'} />
+            <Row k="Amount" v={money(invoiceView.amount)} />
+            <Row k="Paid so far" v={money(invoiceView.paid)} />
+            <Row k="Outstanding" v={money(Number(invoiceView.amount) - Number(invoiceView.paid))} />
+            <Row k="Due" v={invoiceView.due_date ? new Date(invoiceView.due_date).toLocaleDateString('en-KE') : '—'} />
+            <Row k="Status" v={<Badge tone={invoiceView.status}>{invoiceView.status}</Badge>} />
+            <Row k="Raised" v={invoiceView.created_at ? new Date(invoiceView.created_at).toLocaleString('en-KE') : '—'} />
           </div>
         )}
       </Modal>

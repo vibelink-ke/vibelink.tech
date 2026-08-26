@@ -28,7 +28,7 @@ export async function applyPayment(tenantId, tx) {
     }
 
     if (target.type === 'subscriber') {
-      const r = await settleSubscriber(c, tenantId, target.id, tx.amount, paymentId);
+      const r = await settleSubscriber(c, tenantId, target.id, tx.amount, paymentId, target.invoiceId ?? null);
       await activateSubscriber(c, tenantId, target.id);
       await send(tenantId, tx.phone, 'receipt', { amount: tx.amount, code: tx.ref, ...r });
       return { paymentId, applied: true, ...r };
@@ -129,7 +129,7 @@ export async function applyPayment(tenantId, tx) {
  * payment regardless of size: a partial payment does not yet entitle
  * anyone to service, only to a bigger balance.
  */
-async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
+async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId = null) {
   /**
    * `for update` on the subscriber row — without it, two payments landing
    * close together (a portal STK and an operator keying in the same
@@ -148,9 +148,16 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
     'select s.*, p.price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1 for update of s',
     [subId]
   );
+  // A specific invoice — the portal's own "pay this invoice" flow, or the
+  // staff STK push when raised against one — wins over the usual "earliest
+  // due" default; it must still belong to this subscriber and still be
+  // outstanding, since neither side re-checks that between the STK prompt
+  // going out and this callback landing.
   const { rows: [inv] } = await c.query(
-    "select * from invoices where subscriber_id=$1 and status in ('open','partial') order by due_date limit 1",
-    [subId]
+    invoiceId
+      ? "select * from invoices where id=$2 and subscriber_id=$1 and status in ('open','partial')"
+      : "select * from invoices where subscriber_id=$1 and status in ('open','partial') order by due_date limit 1",
+    invoiceId ? [subId, invoiceId] : [subId]
   );
   const available = Number(amount) + Number(sub.credit);
   const price = Number(inv?.amount ?? sub.price);

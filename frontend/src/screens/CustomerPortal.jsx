@@ -31,7 +31,9 @@ const api = {
   changePassword: (currentPassword, newPassword) =>
     api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
   usage: () => api.call('GET', '/portal/usage'),
-  pay: (phone) => api.call('POST', '/portal/pay', { phone }),
+  pay: (phone, amount) => api.call('POST', '/portal/pay', { phone, amount }),
+  payInvoice: (invoiceNumber, phone, amount) =>
+    api.call('POST', '/portal/pay-invoice', { invoiceNumber, phone, amount }),
   payStatus: (checkoutId) => api.call('GET', `/portal/status/${checkoutId}`),
 };
 
@@ -198,8 +200,15 @@ export default function CustomerPortal() {
   // the paybill and account number into the M-Pesa menu by hand.
   const [payOpen, setPayOpen] = useState(false);
   const [payPhone, setPayPhone] = useState('');
+  // Blank means "the default" (plan price, or an invoice's own outstanding
+  // balance) — a customer overrides it to pay ahead, top up a partial
+  // balance, or clear more than one cycle at once.
+  const [payAmount, setPayAmount] = useState('');
   const [payBusy, setPayBusy] = useState(false);
   const [payMsg, setPayMsg] = useState('');
+  // null = the ordinary "renew now" flow; an invoice object = paying that
+  // specific invoice instead, which the Invoices list below sets.
+  const [payTarget, setPayTarget] = useState(null);
   const payPoll = React.useRef(null);
   useEffect(() => () => clearInterval(payPoll.current), []);
 
@@ -365,7 +374,10 @@ export default function CustomerPortal() {
     setPayBusy(true);
     setPayMsg('');
     try {
-      const r = await api.pay(payPhone);
+      const amount = payAmount.trim() ? Number(payAmount) : undefined;
+      const r = payTarget
+        ? await api.payInvoice(payTarget.number, payPhone, amount)
+        : await api.pay(payPhone, amount);
       setPayMsg('Check your phone and enter your M-Pesa PIN.');
       clearInterval(payPoll.current);
       let elapsed = 0;
@@ -734,18 +746,37 @@ export default function CustomerPortal() {
         {me.invoices?.length > 0 && (
           <div style={card}>
             <span style={{ fontSize: 14, fontWeight: 700 }}>Invoices</span>
-            {me.invoices.map((inv) => (
-              <div key={inv.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600 }}>{inv.number}</span>
-                  <span style={{ fontSize: 12, color: pc.muted }}>
-                    Due {new Date(inv.due_date).toLocaleDateString('en-KE')} · KES {inv.amount}
-                    {Number(inv.paid) > 0 ? ` (KES ${inv.paid} paid)` : ''}
-                  </span>
+            {me.invoices.map((inv) => {
+              const owed = Number(inv.amount) - Number(inv.paid);
+              const payable = ['open', 'partial'].includes(inv.status) && owed > 0;
+              return (
+                <div key={inv.number} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600 }}>{inv.number}</span>
+                    <span style={{ fontSize: 12, color: pc.muted }}>
+                      Due {new Date(inv.due_date).toLocaleDateString('en-KE')} · KES {inv.amount}
+                      {Number(inv.paid) > 0 ? ` (KES ${inv.paid} paid)` : ''}
+                    </span>
+                  </div>
+                  {payable ? (
+                    <button
+                      style={{ ...button(true), padding: '6px 12px', fontSize: 13 }}
+                      onClick={() => {
+                        setPayTarget({ number: inv.number, owed });
+                        setPayAmount('');
+                        setPayPhone(payPhone || String(me.phone ?? ''));
+                        setPayOpen(true);
+                        setPayMsg('');
+                      }}
+                    >
+                      Pay
+                    </button>
+                  ) : (
+                    <Badge text={inv.status} tone={INVOICE_TONE[inv.status]} />
+                  )}
                 </div>
-                <Badge text={inv.status} tone={INVOICE_TONE[inv.status]} />
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -776,11 +807,19 @@ export default function CustomerPortal() {
               nowhere findable. Pushing a prompt to the number on file skips
               that step entirely for anyone who would rather not risk it. */}
           {me.service === 'pppoe' && (!payOpen ? (
-            <button style={{ ...button(true), marginTop: 4 }} onClick={() => { setPayOpen(true); setPayMsg(''); }}>
+            <button
+              style={{ ...button(true), marginTop: 4 }}
+              onClick={() => { setPayOpen(true); setPayTarget(null); setPayAmount(''); setPayMsg(''); }}
+            >
               Pay now via M-Pesa
             </button>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+              {payTarget && (
+                <span style={{ fontSize: 12.5, color: pc.accent, fontWeight: 600 }}>
+                  Paying invoice {payTarget.number}
+                </span>
+              )}
               <label style={{ fontSize: 13, color: pc.muted }}>M-Pesa number to pay from</label>
               <input
                 style={input}
@@ -791,10 +830,23 @@ export default function CustomerPortal() {
                 placeholder="254712345678"
                 disabled={payBusy}
               />
+              <label style={{ fontSize: 13, color: pc.muted }}>
+                Amount — leave blank for {payTarget ? 'the balance owed' : 'your plan price'}
+              </label>
+              <input
+                style={input}
+                type="number"
+                inputMode="decimal"
+                value={payAmount}
+                onChange={(e) => setPayAmount(e.target.value)}
+                placeholder={String(payTarget ? payTarget.owed : me.plan?.price ?? '')}
+                disabled={payBusy}
+              />
               <button style={button(true)} onClick={payNow} disabled={payBusy || !payPhone}>
-                {payBusy ? 'Waiting…' : `Send prompt for KES ${me.plan?.price ?? ''}`}
+                {payBusy ? 'Waiting…' : `Send prompt for KES ${payAmount.trim() || (payTarget ? payTarget.owed : me.plan?.price) || ''}`}
               </button>
               {payMsg && <span style={{ fontSize: 13, color: pc.muted }}>{payMsg}</span>}
+              <button style={button(false)} onClick={() => { setPayOpen(false); setPayTarget(null); }}>Cancel</button>
             </div>
           ))}
         </div>

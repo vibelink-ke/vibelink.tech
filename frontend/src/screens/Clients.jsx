@@ -1087,7 +1087,16 @@ export default function Clients() {
               <Select
                 value={editing.plan_id ?? ''}
                 onChange={(e) => setEditing((s) => ({ ...s, plan_id: e.target.value }))}
-                options={[{ value: '', label: 'No plan' }, ...(store.plans ?? []).map((p) => ({ value: p.id, label: p.title }))]}
+                options={[
+                  { value: '', label: 'No plan' },
+                  // Only this client's own service — a hotspot bundle offered
+                  // to a PPPoE line (or the reverse) doesn't mean anything:
+                  // issueVoucherAccess/activateSubscriber each only ever
+                  // provision the one they're built for.
+                  ...(store.plans ?? [])
+                    .filter((p) => p.service === editing.service)
+                    .map((p) => ({ value: p.id, label: p.title })),
+                ]}
               />
             </Field>
             <Field label="Status">

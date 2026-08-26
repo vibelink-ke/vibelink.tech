@@ -107,7 +107,12 @@ export default function AddClient() {
     setF((s) => ({ ...s, [k]: e.target.value.replace(/\D/g, '').slice(0, max) }));
 
   const [busy, setBusy] = useState(false);
-  const pppoePlans = (store.plans ?? []).filter((p) => p.service === 'pppoe');
+  // Named for what it was always used for (a PPPoE-only client form), but
+  // this screen also creates hotspot clients via the Service type selector
+  // below — a hotspot client offered PPPoE plans (or the reverse) is not a
+  // choice, since neither activateSubscriber nor a hotspot voucher can use
+  // the other service's plan at all.
+  const pppoePlans = (store.plans ?? []).filter((p) => p.service === f.service);
 
   /**
    * A real account number from the moment the form opens, not just its
@@ -345,14 +350,19 @@ export default function AddClient() {
               label="Service type"
               hint={linkedAccount ? 'A second line on this account is PPPoE — hotspot vouchers don\'t use an account number' : undefined}
             >
-              <Select value={f.service} onChange={set('service')} options={SERVICES} disabled={!!linkedAccount} />
+              <Select
+                value={f.service}
+                onChange={(e) => setF((s) => ({ ...s, service: e.target.value, planId: '' }))}
+                options={SERVICES}
+                disabled={!!linkedAccount}
+              />
             </Field>
             <Field label="Plan" hint="subscribers.plan_id — drives the RADIUS rate limit and billing cycle">
               <Select
                 value={f.planId}
                 onChange={set('planId')}
                 options={[
-                  { value: '', label: pppoePlans.length ? 'Select a plan…' : 'No PPPoE plans created yet' },
+                  { value: '', label: pppoePlans.length ? 'Select a plan…' : `No ${f.service} plans created yet` },
                   ...pppoePlans.map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
                 ]}
               />

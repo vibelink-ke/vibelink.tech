@@ -1785,9 +1785,13 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
     return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
   }
 
-  const amount = Number(sub.plan_price);
-  if (!(amount > 0)) {
-    return res.status(400).json({ error: 'No plan is set on this account yet — contact support.' });
+  // Defaults to the plan price, but a customer can name their own amount —
+  // paying ahead, topping up a partial balance, or clearing more than one
+  // cycle at once. Capped generously just to catch a typo (an extra zero)
+  // before it becomes an STK prompt for someone's life savings.
+  const amount = req.body?.amount != null ? Number(req.body.amount) : Number(sub.plan_price);
+  if (!(amount > 0) || amount > 1_000_000) {
+    return res.status(400).json({ error: 'Enter a valid amount to pay.' });
   }
 
   try {
@@ -1795,7 +1799,73 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
       phone, amount, accountRef: sub.account_code,
       description: `${sub.name} — ${sub.account_code}`,
     });
-    res.json({ phone, amount, checkoutId: data?.CheckoutRequestID ?? null });
+    const checkoutId = data?.CheckoutRequestID ?? null;
+    // Daraja's STK result callback (handleStkResult) looks this row up by
+    // checkout_id to know who to credit and how much — without it, a
+    // customer's own renewal payment could only ever be applied by the
+    // separate C2B confirmation matching their account number, and
+    // /portal/status/:checkoutId (what the page polls) had nothing to read
+    // back, sitting on "check your phone" even after Safaricom answered.
+    if (checkoutId) {
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [s.tenant_id, checkoutId, phone, amount, { subscriber_id: s.subscriber_id }]);
+    }
+    res.json({ phone, amount, checkoutId });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/**
+ * Pay a specific invoice rather than "renew now" — the two differ when a
+ * customer has more than one open invoice (a top-up alongside their normal
+ * renewal, say) and wants to settle a particular one rather than whichever
+ * settleSubscriber would otherwise pick (earliest due).
+ */
+app.post('/portal/pay-invoice', stkLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+
+  const number = String(req.body?.invoiceNumber ?? '').trim();
+  const { rows: [inv] } = await pool.query(
+    `select id, number, amount, paid from invoices
+      where tenant_id=$1 and subscriber_id=$2 and number=$3 and status in ('open','partial')`,
+    [s.tenant_id, s.subscriber_id, number]);
+  if (!inv) return res.status(404).json({ error: 'That invoice was not found, or is already settled.' });
+
+  const owed = Number(inv.amount) - Number(inv.paid);
+  // Same "let them name it" reasoning as /portal/pay — a partial payment
+  // toward this invoice is legitimate, not just paying it off in full.
+  const amount = req.body?.amount != null ? Number(req.body.amount) : owed;
+  if (!(amount > 0) || amount > 1_000_000) {
+    return res.status(400).json({ error: 'Enter a valid amount to pay.' });
+  }
+
+  let phone = String(req.body?.phone ?? s.phone ?? '').trim();
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  try {
+    const data = await mpesa.stkPush(s.tenant_id, {
+      phone, amount, accountRef: s.account_code,
+      description: `Invoice ${inv.number}`,
+    });
+    const checkoutId = data?.CheckoutRequestID ?? null;
+    if (checkoutId) {
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        // invoice_id: settleSubscriber applies to this exact invoice when
+        // present, rather than falling back to "earliest open".
+        [s.tenant_id, checkoutId, phone, amount, { subscriber_id: s.subscriber_id, invoice_id: inv.id }]);
+    }
+    res.json({ phone, amount, checkoutId });
   } catch (e) {
     res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
   }
@@ -5314,17 +5384,79 @@ app.get('/api/invoices', wrap(async (req, res) => {
   res.json(rows);
 }));
 
+/**
+ * A "paid" invoice at creation is for recording something already settled —
+ * a cash payment taken on-site, a historical invoice being backfilled — not
+ * a new charge waiting to be collected. paid is set to the full amount
+ * rather than left at 0, since a paid invoice showing "0 of 5000 paid"
+ * would read as still owed everywhere the amount/paid pair is displayed.
+ */
 app.post('/api/invoices', wrap(async (req, res) => {
-  const { subscriberId, amount, dueDate, reason, planId } = req.body;
+  const { subscriberId, amount, dueDate, reason, planId, paid } = req.body;
   if (!reason || !String(reason).trim()) {
     return res.status(400).json({ error: 'Say what this invoice is for' });
   }
+  const isPaid = !!paid;
   const { rows: [i] } = await pool.query(
-    `insert into invoices (tenant_id, subscriber_id, plan_id, number, amount, due_date, reason)
-     values ($1,$2,$3,'INV-' || to_char(now(),'YYMM') || '-' || substr(gen_random_uuid()::text,1,6),$4,$5,$6)
+    `insert into invoices (tenant_id, subscriber_id, plan_id, number, amount, paid, status, due_date, reason)
+     values ($1, $2, $3,
+             -- No random suffix, no dashes: INV + the date + a per-day
+             -- sequence number, so two invoices raised the same day read as
+             -- 001/002 rather than an unreadable hex tail nobody could ever
+             -- read back over the phone.
+             'INV' || to_char(now(),'YYMMDD') ||
+               lpad((
+                 select count(*) + 1 from invoices
+                  where tenant_id=$1 and number like 'INV' || to_char(now(),'YYMMDD') || '%'
+               )::text, 3, '0'),
+             $4, $5, $6, $7, $8)
      returning *`,
-    [req.tenant.id, subscriberId ?? null, planId ?? null, amount, dueDate, String(reason).trim()]);
+    [req.tenant.id, subscriberId ?? null, planId ?? null, amount,
+     isPaid ? amount : 0, isPaid ? 'paid' : 'open', dueDate, String(reason).trim()]);
   res.json(i);
+}));
+
+app.put('/api/invoices/:id', wrap(async (req, res) => {
+  const { amount, dueDate, reason, status } = req.body;
+  const { rows: [existing] } = await pool.query(
+    'select * from invoices where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!existing) return res.status(404).json({ error: 'No such invoice' });
+  if (status && !['open', 'partial', 'paid', 'void'].includes(status)) {
+    return res.status(400).json({ error: 'Invalid status' });
+  }
+  const { rows: [i] } = await pool.query(
+    `update invoices set
+       amount = coalesce($3, amount),
+       due_date = coalesce($4, due_date),
+       reason = coalesce(nullif($5, ''), reason),
+       -- Marking an invoice paid by hand (a cash payment, a correction) sets
+       -- paid to the full amount too — the same reasoning as create above,
+       -- so status and the amount/paid pair never disagree with each other.
+       paid = case when $6 = 'paid' then coalesce($3, amount) else paid end,
+       status = coalesce(nullif($6, ''), status)
+     where id=$1 and tenant_id=$2
+     returning *`,
+    [req.params.id, req.tenant.id, amount ?? null, dueDate ?? null, reason ?? '', status ?? '']);
+  res.json(i);
+}));
+
+/**
+ * Refused once a real payment has landed against it — deleting the invoice
+ * would leave that payments row pointing at nothing, and the money already
+ * collected with no record of what it was for. void the invoice instead
+ * (PUT status=void) if it needs to stop counting toward what's owed.
+ */
+app.delete('/api/invoices/:id', wrap(async (req, res) => {
+  const { rows: [existing] } = await pool.query(
+    'select paid from invoices where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!existing) return res.status(404).json({ error: 'No such invoice' });
+  if (Number(existing.paid) > 0) {
+    return res.status(409).json({
+      error: 'This invoice has a payment applied to it — void it instead of deleting, so that payment stays accounted for.',
+    });
+  }
+  await pool.query('delete from invoices where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  res.json({ ok: true });
 }));
 
 /**
