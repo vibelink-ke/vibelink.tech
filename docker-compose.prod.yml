@@ -92,10 +92,16 @@ services:
       R2_BUCKET: ${R2_BUCKET:-vibelink-db-backups}
       # WireGuard onboarding. Optional: without them the button says what to set
       # rather than minting a peer that could never hand shake. The endpoint is
-      # where routers dial, and the public key is the server's own — the private
-      # key stays in the wireguard container and never reaches the API.
+      # where routers dial; the public key is handed to routers so they can
+      # verify us. The private key has to be here too, not just in the
+      # wireguard container — wireguard.js's syncServer() is what renders
+      # wg0.conf's whole [Interface] block (api is the only side that knows
+      # about every wg_peers row), and a config missing its own private key
+      # is not valid, which is why the wireguard container previously logged
+      # "doesn't seem to be valid, skipping" even once a peer existed.
       WG_ENDPOINT: ${WG_ENDPOINT:-}
       WG_SERVER_PUBLIC_KEY: ${WG_SERVER_PUBLIC_KEY:-}
+      WG_SERVER_PRIVATE_KEY: ${WG_SERVER_PRIVATE_KEY:-}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
     volumes:
