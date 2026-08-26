@@ -1523,12 +1523,20 @@ create table if not exists referrers (
   commission_rate  numeric(12,2) not null default 0,
   notes            text,
   created_at       timestamptz not null default now(),
-  constraint referrers_commission_type_valid check (commission_type in ('percent','fixed')),
-  -- A referrer is staff, an existing customer, or external — never both a
-  -- staff row and a customer row at once, which would just be ambiguous
-  -- about which relationship actually earned the commission.
-  constraint referrers_not_both_staff_and_subscriber check (not (staff_id is not null and subscriber_id is not null))
+  constraint referrers_commission_type_valid check (commission_type in ('percent','fixed'))
 );
+-- referrers was first created without subscriber_id (staff and external
+-- referrers only) — added when customers were let refer their own friends.
+-- create table if not exists is a no-op on a database where the narrower
+-- version already ran, so the column and its constraint have to be added
+-- here explicitly rather than only in the table definition above.
+alter table referrers add column if not exists subscriber_id uuid references subscribers on delete set null;
+alter table referrers drop constraint if exists referrers_not_both_staff_and_subscriber;
+-- A referrer is staff, an existing customer, or external — never both a
+-- staff row and a customer row at once, which would just be ambiguous
+-- about which relationship actually earned the commission.
+alter table referrers add constraint referrers_not_both_staff_and_subscriber
+  check (not (staff_id is not null and subscriber_id is not null));
 create index if not exists referrers_tenant_id_idx on referrers (tenant_id);
 -- Both looked up whenever a referrer is created or edited, to confirm the
 -- staff/customer row actually belongs to this tenant — a sequential scan of
