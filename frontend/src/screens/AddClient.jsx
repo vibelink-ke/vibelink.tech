@@ -47,10 +47,20 @@ export default function AddClient() {
   // account, a new line tag, not a new customer) and their name/phone come
   // along so this is one field — the tag — rather than the whole form again.
   const linkedAccount = params.get('account') ?? '';
+  // Arrived from a won lead instead: no account to link, just a name/phone/
+  // referrer already known and not worth retyping. referredBy carries
+  // straight through to createSubscriber's referredBy in save() below.
+  const fromLeadReferrer = params.get('referredBy') ?? '';
   const [f, setF] = useState(() => {
-    if (!linkedAccount) return BLANK;
-    const [firstName = '', ...rest] = (params.get('name') ?? '').trim().split(/\s+/);
-    return { ...BLANK, account: linkedAccount, firstName, lastName: rest.join(' '), phone: params.get('phone') ?? '' };
+    if (linkedAccount) {
+      const [firstName = '', ...rest] = (params.get('name') ?? '').trim().split(/\s+/);
+      return { ...BLANK, account: linkedAccount, firstName, lastName: rest.join(' '), phone: params.get('phone') ?? '' };
+    }
+    if (params.get('name') || params.get('phone')) {
+      const [firstName = '', ...rest] = (params.get('name') ?? '').trim().split(/\s+/);
+      return { ...BLANK, firstName, lastName: rest.join(' '), phone: params.get('phone') ?? '', referredBy: fromLeadReferrer };
+    }
+    return BLANK;
   });
   const [differentCustomer, setDifferentCustomer] = useState(false);
 

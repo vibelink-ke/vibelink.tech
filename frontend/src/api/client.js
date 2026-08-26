@@ -141,6 +141,8 @@ export const api = {
   createLead: (l) => post('/api/leads', l),
   updateLead: (id, patchBody) => patch(`/api/leads/${id}`, patchBody),
   deleteLead: (id) => del(`/api/leads/${id}`),
+  leadNotes: (id) => get(`/api/leads/${id}/notes`),
+  addLeadNote: (id, body) => post(`/api/leads/${id}/notes`, { body }),
 
   referrers: () => get('/api/referrers'),
   createReferrer: (r) => post('/api/referrers', r),

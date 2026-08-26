@@ -2360,16 +2360,17 @@ async function referrerForSubscriber(tenantId, subscriberId) {
 
 app.get('/api/leads', async (req, res) => {
   const { rows } = await pool.query(
-    `select l.*, r.name as referrer_name
+    `select l.*, r.name as referrer_name, st.name as assignee_name
        from leads l
        left join referrers r on r.id = l.referrer_id
+       left join staff st on st.id = l.assigned_to
       where l.tenant_id=$1
       order by l.created_at desc`,
     [req.tenant.id]);
   res.json(rows);
 });
 app.post('/api/leads', async (req, res) => {
-  const { name, phone, source, referrerId, referredByClientId } = req.body;
+  const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp } = req.body;
 
   let referrer = null;
   if (referrerId) {
@@ -2384,11 +2385,43 @@ app.post('/api/leads', async (req, res) => {
     referrer = await referrerForSubscriber(req.tenant.id, referredByClientId);
   }
 
+  if (assignedTo) {
+    const { rowCount } = await pool.query(
+      'select 1 from staff where id=$1 and tenant_id=$2', [assignedTo, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+
   const { rows: [l] } = await pool.query(
-    'insert into leads (tenant_id, name, phone, source, referrer_id) values ($1,$2,$3,$4,$5) returning *',
-    [req.tenant.id, name, phone, source ?? 'manual', referrer]);
+    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [req.tenant.id, name, phone, source ?? 'manual', referrer, assignedTo || null, nextFollowUp || null]);
   res.json(l);
 });
+
+app.get('/api/leads/:id/notes', wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    'select 1 from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  const { rows } = await pool.query(
+    'select * from lead_notes where tenant_id=$1 and lead_id=$2 order by at', [req.tenant.id, req.params.id]);
+  res.json(rows);
+}));
+
+app.post('/api/leads/:id/notes', wrap(async (req, res) => {
+  const { body } = req.body ?? {};
+  if (!String(body ?? '').trim()) return res.status(400).json({ error: 'Write something first' });
+  // Same tenant-ownership check as ticket_notes — lead_notes.lead_id is a
+  // plain FK to leads(id), not composite, so this is the only thing
+  // standing between a staff member on any tenant and writing into another
+  // tenant's pipeline.
+  const { rowCount } = await pool.query(
+    'select 1 from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  const { rows: [n] } = await pool.query(
+    `insert into lead_notes (tenant_id, lead_id, author, body) values ($1,$2,$3,$4) returning *`,
+    [req.tenant.id, req.params.id, req.session?.name ?? 'system', body]);
+  res.json(n);
+}));
 
 /**
  * Referrers — staff or outsiders who bring in clients and earn a one-time
@@ -5505,7 +5538,7 @@ app.patch('/api/leads/:id', wrap(async (req, res) => {
     req.body.referrer_id = await referrerForSubscriber(req.tenant.id, req.body.referred_by_client_id);
   }
 
-  const allowed = ['status', 'name', 'phone', 'source', 'referrer_id'];
+  const allowed = ['status', 'name', 'phone', 'source', 'referrer_id', 'assigned_to', 'next_follow_up'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
 
@@ -5513,6 +5546,11 @@ app.patch('/api/leads/:id', wrap(async (req, res) => {
     const { rowCount } = await pool.query(
       'select 1 from referrers where id=$1 and tenant_id=$2', [req.body.referrer_id, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
+  }
+  if (sets.includes('assigned_to') && req.body.assigned_to) {
+    const { rowCount } = await pool.query(
+      'select 1 from staff where id=$1 and tenant_id=$2', [req.body.assigned_to, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
   }
 
   const { rows: [l] } = await pool.query(

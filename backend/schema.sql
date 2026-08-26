@@ -1562,3 +1562,26 @@ create table if not exists referral_commissions (
 );
 create index if not exists referral_commissions_tenant_id_idx on referral_commissions (tenant_id);
 create index if not exists referral_commissions_referrer_id_idx on referral_commissions (referrer_id);
+
+-- ─────────────── lead follow-up, assignment, notes ───────────────
+-- Every write-up on what a real lead pipeline needs beyond a stage and a
+-- source agrees on the same three things: who owns it, when to touch it
+-- next, and a running record of what's actually happened — a pipeline with
+-- none of those is a list, not a pipeline.
+alter table leads add column if not exists assigned_to    uuid references staff on delete set null;
+alter table leads add column if not exists next_follow_up timestamptz;
+create index if not exists leads_assigned_to_idx on leads (assigned_to) where assigned_to is not null;
+create index if not exists leads_next_follow_up_idx on leads (next_follow_up) where next_follow_up is not null;
+
+-- Same shape as ticket_notes — one append-only history per lead rather than
+-- a single "notes" text field that only ever remembers the last thing
+-- anyone typed over whatever was there before.
+create table if not exists lead_notes (
+  id        uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references tenants on delete cascade,
+  lead_id   uuid not null references leads on delete cascade,
+  author    text,
+  body      text not null,
+  at        timestamptz not null default now()
+);
+create index if not exists lead_notes_lead_idx on lead_notes (lead_id, at);

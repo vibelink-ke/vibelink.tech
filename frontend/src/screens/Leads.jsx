@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -24,7 +25,12 @@ const referrerTypeTone = (t) =>
     : t === 'customer' ? { bg: color.amberBg, fg: color.amberInk }
     : { bg: '#e2ebe5', fg: color.green };
 
-const LEAD_BLANK = { name: '', phone: '', source: 'manual', referredBy: '' };
+const LEAD_BLANK = { name: '', phone: '', source: 'manual', referredBy: '', assignedTo: '', nextFollowUp: '' };
+
+/** yyyy-mm-dd for a date <input>, from whatever ISO string the API sent. */
+const toDateInput = (iso) => (iso ? String(iso).slice(0, 10) : '');
+const isOverdue = (iso) => !!iso && new Date(iso) < new Date(new Date().toDateString());
+const isDueToday = (iso) => !!iso && toDateInput(iso) === toDateInput(new Date().toISOString());
 const REFERRER_BLANK = { name: '', phone: '', refType: 'external', staffId: '', subscriberId: '', commissionType: 'percent', commissionRate: '', notes: '' };
 
 /**
@@ -35,6 +41,7 @@ const REFERRER_BLANK = { name: '', phone: '', refType: 'external', staffId: '', 
  */
 export default function Leads() {
   const store = useStore();
+  const navigate = useNavigate();
   const [tab, setTab] = useState('pipeline');
 
   const leads = store.leads ?? [];
@@ -46,6 +53,9 @@ export default function Leads() {
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadEdit, setLeadEdit] = useState(null);
   const [leadViewing, setLeadViewing] = useState(null);
+  const [leadNotes, setLeadNotes] = useState(null);
+  const [noteText, setNoteText] = useState('');
+  const [noteBusy, setNoteBusy] = useState(false);
   const [leadDeleting, setLeadDeleting] = useState(null);
   const [lf, setLf] = useState(LEAD_BLANK);
   const [leadBusy, setLeadBusy] = useState(false);
@@ -54,6 +64,8 @@ export default function Leads() {
   const won = leads.filter((l) => l.status === 'won').length;
   const activeLeads = leads.filter((l) => l.status !== 'won' && l.status !== 'lost').length;
   const conversionRate = leads.length ? Math.round((won / leads.length) * 100) : 0;
+  const dueToday = leads.filter((l) => l.status !== 'won' && l.status !== 'lost' && isDueToday(l.next_follow_up)).length;
+  const overdue = leads.filter((l) => l.status !== 'won' && l.status !== 'lost' && isOverdue(l.next_follow_up) && !isDueToday(l.next_follow_up)).length;
 
   /**
    * A lead a customer sends your way often names someone who has never been
@@ -83,7 +95,11 @@ export default function Leads() {
   };
   const openEditLead = (l) => {
     setLeadEdit(l);
-    setLf({ name: l.name, phone: l.phone, source: l.source ?? 'manual', referredBy: l.referrer_id ? `referrer:${l.referrer_id}` : '' });
+    setLf({
+      name: l.name, phone: l.phone, source: l.source ?? 'manual',
+      referredBy: l.referrer_id ? `referrer:${l.referrer_id}` : '',
+      assignedTo: l.assigned_to ?? '', nextFollowUp: toDateInput(l.next_follow_up),
+    });
     setLeadOpen(true);
   };
 
@@ -92,9 +108,16 @@ export default function Leads() {
     const [kind, refId] = lf.referredBy ? lf.referredBy.split(':') : [null, null];
     setLeadBusy(true);
     try {
-      const body = { name: lf.name.trim(), phone: lf.phone.trim(), source: lf.source };
+      const body = {
+        name: lf.name.trim(), phone: lf.phone.trim(), source: lf.source,
+        assignedTo: lf.assignedTo || null, nextFollowUp: lf.nextFollowUp || null,
+      };
       if (leadEdit) {
-        const patchBody = { ...body, referrer_id: kind === 'referrer' ? refId : null };
+        const patchBody = {
+          name: body.name, phone: body.phone, source: body.source,
+          assigned_to: body.assignedTo, next_follow_up: body.nextFollowUp,
+          referrer_id: kind === 'referrer' ? refId : null,
+        };
         if (kind === 'client') patchBody.referred_by_client_id = refId;
         const updated = await api.updateLead(leadEdit.id, patchBody);
         store.setCollection('leads', (ls) => ls.map((x) => (x.id === leadEdit.id ? { ...x, ...updated } : x)));
@@ -115,6 +138,44 @@ export default function Leads() {
     } finally {
       setLeadBusy(false);
     }
+  };
+
+  const viewLead = async (l) => {
+    setLeadViewing(l);
+    setLeadNotes(null);
+    setNoteText('');
+    try {
+      setLeadNotes(await api.leadNotes(l.id));
+    } catch (e) {
+      store.toast(`Could not load notes: ${e.message}`);
+      setLeadNotes([]);
+    }
+  };
+
+  const addNote = async () => {
+    if (!noteText.trim()) return;
+    setNoteBusy(true);
+    try {
+      const n = await api.addLeadNote(leadViewing.id, noteText.trim());
+      setLeadNotes((ns) => [...(ns ?? []), n]);
+      setNoteText('');
+    } catch (e) {
+      store.toast(`Could not save the note: ${e.message}`);
+    } finally {
+      setNoteBusy(false);
+    }
+  };
+
+  /**
+   * The one step every lead pipeline exists to reach — pre-fills Add Client
+   * with what's already known (name, phone, and the referrer, so the
+   * commission link made here survives into the real account) rather than
+   * asking the operator to retype a lead they're looking straight at.
+   */
+  const convertToClient = (l) => {
+    const params = new URLSearchParams({ name: l.name, phone: l.phone });
+    if (l.referrer_id) params.set('referredBy', l.referrer_id);
+    navigate(`/clients/new?${params.toString()}`);
   };
 
   const changeStage = (l) => async (e) => {
@@ -261,8 +322,9 @@ export default function Leads() {
         <>
           <Grid min={200} gap={14}>
             <Stat label="Active" value={activeLeads} hint="still in play" />
+            <Stat label="Due today" value={dueToday} tone={dueToday ? color.amberInk : undefined} hint="follow up today" />
+            <Stat label="Overdue" value={overdue} tone={overdue ? color.rust : undefined} hint="past their follow-up date" />
             <Stat label="Won" value={won} tone={won ? color.green : undefined} hint="converted to clients" />
-            <Stat label="Lost" value={leads.filter((l) => l.status === 'lost').length} hint="closed out" />
             <Stat label="Conversion" value={`${conversionRate}%`} hint="won / total" />
           </Grid>
 
@@ -304,9 +366,22 @@ export default function Leads() {
                 },
                 { key: 'badge', label: '', render: (l) => <Badge tone={stageTone(l.status)}>{l.status}</Badge> },
                 {
-                  key: 'created_at',
-                  label: 'Added',
-                  render: (l) => (l.created_at ? new Date(l.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' }) : '—'),
+                  key: 'assignee',
+                  label: 'Assigned',
+                  render: (l) => l.assignee_name ?? <span style={{ color: color.muted }}>unassigned</span>,
+                },
+                {
+                  key: 'next_follow_up',
+                  label: 'Follow up',
+                  render: (l) => {
+                    if (!l.next_follow_up) return <span style={{ color: color.muted }}>—</span>;
+                    const overdueRow = l.status !== 'won' && l.status !== 'lost' && isOverdue(l.next_follow_up);
+                    return (
+                      <span style={{ color: overdueRow ? color.rust : color.ink, fontWeight: overdueRow ? 600 : 400 }}>
+                        {new Date(l.next_follow_up).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}
+                      </span>
+                    );
+                  },
                 },
                 {
                   key: 'actions',
@@ -314,7 +389,8 @@ export default function Leads() {
                   align: 'right',
                   render: (l) => (
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      <Button onClick={() => setLeadViewing(l)}>View</Button>
+                      {l.status === 'won' && <Button variant="primary" onClick={() => convertToClient(l)}>Convert</Button>}
+                      <Button onClick={() => viewLead(l)}>View</Button>
                       <Button onClick={() => openEditLead(l)}>Edit</Button>
                       <Button onClick={() => setLeadDeleting(l)}>Delete</Button>
                     </div>
@@ -353,21 +429,75 @@ export default function Leads() {
               <Field label="Referred by" hint="Optional — who to credit and pay commission to">
                 <Select value={lf.referredBy} onChange={setL('referredBy')} options={referredByOptions} />
               </Field>
+              <Field label="Assign to" hint="Who's chasing this one">
+                <Select
+                  value={lf.assignedTo}
+                  onChange={setL('assignedTo')}
+                  options={[{ value: '', label: '— unassigned —' }, ...staff.map((s) => ({ value: s.id, label: s.name }))]}
+                />
+              </Field>
+              <Field label="Next follow-up" hint="Optional">
+                <Input type="date" value={lf.nextFollowUp} onChange={setL('nextFollowUp')} />
+              </Field>
             </div>
           </Modal>
 
           {/* View lead */}
-          <Drawer open={!!leadViewing} title={leadViewing?.name} onClose={() => setLeadViewing(null)}>
+          <Drawer
+            open={!!leadViewing}
+            title={leadViewing?.name}
+            actions={leadViewing?.status === 'won' ? <Button variant="primary" onClick={() => convertToClient(leadViewing)}>Convert to client</Button> : undefined}
+            onClose={() => setLeadViewing(null)}
+          >
             {leadViewing && (
-              <div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                <div>
                 <KV k="Phone" v={leadViewing.phone} />
                 <KV k="Channel" v={leadViewing.source ?? '—'} />
                 <KV k="Referred by" v={leadViewing.referrer_name ?? '—'} />
+                <KV k="Assigned to" v={leadViewing.assignee_name ?? '—'} />
+                <KV
+                  k="Next follow-up"
+                  v={
+                    leadViewing.next_follow_up
+                      ? <span style={{ color: isOverdue(leadViewing.next_follow_up) ? color.rust : color.ink }}>
+                          {new Date(leadViewing.next_follow_up).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </span>
+                      : '—'
+                  }
+                />
                 <KV k="Stage" v={<Badge tone={stageTone(leadViewing.status)}>{leadViewing.status}</Badge>} />
                 <KV
                   k="Added"
                   v={leadViewing.created_at ? new Date(leadViewing.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                 />
+                </div>
+
+                <div>
+                  <p style={{ fontSize: 12.5, fontWeight: 600, color: color.muted, textTransform: 'uppercase', letterSpacing: '.04em', margin: '0 0 8px' }}>
+                    Notes
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 10 }}>
+                    {leadNotes === null ? (
+                      <p style={{ fontSize: 13, color: color.muted, margin: 0 }}>Loading…</p>
+                    ) : !leadNotes.length ? (
+                      <p style={{ fontSize: 13, color: color.muted, margin: 0 }}>No notes yet.</p>
+                    ) : (
+                      leadNotes.map((n) => (
+                        <div key={n.id} style={{ padding: '8px 10px', background: color.tileBg, borderRadius: radius.md, fontSize: 13 }}>
+                          <div>{n.body}</div>
+                          <div style={{ fontSize: 11, color: color.muted, marginTop: 4 }}>
+                            {n.author ?? 'system'} · {new Date(n.at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Add a note…" />
+                    <Button onClick={addNote} disabled={noteBusy || !noteText.trim()}>{noteBusy ? '…' : 'Add'}</Button>
+                  </div>
+                </div>
               </div>
             )}
           </Drawer>
