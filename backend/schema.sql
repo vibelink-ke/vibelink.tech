@@ -509,6 +509,17 @@ alter table sla_policies add column if not exists enabled        boolean not nul
 
 alter table tickets add column if not exists description text;
 alter table tickets add column if not exists due_at      timestamptz;
+-- sla_policies (below) has existed as long as tickets has, with its own
+-- respond_mins/resolve_mins/escalate_to fully editable from Settings — but
+-- nothing ever connected a real ticket to one. due_at above stayed null
+-- until an operator typed a date in by hand, "SLA management" configured
+-- rules that governed nothing, and stats.breaching on the Tickets screen
+-- only ever counted open high/critical tickets, not an actual breach.
+alter table tickets add column if not exists sla_policy_id uuid references sla_policies on delete set null;
+-- Set once a breach is actually acted on (see checkSlaBreaches in jobs.js),
+-- so the escalation fires exactly once per ticket rather than every five
+-- minutes for as long as it stays open past its deadline.
+alter table tickets add column if not exists sla_breach_notified boolean not null default false;
 
 create table if not exists ticket_notes (
   id        uuid primary key default gen_random_uuid(),

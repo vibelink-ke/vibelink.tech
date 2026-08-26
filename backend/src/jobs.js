@@ -54,6 +54,7 @@ export function startJobs() {
   // elsewhere. Only licence_ends remains — WHMCS moves it, this acts on it.
   cron.schedule('0 7 * * *',  safely('expireTenantLicences', expireTenantLicences));
   cron.schedule('*/5 * * * *', safely('lockNewPppoeMacs', lockNewPppoeMacs));
+  cron.schedule('*/5 * * * *', safely('checkSlaBreaches', checkSlaBreaches));
   // 3am local — after the day's invoicing/charging runs, before the 6am invoice
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
@@ -177,6 +178,48 @@ async function purgeExpiredVouchers() {
   }
   for (const [tenantId, codes] of byTenant) {
     await forgetVoucherAccess(pool, codes, tenantId);
+  }
+}
+
+/**
+ * SLA policies (Support -> SLA management) have always been fully
+ * configurable — name, priority, respond/resolve minutes, who to escalate
+ * to — and nothing ever enforced them. A ticket's due_at stayed null until
+ * an operator typed a date in by hand (see the sla_policy_id wiring added
+ * to POST /api/tickets), and even with a due date set, nothing ever told
+ * anyone it had passed. The screen configured rules that governed nothing.
+ *
+ * Runs every five minutes, same cadence as the other short-interval jobs
+ * here. sla_breach_notified is what makes this fire once per breach rather
+ * than every single run for as long as a ticket stays overdue — the PATCH
+ * route clears it if the ticket is reopened or its due date is pushed out,
+ * so a genuinely new breach can still notify again.
+ */
+async function checkSlaBreaches() {
+  const { rows } = await pool.query(
+    `select t.id, t.tenant_id, t.number, t.subject, t.priority, sp.escalate_to
+       from tickets t
+       join sla_policies sp on sp.id = t.sla_policy_id
+      where t.due_at < now() and t.status <> 'resolved' and not t.sla_breach_notified
+        and t.tenant_id in (${enabledTenants})`,
+    ['checkSlaBreaches']);
+
+  for (const t of rows) {
+    const body = `SLA breached: ${t.number} "${t.subject}" (${t.priority}) is past its resolve-by time.`;
+    let sent = false;
+    if (t.escalate_to) {
+      const { rows: [staffRow] } = await pool.query(
+        'select phone from staff where id=$1 and tenant_id=$2', [t.escalate_to, t.tenant_id]);
+      if (staffRow?.phone) {
+        await send(t.tenant_id, staffRow.phone, 'custom', { body }).catch(() => {});
+        sent = true;
+      }
+    }
+    // No escalate_to configured, or that staff member has no phone on file —
+    // same fallback notifyOwner already is for the router watchdog: the
+    // rota number if one is set, otherwise the account owner.
+    if (!sent) await notifyOwner(t.tenant_id, body);
+    await pool.query('update tickets set sla_breach_notified=true where id=$1', [t.id]);
   }
 }
 

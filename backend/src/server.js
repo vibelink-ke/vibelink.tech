@@ -2318,15 +2318,38 @@ app.post('/api/sms/test', async (req, res) => {
 // All scoped by req.tenant.id — the tenant resolver above 404s unknown hosts and
 // every query below runs with RLS active (see withTenant in db.js for writes).
 app.get('/api/tickets', async (req, res) => {
-  const { rows } = await pool.query('select * from tickets where tenant_id=$1 order by created_at desc', [req.tenant.id]);
+  const { rows } = await pool.query(
+    `select t.*, sp.name as sla_policy_name
+       from tickets t
+       left join sla_policies sp on sp.id = t.sla_policy_id
+      where t.tenant_id=$1
+      order by t.created_at desc`,
+    [req.tenant.id]);
   res.json(rows);
 });
 app.post('/api/tickets', async (req, res) => {
   const { subject, subscriberId, priority = 'medium' } = req.body;
+
+  /**
+   * sla_policies has always been fully configurable from Settings — name,
+   * priority, respond/resolve minutes, who to escalate to — and nothing
+   * before this ever matched a real ticket against one. due_at stayed null
+   * until an operator typed a date in by hand, which made the whole screen
+   * describe a promise nothing here was keeping. One matching enabled
+   * policy for this priority is enough to say what "on time" even means;
+   * an unconfigured priority just gets no due date, same as today.
+   */
+  const { rows: [policy] } = await pool.query(
+    `select id, resolve_mins from sla_policies
+      where tenant_id=$1 and priority=$2 and coalesce(enabled, true)
+      order by resolve_mins asc limit 1`,
+    [req.tenant.id, priority]);
+
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
-     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, $4) returning *`,
-    [req.tenant.id, subject, subscriberId ?? null, priority]);
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, $4, $5, $6) returning *`,
+    [req.tenant.id, subject, subscriberId ?? null, priority,
+     policy?.id ?? null, policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null]);
   res.json(t);
 });
 
@@ -5514,8 +5537,13 @@ app.patch('/api/tickets/:id', wrap(async (req, res) => {
   const allowed = ['status', 'priority', 'assigned_to', 'subject', 'description', 'due_at'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  // Pushing the deadline out (or reopening a ticket) after checkSlaBreaches
+  // already fired should let a genuinely new breach notify again, rather
+  // than staying silently suppressed by a flag from before the edit.
+  const resetNotified = sets.includes('due_at') || sets.includes('status');
   const { rows: [t] } = await pool.query(
     `update tickets set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}, updated_at=now()
+     ${resetNotified ? ', sla_breach_notified=false' : ''}
      where tenant_id=$1 and id=$2 returning *`,
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!t) return res.status(404).json({ error: 'not found' });
@@ -6276,10 +6304,12 @@ app.put('/api/sla-policies/:id', wrap(async (req, res) => {
 // ── ticket detail and notes ───────────────────────
 app.get('/api/tickets/:id', wrap(async (req, res) => {
   const { rows: [t] } = await pool.query(
-    `select tk.*, s.name as subscriber_name, s.phone as subscriber_phone, st.name as assignee_name
+    `select tk.*, s.name as subscriber_name, s.phone as subscriber_phone, st.name as assignee_name,
+            sp.name as sla_policy_name
      from tickets tk
      left join subscribers s on s.id = tk.subscriber_id
      left join staff st on st.id = tk.assigned_to
+     left join sla_policies sp on sp.id = tk.sla_policy_id
      where tk.tenant_id=$1 and tk.id=$2`, [req.tenant.id, req.params.id]);
   if (!t) return res.status(404).json({ error: 'not found' });
   // ticket_notes.ticket_id is a plain FK to tickets(id), not composite on
@@ -6514,6 +6544,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'dbBackup', name: 'Database backup', cron: '0 3 * * *', system: true, detail: 'Nightly pg_dump to R2 — daily kept a week, Sunday\'s kept two months' },
   { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
+  { job: 'checkSlaBreaches', name: 'SLA breach alerts', cron: '*/5 * * * *', detail: 'Texts whoever an SLA policy names to escalate to (or the owner) the moment a ticket passes its resolve-by time' },
 ];
 
 /**

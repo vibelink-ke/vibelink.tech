@@ -256,6 +256,7 @@ export default function Tickets() {
             <KV k="Raised" v={when(detail.created_at)} />
             <KV k="Last touched" v={when(detail.updated_at)} />
             <KV k="Due" v={detail.due_at ? when(detail.due_at) : 'No due date'} />
+            <KV k="SLA policy" v={detail.sla_policy_name ?? `No policy configured for "${detail.priority}"`} />
 
             <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>
