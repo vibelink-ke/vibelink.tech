@@ -1,5 +1,11 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { pool } from './db.js';
+
+const run = promisify(execFile);
 
 /**
  * WireGuard peer management.
@@ -107,6 +113,45 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
       .join('\n')
   );
   return head.concat(peers).join('\n');
+}
+
+/**
+ * Write wg0.conf and try to hot-reload it — the two steps scripts/wg-sync.mjs
+ * always required a human to remember to run by hand after every peer create
+ * or delete. "Onboard via WireGuard" minted a peer and handed over a router
+ * script with nothing on this side ever making the server's own wg0 aware of
+ * it — the router dialled a peer the server had never heard of, and the
+ * handshake just never completed, silently, with no error anywhere to point
+ * at. Calling this from the peer routes closes that gap for the file-write
+ * half unconditionally.
+ *
+ * The reload half stays best-effort: this runs in the api container, and wg0
+ * itself lives in the separate `wireguard` compose service — a bare `wg`
+ * command here can only ever act on this container's own network namespace,
+ * which does not have the interface. Same fallback wg-sync.mjs already prints
+ * for that case, just returned to the caller instead of only logged, so the
+ * peer-creation response can hand the operator the one-liner right there
+ * instead of pointing at documentation.
+ */
+export async function syncServer() {
+  const serverPrivateKey = process.env.WG_SERVER_PRIVATE_KEY;
+  if (!serverPrivateKey) return { written: false, reloaded: false, reason: 'WG_SERVER_PRIVATE_KEY not set' };
+
+  const configPath = process.env.WG_CONFIG_PATH ?? '/config/wg_confs/wg0.conf';
+  const port = Number(process.env.WG_PORT ?? 51820);
+  const conf = await renderServerConfig(serverPrivateKey, port);
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, conf, { mode: 0o600 });
+
+  try {
+    await run('wg', ['syncconf', 'wg0', configPath]);
+    return { written: true, reloaded: true };
+  } catch (e) {
+    const fallbackCmd = `docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 ${configPath}`;
+    console.log(`wg syncconf not reloaded from api (${String(e.message ?? '').trim().slice(0, 120)}) — run: ${fallbackCmd}`);
+    return { written: true, reloaded: false, fallbackCmd };
+  }
 }
 
 export { SERVER_IP, SUPERNET };

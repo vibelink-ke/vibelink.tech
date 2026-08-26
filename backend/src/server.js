@@ -3880,6 +3880,12 @@ app.post('/api/routers/wg-peer', requireRole('owner'), wrap(async (req, res) => 
   const { peer, privateKey, presharedKey, assignedIp } =
     await wg.createPeer(req.tenant.id, { name, routerId: routerId ?? null });
 
+  // The router is about to be handed a script that dials this peer — the
+  // server's own wg0 has to already know about it, or the handshake just
+  // never completes with nothing anywhere to point at. See syncServer()'s
+  // own comment for why the reload half can still come back false.
+  const sync = await wg.syncServer().catch((e) => ({ written: false, reloaded: false, reason: e.message }));
+
   res.json({
     peerId: peer.id,
     assignedIp,
@@ -3888,6 +3894,7 @@ app.post('/api/routers/wg-peer', requireRole('owner'), wrap(async (req, res) => 
     // must be recreated rather than recovered.
     script: wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey }),
     note: 'The private key is shown once and is not stored. Apply it before closing this.',
+    sync,
   });
 }));
 
@@ -3902,7 +3909,9 @@ app.get('/api/routers/wg-peers', wrap(async (req, res) => {
 
 app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, res) => {
   await pool.query('delete from wg_peers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
-  res.json({ ok: true, note: 'Run scripts/wg-sync.mjs to drop it from the running server.' });
+  const wg = await import('./wireguard.js');
+  const sync = await wg.syncServer().catch((e) => ({ written: false, reloaded: false, reason: e.message }));
+  res.json({ ok: true, sync });
 }));
 
 app.get('/api/routers', async (req, res) => {

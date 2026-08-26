@@ -6,21 +6,17 @@
  *   node scripts/wg-sync.mjs --print         # show it, change nothing
  *   node scripts/wg-sync.mjs --init          # mint a server keypair and stop
  *
- * The database is the source of truth. Adding a router in the UI creates a peer
- * row; running this makes the running server aware of it. Nothing here reaches
- * out to a router, so it is safe to run whenever.
+ * The database is the source of truth. server.js's wg-peer create/delete
+ * routes already call wireguard.js's syncServer() themselves on every
+ * change, so this is no longer required after the normal Onboard-via-
+ * WireGuard flow — it exists for --print/--init, and as a manual fallback if
+ * a sync ever needs re-running by hand (a server restart, a config restore).
  */
 import 'dotenv/config';
-import fs from 'node:fs';
-import path from 'node:path';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { pool } from '../src/db.js';
-import { keypair, renderServerConfig, SERVER_IP } from '../src/wireguard.js';
+import { keypair, renderServerConfig, syncServer, SERVER_IP } from '../src/wireguard.js';
 
-const run = promisify(execFile);
 const args = process.argv.slice(2);
-const CONFIG = process.env.WG_CONFIG_PATH ?? '/config/wg_confs/wg0.conf';
 const PORT = Number(process.env.WG_PORT ?? 51820);
 
 if (args.includes('--init')) {
@@ -39,36 +35,21 @@ if (!priv) {
   process.exit(1);
 }
 
-const conf = await renderServerConfig(priv, PORT);
-
 if (args.includes('--print')) {
-  console.log(conf);
+  console.log(await renderServerConfig(priv, PORT));
   await pool.end();
   process.exit(0);
 }
 
-fs.mkdirSync(path.dirname(CONFIG), { recursive: true });
-fs.writeFileSync(CONFIG, conf, { mode: 0o600 });
-console.log(`wrote ${CONFIG} (${conf.split('[Peer]').length - 1} peer(s), server ${SERVER_IP})`);
-
-// `syncconf` applies changes without dropping established tunnels; `up` would.
-try {
-  await run('wg', ['syncconf', 'wg0', CONFIG]);
-  console.log('reloaded wg0');
-} catch (e) {
-  /*
-   * Expected under Docker, and not a failure.
-   *
-   * This runs in the API container, which is where the database is. wg lives
-   * in the wireguard container, which owns the interface. The file has been
-   * written to the directory they share, so all that is left is asking the
-   * other side to read it, and printing the command that does that is more
-   * use than reporting that this one could not.
-   */
-  const why = String(e.message ?? '').trim().slice(0, 120);
-  console.log(`not reloaded from here (${why})`);
-  console.log('The config is written. Apply it with:');
-  console.log(`  docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 ${CONFIG}`);
+const result = await syncServer();
+if (!result.written) {
+  console.error(`did not write config: ${result.reason}`);
+} else if (result.reloaded) {
+  console.log(`wrote config and reloaded wg0 (server ${SERVER_IP})`);
+} else {
+  console.log(`wrote config (server ${SERVER_IP})`);
+  console.log(`not reloaded from here — this runs in the api container, wg0 lives in the wireguard one. Apply it with:`);
+  console.log(`  ${result.fallbackCmd}`);
 }
 
 await pool.end();

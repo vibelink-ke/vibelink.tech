@@ -21,6 +21,54 @@ const bitrate = (bps) => {
 };
 
 /**
+ * The router row's own actions menu. Seven buttons (Hotspot, Refresh,
+ * Traffic, Import, Edit, Check RADIUS, Check hotspot) used to sit side by
+ * side on every row regardless of how many routers a tenant had — fine for
+ * one router, unreadable for a real deployment with a dozen. Configure and
+ * Delete stay outside it: one is the action a new or failed router actually
+ * needs first, the other is destructive enough to want its own target
+ * separate from a list that opens and closes.
+ */
+function ActionMenu({ open, onToggle, children }) {
+  return (
+    <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+      <Button onClick={onToggle}>Actions ▾</Button>
+      {open && (
+        <div
+          style={{
+            position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 20,
+            background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.md,
+            boxShadow: '0 10px 28px rgba(20,26,23,.16)', minWidth: 176, padding: 6,
+            display: 'grid', gap: 1,
+          }}
+        >
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MenuItem({ onClick, title, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 0,
+        borderRadius: radius.sm ?? 6, padding: '8px 10px', fontSize: 13, color: color.ink ?? '#161a17',
+        cursor: 'pointer', font: 'inherit',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f6f3'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
  * Winbox into your own router directly, over the same tunnel it already
  * dials into — a real VPN peer for your own laptop, not a proxy through the
  * billing server. Reaches only this tenant's own routers; see
@@ -114,6 +162,7 @@ export default function Routers() {
   const [form, setForm] = useState(null); // blankRouter() when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState(null);         // the router row open for editing
+  const [menuFor, setMenuFor] = useState(null);   // router id whose Actions menu is open
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
   const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
   const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
@@ -125,6 +174,16 @@ export default function Routers() {
   const [detected, setDetected] = useState(null);   // { serverHost, detected, port }
   // What OpenVPN says is actually connected, which is the only reliable answer.
   const [tunnels, setTunnels] = useState({ tunnels: [], stale: [] });
+
+  // Closes whichever row's Actions menu is open on any click outside it —
+  // ActionMenu itself stops propagation for clicks on the menu, so this only
+  // ever fires for a click genuinely elsewhere on the page.
+  useEffect(() => {
+    if (!menuFor) return undefined;
+    const close = () => setMenuFor(null);
+    document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [menuFor]);
 
   // Prefill the dial address when the dialog opens. The server knows it — either
   // from OVPN_PUBLIC_HOST / ROOT_DOMAIN, or from the hostname this page arrived
@@ -783,58 +842,62 @@ Revoke anyway?`
                   >
                     {configuring === r.id ? 'Reading…' : r.autoconfig_last_ok ? 'Reconfigure' : 'Configure'}
                   </Button>
-                  {/* Only for routers that serve a hotspot. Offering it on a
-                      PPPoE-only tower would invite pushing a captive portal
-                      onto a link that has no guests on it. */}
-                  {(r.role === 'hotspot' || r.role === 'both') && (
-                    <Button
-                      onClick={() => runHotspot(r, {})}
-                      disabled={configuring === r.id}
-                      title="Push DHCP, hotspot server, profile, walled garden and the anti-sharing rule"
+                  <ActionMenu open={menuFor === r.id} onToggle={() => setMenuFor((id) => (id === r.id ? null : r.id))}>
+                    {/* Only for routers that serve a hotspot. Offering it on a
+                        PPPoE-only tower would invite pushing a captive portal
+                        onto a link that has no guests on it. */}
+                    {(r.role === 'hotspot' || r.role === 'both') && (
+                      <MenuItem
+                        onClick={() => { setMenuFor(null); runHotspot(r, {}); }}
+                        title="Push DHCP, hotspot server, profile, walled garden and the anti-sharing rule"
+                      >
+                        Hotspot
+                      </MenuItem>
+                    )}
+                    {/* Re-sends the same settings without asking about ports again —
+                        after a reset, after config drift, or after a first attempt
+                        that failed. Previously this was hidden until a push had
+                        already succeeded, which withheld the retry button from
+                        exactly the routers that needed retrying. */}
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); runAutoconfig(r, {}); }}
+                      title="Push the current settings again, without asking about ports"
                     >
-                      Hotspot
-                    </Button>
-                  )}
-                  {/* Re-sends the same settings without asking about ports again —
-                      after a reset, after config drift, or after a first attempt
-                      that failed. Previously this was hidden until a push had
-                      already succeeded, which withheld the retry button from
-                      exactly the routers that needed retrying. */}
-                  <Button
-                    onClick={() => runAutoconfig(r, {})}
-                    disabled={configuring === r.id}
-                    title="Push the current settings again, without asking about ports"
-                  >
-                    {configuring === r.id ? 'Sending…' : 'Refresh'}
-                  </Button>
-                  <Button
-                    onClick={() => setTraffic({ router: r, ports: null, error: null })}
-                    title="Live throughput on every port"
-                  >
-                    Traffic
-                  </Button>
-                  <Button
-                    onClick={() => previewImport(r)}
-                    title="Create clients from the PPPoE accounts already on this router"
-                  >
-                    Import
-                  </Button>
-                  <Button
-                    onClick={() =>
-                      setEdit({
-                        id: r.id, name: r.name, host: String(r.host).split('/')[0],
-                        // The real secret, not blank: it is generated for you, so this
-                        // is the only place to read it when configuring a router by hand.
-                        secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
-                      })
-                    }
-                  >
-                    Edit
-                  </Button>
-                  <Button onClick={() => checkRadius(r)}>Check RADIUS</Button>
-                  <Button onClick={() => checkHotspot(r)} title="Ask the router why the login page is not appearing">
-                    Check hotspot
-                  </Button>
+                      Refresh
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); setTraffic({ router: r, ports: null, error: null }); }}
+                      title="Live throughput on every port"
+                    >
+                      Traffic
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); previewImport(r); }}
+                      title="Create clients from the PPPoE accounts already on this router"
+                    >
+                      Import
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        setMenuFor(null);
+                        setEdit({
+                          id: r.id, name: r.name, host: String(r.host).split('/')[0],
+                          // The real secret, not blank: it is generated for you, so this
+                          // is the only place to read it when configuring a router by hand.
+                          secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
+                        });
+                      }}
+                    >
+                      Edit
+                    </MenuItem>
+                    <MenuItem onClick={() => { setMenuFor(null); checkRadius(r); }}>Check RADIUS</MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); checkHotspot(r); }}
+                      title="Ask the router why the login page is not appearing"
+                    >
+                      Check hotspot
+                    </MenuItem>
+                  </ActionMenu>
                   <Button onClick={() => removeRouter(r)}>Delete</Button>
                 </div>
               ),
