@@ -109,9 +109,21 @@ export function StoreProvider({ children }) {
    */
   const reload = useCallback(async ({ quiet = false } = {}) => {
     if (!quiet) setLoading(true);
-    const entries = Object.entries(COLLECTIONS);
+    // `tenants` is /api/tenants, superAdminOnly on the backend (see
+    // server.js) — every tenant's own dashboard fetched it anyway, on every
+    // mount, path change and 30-second poll, purely to feed the one screen
+    // (Tenants.jsx) that only a platform owner can even reach. For anyone
+    // else that was a guaranteed 403 on a timer, forever, for a collection
+    // never once read. Same condition as isPlatformOwner below.
+    const isPlatformOwner = !!session?.superAdmin && session?.role === 'owner';
+    const entries = Object.entries(COLLECTIONS).filter(([key]) => key !== 'tenants' || isPlatformOwner);
     const settled = await Promise.allSettled(entries.map(([, fn]) => fn()));
-    const next = {};
+    // Starts from EMPTY, not {}: a skipped collection (tenants, for anyone
+    // but a platform owner) needs to land on its usual [] rather than
+    // undefined — every screen already reads its slice as `store.x ?? []`,
+    // but there is no reason to make that guard load-bearing for a key that
+    // was never actually fetched.
+    const next = { ...EMPTY };
     const errs = {};
     settled.forEach((r, i) => {
       const key = entries[i][0];
@@ -141,7 +153,7 @@ export function StoreProvider({ children }) {
     setSettings(val(5, { org: {}, smtp: {}, prefs: {} }));
     setErrors(errs);
     setLoading(false);
-  }, []);
+  }, [session]);
 
   /**
    * Keep every screen current without anyone pressing anything.
