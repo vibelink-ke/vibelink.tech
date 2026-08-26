@@ -140,6 +140,7 @@ export const api = {
   createTicket: (t) => post('/api/tickets', t),
   ticket: (id) => get(`/api/tickets/${id}`),
   updateTicket: (id, patchBody) => patch(`/api/tickets/${id}`, patchBody),
+  approvePlanChange: (id) => post(`/api/tickets/${id}/approve-plan-change`, {}),
   addTicketNote: (id, body, internal = true) => post(`/api/tickets/${id}/notes`, { body, internal }),
   deleteTicket: (id) => del(`/api/tickets/${id}`),
 

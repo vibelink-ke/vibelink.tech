@@ -1944,16 +1944,16 @@ app.post('/portal/request-plan-change', wrap(async (req, res) => {
   const planId = String(req.body?.planId ?? '');
 
   const { rows: [plan] } = await pool.query(
-    `select title, price from plans where id=$1 and tenant_id=$2 and service='pppoe' and active`,
+    `select id, title, price from plans where id=$1 and tenant_id=$2 and service='pppoe' and active`,
     [planId, s.tenant_id]);
   if (!plan) return res.status(404).json({ error: 'That plan is not available.' });
 
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, source)
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, source, requested_plan_id)
      values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6),
-             $2, $3, 'medium', 'portal')
+             $2, $3, 'medium', 'portal', $4)
      returning id, number`,
-    [s.tenant_id, `Plan change request: ${s.plan_title ?? 'current plan'} → ${plan.title}`, s.subscriber_id]);
+    [s.tenant_id, `Plan change request: ${s.plan_title ?? 'current plan'} → ${plan.title}`, s.subscriber_id, plan.id]);
   await pool.query(
     `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
      values ($1,$2,$3,$4,false)`,
@@ -6023,6 +6023,56 @@ app.delete('/api/tickets/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/**
+ * One click for a plan-change-request ticket: apply the requested plan,
+ * resolve the ticket, and assign it to whoever approved it — the standard
+ * shape for this kind of request (see the ITSM/telecom change-workflow
+ * research this was built from): the approver becomes the owner of record,
+ * and approving is the same action as resolving rather than two separate
+ * steps someone can forget the second half of.
+ *
+ * Refuses anything that isn't actually a pending plan-change request —
+ * requested_plan_id is only ever set by /portal/request-plan-change, so a
+ * ticket without one has nothing here to safely apply.
+ */
+app.post('/api/tickets/:id/approve-plan-change', wrap(async (req, res) => {
+  const { rows: [t] } = await pool.query(
+    'select * from tickets where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!t) return res.status(404).json({ error: 'No such ticket' });
+  if (!t.requested_plan_id) return res.status(400).json({ error: 'This ticket has no plan change to approve.' });
+  if (!t.subscriber_id) return res.status(400).json({ error: 'This ticket has no client attached.' });
+  if (t.status === 'resolved') return res.status(409).json({ error: 'Already resolved.' });
+
+  const { rows: [plan] } = await pool.query(
+    'select id, title from plans where id=$1 and tenant_id=$2', [t.requested_plan_id, req.tenant.id]);
+  if (!plan) return res.status(404).json({ error: 'That plan no longer exists.' });
+
+  const { rows: [sub] } = await pool.query(
+    'update subscribers set plan_id=$1 where id=$2 and tenant_id=$3 returning pppoe_user',
+    [plan.id, t.subscriber_id, req.tenant.id]);
+  if (!sub) return res.status(404).json({ error: 'That client no longer exists.' });
+
+  // Same as PATCH /api/subscribers/:id's own plan_id handling — the rate
+  // limit lives in radreply and does not move on its own.
+  if (sub.pppoe_user) {
+    const radius = await import('./radius.js');
+    await radius.syncSubscriberCredentials(pool, req.tenant.id, t.subscriber_id)
+      .catch((e) => console.warn('approve-plan-change: radius not updated —', e?.message ?? e));
+  }
+
+  const { rows: [updated] } = await pool.query(
+    `update tickets set status='resolved', assigned_to=$3, updated_at=now()
+      where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, req.session.staff_id]);
+  await pool.query(
+    `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
+     values ($1,$2,$3,$4,false)`,
+    [req.tenant.id, req.params.id, req.session.name ?? 'Support',
+     `Approved — switched to ${plan.title}.`]);
+
+  res.json(updated);
+}));
+
 app.patch('/api/leads/:id', wrap(async (req, res) => {
   // referred_by_client_id is not a real column — resolved to a referrer_id
   // (finding or creating a customer-type referrer for that subscriber, same
@@ -6773,11 +6823,12 @@ app.put('/api/sla-policies/:id', wrap(async (req, res) => {
 app.get('/api/tickets/:id', wrap(async (req, res) => {
   const { rows: [t] } = await pool.query(
     `select tk.*, s.name as subscriber_name, s.phone as subscriber_phone, st.name as assignee_name,
-            sp.name as sla_policy_name
+            sp.name as sla_policy_name, rp.title as requested_plan_title
      from tickets tk
      left join subscribers s on s.id = tk.subscriber_id
      left join staff st on st.id = tk.assigned_to
      left join sla_policies sp on sp.id = tk.sla_policy_id
+     left join plans rp on rp.id = tk.requested_plan_id
      where tk.tenant_id=$1 and tk.id=$2`, [req.tenant.id, req.params.id]);
   if (!t) return res.status(404).json({ error: 'not found' });
   // ticket_notes.ticket_id is a plain FK to tickets(id), not composite on

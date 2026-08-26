@@ -87,6 +87,21 @@ export default function Tickets() {
     }
   };
 
+  const [approving, setApproving] = useState(false);
+  const approvePlanChange = async (t) => {
+    setApproving(true);
+    try {
+      const updated = await api.approvePlanChange(t.id);
+      setDetail((d) => ({ ...d, ...updated }));
+      store.setCollection('tickets', (ts) => ts.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
+      store.toast(`Switched to ${t.requested_plan_title} and resolved`);
+    } catch (e) {
+      store.toast(`Could not approve: ${e.message}`);
+    } finally {
+      setApproving(false);
+    }
+  };
+
   const addNote = async () => {
     if (!note.trim()) return;
     try {
@@ -268,6 +283,26 @@ export default function Tickets() {
             <KV k="Last touched" v={when(detail.updated_at)} />
             <KV k="Due" v={detail.due_at ? when(detail.due_at) : 'No due date'} />
             <KV k="SLA policy" v={detail.sla_policy_name ?? `No policy configured for "${detail.priority}"`} />
+
+            {detail.requested_plan_id && (
+              <div
+                style={{
+                  background: '#f6f4ff', border: `1px solid ${color.line}`, borderRadius: radius.md,
+                  padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 8,
+                }}
+              >
+                <span style={{ fontSize: 13 }}>
+                  Requesting a switch to <strong>{detail.requested_plan_title ?? 'a plan'}</strong>
+                </span>
+                {detail.status === 'resolved' ? (
+                  <span style={{ fontSize: 12, color: color.muted }}>Already resolved.</span>
+                ) : (
+                  <Button variant="primary" onClick={() => approvePlanChange(detail)} disabled={approving} style={{ alignSelf: 'flex-start' }}>
+                    {approving ? 'Applying…' : 'Approve — switch plan now'}
+                  </Button>
+                )}
+              </div>
+            )}
 
             <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>

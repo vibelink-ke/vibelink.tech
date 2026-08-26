@@ -104,9 +104,17 @@ export function StoreProvider({ children }) {
     setToastAction(() => action);
     clearTimeout(toastTimer.current);
     // A toast worth clicking through to (a new customer ticket, a live chat
-    // waiting) stays up long enough to actually notice and act on; a plain
-    // confirmation ("Saved") still clears quickly.
-    toastTimer.current = setTimeout(() => { setToastMsg(''); setToastAction(null); }, action ? 8000 : 2600);
+    // waiting) stays on screen until clicked or dismissed — the entire
+    // point is that nobody may be looking right now, so timing it out on a
+    // clock is how the one moment it mattered gets missed. A plain
+    // confirmation ("Saved") still clears itself quickly.
+    if (!action) toastTimer.current = setTimeout(() => setToastMsg(''), 2600);
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    clearTimeout(toastTimer.current);
+    setToastMsg('');
+    setToastAction(null);
   }, []);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -426,6 +434,7 @@ export function StoreProvider({ children }) {
       toastMsg,
       toastAction,
       toast,
+      dismissToast,
       reload,
       setCollection,
       setUnmatched,
@@ -435,7 +444,7 @@ export function StoreProvider({ children }) {
     [
       data, unmatched, hotspotSettings, smsGateways, smsCredits, paymentMethods, settings,
       loading, errors, session, signIn, signOut, dark, navOpen, role, searchQuery, toastMsg, toastAction, toast,
-      reload, setCollection,
+      dismissToast, reload, setCollection,
     ]
   );
 
