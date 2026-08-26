@@ -43,12 +43,18 @@ export const presharedKey = () => crypto.randomBytes(32).toString('base64');
 /**
  * Mint a peer. The private key is returned once, for the router's config, and
  * never stored — only the public key is kept, which is all the server needs.
+ *
+ * `ip`, when given, skips the normal allocation and uses that address
+ * instead — the WireGuard/OVPN failover onboarding needs both transports to
+ * carry the identical tunnel address, since RADIUS CoA and the watchdog only
+ * ever know a router by that one address regardless of which tunnel is
+ * actually carrying it at a given moment.
  */
-export async function createPeer(tenantId, { name, routerId = null }) {
+export async function createPeer(tenantId, { name, routerId = null, ip: presetIp = null }) {
   const { privateKey, publicKey } = keypair();
   const psk = presharedKey();
   const subnet = await ensureSubnet(tenantId);
-  const ip = await nextHostIp(tenantId);
+  const ip = presetIp ?? await nextHostIp(tenantId);
 
   const { rows: [peer] } = await pool.query(
     `insert into wg_peers (tenant_id, router_id, name, public_key, preshared_key, assigned_ip)
@@ -92,6 +98,57 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
     `add chain=input src-address=${SERVER_IP} action=accept comment="billing server" place-before=0`,
     '',
     `:log info "billing WireGuard up on ${assignedIp}"`,
+  ].join('\n');
+}
+
+/**
+ * The router-side half of WireGuard/OVPN failover: a script that watches
+ * billing-wg's own handshake age and switches to billing-ovpn (added
+ * disabled, by the OVPN onboarding script pasted alongside this one) if it
+ * goes stale, then switches back once WireGuard recovers.
+ *
+ * Router-side rather than server-side because the server has no way to
+ * distinguish "this router's WireGuard is down" from "this router is down" —
+ * both look identical from here (nothing answers on that address). The
+ * router itself is the only place that actually knows which transport last
+ * worked, so it is the only place that can decide.
+ *
+ * Never both interfaces enabled at once: they would both try to hold the
+ * same tunnel address, and OVPN's own address comes from the server
+ * assigning it dynamically by username, not from anything set here — RADIUS
+ * CoA and the watchdog only ever address the router by that one shared
+ * address, so only one interface may be carrying it at a time.
+ *
+ * staleAfter is a RouterOS time literal ("90s", "2m") — three times
+ * mikrotikScript's own persistent-keepalive=25s, so one or two missed
+ * keepalives do not trigger a failover on their own.
+ */
+export function failoverScript({ staleAfter = '90s' } = {}) {
+  return [
+    '/system script',
+    'remove [find name=billing-failover]',
+    'add name=billing-failover policy=read,write,test source={',
+    '  :local peer [/interface wireguard peers find where interface=billing-wg];',
+    '  :local age 1d;',
+    '  :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
+    `  :if ($age > ${staleAfter}) do={`,
+    '    :if ([/interface ovpn-client get [find name=billing-ovpn] disabled]) do={',
+    '      :log warning "billing-wg stale ($age) -- failing over to OVPN";',
+    '      /interface wireguard set [find name=billing-wg] disabled=yes;',
+    '      /interface ovpn-client set [find name=billing-ovpn] disabled=no;',
+    '    }',
+    '  } else={',
+    '    :if ([/interface ovpn-client get [find name=billing-ovpn] disabled] = false) do={',
+    '      :log info "billing-wg recovered -- switching back from OVPN";',
+    '      /interface ovpn-client set [find name=billing-ovpn] disabled=yes;',
+    '      /interface wireguard set [find name=billing-wg] disabled=no;',
+    '    }',
+    '  }',
+    '}',
+    '',
+    '/system scheduler',
+    'remove [find name=billing-failover-check]',
+    'add name=billing-failover-check interval=2m on-event=billing-failover',
   ].join('\n');
 }
 

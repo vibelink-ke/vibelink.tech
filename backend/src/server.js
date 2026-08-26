@@ -4164,6 +4164,94 @@ app.post('/api/routers/wg-peer', requireRole('owner'), wrap(async (req, res) => 
   });
 }));
 
+/**
+ * Onboard with failover: WireGuard as the preferred transport, OVPN as a
+ * standby the router itself switches to if WireGuard's handshake ever goes
+ * stale (see wireguard.js's failoverScript) — for a site whose WAN blocks or
+ * mangles WireGuard's UDP port, which happens on some carrier/CGNAT links,
+ * without leaving that router permanently on the slower, single-threaded
+ * OVPN path once WireGuard is reachable again.
+ *
+ * Both transports are minted for the *same* tunnel address — RADIUS CoA and
+ * the watchdog only ever know a router by that one address, so which
+ * interface is actually carrying it at a given moment has to stay invisible
+ * to everything on this side.
+ */
+app.post('/api/routers/failover-script', requireRole('owner'), wrap(async (req, res) => {
+  const wg = await import('./wireguard.js');
+  const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
+  const { name, routerId } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name the router' });
+
+  const endpoint = process.env.WG_ENDPOINT;
+  const serverPublicKey = process.env.WG_SERVER_PUBLIC_KEY;
+  if (!endpoint || !serverPublicKey) {
+    return res.status(400).json({
+      error: 'WG_ENDPOINT and WG_SERVER_PUBLIC_KEY are not set. See docs/NETWORK-SETUP.md.',
+    });
+  }
+  if (routerId) {
+    const { rows: [existing] } = await pool.query(
+      'select ros_version from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
+    if (existing?.ros_version && /^6\b/.test(existing.ros_version)) {
+      return res.status(409).json({
+        error: `This router last identified itself as RouterOS ${existing.ros_version}, which has `
+          + 'no WireGuard, so it cannot fail over to OVPN from a WireGuard primary. Use '
+          + '"+ Onboard via OVPN" for it instead.',
+      });
+    }
+  }
+
+  await ensureSubnet(req.tenant.id);
+  const nasIp = await nextHostIp(req.tenant.id);
+
+  const { peer, privateKey, presharedKey, assignedIp } =
+    await wg.createPeer(req.tenant.id, { name, routerId: routerId ?? null, ip: nasIp });
+
+  const octets = nasIp.split('.');
+  const ovpnUsername = `router-${octets[2]}-${octets[3]}`;
+  const ovpnToken = crypto.randomBytes(6).toString('hex');
+  await pool.query(
+    `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip)
+     values ($1,$2,crypt($3, gen_salt('bf')),$4)`,
+    [req.tenant.id, ovpnUsername, ovpnToken, nasIp]);
+
+  const sync = await wg.syncServer().catch((e) => ({ written: false, reloaded: false, reason: e.message }));
+
+  const host = String(req.body?.serverHost ?? '').trim() || tunnelHost(req);
+  const v6 = false; // a RouterOS 6 router was already refused above
+  const authDigest = (process.env.OVPN_AUTH_DIGEST ?? 'sha1').toLowerCase();
+
+  const script = [
+    wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey }),
+    '',
+    '# OVPN standby — added disabled; billing-failover enables it only if',
+    '# billing-wg\'s handshake goes stale.',
+    '/interface ovpn-client remove [find name=billing-ovpn]',
+    `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `
+      + `user=${ovpnUsername} password=${ovpnToken} certificate=none cipher=aes256-cbc auth=${authDigest} `
+      + 'add-default-route=no mode=ip disabled=yes',
+    '/ip firewall nat remove [find where comment="ispVpn tunnel egress (managed)"]',
+    '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade '
+      + 'comment="ispVpn tunnel egress (managed)"',
+    '',
+    wg.failoverScript(),
+    '',
+    ':log info "billing WireGuard/OVPN failover configured"',
+  ].join('\n');
+
+  res.json({
+    peerId: peer.id,
+    assignedIp,
+    publicKey: peer.public_key,
+    ovpnUsername,
+    script,
+    note: 'The WireGuard private key and OVPN password are shown once and are not stored. '
+      + 'Apply the script before closing this.',
+    sync,
+  });
+}));
+
 app.get('/api/routers/wg-peers', wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select p.id, p.name, p.assigned_ip, p.enabled, p.last_handshake, p.rx_bytes, p.tx_bytes,

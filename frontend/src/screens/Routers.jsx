@@ -400,6 +400,34 @@ export default function Routers() {
     }
   };
 
+  /**
+   * WireGuard as the preferred transport, OVPN as a router-decided standby —
+   * see wireguard.js's failoverScript for why the switch has to happen on
+   * the router rather than here: this side cannot tell "this router's
+   * WireGuard is down" from "this router is down", only the router itself
+   * knows which transport last actually worked.
+   */
+  const mintFailover = async () => {
+    const name = window.prompt('Name this router (for the peer list)');
+    if (!name?.trim()) return;
+    setBusy(true);
+    try {
+      const res = await api.failoverScript({ name: name.trim() });
+      setOvpn({
+        kind: 'failover',
+        script: res.script,
+        username: res.ovpnUsername,
+        nasIp: res.assignedIp,
+        defaultApiPort: 8728,
+      });
+      setDial((d) => ({ ...d, open: false }));
+    } catch (e) {
+      store.toast(`Could not set up WireGuard/OVPN failover: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyScript = async () => {
     try {
       await navigator.clipboard.writeText(ovpn.script);
@@ -812,6 +840,10 @@ Revoke anyway?`
                   title="RouterOS 7 only. Survives a changing address far better than OVPN.">
             + Onboard via WireGuard
           </Button>
+          <Button onClick={mintFailover} disabled={busy}
+                  title="RouterOS 7 only. WireGuard as usual, with the router itself switching to OVPN if a carrier or CGNAT link ever blocks WireGuard's UDP port.">
+            + Onboard with failover
+          </Button>
         </>
       }
     >
@@ -1122,6 +1154,8 @@ Revoke anyway?`
         open={!!ovpn && !form}
         title={ovpn?.kind === 'wireguard'
           ? 'Paste this into the MikroTik terminal (WireGuard)'
+          : ovpn?.kind === 'failover'
+          ? 'Paste this into the MikroTik terminal (WireGuard + OVPN failover)'
           : 'Paste this into the MikroTik terminal'}
         width={640}
         onClose={() => setOvpn(null)}
@@ -1139,7 +1173,7 @@ Revoke anyway?`
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', gap: 16, fontSize: 12.5, flexWrap: 'wrap' }}>
               <span>
-                {ovpn.kind === 'wireguard' ? 'Peer' : 'Username'}{' '}
+                {ovpn.kind === 'wireguard' ? 'Peer' : ovpn.kind === 'failover' ? 'OVPN username' : 'Username'}{' '}
                 <strong style={{ fontFamily: font.mono }}>{ovpn.username}</strong>
               </span>
               <span>
@@ -1159,6 +1193,15 @@ Revoke anyway?`
                   stored here — if you lose it, make a new peer rather than looking for it.
                   The router keeps a stable address in your tunnel range, so RADIUS CoA can
                   always reach it. Come back here once the handshake completes.
+                </>
+              ) : ovpn.kind === 'failover' ? (
+                <>
+                  RouterOS 7 only. WireGuard comes up as usual; OVPN is added disabled,
+                  as a standby the router itself switches to if WireGuard's handshake ever
+                  goes stale for more than 90 seconds, and switches back from once WireGuard
+                  recovers — checked every 2 minutes by a scheduler this script also adds.
+                  The private key and OVPN password are shown once and are not stored.
+                  Come back here once the WireGuard handshake completes.
                 </>
               ) : (
                 <>
