@@ -6545,6 +6545,7 @@ const AUTOMATION_JOBS = [
   { job: 'dbBackup', name: 'Database backup', cron: '0 3 * * *', system: true, detail: 'Nightly pg_dump to R2 — daily kept a week, Sunday\'s kept two months' },
   { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
   { job: 'checkSlaBreaches', name: 'SLA breach alerts', cron: '*/5 * * * *', detail: 'Texts whoever an SLA policy names to escalate to (or the owner) the moment a ticket passes its resolve-by time' },
+  { job: 'enforceHotspotDataCaps', name: 'Hotspot data caps', cron: '*/15 * * * *', detail: 'Tracks usage against a plan’s data cap and cuts a voucher off the moment it’s hit' },
 ];
 
 /**

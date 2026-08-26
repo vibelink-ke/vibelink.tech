@@ -623,6 +623,38 @@ export async function startVoucherClock(c, tenantId, code) {
 }
 
 /**
+ * Cut a voucher off before its normal expiry — the data-cap enforcement in
+ * jobs.js is the only caller today. Unlike startVoucherClock above, this
+ * always overwrites: that function only ever wrote Expiration once, the
+ * first time a clock started, because the value it wrote was already
+ * correct for the voucher's normal lifetime. A data-cap breach means the
+ * *existing* Expiration (still the original, later time) is now wrong and
+ * has to be moved earlier, or a guest cut off for their cap could simply
+ * reconnect — the same reconnect loophole this whole Expiration mechanism
+ * exists to close in the first place, just reopened by a stale value
+ * instead of a missing one.
+ */
+export async function expireVoucherNow(c, tenantId, code) {
+  await c.query(
+    `insert into radcheck (tenant_id, username, attribute, op, value) values ($1,$2,'Expiration',':=',$3)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [tenantId, code, radiusDate(new Date())]);
+  await c.query(
+    `update vouchers set status='expired', expires_at=now() where tenant_id=$1 and code=$2`,
+    [tenantId, code]);
+}
+
+/**
+ * Disconnect whatever is live right now. Rewriting Expiration only stops
+ * the *next* login attempt — a session already connected when a data cap is
+ * hit would otherwise keep flowing until RouterOS's own Session-Timeout
+ * eventually ends it on its own schedule, which could be hours away.
+ */
+export async function disconnectVoucherSession(c, host, secret, code) {
+  await coa(c, host, secret, code, null, undefined, true);
+}
+
+/**
  * Push a live speed change to the router.
  *
  * Best-effort by design: the caller is applying a payment or running the fair-use

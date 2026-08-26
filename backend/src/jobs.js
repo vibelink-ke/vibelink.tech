@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
-import { walledGarden, forgetVoucherAccess } from './radius.js';
+import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
@@ -41,6 +41,7 @@ const safely = (name, fn) => async () => {
 export function startJobs() {
   cron.schedule('*/5 * * * *', safely('expireAndSuspend', expireAndSuspend));
   cron.schedule('*/15 * * * *', safely('enforceFup', enforceFup));
+  cron.schedule('*/15 * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
   cron.schedule('0 6 * * *',  safely('generateInvoices', generateInvoices));
   cron.schedule('0 8,12,18 * * *', safely('autoCharge', autoCharge));
   cron.schedule('0 9 * * *',  safely('remind', remind));
@@ -220,6 +221,89 @@ async function checkSlaBreaches() {
     // rota number if one is set, otherwise the account owner.
     if (!sent) await notifyOwner(t.tenant_id, body);
     await pool.query('update tickets set sla_breach_notified=true where id=$1', [t.id]);
+  }
+}
+
+const HOTSPOT_MB = 1024 * 1024;
+
+/**
+ * Hotspot plans have always let an operator set a data cap
+ * (plans.data_cap_mb) — the same as PPPoE's own fair-use policies — and
+ * nothing ever measured a voucher's usage against it. vouchers.data_used_mb
+ * existed and sat at its default 0 forever; a voucher sold as "1 day, 1GB"
+ * behaved exactly like an uncapped one, because nothing here ever checked.
+ *
+ * Usage comes from `sessions` (voucher_id), the same RADIUS-accounting
+ * mirror enforceFup already reads for PPPoE subscribers via subscriber_id.
+ * Every in-use voucher with a cap gets data_used_mb kept current regardless
+ * of whether it's over — that part is pure bookkeeping the operator should
+ * be able to trust even for a voucher nowhere near its limit.
+ */
+async function enforceHotspotDataCaps() {
+  const { rows } = await pool.query(
+    `select v.id, v.tenant_id, v.code, v.mac,
+            coalesce(sum(s.bytes_in + s.bytes_out), 0) as bytes,
+            p.data_cap_mb
+       from vouchers v
+       join plans p on p.id = v.plan_id
+       left join sessions s on s.voucher_id = v.id
+      where v.status='in_use' and p.data_cap_mb is not null and p.data_cap_mb > 0
+        and v.tenant_id in (${enabledTenants})
+      group by v.id, p.data_cap_mb`,
+    ['enforceHotspotDataCaps']);
+  if (!rows.length) return;
+
+  const capBreached = [];
+  for (const v of rows) {
+    const usedMb = Math.round(Number(v.bytes) / HOTSPOT_MB);
+    await pool.query('update vouchers set data_used_mb=$2 where id=$1', [v.id, usedMb]);
+    if (usedMb >= Number(v.data_cap_mb)) capBreached.push(v);
+  }
+  if (!capBreached.length) return;
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  for (const v of capBreached) {
+    // Blocks the *next* login immediately — see expireVoucherNow's own
+    // comment on why the original (later) Expiration has to be overwritten,
+    // not just the vouchers row.
+    await expireVoucherNow(pool, v.tenant_id, v.code);
+
+    if (v.mac) {
+      // A MAC-bound device (the TV/console bypass flow) never went through
+      // RADIUS at all — same unbind expireAndSuspend already uses for a
+      // time-based expiry, just triggered by the data cap instead.
+      const { rows: [d] } = await pool.query(
+        `select r.host, r.secret, r.api_port, r.service_user, r.service_password_enc
+           from voucher_devices dv join routers r on r.id = dv.router_id
+          where dv.voucher_id=$1 and r.service_user is not null and r.service_password_enc is not null
+          limit 1`, [v.id]);
+      if (d) {
+        try {
+          const password = secrets.decrypt(d.service_password_enc);
+          const conn = await ros.connect({
+            host: String(d.host).split('/')[0], port: d.api_port ?? 8728,
+            user: d.service_user, password, timeoutSec: 8,
+          });
+          try { await ros.unbindDeviceByMac(conn, { mac: v.mac }); } finally { ros.close(conn); }
+        } catch (e) {
+          console.warn('data-cap unbindDeviceByMac failed for', v.mac, '—', e.message);
+        }
+      }
+    } else {
+      // A regular hotspot login — kick whatever is live right now, or the
+      // Expiration rewrite above only stops the next attempt while this
+      // session keeps flowing until RouterOS's own Session-Timeout ends it,
+      // which could be hours away.
+      const { rows: [sess] } = await pool.query(
+        `select r.host, r.secret from sessions se join routers r on r.id = se.router_id
+          where se.voucher_id=$1 and se.stopped_at is null limit 1`, [v.id]);
+      if (sess) {
+        await disconnectVoucherSession(pool, sess.host, sess.secret, v.code)
+          .catch((e) => console.warn('data-cap disconnect failed for', v.code, '—', e.message));
+      }
+    }
   }
 }
 
