@@ -1491,3 +1491,53 @@ end $$;
 -- one query is simpler than standing up anything else for it.
 alter table tenants add column if not exists favicon bytea;
 alter table tenants add column if not exists favicon_mime text;
+
+-- ─────────────── referrals & commission ───────────────
+-- Whoever brings in a client — a staff member working a lead, or someone
+-- outside the business entirely (a shop owner, a satisfied customer) who
+-- gets a cut for sending people your way. staff_id links back to an
+-- existing staff row when the referrer is one of your own; left null for
+-- an external referrer, who exists only in this table.
+create table if not exists referrers (
+  id               uuid primary key default gen_random_uuid(),
+  tenant_id        uuid not null references tenants on delete cascade,
+  staff_id         uuid references staff on delete set null,
+  name             text not null,
+  phone            text,
+  -- percent: commission_rate is 0-100, applied to the client's first payment.
+  -- fixed: commission_rate is a flat KES amount, paid regardless of that
+  -- payment's size.
+  commission_type  text not null default 'percent',
+  commission_rate  numeric(12,2) not null default 0,
+  notes            text,
+  created_at       timestamptz not null default now(),
+  constraint referrers_commission_type_valid check (commission_type in ('percent','fixed'))
+);
+create index if not exists referrers_tenant_id_idx on referrers (tenant_id);
+
+-- Set at client creation, not changeable after — the referral is a fact
+-- about how this client came to sign up, same as the account was created;
+-- reassigning it later would let a payout dispute be resolved by editing
+-- history instead of the commission record itself.
+alter table subscribers add column if not exists referred_by uuid references referrers on delete set null;
+
+-- One row per client, ever — the unique constraint on subscriber_id is what
+-- makes "one-time, on the first payment" actually true rather than a rule
+-- the application code has to remember to enforce everywhere a payment can
+-- be applied.
+create table if not exists referral_commissions (
+  id             uuid primary key default gen_random_uuid(),
+  tenant_id      uuid not null references tenants on delete cascade,
+  referrer_id    uuid not null references referrers on delete cascade,
+  subscriber_id  uuid not null references subscribers on delete cascade,
+  payment_id     uuid references payments on delete set null,
+  basis_amount   numeric(12,2) not null,   -- the payment this was computed from
+  amount         numeric(12,2) not null,   -- the commission itself
+  status         text not null default 'owed',
+  paid_at        timestamptz,
+  created_at     timestamptz not null default now(),
+  unique (subscriber_id),
+  constraint referral_commissions_status_valid check (status in ('owed','paid'))
+);
+create index if not exists referral_commissions_tenant_id_idx on referral_commissions (tenant_id);
+create index if not exists referral_commissions_referrer_id_idx on referral_commissions (referrer_id);

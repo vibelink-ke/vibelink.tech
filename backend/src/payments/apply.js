@@ -169,7 +169,38 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId) {
   }
   await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, applied_at=now() where id=$1",
     [paymentId, subId, inv?.id ?? null]);
+
+  if (sub.referred_by) await creditReferral(c, tenantId, sub, subId, amount, paymentId);
+
   return { expires, partial: !full, balance: credit };
+}
+
+/**
+ * One-time commission, on the client's first applied payment only — the
+ * unique (subscriber_id) constraint on referral_commissions is what makes
+ * that a database guarantee rather than something this function has to get
+ * right on its own every time it's called; on conflict do nothing is the
+ * whole enforcement.
+ */
+async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
+  const { rows: [already] } = await c.query(
+    "select 1 from payments where subscriber_id=$1 and status='applied' and id<>$2", [subId, paymentId]);
+  if (already) return;   // a prior payment already applied — this is not the first
+
+  const { rows: [ref] } = await c.query(
+    'select id, commission_type, commission_rate from referrers where id=$1', [sub.referred_by]);
+  if (!ref) return;   // referrer was deleted since — nothing to credit
+
+  const commission = ref.commission_type === 'percent'
+    ? (Number(amount) * Number(ref.commission_rate)) / 100
+    : Number(ref.commission_rate);
+  if (!(commission > 0)) return;
+
+  await c.query(
+    `insert into referral_commissions (tenant_id, referrer_id, subscriber_id, payment_id, basis_amount, amount)
+     values ($1,$2,$3,$4,$5,$6)
+     on conflict (subscriber_id) do nothing`,
+    [tenantId, ref.id, subId, paymentId, amount, commission]);
 }
 
 /** Fuzzy match for till/typo'd references. Learns the payer phone on success. */

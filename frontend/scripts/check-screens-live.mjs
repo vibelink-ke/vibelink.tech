@@ -89,6 +89,10 @@ const COLLECTIONS = {
   ovpnClients: [{ id: 'ov1', username: 'router-2-2', assigned_ip: '10.50.2.2', connected_at: iso(0), created_at: iso(-1), connectedNow: true }],
   ipPools: [{ id: 'pool1', name: 'PPPoE', cidr: '172.16.0.0/24', service: 'pppoe', router_id: 'r1' }],
   liveQueue: [{ id: 'lc1', display_name: 'Guest', visitor_ref: 'v1', status: 'waiting', started_at: iso(-0.01) }],
+  referrers: [
+    { id: 'ref1', staff_id: null, name: 'Grace Wanjiru', phone: '0722222222', commission_type: 'percent', commission_rate: 10, notes: null, created_at: iso(-30), clients_referred: 2, owed: 150, paid: 300 },
+    { id: 'ref2', staff_id: 's1', name: 'Administrator', phone: null, commission_type: 'fixed', commission_rate: 500, notes: 'Front-desk sign-ups', created_at: iso(-10), clients_referred: 0, owed: 0, paid: 0 },
+  ],
 };
 
 /**
@@ -144,6 +148,10 @@ const ROUTES = [
   [/\/api\/live-chats\/[^/]+\/messages/, { chat: { id: 'lc1', display_name: 'Guest', visitor_ref: 'v1', status: 'open', started_at: iso(-0.01) }, messages: [{ id: 'm1', sender: 'visitor', body: 'Hello?', created_at: iso(-0.005) }] }],
   [/\/api\/live-chats$/, COLLECTIONS.liveQueue],
   [/\/api\/subscribers\/[^/]+\/credentials$/, { pppoe_user: '44013', pppoe_pass: 'secret', portal_password_set: true }],
+  [/\/api\/referrers\/[^/]+\/commissions$/, [
+    { id: 'rc1', referrer_id: 'ref1', subscriber_id: 'c1', payment_id: 'pay1', basis_amount: 1500, amount: 150, status: 'owed', paid_at: null, created_at: iso(-5), subscriber_name: 'Peter Kandie', account_code: '44013' },
+    { id: 'rc2', referrer_id: 'ref1', subscriber_id: 'c2', payment_id: 'pay2', basis_amount: 1500, amount: 150, status: 'paid', paid_at: iso(-2), created_at: iso(-8), subscriber_name: 'Mary W', account_code: '44014' },
+  ]],
   [/\/api\/me$/, { id: 's1', name: 'Administrator', email: 'admin@example.com', role: 'owner' }],
 ];
 
@@ -179,6 +187,7 @@ const COLLECTION_ROUTES = [
   [/\/api\/sales-reps$/, COLLECTIONS.salesReps],
   [/\/api\/ovpn-clients$/, COLLECTIONS.ovpnClients],
   [/\/api\/ip-pools$/, COLLECTIONS.ipPools],
+  [/\/api\/referrers$/, COLLECTIONS.referrers],
 ];
 
 const unmatchedUrls = new Set();

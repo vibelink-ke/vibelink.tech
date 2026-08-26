@@ -141,6 +141,13 @@ export const api = {
   createLead: (l) => post('/api/leads', l),
   updateLead: (id, patchBody) => patch(`/api/leads/${id}`, patchBody),
 
+  referrers: () => get('/api/referrers'),
+  createReferrer: (r) => post('/api/referrers', r),
+  updateReferrer: (id, patchBody) => put(`/api/referrers/${id}`, patchBody),
+  deleteReferrer: (id) => del(`/api/referrers/${id}`),
+  referrerCommissions: (id) => get(`/api/referrers/${id}/commissions`),
+  markCommissionPaid: (id) => post(`/api/referral-commissions/${id}/mark-paid`, {}),
+
   messages: (subscriberId) => get(`/api/messages/${subscriberId}`),
   sendMessage: (m) => post('/api/messages', m),
 

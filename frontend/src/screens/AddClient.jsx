@@ -21,6 +21,7 @@ const BLANK = {
   identification: '',
   location: '',
   lineLabel: '',
+  referredBy: '',
   // Blank, not a default. These shipped filled in with one spot in Eldoret, so
   // every client saved without touching the field would have claimed to live
   // there — a map full of confident wrong pins is worse than an empty one.
@@ -178,6 +179,7 @@ export default function AddClient() {
         pppoePass: f.password || null,
         staticIp: f.assignedIp || null,
         lineLabel: f.lineLabel || null,
+        referredBy: f.referredBy || null,
         location: f.location || null,
         lat: f.lat,
         lng: f.lng,
@@ -280,6 +282,19 @@ export default function AddClient() {
               hint="Only for a second or third line on the same account — Shop, Flat 3, Warehouse"
             >
               <Input value={f.lineLabel} onChange={set('lineLabel')} placeholder="Leave blank for their only line" />
+            </Field>
+            {/* Optional — most signups have no referrer at all. Credits a
+                one-time commission automatically on this client's first
+                payment; see the Referrals screen for who that goes to. */}
+            <Field label="Referred by" hint="Optional">
+              <Select
+                value={f.referredBy}
+                onChange={set('referredBy')}
+                options={[
+                  { value: '', label: '— none —' },
+                  ...(store.referrers ?? []).map((r) => ({ value: r.id, label: r.name })),
+                ]}
+              />
             </Field>
             <Field label="Category">
               <Select value={f.category} onChange={set('category')} options={CATEGORIES} />

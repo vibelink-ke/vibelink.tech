@@ -26,6 +26,7 @@ const COLLECTIONS = {
   clients: api.subscribers,
   tickets: api.tickets,
   leads: api.leads,
+  referrers: api.referrers,
   tariffs: api.tariffs,
   routers: api.routers,
   ipPools: api.ipPools,

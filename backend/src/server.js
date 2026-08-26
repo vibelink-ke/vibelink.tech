@@ -2255,6 +2255,112 @@ app.post('/api/leads', async (req, res) => {
   res.json(l);
 });
 
+/**
+ * Referrers — staff or outsiders who bring in clients and earn a one-time
+ * commission on the client's first payment. clients_referred and totals are
+ * computed here rather than trusted from anywhere else, since they're what
+ * the list screen is actually for: at a glance, who's earned what.
+ */
+app.get('/api/referrers', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select r.*,
+            count(s.id) as clients_referred,
+            coalesce(sum(rc.amount) filter (where rc.status='owed'), 0) as owed,
+            coalesce(sum(rc.amount) filter (where rc.status='paid'), 0) as paid
+       from referrers r
+       left join subscribers s on s.referred_by = r.id
+       left join referral_commissions rc on rc.referrer_id = r.id
+      where r.tenant_id=$1
+      group by r.id
+      order by r.created_at desc`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/referrers', wrap(async (req, res) => {
+  const { name, phone, staffId, commissionType = 'percent', commissionRate = 0, notes } = req.body ?? {};
+  if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
+  if (!['percent', 'fixed'].includes(commissionType)) {
+    return res.status(400).json({ error: 'commissionType must be percent or fixed' });
+  }
+  const rate = Number(commissionRate);
+  if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: 'Enter a valid commission rate' });
+  if (commissionType === 'percent' && rate > 100) {
+    return res.status(400).json({ error: 'A percentage commission cannot be over 100%' });
+  }
+
+  // A staff-type referrer is scoped to this tenant's own team, the same
+  // guarantee every other staff_id foreign key on this platform carries —
+  // never trusted bare off the request body.
+  if (staffId) {
+    const { rowCount } = await pool.query(
+      'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+
+  const { rows: [r] } = await pool.query(
+    `insert into referrers (tenant_id, staff_id, name, phone, commission_type, commission_rate, notes)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *, 0 as clients_referred, 0 as owed, 0 as paid`,
+    [req.tenant.id, staffId || null, String(name).trim(), phone || null, commissionType, rate, notes || null]);
+  res.json(r);
+}));
+
+app.put('/api/referrers/:id', wrap(async (req, res) => {
+  const { name, phone, commissionType, commissionRate, notes } = req.body ?? {};
+  if (commissionType && !['percent', 'fixed'].includes(commissionType)) {
+    return res.status(400).json({ error: 'commissionType must be percent or fixed' });
+  }
+  if (commissionRate !== undefined) {
+    const rate = Number(commissionRate);
+    if (!Number.isFinite(rate) || rate < 0) return res.status(400).json({ error: 'Enter a valid commission rate' });
+    if ((commissionType ?? 'percent') === 'percent' && rate > 100) {
+      return res.status(400).json({ error: 'A percentage commission cannot be over 100%' });
+    }
+  }
+  const { rows: [r] } = await pool.query(
+    `update referrers set
+       name=coalesce(nullif($3,''), name),
+       phone=coalesce($4, phone),
+       commission_type=coalesce($5, commission_type),
+       commission_rate=coalesce($6, commission_rate),
+       notes=coalesce($7, notes)
+     where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, name ?? '', phone ?? null,
+     commissionType ?? null, commissionRate ?? null, notes ?? null]);
+  if (!r) return res.status(404).json({ error: 'No such referrer' });
+  res.json(r);
+}));
+
+app.delete('/api/referrers/:id', wrap(async (req, res) => {
+  // Referred clients keep their history (referred_by -> null on delete, per
+  // the FK) and any commission already recorded stays exactly as it was —
+  // deleting the referrer is about not offering them for new referrals
+  // going forward, not erasing what already happened.
+  await pool.query('delete from referrers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  res.json({ ok: true });
+}));
+
+/** Everything owed to one referrer — the drawer behind View. */
+app.get('/api/referrers/:id/commissions', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select rc.*, s.name as subscriber_name, s.account_code
+       from referral_commissions rc
+       join subscribers s on s.id = rc.subscriber_id
+      where rc.referrer_id=$1 and rc.tenant_id=$2
+      order by rc.created_at desc`,
+    [req.params.id, req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/referral-commissions/:id/mark-paid', wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query(
+    `update referral_commissions set status='paid', paid_at=now()
+      where id=$1 and tenant_id=$2 and status='owed' returning *`,
+    [req.params.id, req.tenant.id]);
+  if (!c) return res.status(404).json({ error: 'No such owed commission' });
+  res.json(c);
+}));
+
 app.get('/api/messages/:subscriberId', async (req, res) => {
   const { rows } = await pool.query(
     'select * from messages where tenant_id=$1 and subscriber_id=$2 order by sent_at', [req.tenant.id, req.params.subscriberId]);
@@ -4313,7 +4419,7 @@ function coord(value, limit) {
 
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
-          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel } = req.body;
+          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
 
   /**
@@ -4382,13 +4488,23 @@ app.post('/api/subscribers', wrap(async (req, res) => {
       });
     }
   }
+  // Scoped the same as every other foreign key taken bare off the request —
+  // a referrer id has to actually belong to this tenant, not just exist.
+  let referrerId = null;
+  if (referredBy) {
+    const { rowCount } = await pool.query(
+      'select 1 from referrers where id=$1 and tenant_id=$2', [referredBy, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
+    referrerId = referredBy;
+  }
+
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
-       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`,
+       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label, referred_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning *`,
     [req.tenant.id, account, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
-     location || null, coord(lat, 90), coord(lng, 180), label]);
+     location || null, coord(lat, 90), coord(lng, 180), label, referrerId]);
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.

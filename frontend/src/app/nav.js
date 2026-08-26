@@ -42,6 +42,7 @@ export const NAV_SECTIONS = [
     heading: 'MONEY',
     items: [
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
+      { to: '/referrals', label: 'Referrals', count: (s) => s.referrers.length },
       { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length },
       { to: '/automation', label: 'Automation' },
     ],
