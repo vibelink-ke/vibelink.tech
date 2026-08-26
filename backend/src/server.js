@@ -374,7 +374,7 @@ app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
   if (!who) return res.json(generic);
 
   const { rows: [acct] } = await pool.query(
-    `select st.id, st.email, st.phone, st.tenant_id, t.subdomain from staff st
+    `select st.id, st.email, st.phone, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
      join tenants t on t.id = st.tenant_id
      where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
   if (!acct) return res.json(generic);
@@ -382,17 +382,21 @@ app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
   const token = await auth.createLoginToken(acct.id, 'reset');
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   const link = `https://${acct.subdomain}.${root}/reset-password?token=${token}`;
+  // Falls back to "Vibelink" only for the very rare tenant row missing a
+  // name — every ISP on the platform has staff whose password-reset mail
+  // should say their own company, not the platform running underneath it.
+  const brand = acct.tenant_name || 'Vibelink';
 
   if (acct.email) {
     const email = await import('./email.js');
-    email.sendSystem(acct.tenant_id, acct.email, 'Reset your Vibelink password',
+    email.sendSystem(acct.tenant_id, acct.email, `Reset your ${brand} password`,
       `Reset your password: ${link}\n\nThis link expires in 30 minutes and works once. `
       + 'If you did not request this, ignore it.').catch(() => {});
   }
   if (acct.phone) {
     const sms = await import('./sms.js');
     sms.send(acct.tenant_id, acct.phone, 'custom',
-      { body: `Vibelink password reset: ${link} (valid 30 min)` }).catch(() => {});
+      { body: `${brand} password reset: ${link} (valid 30 min)` }).catch(() => {});
   }
   auth.pruneLoginTokens();
   res.json(generic);
@@ -424,7 +428,7 @@ app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
   if (!who) return res.json(generic);
 
   const { rows: [acct] } = await pool.query(
-    `select st.id, st.email, st.tenant_id, t.subdomain from staff st
+    `select st.id, st.email, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
      join tenants t on t.id = st.tenant_id
      where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
   if (!acct?.email) return res.json(generic);
@@ -432,9 +436,10 @@ app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
   const token = await auth.createLoginToken(acct.id, 'magic');
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   const link = `https://${acct.subdomain}.${root}/api/auth/magic?token=${token}`;
+  const brand = acct.tenant_name || 'Vibelink';
 
   const email = await import('./email.js');
-  email.sendSystem(acct.tenant_id, acct.email, 'Your Vibelink sign-in link',
+  email.sendSystem(acct.tenant_id, acct.email, `Your ${brand} sign-in link`,
     `Sign in: ${link}\n\nThis link expires in 15 minutes and works once. `
     + 'If you did not request this, ignore it.').catch(() => {});
   auth.pruneLoginTokens();
@@ -2086,8 +2091,9 @@ app.post('/api/email/test', wrap(async (req, res) => {
   const to = String(req.body?.to ?? '').trim();
   if (!to) return res.status(400).json({ error: 'Enter an address to send the test to' });
 
-  const out = await mail.send(req.tenant.id, to, 'Vibelink test email',
-    'This is a test from your Vibelink billing system. If you are reading it, your email gateway works.');
+  const brand = req.tenant.name || 'Vibelink';
+  const out = await mail.send(req.tenant.id, to, `${brand} test email`,
+    `This is a test from your ${brand} billing system. If you are reading it, your email gateway works.`);
   if (!out.ok) return res.status(502).json({ error: out.error });
   res.json({ ok: true, sent: to });
 }));
