@@ -43,6 +43,13 @@
 	handle /webhooks/* {
 		reverse_proxy net:8080
 	}
+	# Same missing-proxy-rule trap every other unlisted path here has already
+	# hit once: without this, /healthz falls through to try_files and 200s
+	# with index.html regardless of whether the API or the database behind it
+	# is actually up — a health check that always passes is worse than none.
+	handle /healthz {
+		reverse_proxy net:8080
+	}
 	# The captive-portal support widget (hotspot-portal.js's chat, and the
 	# customer portal's own copy of it). No admin screen lives under /chat,
 	# so unlike /hotspot below this can be the whole prefix — nothing to

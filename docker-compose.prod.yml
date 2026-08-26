@@ -116,6 +116,15 @@ services:
       # only), and the whole-directory mount works everywhere.
       - billing-ovpn-pki:/etc/openvpn/pki:ro
     # No `ports`: the namespace belongs to `net`. Caddy reaches it as net:8080.
+    # localhost works here specifically because api shares net's own network
+    # namespace (network_mode above) — from any other container this would
+    # need to be net:8080 instead.
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://localhost:8080/healthz']
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     build:
@@ -134,6 +143,12 @@ services:
     volumes:
       - caddy-data:/data      # certificates; losing this re-issues them
       - caddy-config:/config
+    # No healthcheck here on purpose: on-demand TLS means even a request
+    # this container can answer correctly may still round-trip Let's
+    # Encrypt on a cold cache, and neither the official Caddy image nor
+    # Alpine's own base is guaranteed to carry wget/curl/nc to probe with
+    # regardless — a check likely to false-negative is worse than none, on
+    # the one container that terminates TLS for every tenant.
 
   # Also in the shared namespace. Routers send RADIUS to 10.50.0.1, the tunnel-side
   # address of that namespace — from anywhere else those packets arrive at the

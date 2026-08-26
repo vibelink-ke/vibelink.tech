@@ -15,6 +15,25 @@ import * as mpesa from './payments/daraja.js';
 import { startJobs } from './jobs.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
+import axios from 'axios';
+
+/**
+ * Every outbound call to Safaricom, KopoKopo, a bank's STK endpoint, or any
+ * of the SMS gateways (daraja.js, kopokopo.js, bankstk.js, sms.js) shares
+ * this one axios module — importing "axios" anywhere in the process returns
+ * the same default instance — so setting the timeout here once covers all
+ * of them, rather than passing `{ timeout }` at every individual call site
+ * and hoping a future one remembers to.
+ *
+ * None of those calls set a timeout of their own before this. A gateway
+ * that stops answering — not erroring, just never replying — left the
+ * request hanging with nothing to time it out: the guest's STK push, the
+ * cashier's manual match, the SMS send behind a payment receipt, all
+ * blocked on a socket that might never close, tying up the request handler
+ * (and, for anything running inside a transaction, the database connection
+ * underneath it) for as long as the far end feels like staying silent.
+ */
+axios.defaults.timeout = 15000;
 
 // A crash used to be invisible: the process died, the proxy answered 502 with an
 // empty body, the container restarted, and nothing was written down. Say what
@@ -90,6 +109,29 @@ app.use((req, res, next) => {
     if (req.method === 'OPTIONS') return res.status(204).end();
   }
   next();
+});
+
+/**
+ * Liveness/readiness for whatever watches this container — Docker's own
+ * `healthcheck:`, an uptime monitor, a load balancer. /api/platform/health
+ * already exists but is superAdminOnly and answers with disk/memory figures
+ * that are nobody's business but the platform owner's; nothing before this
+ * commit could ask "is this process actually able to serve a request" without
+ * a session. No auth on purpose — this reports nothing beyond up/down, the
+ * same as the trust boundary a plain TCP health probe already has anyway.
+ *
+ * Actually touches the database rather than only answering 200 unconditionally
+ * — a process that is running but whose pool is exhausted or whose database
+ * is unreachable is not actually healthy, and the whole point of a check like
+ * this is catching exactly that case before an operator's own monitoring does.
+ */
+app.get('/healthz', async (_req, res) => {
+  try {
+    await pool.query('select 1');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ ok: false, error: e.message });
+  }
 });
 
 /**
@@ -6383,6 +6425,14 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
+  /**
+   * Same gap this list's own comment above already describes, caught by
+   * scripts/check-jobs.mjs rather than by memory this time: both had been
+   * running, unlisted, since before any of the jobs above them were added
+   * here at all.
+   */
+  { job: 'dbBackup', name: 'Database backup', cron: '0 3 * * *', system: true, detail: 'Nightly pg_dump to R2 — daily kept a week, Sunday\'s kept two months' },
+  { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
 ];
 
 /**

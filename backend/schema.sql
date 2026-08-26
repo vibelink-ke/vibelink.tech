@@ -1519,17 +1519,28 @@ create table if not exists referrers (
   constraint referrers_not_both_staff_and_subscriber check (not (staff_id is not null and subscriber_id is not null))
 );
 create index if not exists referrers_tenant_id_idx on referrers (tenant_id);
+-- Both looked up whenever a referrer is created or edited, to confirm the
+-- staff/customer row actually belongs to this tenant — a sequential scan of
+-- every referrer for that check gets slower with every referrer a tenant
+-- has, for a lookup that has nothing to do with how many referrers exist.
+create index if not exists referrers_staff_id_idx on referrers (staff_id) where staff_id is not null;
+create index if not exists referrers_subscriber_id_idx on referrers (subscriber_id) where subscriber_id is not null;
 
 -- Which referrer brought in this lead, chosen alongside the channel/source
 -- it came through — set at creation, same reasoning as subscribers.referred_by
 -- below: a fact about how the lead arrived, not something to quietly rewrite.
 alter table leads add column if not exists referrer_id uuid references referrers on delete set null;
+create index if not exists leads_referrer_id_idx on leads (referrer_id) where referrer_id is not null;
 
 -- Set at client creation, not changeable after — the referral is a fact
 -- about how this client came to sign up, same as the account was created;
 -- reassigning it later would let a payout dispute be resolved by editing
 -- history instead of the commission record itself.
 alter table subscribers add column if not exists referred_by uuid references referrers on delete set null;
+-- GET /api/referrers joins every subscriber against referrers on this
+-- column to compute clients_referred — without an index that's a full
+-- table scan of subscribers on every single load of the Referrals screen.
+create index if not exists subscribers_referred_by_idx on subscribers (referred_by) where referred_by is not null;
 
 -- One row per client, ever — the unique constraint on subscriber_id is what
 -- makes "one-time, on the first payment" actually true rather than a rule
