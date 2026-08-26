@@ -107,6 +107,11 @@ services:
       WG_ENDPOINT: ${WG_ENDPOINT:-}
       WG_SERVER_PUBLIC_KEY: ${WG_SERVER_PUBLIC_KEY:-}
       WG_SERVER_PRIVATE_KEY: ${WG_SERVER_PRIVATE_KEY:-}
+      # Web push (push.js). Optional: unset means every push is a silent
+      # no-op, same shape as the WireGuard/SMS "not configured" fallbacks
+      # above — the app installs and works fully without it.
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
     volumes:
