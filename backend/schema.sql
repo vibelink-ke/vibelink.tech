@@ -1618,14 +1618,16 @@ create table if not exists lead_notes (
 );
 create index if not exists lead_notes_lead_idx on lead_notes (lead_id, at);
 
--- ─────────────── retire the dedicated expired-customers IP pool ───────────────
--- Suspended/expired/paused subscribers are now cut off by a single firewall
--- rule matched on a RADIUS-assigned address-list membership (radius.js's
--- walledGarden, applyIspBlockRule in routeros.js) rather than by parking them
--- in a whole IP range set aside for the purpose. Nothing left to reinterpret
--- when a range this shape existed: fold any 'expired'-purpose pool back into
--- an ordinary unlocked 'normal' one so the addresses in it stay usable and
--- the operator can rename, reassign, or delete it like any other pool.
-update ip_pools set purpose = 'normal', locked = false where purpose = 'expired';
+-- ─────────────── the expired-customers IP pool is back ───────────────
+-- Briefly retired in favor of a RADIUS-reply-attribute-only block (the
+-- update/constraint right above this one) — restored because the dedicated
+-- range is what actually catches a subscriber who never reconnects at all,
+-- not just the live-session case CoA can reach. The reply attribute stays
+-- too (radius.js's walledGarden still sets it) as the belt to this range's
+-- braces, same as routeros.js's applyExpiredPool always described it.
+--
+-- Unlike before, this pool is never offered under Networks — it's
+-- auto-created per router (server.js's autoExpiredCidr/ensureExpiredPool)
+-- and pushed by Configure, not something an operator sets up by hand.
 alter table ip_pools drop constraint if exists ip_pools_purpose_check;
-alter table ip_pools add constraint ip_pools_purpose_check check (purpose = 'normal');
+alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal', 'expired'));

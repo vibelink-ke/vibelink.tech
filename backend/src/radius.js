@@ -205,21 +205,36 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
  * break anything pointed at it.
  */
 /**
- * Suspended/expired/paused subscribers keep their normal-pool address — what
- * cuts them off is the Mikrotik-Address-List reply attribute walledGarden
- * sets, which a single firewall rule (applyIspBlockRule in routeros.js) drops
- * regardless of which address they hold. No separate IP range to carve out
- * or keep in sync.
+ * Suspended/expired/paused subscribers are allocated from a separate pool —
+ * a system-managed range auto-created per router, never offered under
+ * Networks — so the whole range can be dropped by one static firewall rule
+ * (applyExpiredPool in routeros.js) instead of the router needing to know
+ * who, individually, is cut off. The Mikrotik-Address-List reply attribute
+ * walledGarden also sets covers a subscriber who never actually reconnects
+ * into that range at all — belt and braces, not a replacement for it.
  */
 async function framedAddress(c, tenantId, subId, s) {
-  const { rows: [pool] } = await c.query(
-    `select cidr from ip_pools
-      where tenant_id=$1 and service='pppoe' and purpose='normal'
-      order by (router_id is not null) desc limit 1`, [tenantId]);
+  const purpose = ['expired', 'suspended', 'paused'].includes(s.status) ? 'expired' : 'normal';
+
+  const poolFor = async (p) => {
+    const { rows: [row] } = await c.query(
+      `select cidr from ip_pools
+        where tenant_id=$1 and service='pppoe' and purpose=$2
+        order by (router_id is not null) desc limit 1`, [tenantId, p]);
+    return row;
+  };
+
+  // A tenant whose expired pool has not been (re)created yet — Configure
+  // pushes it automatically, but only from the next push onward — still
+  // needs an address to hand out. Mikrotik-Rate-Limit and the reply
+  // attribute still apply regardless of which pool answered.
+  const pool = (await poolFor(purpose)) ?? (purpose === 'expired' ? await poolFor('normal') : null);
   if (!pool) return null;
 
   // Whatever they already hold, provided it is still inside both the router's
-  // servable range and the pool.
+  // servable range and the pool that matches their current purpose — a
+  // customer moving from active to expired (or back) must not simply keep an
+  // address from the other range.
   if (s.static_ip) {
     const { rows: [held] } = await c.query('select host($1::inet) as a', [s.static_ip]);
     if (held?.a && inPool(held.a, s.pppoe_pool) && inPool(held.a, pool.cidr)) return held.a;
@@ -399,10 +414,10 @@ export async function clearFupThrottle(c, tenantId, subId) {
 // RouterOS treats a literal 0 as "no limit" — the opposite of a cut-off
 // account — so this is the practical floor: a page will not load, which is
 // the point. Real blocking is the firewall filter rule against the
-// ispblocking address list (see applyIspBlockRule in routeros.js), which the
-// Mikrotik-Address-List reply attribute below puts them on at every login —
-// this rate is only the fallback for the moment before the router picks that
-// attribute up (or the rare case its filter rule has not been pushed yet).
+// expired-customers address list (see applyExpiredPool in routeros.js) or,
+// for a subscriber who never actually reconnects into that range, the
+// Mikrotik-Address-List reply attribute below — this rate is only the
+// fallback for whichever of those has not caught up yet.
 const EXPIRED_RATE = '1k/1k';
 const BLOCK_LIST = 'ispblocking';
 
@@ -676,7 +691,7 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false) {
 
   const result = await coaClient.send({
     host, secret, username: user, rate,
-    // Matches the address-list name applyIspBlockRule's firewall rule drops —
+    // Matches the address-list name applyExpiredPool's firewall rule drops —
     // and the Mikrotik-Address-List reply attribute walledGarden sets for
     // future logins — so a session already in progress is cut off right now
     // rather than only from its next reconnect.

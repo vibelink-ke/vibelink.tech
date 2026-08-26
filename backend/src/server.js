@@ -3867,15 +3867,21 @@ app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
         await pool.query('update routers set pppoe_pool=$2 where id=$1',
           [r.id, confPool?.cidr ?? null]);
 
-        // One firewall rule, not tied to any IP range — radius.js puts a
-        // suspended/expired/paused subscriber on the block list at login via
-        // a RADIUS reply attribute, so no dedicated pool needs setting aside
-        // under Networks for this to work.
-        const blocked = await tryStep('expired-customers firewall block', () =>
-          ros.applyIspBlockRule(conn), 20000);
-        done.push(blocked.done?.length
-          ? `expired/suspended customers blocked at the firewall: ${blocked.done.join('; ')}`
-          : 'expired/suspended customers already blocked at the firewall');
+        // The expired-customers range — auto-created for this router if it
+        // does not already have one (ensureExpiredPool covers both a
+        // brand-new router and one that predates auto-provisioning).
+        // System-managed: never offered under Networks.
+        const expiredPool = await ensureExpiredPool(req.tenant.id, r.id, r.name);
+        if (expiredPool) {
+          const blocked = await tryStep('expired-customers firewall block', () =>
+            ros.applyExpiredPool(conn, { cidr: expiredPool.cidr }), 20000);
+          done.push(blocked.done?.length
+            ? `expired customers (${expiredPool.cidr}) blocked at the firewall: ${blocked.done.join('; ')}`
+            : `expired customers (${expiredPool.cidr}) already blocked at the firewall`);
+        } else {
+          done.push('could not auto-create an expired-customers pool — every candidate range is taken; '
+            + 'suspended/expired accounts fall back to a near-zero speed limit instead of a firewall block');
+        }
       }
     }
     /**
@@ -4194,8 +4200,77 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
      values ($1,$2,$3,$4,$5,$6,$7) returning *`,
     [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
 
+  // Every router shares one physical WAN and cannot route another site's
+  // expired-pool range — the operator has to set one aside per router anyway
+  // — so it may as well already exist rather than depend on remembering to
+  // add it before the firewall block does anything. Soft-fails: a tenant who
+  // has somehow claimed all sixteen candidate blocks still gets their router.
+  // Not offered under Networks — this pool is system-managed, never edited
+  // or deleted by hand; ensureExpiredPool below covers a router created
+  // before this ran, or whose auto-created pool was ever removed.
+  try {
+    const cidr = await autoExpiredCidr(req.tenant.id);
+    if (cidr) {
+      await pool.query(
+        `insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, locked)
+         values ($1,$2,$3,$4,'pppoe','expired',true)`,
+        [req.tenant.id, `${name} — expired customers`, cidr, r.id]);
+    }
+  } catch (e) {
+    console.warn('auto expired-pool for router', r.id, e.message);
+  }
+
   res.json(r);
 }));
+
+/**
+ * The next free /20 (4096 addresses) out of a block set aside purely for
+ * auto-created expired-customer pools — a tenant's own address plan lives
+ * under Networks and is never touched here, so this can never collide with
+ * ranges they chose themselves. Sixteen /20s fit in 10.250.0.0/16, which is
+ * sixteen routers before a tenant would need to set one up by hand instead.
+ */
+async function autoExpiredCidr(tenantId) {
+  const { rows: existing } = await pool.query('select cidr from ip_pools where tenant_id=$1', [tenantId]);
+  const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
+  const { rows: [hs] } = await pool.query(
+    'select hotspot_network from hotspot_settings where tenant_id=$1', [tenantId]);
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  for (let i = 0; i < 16; i++) {
+    const cidr = `10.250.${i * 16}.0/20`;
+    if (existing.some((e) => poolsOverlap(e.cidr, cidr))) continue;
+    if (tunnelConflict(cidr, t?.tunnel_subnet, SERVER_IP)) continue;
+    if (hs?.hotspot_network && poolsOverlap(hs.hotspot_network, cidr)) continue;
+    return cidr;
+  }
+  return null;   // every candidate block taken — an operator has to set one up by hand
+}
+
+/**
+ * A router that predates auto-provisioning (or whose auto-created pool was
+ * ever removed) has no expired-customers range to block — this backfills
+ * one the next time Configure runs, the same shape POST /api/routers already
+ * does for a brand-new router, so "return the expired pool" reaches routers
+ * that already existed rather than only new ones.
+ */
+async function ensureExpiredPool(tenantId, routerId, routerName) {
+  const { rows: [existing] } = await pool.query(
+    `select cidr from ip_pools
+      where tenant_id=$1 and service='pppoe' and purpose='expired'
+        and (router_id = $2 or router_id is null)
+      order by (router_id = $2) desc
+      limit 1`, [tenantId, routerId]);
+  if (existing) return existing;
+
+  const cidr = await autoExpiredCidr(tenantId);
+  if (!cidr) return null;
+  const { rows: [created] } = await pool.query(
+    `insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, locked)
+     values ($1,$2,$3,$4,'pppoe','expired',true) returning cidr`,
+    [tenantId, `${routerName} — expired customers`, cidr, routerId]);
+  return created;
+}
 
 /**
  * Revoke a tunnel credential.
@@ -4389,10 +4464,13 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 300, 1000);
   const { rows } = await pool.query(`
     with pools as (
+      -- Not the expired-customers pool: that range exists to be firewalled
+      -- off, not offered as a normal client's assigned address.
       select cidr from ip_pools
        where tenant_id = $1
          and (router_id = $2 or router_id is null)
          and service = 'pppoe'
+         and purpose != 'expired'
     )
     select host(network(p.cidr) + i) as ip, text(p.cidr) as pool
       from pools p,
@@ -4412,11 +4490,18 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
   res.json({ addresses: rows.map((r) => r.ip), pools: [...new Set(rows.map((r) => r.pool))] });
 }));
 
+/**
+ * Never returns the expired-customers pool — it's auto-created and pushed
+ * by Configure, not something an operator sets up or edits, and showing it
+ * next to the ranges they actually manage only invited someone to rename,
+ * narrow, or delete the one thing quietly doing the firewall block.
+ */
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name,
        (select count(*) from subscribers s where s.router_id=p.router_id) used
-     from ip_pools p left join routers r on r.id=p.router_id where p.tenant_id=$1`, [req.tenant.id]);
+     from ip_pools p left join routers r on r.id=p.router_id
+     where p.tenant_id=$1 and p.purpose != 'expired'`, [req.tenant.id]);
   res.json(rows);
 });
 /**
