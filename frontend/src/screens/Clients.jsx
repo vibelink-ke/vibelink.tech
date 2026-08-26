@@ -8,10 +8,11 @@ import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
+// KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
+// it can't actually charge a PPPoE customer, so it's not offered here.
 const AUTOPAY_OPTIONS = [
   { value: '', label: 'Off' },
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
-  { value: 'kopokopo', label: 'KopoKopo' },
   { value: 'bankstk', label: 'Bank STK push' },
 ];
 

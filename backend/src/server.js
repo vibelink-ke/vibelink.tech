@@ -4627,6 +4627,12 @@ app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
+  // KopoKopo is hotspot-only by policy everywhere else in this codebase
+  // (kopokopo_hotspot_only db constraint, till-based flow, settings screen's
+  // own note) — autopay is a separate column that constraint can't reach.
+  if (autopay === 'kopokopo') {
+    return res.status(400).json({ error: 'KopoKopo cannot be used for autopay — it is hotspot-only.' });
+  }
 
   /**
    * Catch the same customer being added twice.
@@ -4769,6 +4775,10 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
                    'credit'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  if (req.body.autopay === 'kopokopo') {
+    return res.status(400).json({ error: 'KopoKopo cannot be used for autopay — it is hotspot-only.' });
+  }
 
   if ('credit' in req.body) {
     const c = Number(req.body.credit);
