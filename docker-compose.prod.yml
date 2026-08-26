@@ -23,14 +23,19 @@ services:
     container_name: billing-net
     restart: unless-stopped
     command: ['sleep', 'infinity']
-    # ip_forward belongs to the namespace, so it has to be set by whoever owns it.
+    # ip_forward and src_valid_mark belong to the namespace, so they have to be
+    # set by whoever owns it — wireguard needs src_valid_mark itself (reverse
+    # path filtering rejects a WireGuard reply otherwise), but it cannot set a
+    # network sysctl on a namespace it only borrows.
     sysctls:
       - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
     # Every port for all four services is published here.
     ports:
       - '1194:1194/tcp'   # OVPN. TCP, not UDP: the RouterOS 6 client cannot do UDP
       - '1812:1812/udp'   # RADIUS authentication
       - '1813:1813/udp'   # RADIUS accounting
+      - '51820:51820/udp' # WireGuard
       # 8080 stays unpublished; Caddy reaches the API inside the network as net:8080.
 
   db:
@@ -220,18 +225,25 @@ services:
     build: ./infra/wireguard-init
     container_name: billing-wg
     restart: unless-stopped
+    depends_on:
+      net:
+        condition: service_started
+    # Same reasoning as openvpn: wg0 has to exist in the one namespace api and
+    # freeradius can actually reach. A WireGuard handshake succeeding while
+    # this container sat on its own separate network was the whole bug —
+    # the tunnel worked, but nothing on the api/freeradius side had a route
+    # into it, so an onboarded router stayed unreachable regardless.
+    network_mode: 'service:net'
+    # Capabilities are per-container even when the namespace is shared, so
+    # these stay here rather than moving to `net`.
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
-    sysctls:
-      - net.ipv4.ip_forward=1
-      - net.ipv4.conf.all.src_valid_mark=1
     environment:
       PUID: '1000'
       PGID: '1000'
       TZ: ${TZ:-Africa/Nairobi}
-    ports:
-      - '51820:51820/udp'
+    # Port is published on `net`, which owns the namespace.
     volumes:
       - ./infra/wireguard:/config
       - /lib/modules:/lib/modules:ro

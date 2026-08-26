@@ -94,8 +94,17 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
   const head = [
     '# Generated from wg_peers — edit the database, not this file.',
     '[Interface]',
-    // /16, not /24: one address has to cover every tenant's block.
-    `Address = ${SERVER_IP}/16`,
+    // /32, not /16: wg0 now shares a network namespace with OpenVPN's tun0
+    // (both api and freeradius need to reach routers on either transport),
+    // and tun0 already holds a /16 covering this same supernet. A /16 here
+    // too would install a second, equally-broad connected route for it —
+    // an OVPN-onboarded router's address matches both, and which interface
+    // the kernel actually picks for it is undefined. /32 installs no
+    // connected route at all; each WireGuard peer's own /32 AllowedIPs
+    // entry below is what actually routes to it, and that's always more
+    // specific than tun0's /16 regardless, so nothing but this interface's
+    // own identity address needs to be this narrow.
+    `Address = ${SERVER_IP}/32`,
     `ListenPort = ${port}`,
     `PrivateKey = ${serverPrivateKey}`,
     '',
