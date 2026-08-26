@@ -70,6 +70,22 @@ export function loginPage({
   // confirmation page always resolves, so it is the default rather than
   // link-orig — an operator-set redirectUrl still wins over both.
   const fallbackDst = apiBase ? `${apiBase}/hotspot/connected` : '$(link-orig)';
+  /**
+   * An operator typing a redirect into Hotspot -> Settings has no reason to
+   * know it needs a scheme — "google.com" reads as a complete address to
+   * anyone who isn't thinking about how a browser resolves it. Submitted
+   * bare as `dst`, RouterOS's own $(link-login-only) target treats it as a
+   * path relative to the router's own hotspot address, not an external
+   * site — the guest gets redirected to something like
+   * http://<router-ip>/google.com, a 404 on a box with nothing there,
+   * which reads exactly like "the redirect after login doesn't work" and
+   * nothing about it says why. Normalizing to https:// here is the only
+   * point that can catch this — hotspot_settings itself stores whatever was
+   * typed, unvalidated.
+   */
+  const normalizedRedirect = redirectUrl?.trim()
+    ? (/^https?:\/\//i.test(redirectUrl.trim()) ? redirectUrl.trim() : `https://${redirectUrl.trim()}`)
+    : null;
 
   /**
    * The failed-login message, and only for the copy the router will serve.
@@ -265,6 +281,26 @@ export function loginPage({
     <h1>${esc(headline || company)}</h1>
     <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
     ${previewNote}
+    <!--
+      Only on the copy RouterOS actually serves — a person already viewing
+      this over a normal https connection has no restricted popup to escape
+      and no stale router-cached copy to get past; the link would just
+      reload the same page they're already on.
+
+      Two different failure modes look identical to a guest: a phone/TV's
+      own "join this network" mini-browser (Apple's Captive Network
+      Assistant, Android's equivalent) runs a stripped-down WebView that can
+      silently fail to run scripts or close itself early, and separately,
+      RouterOS fetches this page once and keeps serving that same cached
+      copy until the next Configure push — so a fix shipped after that push
+      never reaches a guest still being served the old copy. Both read as
+      "the buttons don't do anything" with nothing on screen to explain why.
+      A plain link tap is native browser navigation, not a script — it works
+      in the restricted popup, and because it points at this address
+      directly rather than the router's local one, it always fetches the
+      live page from here, bypassing any stale cached copy at the same time.
+    -->
+    ${forRouter && apiBase ? `<p class="hint"><a href="${esc(apiBase)}/hotspot/login.html" target="_blank" rel="noopener">Buttons not responding? Tap here to open this page in your browser</a></p>` : ''}
 
     ${errorBlock}
 
@@ -290,7 +326,7 @@ export function loginPage({
         page is the fallback rather than $(link-orig) — see fallbackDst above
         for why link-orig is not reliable enough to depend on by default.
       -->
-      <input type="hidden" name="dst" value="${redirectUrl ? esc(redirectUrl) : fallbackDst}">
+      <input type="hidden" name="dst" value="${normalizedRedirect ? esc(normalizedRedirect) : fallbackDst}">
       <label for="username">Voucher code</label>
       <input id="username" name="username" type="text" inputmode="numeric"
              autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
