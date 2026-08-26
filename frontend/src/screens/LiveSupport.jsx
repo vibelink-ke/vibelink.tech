@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -39,10 +40,28 @@ export default function LiveSupport() {
   const [activeId, setActiveId] = useState(null);
   const [chats, setChats] = useState({}); // id -> [{from, text, mine}]
   const [draft, setDraft] = useState('');
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const queue = store.liveQueue ?? [];
   const waiting = queue.filter((c) => c.status === 'waiting');
   const active = queue.filter((c) => c.status === 'active');
+
+  /**
+   * Landed on from the Dashboard's "started a chat" toast (?chat=<id>) —
+   * opens straight into that conversation instead of leaving the operator
+   * to find it in the queue themselves, which is the whole point of
+   * clicking through a notification rather than just navigating here.
+   */
+  useEffect(() => {
+    const wanted = searchParams.get('chat');
+    if (!wanted || !queue.length) return;
+    const c = queue.find((x) => x.id === wanted);
+    if (!c) return;
+    if (c.status === 'waiting') accept(c);
+    else setActiveId(c.id);
+    setSearchParams((p) => { p.delete('chat'); return p; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, queue]);
   const current = queue.find((c) => c.id === activeId);
 
   const ticketsToday = (store.tickets ?? []).filter((t) => {

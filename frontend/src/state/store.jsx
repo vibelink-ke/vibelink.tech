@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 
 /**
@@ -55,6 +55,7 @@ const COLLECTIONS = {
 const EMPTY = Object.fromEntries(Object.keys(COLLECTIONS).map((k) => [k, []]));
 
 export function StoreProvider({ children }) {
+  const navigate = useNavigate();
   const [data, setData] = useState(EMPTY);
   const [unmatched, setUnmatched] = useState([]);
   const [hotspotSettings, setHotspotSettings] = useState({});
@@ -91,15 +92,73 @@ export function StoreProvider({ children }) {
   const [role, setRole] = useState('owner');
   const [searchQuery, setSearchQuery] = useState('');
   const [toastMsg, setToastMsg] = useState('');
+  // Present only for a toast that should be clicked through to somewhere —
+  // a plain informational toast ("Saved") has none. Kept alongside the
+  // message rather than folded into it so Toast.jsx can render the two
+  // differently (clickable vs not) without parsing the string.
+  const [toastAction, setToastAction] = useState(null);
   const toastTimer = useRef(null);
 
-  const toast = useCallback((msg) => {
+  const toast = useCallback((msg, action = null) => {
     setToastMsg(msg);
+    setToastAction(() => action);
     clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastMsg(''), 2600);
+    // A toast worth clicking through to (a new customer ticket, a live chat
+    // waiting) stays up long enough to actually notice and act on; a plain
+    // confirmation ("Saved") still clears quickly.
+    toastTimer.current = setTimeout(() => { setToastMsg(''); setToastAction(null); }, action ? 8000 : 2600);
   }, []);
 
   useEffect(() => () => clearTimeout(toastTimer.current), []);
+
+  /**
+   * A toast for a customer's own ticket, plan-change request, or live chat —
+   * "Report a problem"/"Chat with support" on the portal, or a plan-change
+   * request (also just a ticket, tagged by its subject) — the moment it
+   * first shows up in a poll, not just a quiet highlight someone has to
+   * notice on the Dashboard themselves.
+   *
+   * `seen` is a plain in-memory Set, not localStorage: it exists only to
+   * stop the very first load (every already-open item, all "new" at once)
+   * from toasting for each one, and to stop the 30-second poll re-toasting
+   * something already announced. Losing it on a hard refresh is fine — the
+   * Dashboard's own "New from customers" row is the durable record; this is
+   * only ever the moment-it-happened nudge.
+   */
+  const seenActivityIds = useRef(null);
+  const notifyNewCustomerActivity = useCallback((tickets, liveQueue) => {
+    const isNewPortalTicket = (t) => t.source === 'portal' && t.status === 'open';
+    const isWaitingChat = (c) => c.status === 'waiting';
+
+    const current = new Set([
+      ...(tickets ?? []).filter(isNewPortalTicket).map((t) => `ticket:${t.id}`),
+      ...(liveQueue ?? []).filter(isWaitingChat).map((c) => `chat:${c.id}`),
+    ]);
+
+    if (!seenActivityIds.current) {
+      // First load: remember what's already there, but nothing to announce —
+      // an operator opening the app is not "3 new tickets just arrived."
+      seenActivityIds.current = current;
+      return;
+    }
+
+    for (const t of tickets ?? []) {
+      const key = `ticket:${t.id}`;
+      if (!isNewPortalTicket(t) || seenActivityIds.current.has(key)) continue;
+      const isPlanChange = t.subject?.startsWith('Plan change request:');
+      toast(
+        isPlanChange ? `Plan change requested: ${t.subject.replace('Plan change request: ', '')}` : `New ticket: ${t.subject}`,
+        { onClick: () => navigate('/tickets') },
+      );
+    }
+    for (const c of liveQueue ?? []) {
+      const key = `chat:${c.id}`;
+      if (!isWaitingChat(c) || seenActivityIds.current.has(key)) continue;
+      toast(`${c.display_name || 'A visitor'} started a chat`, { onClick: () => navigate(`/live-support?chat=${c.id}`) });
+    }
+
+    seenActivityIds.current = current;
+  }, [toast, navigate]);
 
   /**
    * Fetch everything in parallel; a failing slice stays empty and is recorded.
@@ -145,6 +204,7 @@ export function StoreProvider({ children }) {
     ]);
     const val = (i, fallback) => (extras[i].status === 'fulfilled' ? extras[i].value ?? fallback : fallback);
 
+    notifyNewCustomerActivity(next.tickets, next.liveQueue);
     setData(next);
     setUnmatched(val(0, []));
     setHotspotSettings(val(1, {}));
@@ -154,7 +214,7 @@ export function StoreProvider({ children }) {
     setSettings(val(5, { org: {}, smtp: {}, prefs: {} }));
     setErrors(errs);
     setLoading(false);
-  }, [session]);
+  }, [session, notifyNewCustomerActivity]);
 
   /**
    * Keep every screen current without anyone pressing anything.
@@ -357,6 +417,7 @@ export function StoreProvider({ children }) {
       searchQuery,
       setSearchQuery,
       toastMsg,
+      toastAction,
       toast,
       reload,
       setCollection,
@@ -366,7 +427,7 @@ export function StoreProvider({ children }) {
     }),
     [
       data, unmatched, hotspotSettings, smsGateways, smsCredits, paymentMethods, settings,
-      loading, errors, session, signIn, signOut, dark, navOpen, role, searchQuery, toastMsg, toast,
+      loading, errors, session, signIn, signOut, dark, navOpen, role, searchQuery, toastMsg, toastAction, toast,
       reload, setCollection,
     ]
   );
