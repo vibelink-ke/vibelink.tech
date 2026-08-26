@@ -2299,6 +2299,31 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
   });
 }));
 
+// ─────────────── web push ──────────────────
+// A staff member's browser subscription for router-down/SLA/payment alerts —
+// see push.js for why this exists alongside SMS/WhatsApp rather than
+// instead of it.
+app.get('/api/push/vapid-public-key', wrap(async (req, res) => {
+  const push = await import('./push.js');
+  res.json({ key: push.publicKey() });
+}));
+
+app.post('/api/push/subscribe', wrap(async (req, res) => {
+  const sub = req.body?.subscription;
+  if (!sub?.endpoint || !sub?.keys) return res.status(400).json({ error: 'Not a valid push subscription' });
+  const push = await import('./push.js');
+  await push.saveSubscription(req.tenant.id, req.session.staff_id, sub);
+  res.json({ ok: true });
+}));
+
+app.post('/api/push/unsubscribe', wrap(async (req, res) => {
+  const endpoint = String(req.body?.endpoint ?? '');
+  if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });
+  const push = await import('./push.js');
+  await push.removeSubscription(endpoint);
+  res.json({ ok: true });
+}));
+
 app.put('/api/sms/gateways/:provider', wrap(async (req, res) => {
   const { credentials = {}, priority = 1, enabled = true, templates = {} } = req.body;
   const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');

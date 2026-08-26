@@ -242,16 +242,34 @@ export async function orgVars(tenantId) {
   };
 }
 
-/** Send with automatic failover down the tenant's configured gateway list. */
+/**
+ * Send with automatic failover down the tenant's configured SMS gateway
+ * list, and — separately, always, in parallel — over WhatsApp if that is
+ * configured too. WhatsApp is not one more entry in the failover chain: a
+ * customer with both set up gets both messages, every time, rather than
+ * WhatsApp only ever firing when the SMS gateway happened to fail. It has
+ * its own settings section (Settings -> WhatsApp) for exactly this reason —
+ * mixing it into the ordered SMS gateway list would make "which one fired"
+ * a priority-number guessing game instead of "always both."
+ */
 export async function send(tenantId, phone, template, vars = {}) {
   if (!phone) return;
+  const to = String(phone).replace(/^\+?(?:254)?0?/, '254');
+
+  const [smsResult] = await Promise.all([
+    sendSms(tenantId, to, template, vars),
+    sendWhatsApp(tenantId, to, template, vars),
+  ]);
+  return smsResult;
+}
+
+async function sendSms(tenantId, to, template, vars) {
   const { rows: gateways } = await pool.query(
-    'select provider, credentials, templates from tenant_sms_config where tenant_id=$1 and enabled order by priority',
+    "select provider, credentials, templates from tenant_sms_config where tenant_id=$1 and enabled and provider <> 'twilio_whatsapp' order by priority",
     [tenantId]);
   if (!gateways.length) return console.warn('no sms gateway for tenant', tenantId);
 
   const body = render(gateways[0].templates?.[template] ?? DEFAULTS[template], vars);
-  const to = String(phone).replace(/^\+?(?:254)?0?/, '254');
 
   let tried = 0;
   for (const g of gateways) {
@@ -284,6 +302,27 @@ export async function send(tenantId, phone, template, vars = {}) {
   }
   if (!tried) console.warn('no usable sms gateway for tenant', tenantId);
   return { ok: false };
+}
+
+/** Its own row (provider='twilio_whatsapp'), read directly rather than through the failover list above. */
+async function sendWhatsApp(tenantId, to, template, vars) {
+  const { rows: [g] } = await pool.query(
+    "select credentials, templates from tenant_sms_config where tenant_id=$1 and provider='twilio_whatsapp' and enabled",
+    [tenantId]);
+  if (!g || !credentialsComplete('twilio_whatsapp', g.credentials)) return;
+
+  const body = render(g.templates?.[template] ?? DEFAULTS[template], vars);
+  try {
+    const res = await PROVIDERS.twilio_whatsapp(g.credentials, to, body);
+    if (!accepted('twilio_whatsapp', res)) {
+      await log(tenantId, 'twilio_whatsapp', to, body, 'rejected', JSON.stringify(res?.data ?? '').slice(0, 300));
+      return;
+    }
+    await log(tenantId, 'twilio_whatsapp', to, body, 'sent',
+      `HTTP ${res.status} ${JSON.stringify(res?.data ?? '').slice(0, 200)}`);
+  } catch (e) {
+    await log(tenantId, 'twilio_whatsapp', to, body, 'failed', e.message);
+  }
 }
 
 async function log(tenantId, provider, to, body, status, detail) {
@@ -465,4 +504,7 @@ export async function smsBalance(tenantId, { force = false } = {}) {
   return value;
 }
 
-export const providerNames = Object.keys(PROVIDERS);
+// twilio_whatsapp excluded: it has its own settings section and its own
+// always-parallel send path (sendWhatsApp), not a slot in the ordered SMS
+// failover list this drives the dropdown for.
+export const providerNames = Object.keys(PROVIDERS).filter((p) => p !== 'twilio_whatsapp');

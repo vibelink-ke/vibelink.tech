@@ -238,7 +238,7 @@ export default function Settings() {
   }, []);
 
   useEffect(() => {
-    if (tab === 'sms') loadGateways();
+    if (tab === 'sms' || tab === 'whatsapp') loadGateways();
   }, [tab, loadGateways]);
 
   const fieldsByProvider = gw?.fields ?? FALLBACK_FIELDS;
@@ -250,6 +250,16 @@ export default function Settings() {
   const [provider, setProvider] = useState('hostpinnacle');
   const providerFields = fieldsByProvider[provider] ?? [];
   const savedKeys = configured.find((g) => g.provider === provider)?.credentialKeys ?? [];
+
+  // Not one of the ordered SMS failover gateways — it sends in parallel with
+  // whichever of those succeeds (see sms.js's sendWhatsApp), so it gets its
+  // own tab and its own save/remove flow rather than living in the list above.
+  const smsConfigured = configured.filter((g) => g.provider !== 'twilio_whatsapp');
+  const waFields = fieldsByProvider.twilio_whatsapp ?? [];
+  const waConfig = configured.find((g) => g.provider === 'twilio_whatsapp');
+  const [waCreds, setWaCreds] = useState({});
+  const [waBusy, setWaBusy] = useState(false);
+  const setWa = (k) => (e) => setWaCreds((s) => ({ ...s, [k]: e.target.value }));
 
   const setO = (k) => (e) => setOrg((s) => ({ ...s, [k]: e.target.value }));
   const setS = (k) => (e) => setSmtp((s) => ({ ...s, [k]: e.target.value }));
@@ -378,6 +388,32 @@ export default function Settings() {
     }
   };
 
+  const saveWhatsApp = async () => {
+    setWaBusy(true);
+    try {
+      const r = await api.saveSmsGateway('twilio_whatsapp', {
+        credentials: waCreds,
+        // Always tried, not ordered against the SMS list — priority is
+        // meaningless here since this never competes for "which one fires
+        // first," but the column is shared with tenant_sms_config.
+        priority: 0,
+        enabled: true,
+        templates: {},
+      });
+      store.toast(
+        r.complete
+          ? 'WhatsApp saved — messages will now send alongside SMS'
+          : `WhatsApp saved, but still missing ${r.missing.join(', ')} — it will be skipped until complete`
+      );
+      setWaCreds({});
+      await loadGateways();
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setWaBusy(false);
+    }
+  };
+
   return (
     <Screen title="Settings" subtitle="Organisation, billing preferences and the gateways this tenant sends through.">
       <Tabs
@@ -387,6 +423,7 @@ export default function Settings() {
           { id: 'general', label: 'General' },
           { id: 'gateways', label: 'Payment gateways' },
           { id: 'sms', label: 'SMS gateways' },
+          { id: 'whatsapp', label: 'WhatsApp' },
           { id: 'smtp', label: 'Email' },
           { id: 'prefs', label: 'Preferences' },
           { id: 'account', label: 'My account' },
@@ -546,13 +583,13 @@ export default function Settings() {
           </Card>
 
           <Card title="Configured gateways">
-            {configured.length === 0 ? (
+            {smsConfigured.length === 0 ? (
               <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 13, color: color.muted }}>
                 None configured — messaging will not send
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {configured.map((g) => (
+                {smsConfigured.map((g) => (
                   <div
                     key={g.provider}
                     style={{
@@ -600,6 +637,66 @@ export default function Settings() {
             )}
           </Card>
         </div>
+      )}
+
+      {tab === 'whatsapp' && (
+        <Card
+          title="WhatsApp (via Twilio)"
+          subtitle="Sends alongside SMS, not instead of it — every message goes out on both when both are set up"
+          actions={
+            <Badge tone={waConfig && !waConfig.missing?.length ? 'active' : 'unused'}>
+              {waConfig && !waConfig.missing?.length ? 'Connected' : 'Not set'}
+            </Badge>
+          }
+          style={{ maxWidth: 420 }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+              Needs a Twilio account with WhatsApp enabled — Twilio's own sandbox number works for
+              testing before a WhatsApp Business sender is approved.
+            </p>
+            {waFields.map((f) => (
+              <Field
+                key={f.key}
+                label={f.required ? f.label : `${f.label} (optional)`}
+                hint={waConfig?.credentialKeys?.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
+              >
+                <Input
+                  type={f.secret ? 'password' : 'text'}
+                  autoComplete="off"
+                  value={waCreds[f.key] ?? ''}
+                  onChange={setWa(f.key)}
+                  placeholder={waConfig?.credentialKeys?.includes(f.key) ? '••••••••' : ''}
+                />
+              </Field>
+            ))}
+            {waConfig?.missing?.length > 0 && (
+              <span style={{ fontSize: 11.5, color: color.rust }}>
+                missing {waConfig.missing.join(', ')} — skipped when sending until complete
+              </span>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="primary" onClick={saveWhatsApp} disabled={waBusy}>
+                {waBusy ? 'Saving…' : 'Save WhatsApp'}
+              </Button>
+              {waConfig && (
+                <Button
+                  onClick={async () => {
+                    try {
+                      await api.deleteSmsGateway('twilio_whatsapp');
+                      store.toast('WhatsApp removed');
+                      await loadGateways();
+                    } catch (e) {
+                      store.toast(`Could not remove: ${e.message}`);
+                    }
+                  }}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
+        </Card>
       )}
 
       {tab === 'smtp' && (
