@@ -1687,3 +1687,10 @@ update wg_peers p set router_id = r.id
  where p.router_id is null
    and host(r.host)::text = host(p.assigned_ip)::text
    and r.tenant_id = p.tenant_id;
+
+-- Which plan a portal plan-change-request ticket is actually asking for —
+-- the subject line and ticket_notes both say so in free text (readable by
+-- a person, not safe to parse back into an id to actually apply), so
+-- approving one needs a real column to act on rather than string-matching
+-- a plan title that could have been renamed or gone inactive since.
+alter table tickets add column if not exists requested_plan_id uuid references plans on delete set null;
