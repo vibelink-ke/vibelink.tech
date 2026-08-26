@@ -12,6 +12,7 @@ const TABS = [
   { id: 'all', label: 'All transactions' },
   { id: 'invoices', label: 'Invoices' },
   { id: 'reports', label: 'M-Pesa report' },
+  { id: 'sites', label: 'By site' },
 ];
 
 const card = {
@@ -73,6 +74,22 @@ export default function Payments() {
   const stkPoll = useRef(null);
 
   useEffect(() => () => clearInterval(stkPoll.current), []);
+
+  // Loaded on demand, not with the rest of the store's global collections —
+  // this is a report, not something every screen needs on hand, and it is
+  // cheap enough to just refetch each time the tab is opened.
+  const [bySite, setBySite] = useState([]);
+  const [siteLoading, setSiteLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== 'sites') return;
+    let cancelled = false;
+    setSiteLoading(true);
+    api.paymentsBySite()
+      .then((rows) => { if (!cancelled) setBySite(rows); })
+      .catch(() => { if (!cancelled) store.toast('Could not load payments by site'); })
+      .finally(() => { if (!cancelled) setSiteLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab]);
 
   /**
    * Fire the prompt, then poll stk_requests until the callback lands. Without a
@@ -421,6 +438,33 @@ export default function Payments() {
                 ? `${all.length} transaction(s) on file — export or reconcile a statement against them`
                 : 'M-Pesa reconciliation report — nothing to reconcile yet'}
             </Empty>
+          )}
+
+          {tab === 'sites' && (
+            siteLoading ? (
+              <Empty>Loading…</Empty>
+            ) : bySite.length === 0 ? (
+              <Empty>No applied payments yet to attribute to a site.</Empty>
+            ) : (
+              <Table
+                rowKey={(r) => r.router_id ?? 'unassigned'}
+                rows={bySite}
+                columns={[
+                  {
+                    key: 'router_name', label: 'Site',
+                    render: (r) => r.router_name ?? <span style={{ color: color.muted }}>Unassigned</span>,
+                  },
+                  { key: 'pppoe_amount', label: 'PPPoE', align: 'right', render: (r) => money(r.pppoe_amount) },
+                  { key: 'pppoe_count', label: 'PPPoE #', align: 'right', render: (r) => r.pppoe_count },
+                  { key: 'hotspot_amount', label: 'Hotspot', align: 'right', render: (r) => money(r.hotspot_amount) },
+                  { key: 'hotspot_count', label: 'Hotspot #', align: 'right', render: (r) => r.hotspot_count },
+                  {
+                    key: 'total_amount', label: 'Total', align: 'right',
+                    render: (r) => <strong>{money(r.total_amount)}</strong>,
+                  },
+                ]}
+              />
+            )
           )}
         </div>
       </div>

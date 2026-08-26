@@ -1631,3 +1631,13 @@ create index if not exists lead_notes_lead_idx on lead_notes (lead_id, at);
 -- and pushed by Configure, not something an operator sets up by hand.
 alter table ip_pools drop constraint if exists ip_pools_purpose_check;
 alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal', 'expired'));
+
+-- ─────────────── payment monitoring by site/router ───────────────
+-- Which physical router a hotspot voucher was bought at — set from
+-- stk_requests.purpose.router_id when the payment lands (payments/apply.js),
+-- itself carried by the login page's own ?router= query param, plumbed
+-- through from a hardcoded, always-"1" placeholder that never actually
+-- identified a router. Nullable: a purchase from a page cached before this
+-- existed, or without a known router, simply has nothing to attribute.
+alter table vouchers add column if not exists router_id uuid references routers on delete set null;
+create index if not exists vouchers_router_id_idx on vouchers (router_id) where router_id is not null;

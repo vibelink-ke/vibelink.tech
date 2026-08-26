@@ -615,7 +615,15 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     tvMode: req.query.tv === '1',
     // Only the copy destined for the router carries RouterOS template syntax.
     // A person opening this in a browser gets a page with no raw $(...) in it.
-    forRouter: req.query.router === '1',
+    // Historically this was a bare "1" — a boolean, not an id. Configure now
+    // passes the router's real id instead (the two purposes turn out to be
+    // one signal: only a router-fetched copy needs to know which router it
+    // is), so any truthy value still means "fetched by a router" and the
+    // value itself, when it isn't just the old literal "1", is that router's
+    // id — passed straight through unvalidated; /hotspot/buy is where an id
+    // that doesn't belong to this tenant actually gets rejected.
+    forRouter: !!req.query.router,
+    routerId: req.query.router && req.query.router !== '1' ? String(req.query.router) : null,
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
@@ -737,6 +745,21 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
   }
 
+  // Which physical router served this guest's login page — embedded in the
+  // page itself at Configure time (see the `?router=` on the pushed login
+  // URL) and echoed back here by the page's own JS. Optional and
+  // best-effort: a page cached from before this existed, or a login served
+  // some other way, simply has nothing to say and the sale still goes
+  // through — this only ever adds attribution, never blocks a purchase.
+  // Verified against this tenant, not trusted outright, same reasoning as
+  // every other id the portal hands back to itself.
+  let routerId = String(req.body?.routerId ?? '').trim() || null;
+  if (routerId) {
+    const { rows: [r] } = await pool.query(
+      'select id from routers where id=$1 and tenant_id=$2', [routerId, tenant.id]);
+    if (!r) routerId = null;
+  }
+
   const { rows: [plan] } = await pool.query(
     `select id, title, price from plans
       where id=$1 and tenant_id=$2 and service='hotspot' and active`,
@@ -779,7 +802,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     if (kk) {
       const gw = await import('./payments/kopokopo.js');
       checkoutId = await gw.stkPush(tenant.id, {
-        phone, amount: Number(plan.price), planId: plan.id, mac: null, service: 'hotspot',
+        phone, amount: Number(plan.price), planId: plan.id, mac: null, routerId, service: 'hotspot',
       });
     } else {
       const gw = await import('./payments/daraja.js');
@@ -818,7 +841,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
         `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
          values ($1,'daraja',$2,$3,$4,$5)
          on conflict (tenant_id, provider, checkout_id) do nothing`,
-        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id }]);
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, router_id: routerId }]);
     }
     res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
   } catch (e) {
@@ -3452,7 +3475,7 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // whole push — it should say so and leave everything else in place.
     if (portal) {
       try {
-        const url = `https://${portal}/hotspot/login.html?router=1`;
+        const url = `https://${portal}/hotspot/login.html?router=${r.id}`;
         const unreachable = await loginPageReachable(url);
         if (unreachable) throw new Error(unreachable);
 
@@ -5149,6 +5172,48 @@ app.get('/api/payments', wrap(async (req, res) => {
      where pay.tenant_id=$1
      order by pay.received_at desc
      limit 500`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+/**
+ * Payment monitoring by site — how much each physical router has actually
+ * collected, PPPoE and hotspot combined.
+ *
+ * PPPoE attributes through the subscriber's own router_id, set once at
+ * signup/assignment and stable for the life of the line. Hotspot attributes
+ * through vouchers.router_id, set from the login page's own ?router= at
+ * purchase time (only from the point that was wired up — see schema.sql's
+ * comment on the column; a voucher bought before that has nothing to
+ * attribute and lands in the "Unassigned" row rather than being silently
+ * dropped from the total).
+ *
+ * Only 'applied' payments — a pending or failed STK attempt collected
+ * nothing, and unmatched ones have no subscriber or voucher to attribute
+ * through in the first place.
+ */
+app.get('/api/payments/by-site', wrap(async (req, res) => {
+  const { rows } = await pool.query(`
+    select router_id, router_name,
+           sum(pppoe_amount) as pppoe_amount, sum(pppoe_count) as pppoe_count,
+           sum(hotspot_amount) as hotspot_amount, sum(hotspot_count) as hotspot_count,
+           sum(pppoe_amount) + sum(hotspot_amount) as total_amount
+      from (
+        select s.router_id, r.name as router_name,
+               pay.amount as pppoe_amount, 1 as pppoe_count, 0 as hotspot_amount, 0 as hotspot_count
+          from payments pay
+          join subscribers s on s.id = pay.subscriber_id
+          left join routers r on r.id = s.router_id
+         where pay.tenant_id=$1 and pay.status='applied'
+        union all
+        select v.router_id, r.name as router_name,
+               0 as pppoe_amount, 0 as pppoe_count, pay.amount as hotspot_amount, 1 as hotspot_count
+          from payments pay
+          join vouchers v on v.id = pay.voucher_id
+          left join routers r on r.id = v.router_id
+         where pay.tenant_id=$1 and pay.status='applied'
+      ) x
+     group by router_id, router_name
+     order by total_amount desc`, [req.tenant.id]);
   res.json(rows);
 }));
 

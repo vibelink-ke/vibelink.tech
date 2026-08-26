@@ -37,13 +37,20 @@ export async function applyPayment(tenantId, tx) {
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
     await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
 
+    // Which site this was bought at, for payment-monitoring-by-site — the
+    // ordinary "buy a code, type it in" purchase carries this now too (via
+    // the login page's own ?router=), not just the tv-buy flow below.
+    // Best-effort: a purchase from a page with no known router, or one
+    // cached from before this existed, simply has nothing to attribute.
+    if (target.routerId) {
+      await c.query('update vouchers set router_id=$2 where id=$1', [v.id, target.routerId]);
+    }
+
     /**
      * The device itself, bound on the router right now — not left for the
      * guest to submit a login form, because the whole point of the "pick a
      * device, pay direct" flow (POST /hotspot/tv-buy) is a TV that has no
-     * way to submit one. routerId only ever arrives from that flow; the
-     * ordinary "buy a code, type it in" purchase never sets it, so this is
-     * a no-op there. Best-effort and never fatal: the voucher and its code
+     * way to submit one. Best-effort and never fatal: the voucher and its code
      * already exist by this point, and the SMS below still gives a human a
      * way to type the code in by hand if the router push fails here — a
      * guest who paid is never left with literally nothing to show for it.

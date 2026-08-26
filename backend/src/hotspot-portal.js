@@ -57,7 +57,7 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
-  redirectUrl = null, prefillCode = null,
+  redirectUrl = null, prefillCode = null, routerId = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
@@ -426,6 +426,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   // garden, so it is reachable before the guest has paid; that is the whole
   // point of putting it there.
   var API = ${JSON.stringify(apiBase)};
+  // Which physical router served this page — set at Configure time (see
+  // server.js's ?router= on the pushed login URL) so a sale can be
+  // attributed to a site for reporting. Null for a page opened directly in
+  // a browser, or one cached from before this existed; /hotspot/buy treats
+  // it as optional either way.
+  var ROUTER_ID = ${JSON.stringify(routerId)};
 
   /**
    * A quiet inline note next to the pay button was easy to miss — a guest
@@ -616,7 +622,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       fetch(API + '/hotspot/buy', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value }),
+        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value, routerId: ROUTER_ID }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
@@ -820,6 +826,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   <script>
   (function () {
     var API = ${JSON.stringify(apiBase)};
+  // Which physical router served this page — set at Configure time (see
+  // server.js's ?router= on the pushed login URL) so a sale can be
+  // attributed to a site for reporting. Null for a page opened directly in
+  // a browser, or one cached from before this existed; /hotspot/buy treats
+  // it as optional either way.
+  var ROUTER_ID = ${JSON.stringify(routerId)};
     var devices = [], plans = [];
     var pickedDevice = null, pickedPlan = null;
 
