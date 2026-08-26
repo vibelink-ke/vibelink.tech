@@ -230,7 +230,14 @@ export function StoreProvider({ children }) {
   useEffect(() => {
     if (!session) return undefined;
     const tick = () => {
-      if (document.visibilityState === 'visible') reload({ quiet: true });
+      if (document.visibilityState === 'visible') {
+        reload({ quiet: true });
+        // "Is anyone online" for /chat/start's auto-reply decision is only
+        // as good as this — without it, staff.last_seen only ever moved at
+        // login, so someone who signed in eight hours ago and stepped away
+        // still read as "online" for the rest of their session.
+        api.heartbeat().catch(() => {});
+      }
     };
     const id = setInterval(tick, 30000);
     // Catch up immediately on returning to the tab rather than waiting out the

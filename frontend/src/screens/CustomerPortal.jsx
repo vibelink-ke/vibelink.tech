@@ -449,7 +449,11 @@ export default function CustomerPortal() {
       const res = await fetch('/chat/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: me?.name ?? 'Guest', phone: me?.account ?? account }),
+        // me.account is an account number, not a phone number — sending it
+        // as "phone" meant every customer-portal chat's visitor_ref was
+        // actually an account number, which is not something WhatsApp (or
+        // anyone) can message. me.phone is the real thing on file.
+        body: JSON.stringify({ name: me?.name ?? 'Guest', phone: me?.phone ?? null }),
       });
       const d = await safeJson(res);
       if (!d.chatId) throw new Error(d.error ?? 'Support is not available');

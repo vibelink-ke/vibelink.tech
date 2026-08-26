@@ -1317,6 +1317,24 @@ app.post('/chat/start', wrap(async (req, res) => {
      values ($1,$2,'waiting',$3,$4, now()) returning id`,
     [tenant.id, phone ?? 'anonymous', token, name]);
 
+  // An immediate acknowledgment when nobody's actually around to answer —
+  // the standard shape for this (see the WhatsApp/live-chat research this
+  // was built from): confirm the message arrived and set an expectation,
+  // rather than a visitor typing into what looks like silence. Checked
+  // against staff.last_seen, kept current by the app's own presence
+  // heartbeat rather than only the moment someone last logged in.
+  if (phone) {
+    const { rows: [online] } = await pool.query(
+      "select exists(select 1 from staff where tenant_id=$1 and last_seen > now() - interval '2 minutes') as any",
+      [tenant.id]);
+    if (!online.any) {
+      const sms = await import('./sms.js');
+      const org = await sms.orgVars(tenant.id);
+      sms.send(tenant.id, phone, 'chat_offline', { company: org.company, support_phone: org.supportPhone })
+        .catch((e) => console.error('chat_offline auto-reply failed', e.message));
+    }
+  }
+
   res.json({ chatId: chat.id, token });
 }));
 
@@ -2092,6 +2110,22 @@ app.get('/api/subscribers', async (req, res) => {
  * whose tunnel is down must not stop the others from being counted, which is
  * precisely the situation this exists for.
  */
+/**
+ * "I'm here" — called from the app shell on the same visible-tab timer that
+ * already refreshes the store, so staff.last_seen reflects genuine recent
+ * activity rather than only the moment someone logged in (which is when it
+ * was last written before this existed, sometimes hours before). This is
+ * what /chat/start checks to decide whether anyone is actually around to
+ * answer a new chat, versus just having a session cookie that hasn't
+ * expired yet.
+ */
+app.post('/api/presence/heartbeat', wrap(async (req, res) => {
+  if (req.session?.staff_id) {
+    await pool.query('update staff set last_seen=now() where id=$1', [req.session.staff_id]);
+  }
+  res.json({ ok: true });
+}));
+
 app.post('/api/presence/refresh', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');

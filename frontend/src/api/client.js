@@ -267,4 +267,5 @@ export const api = {
   tenantStaff: (id) => get(`/api/tenants/${id}/staff`),
   resetTenantStaffLogin: (id, staffId, body) => post(`/api/tenants/${id}/staff/${staffId}`, body),
   refreshPresence: () => post('/api/presence/refresh', {}),
+  heartbeat: () => post('/api/presence/heartbeat', {}),
 };

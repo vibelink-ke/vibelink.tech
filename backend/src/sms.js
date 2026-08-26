@@ -132,6 +132,13 @@ export const DEFAULTS = {
   custom:   '{body}',
   welcome:  'Welcome to {company}, {first_name}. Your account number is {account} — quote it when '
           + 'you pay. Paybill {paybill}. Plan: {plan} at KES {price}. Help: {support_phone} {support_email}',
+  // Sent once per chat, only when nobody on staff is currently online (see
+  // /chat/start) — an immediate acknowledgment rather than leaving a
+  // visitor typing into what looks like silence. Deliberately sets an
+  // expectation ("as soon as we're back") rather than promising a time
+  // nobody configured.
+  chat_offline: 'Thanks for reaching out to {company}. Our team is offline right now — we saw your '
+              + 'message and will reply as soon as we\'re back. For anything urgent, call {support_phone}.',
 };
 
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
