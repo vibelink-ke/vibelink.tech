@@ -2692,6 +2692,30 @@ async function referrerForSubscriber(tenantId, subscriberId) {
   return created.id;
 }
 
+/**
+ * Same shape as referrerForSubscriber, for a staff member closing a lead —
+ * see PATCH /api/leads/:id's own comment for why this exists. 5% is a
+ * starting default an operator can correct under Leads -> Sales reps; a
+ * sales role earning nothing until someone remembers to configure a rate
+ * would make the whole feature look broken from day one.
+ */
+async function referrerForStaff(tenantId, staffId) {
+  const { rows: [existing] } = await pool.query(
+    'select id from referrers where tenant_id=$1 and staff_id=$2', [tenantId, staffId]);
+  if (existing) return existing.id;
+
+  const { rows: [member] } = await pool.query(
+    'select name, phone from staff where id=$1 and tenant_id=$2', [staffId, tenantId]);
+  if (!member) return null;
+
+  const { rows: [created] } = await pool.query(
+    `insert into referrers (tenant_id, staff_id, name, phone, commission_type, commission_rate, notes)
+     values ($1,$2,$3,$4,'percent',5,'Added automatically — closed a lead assigned to them')
+     returning id`,
+    [tenantId, staffId, member.name, member.phone]);
+  return created.id;
+}
+
 app.get('/api/leads', async (req, res) => {
   const { rows } = await pool.query(
     `select l.*, r.name as referrer_name, st.name as assignee_name
@@ -2703,6 +2727,41 @@ app.get('/api/leads', async (req, res) => {
     [req.tenant.id]);
   res.json(rows);
 });
+/**
+ * Per staff member: leads assigned, leads won, and commission earned —
+ * this month and lifetime. Every staff row is included, not just ones with
+ * activity, so someone assigned leads that never converted still shows up
+ * at zero rather than silently missing from the leaderboard — the research
+ * behind this screen was explicit that a leaderboard only earns trust when
+ * it visibly reflects the real CRM data, not a filtered view of it.
+ *
+ * Commission comes through the same referrers/referral_commissions tables
+ * a customer or external referrer earns through (see referrerForStaff) —
+ * closing a lead and referring a customer are, as far as this system
+ * already tracks compensation, the same kind of event.
+ */
+app.get('/api/leads/sales-performance', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select st.id, st.name,
+            count(l.id) filter (where l.assigned_to = st.id) as leads_assigned,
+            count(l.id) filter (where l.assigned_to = st.id and l.status = 'won') as leads_won,
+            count(l.id) filter (
+              where l.assigned_to = st.id and l.status = 'won'
+                and l.created_at >= date_trunc('month', now())
+            ) as won_this_month,
+            coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month,
+            coalesce(sum(rc.amount), 0) as earned_total
+       from staff st
+       left join leads l on l.tenant_id = st.tenant_id and l.assigned_to = st.id
+       left join referrers r on r.tenant_id = st.tenant_id and r.staff_id = st.id
+       left join referral_commissions rc on rc.referrer_id = r.id
+      where st.tenant_id = $1 and st.role <> 'platform_admin'
+      group by st.id, st.name
+      order by earned_this_month desc, leads_won desc`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
 app.post('/api/leads', async (req, res) => {
   const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp } = req.body;
 
@@ -6188,6 +6247,26 @@ app.patch('/api/leads/:id', wrap(async (req, res) => {
     const { rowCount } = await pool.query(
       'select 1 from staff where id=$1 and tenant_id=$2', [req.body.assigned_to, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+
+  /**
+   * Winning a lead with nobody named as its referrer, but a staff member
+   * chasing it, credits that staff member instead — closing a lead is, in
+   * every way this system already tracks compensation, indistinguishable
+   * from being the reason the customer signed up. Only when there is
+   * genuinely no referrer already: an actual named referrer (a customer
+   * sending a friend, an outside party) always wins over the sales rep who
+   * happened to be assigned, since that relationship was explicit and this
+   * one is inferred.
+   */
+  if (req.body.status === 'won' && !sets.includes('referrer_id')) {
+    const { rows: [current] } = await pool.query(
+      'select referrer_id, assigned_to from leads where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    const staffId = req.body.assigned_to ?? current?.assigned_to;
+    if (current && !current.referrer_id && staffId) {
+      req.body.referrer_id = await referrerForStaff(req.tenant.id, staffId);
+      sets.push('referrer_id');
+    }
   }
 
   const { rows: [l] } = await pool.query(

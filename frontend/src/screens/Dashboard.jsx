@@ -56,6 +56,16 @@ export default function Dashboard() {
   const [recent, setRecent] = useState(null);
   useEffect(() => { api.automationRecent().then(setRecent).catch(() => setRecent([])); }, []);
 
+  // Company-wide recognition, not just the fuller Leads -> Performance
+  // leaderboard's own business — top of the Dashboard is where everyone
+  // actually looks, not just whoever opens Leads.
+  const [topPerformer, setTopPerformer] = useState(null);
+  useEffect(() => {
+    api.salesPerformance()
+      .then((rows) => setTopPerformer([...rows].sort((a, b) => Number(b.earned_this_month) - Number(a.earned_this_month))[0] ?? null))
+      .catch(() => setTopPerformer(null));
+  }, []);
+
   const store = useStore();
   const navigate = useNavigate();
   const [range, setRange] = useState('Today');
@@ -391,6 +401,26 @@ export default function Dashboard() {
             {expiring.length ? `${expiring.length} account(s) need renewal` : 'No accounts expiring yet'}
           </span>
         </div>
+
+        {topPerformer && Number(topPerformer.earned_this_month) > 0 && (
+          <div
+            style={{
+              ...card, gap: 6, cursor: 'pointer',
+              background: 'linear-gradient(135deg, #eef7f0, #f8fbf3)',
+              border: `1px solid ${color.green}44`,
+            }}
+            onClick={() => navigate('/leads?tab=performance')}
+          >
+            <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.green }}>
+              🏆 EMPLOYEE OF THE MONTH
+            </span>
+            <span style={{ fontSize: 20, fontWeight: 700 }}>{topPerformer.name}</span>
+            <span style={{ fontSize: 12.5, color: color.neutralInk }}>
+              {topPerformer.won_this_month} lead{topPerformer.won_this_month === 1 ? '' : 's'} closed
+              · {kes(topPerformer.earned_this_month)} earned this month
+            </span>
+          </div>
+        )}
 
         <div
           style={{

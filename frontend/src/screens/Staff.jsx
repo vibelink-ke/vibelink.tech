@@ -5,19 +5,23 @@ import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Tabs, Toggle } from '../ui/primitives';
 
 /** Permission matrix, transcribed verbatim from `state.permissions` / `state.permissionMeta`. */
-const DEFAULT_ROLES = ['Owner', 'Cashier', 'Technician', 'Support'];
+// Sales closes leads rather than answering tickets or touching money —
+// added for the leads leaderboard/commission feature, since assigning a
+// lead to "chase" needs a real role behind it (store.salesReps filtered on
+// role=sales, previously always empty because nothing ever offered it).
+const DEFAULT_ROLES = ['Owner', 'Cashier', 'Technician', 'Support', 'Sales'];
 
 const DEFAULT_PERMISSIONS = {
-  'view.clients':    { Owner: true, Cashier: true,  Technician: true,  Support: true },
-  'edit.clients':    { Owner: true, Cashier: false, Technician: false, Support: false },
-  'view.money':      { Owner: true, Cashier: true,  Technician: false, Support: false },
-  'apply.payments':  { Owner: true, Cashier: true,  Technician: false, Support: false },
-  'edit.paymentcfg': { Owner: true, Cashier: false, Technician: false, Support: false },
-  'manage.routers':  { Owner: true, Cashier: false, Technician: true,  Support: false },
-  'manage.tickets':  { Owner: true, Cashier: false, Technician: true,  Support: true },
-  'manage.staff':    { Owner: true, Cashier: false, Technician: false, Support: false },
-  'view.tenants':    { Owner: true, Cashier: false, Technician: false, Support: false },
-  'edit.kb':         { Owner: true, Cashier: false, Technician: true,  Support: true },
+  'view.clients':    { Owner: true, Cashier: true,  Technician: true,  Support: true,  Sales: true },
+  'edit.clients':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
+  'view.money':      { Owner: true, Cashier: true,  Technician: false, Support: false, Sales: false },
+  'apply.payments':  { Owner: true, Cashier: true,  Technician: false, Support: false, Sales: false },
+  'edit.paymentcfg': { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
+  'manage.routers':  { Owner: true, Cashier: false, Technician: true,  Support: false, Sales: false },
+  'manage.tickets':  { Owner: true, Cashier: false, Technician: true,  Support: true,  Sales: false },
+  'manage.staff':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
+  'view.tenants':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
+  'edit.kb':         { Owner: true, Cashier: false, Technician: true,  Support: true,  Sales: false },
 };
 
 const PERMISSION_META = [

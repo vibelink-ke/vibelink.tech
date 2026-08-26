@@ -245,6 +245,7 @@ export const api = {
   deleteStaff: (id) => del(`/api/staff/${id}`),
   technicians: () => get('/api/staff?role=technician'),
   salesReps: () => get('/api/staff?role=sales'),
+  salesPerformance: () => get('/api/leads/sales-performance'),
 
   siteProfiles: () => get('/api/site-profiles'),
   createSiteProfile: (p) => post('/api/site-profiles', p),

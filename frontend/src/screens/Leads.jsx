@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -42,12 +42,31 @@ const REFERRER_BLANK = { name: '', phone: '', refType: 'external', staffId: '', 
 export default function Leads() {
   const store = useStore();
   const navigate = useNavigate();
-  const [tab, setTab] = useState('pipeline');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState(searchParams.get('tab') === 'performance' ? 'performance' : 'pipeline');
 
   const leads = store.leads ?? [];
   const referrers = store.referrers ?? [];
   const staff = store.staff ?? [];
   const clients = store.clients ?? [];
+
+  // Loaded on demand rather than with the rest of the store's global
+  // collections — a leaderboard is a report, not something every screen
+  // needs on hand, and refetching each time the tab opens keeps it current
+  // against the same real CRM data the research behind this was explicit
+  // about (a leaderboard only earns trust when it isn't lagged).
+  const [perf, setPerf] = useState([]);
+  const [perfLoading, setPerfLoading] = useState(false);
+  useEffect(() => {
+    if (tab !== 'performance') return;
+    let cancelled = false;
+    setPerfLoading(true);
+    api.salesPerformance()
+      .then((rows) => { if (!cancelled) setPerf(rows); })
+      .catch(() => { if (!cancelled) store.toast('Could not load performance'); })
+      .finally(() => { if (!cancelled) setPerfLoading(false); });
+    return () => { cancelled = true; };
+  }, [tab]);
 
   // ── pipeline ─────────────────────────────────────────────────────
   const [leadOpen, setLeadOpen] = useState(false);
@@ -304,9 +323,9 @@ export default function Leads() {
       actions={
         tab === 'pipeline' ? (
           <Button variant="primary" onClick={openAddLead}>+ Add lead</Button>
-        ) : (
+        ) : tab === 'referrers' ? (
           <Button variant="primary" onClick={openAddReferrer}>+ Add referrer</Button>
-        )
+        ) : null
       }
     >
       <Tabs
@@ -315,6 +334,7 @@ export default function Leads() {
         tabs={[
           { id: 'pipeline', label: 'Pipeline' },
           { id: 'referrers', label: 'Referrers' },
+          { id: 'performance', label: 'Performance' },
         ]}
       />
 
@@ -732,6 +752,81 @@ export default function Leads() {
             </p>
           </Modal>
         </>
+      )}
+
+      {tab === 'performance' && (
+        perfLoading ? (
+          <Card title="Performance"><span style={{ fontSize: 13, color: color.muted }}>Loading…</span></Card>
+        ) : perf.length === 0 ? (
+          <Card title="Performance"><span style={{ fontSize: 13, color: color.muted }}>No staff to show yet.</span></Card>
+        ) : (
+          <>
+            {(() => {
+              const top = [...perf].sort((a, b) => Number(b.earned_this_month) - Number(a.earned_this_month))[0];
+              return top && Number(top.earned_this_month) > 0 && (
+                <Card title="🏆 Employee of the month">
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 20, fontWeight: 700 }}>{top.name}</span>
+                    <span style={{ fontSize: 13.5, color: color.muted }}>
+                      {top.won_this_month} lead{top.won_this_month === 1 ? '' : 's'} closed this month
+                    </span>
+                    <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
+                      {kes(top.earned_this_month)} earned
+                    </span>
+                  </div>
+                </Card>
+              );
+            })()}
+
+            <Card title="Leaderboard" subtitle="Ranked by commission earned this month">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {(() => {
+                  const max = Math.max(1, ...perf.map((p) => Number(p.earned_this_month)));
+                  return perf.map((p, i) => (
+                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <span style={{ width: 18, fontSize: 12.5, color: color.muted, fontFamily: font.mono }}>{i + 1}</span>
+                      <span style={{ width: 130, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {p.name}
+                      </span>
+                      <div style={{ flex: 1, height: 20, background: color.tileBg, borderRadius: radius.pill, overflow: 'hidden' }}>
+                        <div
+                          style={{
+                            width: `${(Number(p.earned_this_month) / max) * 100}%`, height: '100%',
+                            background: i === 0 ? color.green : color.neutralInk, borderRadius: radius.pill,
+                            transition: 'width .3s',
+                          }}
+                        />
+                      </div>
+                      <span style={{ width: 90, textAlign: 'right', fontSize: 13, fontFamily: font.mono, fontWeight: 600 }}>
+                        {kes(p.earned_this_month)}
+                      </span>
+                      <span style={{ width: 70, textAlign: 'right', fontSize: 12, color: color.muted }}>
+                        {p.won_this_month}/{p.leads_assigned} won
+                      </span>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </Card>
+
+            <Card title="All-time" subtitle="Lifetime leads and commission per person">
+              <Table
+                rowKey={(p) => p.id}
+                rows={perf}
+                columns={[
+                  { key: 'name', label: 'Name', render: (p) => <span style={{ fontWeight: 600 }}>{p.name}</span> },
+                  { key: 'leads_assigned', label: 'Assigned', align: 'right' },
+                  { key: 'leads_won', label: 'Won', align: 'right' },
+                  {
+                    key: 'rate', label: 'Conversion', align: 'right',
+                    render: (p) => `${p.leads_assigned > 0 ? Math.round((p.leads_won / p.leads_assigned) * 100) : 0}%`,
+                  },
+                  { key: 'earned_total', label: 'Earned (lifetime)', align: 'right', render: (p) => kes(p.earned_total) },
+                ]}
+              />
+            </Card>
+          </>
+        )
       )}
     </Screen>
   );
