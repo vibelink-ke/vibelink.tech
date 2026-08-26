@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -10,6 +11,18 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Te
 const blankRouter = () => ({
   name: '', host: '', secret: '', apiPort: '8728', role: 'both',
 });
+
+// Traffic dialog's own table styles — referenced by the per-port table below
+// but never actually defined, so opening Traffic and letting a poll fill in
+// `ports` threw "th is not defined" the moment that table tried to render,
+// which React's error boundary caught by discarding the whole screen rather
+// than just the dialog.
+const th = {
+  textAlign: 'left', padding: '6px 8px', fontSize: 11, fontWeight: 600,
+  letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted,
+  borderBottom: `1px solid ${color.line}`,
+};
+const td = { padding: '6px 8px', borderBottom: `1px solid ${color.line}` };
 
 /** Bits per second in the units an operator reads, not raw digits. */
 const bitrate = (bps) => {
@@ -28,22 +41,40 @@ const bitrate = (bps) => {
  * Delete stay outside it: one is the action a new or failed router actually
  * needs first, the other is destructive enough to want its own target
  * separate from a list that opens and closes.
+ *
+ * Rendered through a portal into document.body rather than as a child of the
+ * button, and positioned in `position: fixed` from the button's own
+ * getBoundingClientRect(). The table it lives in scrolls horizontally inside
+ * its own "scroll-x" container (`overflow-x: auto`), and CSS computes an
+ * unset overflow-y as auto the moment its sibling axis is anything but
+ * visible — there is no such thing as scrollable on one axis and genuinely
+ * visible on the other. So this menu, as a child of that container, was
+ * being clipped by it the instant it opened near the bottom or right edge of
+ * the table: it existed, it just had nowhere visible to draw itself. A
+ * portal escapes that ancestor entirely.
  */
-function ActionMenu({ open, onToggle, children }) {
+function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
+  const menuWidth = 184;
   return (
-    <div style={{ position: 'relative' }} onClick={(e) => e.stopPropagation()}>
+    <div style={{ display: 'inline-block' }}>
       <Button onClick={onToggle}>Actions ▾</Button>
-      {open && (
+      {open && anchorRect && createPortal(
         <div
+          ref={menuRef}
+          onClick={(e) => e.stopPropagation()}
           style={{
-            position: 'absolute', right: 0, top: 'calc(100% + 4px)', zIndex: 20,
+            position: 'fixed',
+            left: Math.max(8, Math.min(anchorRect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+            top: Math.min(anchorRect.bottom + 4, window.innerHeight - 8),
+            zIndex: 1000,
             background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.md,
-            boxShadow: '0 10px 28px rgba(20,26,23,.16)', minWidth: 176, padding: 6,
+            boxShadow: '0 10px 28px rgba(20,26,23,.16)', width: menuWidth, padding: 6,
             display: 'grid', gap: 1,
           }}
         >
           {children}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -163,6 +194,8 @@ export default function Routers() {
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState(null);         // the router row open for editing
   const [menuFor, setMenuFor] = useState(null);   // router id whose Actions menu is open
+  const [menuRect, setMenuRect] = useState(null); // that menu's toggle button, at the moment it opened
+  const menuNodeRef = useRef(null);               // the portal's own DOM node, for the outside-click check
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
   const [adminPrompt, setAdminPrompt] = useState(null);   // first-run credentials
   const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
@@ -175,12 +208,16 @@ export default function Routers() {
   // What OpenVPN says is actually connected, which is the only reliable answer.
   const [tunnels, setTunnels] = useState({ tunnels: [], stale: [] });
 
-  // Closes whichever row's Actions menu is open on any click outside it —
-  // ActionMenu itself stops propagation for clicks on the menu, so this only
-  // ever fires for a click genuinely elsewhere on the page.
+  // Closes whichever row's Actions menu is open on any click outside it. The
+  // menu itself is portalled to document.body, so it is not a DOM descendant
+  // of anything in the table — checking menuNodeRef.current directly is what
+  // tells a click on a menu item apart from a click genuinely elsewhere.
   useEffect(() => {
     if (!menuFor) return undefined;
-    const close = () => setMenuFor(null);
+    const close = (e) => {
+      if (menuNodeRef.current?.contains(e.target)) return;
+      setMenuFor(null);
+    };
     document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [menuFor]);
@@ -842,7 +879,16 @@ Revoke anyway?`
                   >
                     {configuring === r.id ? 'Reading…' : r.autoconfig_last_ok ? 'Reconfigure' : 'Configure'}
                   </Button>
-                  <ActionMenu open={menuFor === r.id} onToggle={() => setMenuFor((id) => (id === r.id ? null : r.id))}>
+                  <ActionMenu
+                    open={menuFor === r.id}
+                    anchorRect={menuFor === r.id ? menuRect : null}
+                    menuRef={menuNodeRef}
+                    onToggle={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuFor((id) => (id === r.id ? null : r.id));
+                      setMenuRect(rect);
+                    }}
+                  >
                     {/* Only for routers that serve a hotspot. Offering it on a
                         PPPoE-only tower would invite pushing a captive portal
                         onto a link that has no guests on it. */}
