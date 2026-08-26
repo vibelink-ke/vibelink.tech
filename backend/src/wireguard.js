@@ -78,6 +78,15 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
     '/ip/address',
     `add address=${assignedIp}/24 interface=billing-wg`,
     '',
+    // Unlike wg-quick on Linux, RouterOS's WireGuard peer allowed-address
+    // only governs which packets are *accepted* from a peer — it never
+    // installs a route, so without this the router has no idea how to send
+    // anything back to us: it can decrypt an inbound ping fine, then drop
+    // its own reply for lack of a route, which looks exactly like a dead
+    // tunnel from our side despite a perfectly healthy handshake.
+    '/ip/route',
+    `add dst-address=${SERVER_IP}/32 gateway=billing-wg`,
+    '',
     '# Let the billing server reach this router for RADIUS CoA',
     '/ip/firewall/filter',
     `add chain=input src-address=${SERVER_IP} action=accept comment="billing server" place-before=0`,
