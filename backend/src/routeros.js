@@ -724,7 +724,7 @@ export async function wanInterface(conn, ifaceNames = null) {
  * accidentally opening a resolver to the internet, the same choice applyNat
  * already makes when it cannot name an interface.
  */
-export async function applyDnsProxy(conn) {
+export async function applyDnsProxy(conn, { hotspotSubnet = null } = {}) {
   const [dns] = await conn.write('/ip/dns/print', []);
   const already = dns?.['allow-remote-requests'] === 'true' || dns?.['allow-remote-requests'] === 'yes';
 
@@ -739,9 +739,14 @@ export async function applyDnsProxy(conn) {
     await cmd(conn, 'DNS proxy', '/ip/dns/set', ['=allow-remote-requests=yes']);
   }
 
+  // Matched by comment prefix, not bare chain+port — a rate-limit pair added
+  // below shares both of those with this rule, and matching on just chain and
+  // port would have made each "fix" the other's own idempotency check thought
+  // was a stray duplicate of itself.
   const rules = await conn.write('/ip/firewall/filter/print', []);
   const mine = rules.filter((r) => isManaged(r)
-    && String(r.chain) === 'input' && String(r['dst-port']) === '53');
+    && String(r.chain) === 'input' && String(r['dst-port']) === '53'
+    && String(r.comment ?? '').startsWith('ispBlocking WAN DNS'));
   const fields = [
     '=chain=input', `=in-interface=${wan}`, '=protocol=udp', '=dst-port=53',
     '=action=drop', `=comment=${managed('ispBlocking WAN DNS')}`,
@@ -765,6 +770,79 @@ export async function applyDnsProxy(conn) {
   }
   for (const dupe of mine.slice(1)) {
     await cmd(conn, 'remove duplicate WAN DNS block', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
+  }
+
+  /**
+   * DNS tunneling — the standard way a captive portal gets bypassed for
+   * free, and exactly what a "VPN injector" app does when it finds one open.
+   * `allow-remote-requests=yes` above is not optional (a guest cannot even
+   * see the login popup without it — see this function's own top comment),
+   * so an unauthenticated guest and a paying one reach the identical open
+   * resolver either way. Nothing about the walled garden touches this: it
+   * matches HTTP hosts, and a DNS query addressed to the router itself
+   * never goes near it. Tools like iodine or dnscat2 — and every
+   * commercial "free internet" injector app doing the same trick by
+   * hand — tunnel arbitrary TCP/IP through exactly this open recursive
+   * resolver, before ever paying for a voucher.
+   *
+   * Not blockable outright — real name resolution has to keep working, for
+   * everyone, paid or not, or the portal itself stops appearing. Rate-limited
+   * instead: RouterOS's own leaky-bucket `limit` matcher accepts up to 40
+   * packets/sec (bursting to 80) per guest address, and anything over that
+   * budget falls through to the drop rule beneath it. Ordinary browsing
+   * fires a handful of small queries per page; a tunnel needs sustained
+   * throughput through the same 53/udp path to be worth anything, and this
+   * caps it at a small fraction of dial-up speed — resolvable, not usable.
+   */
+  if (hotspotSubnet) {
+    const dnsRules = await conn.write('/ip/firewall/filter/print', []);
+    const mineAccept = dnsRules.filter((r) => isManaged(r)
+      && String(r.comment ?? '').startsWith('ispBlocking guest DNS rate accept'));
+    const mineDrop = dnsRules.filter((r) => isManaged(r)
+      && String(r.comment ?? '').startsWith('ispBlocking guest DNS rate drop'));
+
+    const acceptFields = [
+      '=chain=input', `=src-address=${hotspotSubnet}`, '=protocol=udp', '=dst-port=53',
+      '=limit=40,80:packet', '=action=accept', `=comment=${managed('ispBlocking guest DNS rate accept')}`,
+    ];
+    const dropFields = [
+      '=chain=input', `=src-address=${hotspotSubnet}`, '=protocol=udp', '=dst-port=53',
+      '=action=drop', `=comment=${managed('ispBlocking guest DNS rate drop')}`,
+    ];
+
+    /**
+     * Drop created first, accept created second — both only ever with
+     * place-before=0, the one placement value the rest of this file trusts
+     * (see the WAN-block rule above; an id-based place-before was tried here
+     * first and dropped for mixing conventions nothing else in this codebase
+     * relies on). Each successive place-before=0 insert becomes the new
+     * front of the whole filter list, so creating drop and then accept, in
+     * that order, is what leaves accept sitting ahead of drop — traffic
+     * still inside the budget matches accept first and never reaches drop
+     * at all. Only matters on the first push that creates both; an idempotent
+     * re-push updates each rule in place without touching order again.
+     */
+    if (mineDrop.length) {
+      if (!unchanged(mineDrop[0], dropFields)) {
+        await cmd(conn, 'guest DNS rate drop', '/ip/firewall/filter/set', [`=.id=${idOf(mineDrop[0])}`, ...dropFields]);
+      }
+    } else {
+      await cmd(conn, 'guest DNS rate drop', '/ip/firewall/filter/add', [...dropFields, '=place-before=0']);
+    }
+    for (const dupe of mineDrop.slice(1)) {
+      await cmd(conn, 'remove duplicate guest DNS drop', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
+    }
+
+    if (mineAccept.length) {
+      if (!unchanged(mineAccept[0], acceptFields)) {
+        await cmd(conn, 'guest DNS rate limit', '/ip/firewall/filter/set', [`=.id=${idOf(mineAccept[0])}`, ...acceptFields]);
+      }
+    } else {
+      await cmd(conn, 'guest DNS rate limit', '/ip/firewall/filter/add', [...acceptFields, '=place-before=0']);
+    }
+    for (const dupe of mineAccept.slice(1)) {
+      await cmd(conn, 'remove duplicate guest DNS accept', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
+    }
   }
 
   return { enabled: true, protected: true, wan };

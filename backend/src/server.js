@@ -3215,9 +3215,16 @@ app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
     // captive-portal popup does not appear at all — not a page problem, a DNS
     // problem, and one indistinguishable from "nothing is wrong here" by
     // reading the walled garden or the login page alone.
-    const dnsProxy = await tryStep('DNS proxy', () => ros.applyDnsProxy(conn), 40000);
+    //
+    // hotspotSubnet also rate-limits the guest side of this same open
+    // resolver — see applyDnsProxy's own comment on why an open DNS proxy is
+    // the standard way a captive portal gets bypassed for free (DNS
+    // tunneling, the same trick every "VPN injector" app relies on).
+    const dnsProxy = await tryStep('DNS proxy', () => ros.applyDnsProxy(conn, {
+      hotspotSubnet: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+    }), 40000);
     done.push(dnsProxy.protected
-      ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}`
+      ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}, guest DNS rate-limited against tunneling`
       : dnsProxy.enabled
         ? `DNS proxy open to guests — could not confirm the uplink to firewall it, so check this by hand`
         : `could not enable the DNS proxy safely (no uplink identified) — guests will not be able to resolve names, and the popup will not appear`);
