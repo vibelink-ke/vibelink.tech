@@ -405,19 +405,43 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   </div>
 
   <script>
-  (function () {
-    /**
-     * A quiet inline note next to the pay button was easy to miss — a guest
-     * who hands their phone to M-Pesa for the PIN prompt and comes back
-     * finds text that already changed, nothing drawing the eye to it. This
-     * covers the screen instead, for a moment, the way a real "payment
-     * successful" confirmation should. kind picks the icon/color:
-     * "success" (green check) or "notice" (amber, session-ended). Auto-
-     * hides after ms unless ms is 0, in which case it waits for the tap
-     * anywhere to dismiss — used for success, where the guest is about to
-     * be connected and dismissing early would just hide useful status text.
-     */
-    function popup(kind, title, body, ms) {
+  /**
+   * Rebuilt as independent, self-contained sections rather than one script
+   * that runs top to bottom — the exact shape of two bugs already found in
+   * this file's own history (the unquoted $(if error) block, the TV/set-top
+   * link). Either one worked by making some earlier line throw, which
+   * silently skipped every addEventListener after it in the same function:
+   * a JS error nobody sees (RouterOS serves this with no console attached),
+   * on a page where "the button does nothing" and "a wall of buttons all
+   * stopped working at once" look identical from the guest's side. Auto-
+   * login, Buy, and Talk to support each run inside their own try/catch now,
+   * so a failure in one can never prevent the others' listeners from
+   * attaching — the actual guarantee this needs, not just this particular
+   * bug fixed again.
+   */
+
+  // Absolute, not relative. The router serves this page from its own hotspot
+  // DNS name (billing.spot), so a relative URL would post to the router
+  // itself — which knows nothing about bundles. This host is in the walled
+  // garden, so it is reachable before the guest has paid; that is the whole
+  // point of putting it there.
+  var API = ${JSON.stringify(apiBase)};
+
+  /**
+   * A quiet inline note next to the pay button was easy to miss — a guest
+   * who hands their phone to M-Pesa for the PIN prompt and comes back finds
+   * text that already changed, nothing drawing the eye to it. This covers
+   * the screen instead, for a moment, the way a real "payment successful"
+   * confirmation should. kind picks the icon/color: "success" (green check)
+   * or "notice" (amber, session-ended). Auto-hides after ms unless ms is 0,
+   * in which case it waits for the tap anywhere to dismiss — used for
+   * success, where the guest is about to be connected and dismissing early
+   * would just hide useful status text. Shared by both sections below, but
+   * defined at the top level and defensive on its own: a popup that fails
+   * to show is not worth taking either section down over.
+   */
+  function popup(kind, title, body, ms) {
+    try {
       var overlay = document.getElementById('popupOverlay');
       var box = document.getElementById('popup');
       box.className = 'popup ' + kind;
@@ -427,35 +451,19 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       overlay.style.display = 'flex';
       overlay.onclick = function () { overlay.style.display = 'none'; };
       if (ms) setTimeout(function () { overlay.style.display = 'none'; }, ms);
-    }
+    } catch (e) { /* a missing popup is not worth breaking whatever called it */ }
+  }
 
-    var pay = document.getElementById('pay');
-    var title = document.getElementById('payTitle');
-    var phone = document.getElementById('payPhone');
-    var go = document.getElementById('payGo');
-    var note = document.getElementById('payNote');
-    var codeBox = document.getElementById('payCode');
-    var codeVal = document.getElementById('payCodeValue');
-    var planId = null;
-    var timer = null;
-
-    // Absolute, not relative. The router serves this page from its own hotspot
-    // DNS name (billing.spot), so a relative URL would post to the router
-    // itself — which knows nothing about bundles. This host is in the walled
-    // garden, so it is reachable before the
-    // guest has paid; that is the whole point of putting it there.
-    var API = ${JSON.stringify(apiBase)};
-
-    /**
-     * Recognise a device that already paid, without depending on the
-     * router's own add-mac-cookie table — that one lives in RAM and is
-     * exactly what a power outage wipes, which is the whole reason a
-     * customer who is still well within their paid time lands back on this
-     * page instead of being waved straight through.
-     *
-     * Skipped after a just-failed attempt ($(if error)), so a wrong code
-     * cannot loop into auto-resubmitting itself forever.
-     */
+  /**
+   * Recognise a device that already paid, without depending on the router's
+   * own add-mac-cookie table — that one lives in RAM and is exactly what a
+   * power outage wipes, which is the whole reason a customer who is still
+   * well within their paid time lands back on this page instead of being
+   * waved straight through. Skipped after a just-failed attempt
+   * ($(if error)), so a wrong code cannot loop into auto-resubmitting
+   * itself forever.
+   */
+  try {
     var mac = ${JSON.stringify(macToken)};
     var hadError = ${JSON.stringify(hadErrorToken)} === 'yes';
     // The SMS a guest gets on payment carries the code as text and as a tap
@@ -479,94 +487,42 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         })
         .catch(function () { /* stay on the manual form — nothing to recover from here */ });
     }
+  } catch (e) { /* falls back to the plain sign-in form, already on screen */ }
+
+  // ── buy a bundle ───────────────────────────────────────────────────
+  try {
+    var pay = document.getElementById('pay');
+    var payTitle = document.getElementById('payTitle');
+    var payPhone = document.getElementById('payPhone');
+    var payGo = document.getElementById('payGo');
+    var payNote = document.getElementById('payNote');
+    var payCode = document.getElementById('payCode');
+    var payCodeValue = document.getElementById('payCodeValue');
+    var pickedPlanId = null;
+    var payPollTimer = null;
 
     document.querySelectorAll('.buy').forEach(function (b) {
       b.addEventListener('click', function () {
-        planId = b.getAttribute('data-plan');
+        pickedPlanId = b.getAttribute('data-plan');
         // The preview's bundles are illustrations and carry no id. Saying so
         // beats a button that swallows the click and looks broken.
-        if (!planId) {
+        if (!pickedPlanId) {
           pay.classList.add('on');
-          title.textContent = b.getAttribute('data-title');
-          note.textContent = 'This is an example bundle. On your own subdomain this '
-            + 'sends the M-Pesa prompt.';
-          phone.style.display = 'none';
-          go.style.display = 'none';
+          payTitle.textContent = b.getAttribute('data-title');
+          payNote.textContent = 'This is an example bundle. On your own subdomain this sends the M-Pesa prompt.';
+          payPhone.style.display = 'none';
+          payGo.style.display = 'none';
           return;
         }
-        phone.style.display = '';
-        go.style.display = '';
-        title.textContent = 'Buy ' + b.getAttribute('data-title');
+        payPhone.style.display = '';
+        payGo.style.display = '';
+        payTitle.textContent = 'Buy ' + b.getAttribute('data-title');
         pay.classList.add('on');
-        note.textContent = '';
-        codeBox.style.display = 'none';
-        phone.focus();
+        payNote.textContent = '';
+        payCode.style.display = 'none';
+        payPhone.focus();
       });
     });
-
-    function poll(id) {
-      fetch(API + '/hotspot/buy/' + encodeURIComponent(id))
-        .then(function (r) { return r.json(); })
-        .then(function (d) {
-          if (d.code) {
-            clearInterval(timer);
-            note.textContent = 'Paid. Connecting…';
-            codeVal.textContent = d.code;
-            codeBox.style.display = 'block';
-            document.getElementById('username').value = d.code;
-            watchVoucher(d.code);
-            // 0 = stays up until tapped, not timed out — this is the moment
-            // that matters most on the whole page, and the guest is about
-            // to be sent through the auto-connect below regardless.
-            popup('success', 'Payment successful', 'Your code is ' + d.code + '. Connecting you now…', 0);
-            // The code being visible and correct was never in question — what
-            // was missing is that nothing ever submitted the form on the
-            // guest's behalf, so "paid" and "online" were two separate steps
-            // and a guest who didn't notice the Connect button stayed on this
-            // page, believing the purchase itself had failed to connect them.
-            //
-            // form.submit() does not fire the 'submit' event, so the form's
-            // own onsubmit — which copies the code into the hidden password
-            // field — never ran: this sent the router a login with the
-            // right username and an empty password, which RouterOS silently
-            // rejects the same way a wrong password would. Doing that copy
-            // here, the same as onsubmit does, before calling submit()
-            // avoids depending on an event that .submit() never dispatches.
-            setTimeout(function () {
-              document.getElementById('password').value = d.code;
-              document.getElementById('loginForm').submit();
-            }, 1200);
-            /**
-             * A successful hotspot login navigates the guest away from this
-             * page entirely — RouterOS redirects to dst the instant it
-             * accepts the credentials. So if this script is still running
-             * several seconds later, the submit above did not actually get
-             * them online, whatever the reason (a $(...) token RouterOS
-             * resolved differently for this request than for the original
-             * page load, a slow router, anything). Rather than leave a paid
-             * guest staring at a page that looks stuck, with "go back and
-             * try again" as a fact they'd have to discover for themselves, a
-             * fresh load of this same page with the code attached goes
-             * through the exact path the SMS's own tap-to-connect link
-             * already uses successfully — new request, tokens resolved
-             * fresh, same auto-login script at the top of the page.
-             */
-            setTimeout(function () {
-              var btn = document.getElementById('connectNow');
-              btn.style.display = 'block';
-              btn.addEventListener('click', function () {
-                window.location.href = API + '/hotspot/login.html?code=' + encodeURIComponent(d.code);
-              });
-            }, 5000);
-            return;
-          }
-          if (d.status === 'failed' || d.status === 'cancelled') {
-            clearInterval(timer);
-            note.textContent = d.detail || 'The payment did not go through.';
-          }
-        })
-        .catch(function () { /* keep polling; a dropped request is not a failure */ });
-    }
 
     /**
      * Nothing watched a voucher after it was shown as paid — a guest who kept
@@ -596,14 +552,95 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       }, 30000);
     }
 
-    // ── live chat ──────────────────────────────────────────────────────
-    var chat = document.getElementById('chat');
+    function pollPayment(checkoutId) {
+      fetch(API + '/hotspot/buy/' + encodeURIComponent(checkoutId))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.code) {
+            clearInterval(payPollTimer);
+            payNote.textContent = 'Paid. Connecting…';
+            payCodeValue.textContent = d.code;
+            payCode.style.display = 'block';
+            document.getElementById('username').value = d.code;
+            watchVoucher(d.code);
+            // 0 = stays up until tapped, not timed out — this is the moment
+            // that matters most on the whole page, and the guest is about
+            // to be sent through the auto-connect below regardless.
+            popup('success', 'Payment successful', 'Your code is ' + d.code + '. Connecting you now…', 0);
+            // form.submit() does not fire the 'submit' event, so the form's
+            // own onsubmit — which copies the code into the hidden password
+            // field — never runs: submitting with the password still empty
+            // sends the router a login RouterOS silently rejects the same
+            // way a wrong password would. Doing that copy here, the same as
+            // onsubmit does, before calling submit() avoids depending on an
+            // event .submit() never dispatches.
+            setTimeout(function () {
+              document.getElementById('password').value = d.code;
+              document.getElementById('loginForm').submit();
+            }, 1200);
+            /**
+             * A successful hotspot login navigates the guest away from this
+             * page entirely — RouterOS redirects to dst the instant it
+             * accepts the credentials. So if this script is still running
+             * several seconds later, the submit above did not actually get
+             * them online, whatever the reason (a $(...) token RouterOS
+             * resolved differently for this request than for the original
+             * page load, a slow router, anything). Rather than leave a paid
+             * guest staring at a page that looks stuck, a fresh load of this
+             * same page with the code attached goes through the exact path
+             * the SMS's own tap-to-connect link already uses successfully —
+             * new request, tokens resolved fresh, same auto-login above.
+             */
+            setTimeout(function () {
+              var btn = document.getElementById('connectNow');
+              btn.style.display = 'block';
+              btn.addEventListener('click', function () {
+                window.location.href = API + '/hotspot/login.html?code=' + encodeURIComponent(d.code);
+              });
+            }, 5000);
+            return;
+          }
+          if (d.status === 'failed' || d.status === 'cancelled') {
+            clearInterval(payPollTimer);
+            payNote.textContent = d.detail || 'The payment did not go through.';
+          }
+        })
+        .catch(function () { /* keep polling; a dropped request is not a failure */ });
+    }
+
+    payGo.addEventListener('click', function () {
+      if (!pickedPlanId) return;
+      payGo.disabled = true;
+      payNote.textContent = 'Sending…';
+      fetch(API + '/hotspot/buy', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          payGo.disabled = false;
+          if (!res.ok) { payNote.textContent = res.d.error || 'Could not start the payment.'; return; }
+          payNote.textContent = 'Check your phone and enter your M-Pesa PIN.';
+          clearInterval(payPollTimer);
+          payPollTimer = setInterval(function () { pollPayment(res.d.checkoutId); }, 3000);
+        })
+        .catch(function () {
+          payGo.disabled = false;
+          payNote.textContent = 'Could not reach the billing system from here.';
+        });
+    });
+  } catch (e) { /* Buy stays unresponsive; Talk to support below is unaffected */ }
+
+  // ── talk to support ────────────────────────────────────────────────
+  try {
+    var chatPanel = document.getElementById('chat');
     var chatLog = document.getElementById('chatLog');
     var chatText = document.getElementById('chatText');
     var chatNote = document.getElementById('chatNote');
-    var chatId = null, chatToken = null, lastId = 0, chatTimer = null;
+    var chatId = null, chatToken = null, chatLastId = 0, chatPollTimer = null;
 
-    function append(sender, body) {
+    function appendMessage(sender, body) {
       var el = document.createElement('div');
       el.className = 'msg ' + (sender === 'staff' ? 'them' : 'me');
       el.textContent = body;
@@ -613,16 +650,16 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 
     function pollChat() {
       if (!chatId) return;
-      fetch(API + '/chat/' + chatId + '?token=' + encodeURIComponent(chatToken) + '&since=' + lastId)
+      fetch(API + '/chat/' + chatId + '?token=' + encodeURIComponent(chatToken) + '&since=' + chatLastId)
         .then(function (r) { return r.json(); })
         .then(function (d) {
           (d.messages || []).forEach(function (m) {
-            lastId = m.id;
+            chatLastId = m.id;
             // Only the other side: our own were shown the moment they were sent.
-            if (m.sender === 'staff') append('staff', m.body);
+            if (m.sender === 'staff') appendMessage('staff', m.body);
           });
           if (d.status === 'closed') {
-            clearInterval(chatTimer);
+            clearInterval(chatPollTimer);
             chatNote.textContent = 'Support closed this conversation.';
           }
         })
@@ -630,8 +667,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     }
 
     document.getElementById('chatOpen').addEventListener('click', function () {
-      chat.classList.toggle('on');
-      if (!chat.classList.contains('on') || chatId) return;
+      chatPanel.classList.toggle('on');
+      if (!chatPanel.classList.contains('on') || chatId) return;
       chatNote.textContent = 'Connecting…';
       fetch(API + '/chat/start', {
         method: 'POST',
@@ -643,7 +680,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           if (!d.chatId) { chatNote.textContent = d.error || 'Support is not available.'; return; }
           chatId = d.chatId; chatToken = d.token;
           chatNote.textContent = 'Someone will reply here.';
-          chatTimer = setInterval(pollChat, 3000);
+          chatPollTimer = setInterval(pollChat, 3000);
         })
         .catch(function () { chatNote.textContent = 'Could not reach support from here.'; });
     });
@@ -652,7 +689,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       var body = chatText.value.trim();
       if (!body || !chatId) return;
       chatText.value = '';
-      append('visitor', body);
+      appendMessage('visitor', body);
       fetch(API + '/chat/' + chatId + '/message', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -661,30 +698,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     }
     document.getElementById('chatSend').addEventListener('click', sendChat);
     chatText.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
-
-    go.addEventListener('click', function () {
-      if (!planId) return;
-      go.disabled = true;
-      note.textContent = 'Sending…';
-      fetch(API + '/hotspot/buy', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ planId: planId, phone: phone.value }),
-      })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (res) {
-          go.disabled = false;
-          if (!res.ok) { note.textContent = res.d.error || 'Could not start the payment.'; return; }
-          note.textContent = 'Check your phone and enter your M-Pesa PIN.';
-          clearInterval(timer);
-          timer = setInterval(function () { poll(res.d.checkoutId); }, 3000);
-        })
-        .catch(function () {
-          go.disabled = false;
-          note.textContent = 'Could not reach the billing system from here.';
-        });
-    });
-  }());
+  } catch (e) { /* Talk to support stays unresponsive; Buy above is unaffected */ }
   </script>
 </body>
 </html>`;
