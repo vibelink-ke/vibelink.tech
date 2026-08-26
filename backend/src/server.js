@@ -1807,11 +1807,70 @@ app.post('/portal/support', wrap(async (req, res) => {
   if (!s) return res.status(401).json({ error: 'not signed in' });
   const subject = String(req.body?.subject ?? '').trim();
   if (!subject) return res.status(400).json({ error: 'Say what the problem is.' });
+  // Optional — the portal's own form used to be a bare window.prompt() with
+  // room for a subject line only, so a customer had nowhere to actually
+  // describe the problem beyond a few words. A subject alone still works.
+  const body = String(req.body?.body ?? '').trim().slice(0, 2000);
 
   const { rows: [t] } = await pool.query(
     `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
      values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium')
-     returning number`, [s.tenant_id, subject, s.subscriber_id]);
+     returning id, number`, [s.tenant_id, subject, s.subscriber_id]);
+  if (body) {
+    // internal=false: this is the customer's own account of the problem,
+    // meant to be seen (Tickets screen already shows non-internal notes),
+    // not a private staff-only note about them.
+    await pool.query(
+      `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
+       values ($1,$2,$3,$4,false)`,
+      [s.tenant_id, t.id, s.name ?? 'Customer', body]);
+  }
+  res.json({ ok: true, ticket: t.number });
+}));
+
+/** PPPoE plans this subscriber could switch to — active plans on their own service, tenant-scoped. */
+app.get('/portal/plans-pppoe', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const { rows } = await pool.query(
+    `select id, title, price, speed_down, speed_up from plans
+      where tenant_id=$1 and service='pppoe' and active
+      order by price`, [s.tenant_id]);
+  res.json(rows);
+}));
+
+/**
+ * A plan switch is never applied here directly — proration, whether it
+ * takes effect now or at the next renewal, and confirming the customer
+ * actually intended a downgrade are all staff judgment calls this route has
+ * no way to make safely on its own. What it can do safely is turn "call and
+ * ask them to change my plan" into a ticket staff can act on immediately,
+ * with exactly which plan and which subscriber already attached — reusing
+ * the same tickets/ticket_notes tables and screen the ordinary "report a
+ * problem" flow does, rather than a parallel approval system nothing else
+ * knows how to show.
+ */
+app.post('/portal/request-plan-change', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const planId = String(req.body?.planId ?? '');
+
+  const { rows: [plan] } = await pool.query(
+    `select title, price from plans where id=$1 and tenant_id=$2 and service='pppoe' and active`,
+    [planId, s.tenant_id]);
+  if (!plan) return res.status(404).json({ error: 'That plan is not available.' });
+
+  const { rows: [t] } = await pool.query(
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6),
+             $2, $3, 'medium')
+     returning id, number`,
+    [s.tenant_id, `Plan change request: ${s.plan_title ?? 'current plan'} → ${plan.title}`, s.subscriber_id]);
+  await pool.query(
+    `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
+     values ($1,$2,$3,$4,false)`,
+    [s.tenant_id, t.id, s.name ?? 'Customer',
+     `Requested switch to ${plan.title} (KES ${plan.price}). Current: ${s.plan_title ?? 'none'}.`]);
   res.json({ ok: true, ticket: t.number });
 }));
 

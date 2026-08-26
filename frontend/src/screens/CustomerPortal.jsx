@@ -24,7 +24,9 @@ const api = {
   me: () => api.call('GET', '/portal/me'),
   login: (account, password) => api.call('POST', '/portal/login', { account, password }),
   logout: () => api.call('POST', '/portal/logout', {}),
-  support: (subject) => api.call('POST', '/portal/support', { subject }),
+  support: (subject, body) => api.call('POST', '/portal/support', { subject, body }),
+  pppoePlans: () => api.call('GET', '/portal/plans-pppoe'),
+  requestPlanChange: (planId) => api.call('POST', '/portal/request-plan-change', { planId }),
   recover: (phone) => api.call('POST', '/portal/recover', { phone }),
   changePassword: (currentPassword, newPassword) =>
     api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
@@ -274,14 +276,45 @@ export default function CustomerPortal() {
     }
   };
 
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportSubject, setReportSubject] = useState('');
+  const [reportBody, setReportBody] = useState('');
+  const [reportBusy, setReportBusy] = useState(false);
+
   const raise = async () => {
-    const subject = window.prompt('What is wrong? Support will see this.');
-    if (!subject?.trim()) return;
+    if (!reportSubject.trim()) { setNote('Say what the problem is.'); return; }
+    setReportBusy(true);
     try {
-      const { ticket } = await api.support(subject);
+      const { ticket } = await api.support(reportSubject.trim(), reportBody.trim());
       setNote(`Logged as ${ticket}. Support will be in touch.`);
+      setReportOpen(false);
+      setReportSubject('');
+      setReportBody('');
     } catch (err) {
       setNote(err.message);
+    } finally {
+      setReportBusy(false);
+    }
+  };
+
+  // PPPoE only — a hotspot guest buys a bundle outright rather than holding
+  // a standing plan there is a "change," so this never applies to them.
+  const [pppoePlans, setPppoePlans] = useState([]);
+  const [planBusy, setPlanBusy] = useState(false);
+  useEffect(() => {
+    if (!me || me.service !== 'pppoe') return;
+    api.pppoePlans().then(setPppoePlans).catch(() => setPppoePlans([]));
+  }, [me]);
+
+  const requestPlan = async (planId) => {
+    setPlanBusy(true);
+    try {
+      const { ticket } = await api.requestPlanChange(planId);
+      setNote(`Plan change requested — logged as ${ticket}. Support will confirm.`);
+    } catch (err) {
+      setNote(err.message);
+    } finally {
+      setPlanBusy(false);
     }
   };
 
@@ -654,6 +687,50 @@ export default function CustomerPortal() {
           </div>
         )}
 
+        {me.service === 'pppoe' && pppoePlans.length > 0 && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Change plan</span>
+            <span style={{ fontSize: 12.5, color: pc.muted }}>
+              Requesting a plan sends it straight to support to confirm and apply — it does not
+              switch immediately.
+            </span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {pppoePlans.map((p) => {
+                const current = me.plan?.title === p.title;
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                      padding: '9px 11px', borderRadius: 12,
+                      border: `1px solid ${current ? pc.accent : pc.line}`,
+                      background: current ? '#f6f4ff' : 'transparent',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.title}</span>
+                      <span style={{ fontSize: 12, color: pc.muted }}>
+                        {p.speed_down ? `${p.speed_down}/${p.speed_up} Mbps · ` : ''}KES {p.price}/mo
+                      </span>
+                    </div>
+                    {current ? (
+                      <Badge text="Current" tone={pc.accent} />
+                    ) : (
+                      <button
+                        style={{ ...button(false), padding: '6px 12px', fontSize: 13 }}
+                        onClick={() => requestPlan(p.id)}
+                        disabled={planBusy}
+                      >
+                        Request
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {me.invoices?.length > 0 && (
           <div style={card}>
             <span style={{ fontSize: 14, fontWeight: 700 }}>Invoices</span>
@@ -770,7 +847,30 @@ export default function CustomerPortal() {
               Call {me.supportPhone}
             </a>
           )}
-          <button style={button(false)} onClick={raise}>Report a problem</button>
+          {!reportOpen ? (
+            <button style={button(false)} onClick={() => setReportOpen(true)}>Report a problem</button>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input
+                style={input}
+                value={reportSubject}
+                onChange={(e) => setReportSubject(e.target.value)}
+                placeholder="What is wrong? (a few words)"
+              />
+              <textarea
+                style={{ ...input, fontFamily: font.sans, resize: 'vertical', minHeight: 70 }}
+                value={reportBody}
+                onChange={(e) => setReportBody(e.target.value)}
+                placeholder="Details, if you have them — when it started, what you've already tried (optional)"
+              />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button style={button(true)} onClick={raise} disabled={reportBusy || !reportSubject.trim()}>
+                  {reportBusy ? 'Sending…' : 'Send'}
+                </button>
+                <button style={button(false)} onClick={() => setReportOpen(false)}>Cancel</button>
+              </div>
+            </div>
+          )}
           {!chat && (
             <button style={button(false)} onClick={startChat}>Chat with support</button>
           )}
