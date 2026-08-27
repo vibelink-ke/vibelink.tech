@@ -3750,7 +3750,7 @@ function atStep(e, message) {
  * Everything here is idempotent, so the answer to "did that work?" is always to
  * press it again and read the result.
  */
-app.post('/api/routers/:id/hotspot', wrap(async (req, res) => {
+app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const { SERVER_IP } = await import('./tunnel.js');
@@ -4132,7 +4132,7 @@ app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
  * Reachable only because the API container shares the tunnel namespace — the
  * router's address here is its tunnel address, never a public one.
  */
-app.post('/api/routers/:id/autoconfig', wrap(async (req, res) => {
+app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const { SERVER_IP } = await import('./tunnel.js');
@@ -5573,7 +5573,7 @@ app.post('/api/subscribers/:id/portal-password', wrap(async (req, res) => {
  *
  * Admin-only, and never exposed to the customer.
  */
-app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
+app.post('/api/subscribers/:id/access', requirePermission('clients.suspend'), wrap(async (req, res) => {
   const action = String(req.body?.action ?? '');
   const target = { pause: 'paused', suspend: 'suspended', resume: 'active' }[action];
   if (!target) return res.status(400).json({ error: 'action must be pause, suspend or resume' });
@@ -6184,7 +6184,7 @@ app.get('/api/vouchers', wrap(async (req, res) => {
 }));
 
 /** Generate a batch by hand — the usual path is a payment landing in apply.js. */
-app.post('/api/vouchers', wrap(async (req, res) => {
+app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
   const { planId, count = 1, batch } = req.body;
   const { issueVoucherAccess } = await import('./radius.js');
   const { withTenant } = await import('./db.js');
@@ -6212,7 +6212,7 @@ app.post('/api/vouchers', wrap(async (req, res) => {
  * The codes have to be read before the rows go, because afterwards there is
  * nothing left to say which credentials belonged to them.
  */
-app.post('/api/vouchers/delete', wrap(async (req, res) => {
+app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { ids = [] } = req.body;
   const { rows: doomed } = await pool.query(
     'select code from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
@@ -6267,7 +6267,7 @@ app.get('/api/permissions', requirePermission('staff.view'), wrap(async (req, re
   res.json({ matrix: await loadPermissions(req.tenant.id), meta: PERMISSION_META });
 }));
 
-app.put('/api/permissions', requirePermission('staff.edit'), wrap(async (req, res) => {
+app.put('/api/permissions', requirePermission('staff.manage_permissions'), wrap(async (req, res) => {
   const matrix = req.body?.matrix;
   if (!matrix || typeof matrix !== 'object') return res.status(400).json({ error: 'matrix is required' });
   await savePermissions(req.tenant.id, matrix);
