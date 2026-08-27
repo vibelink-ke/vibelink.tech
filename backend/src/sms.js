@@ -225,19 +225,33 @@ export function subscriberVars(s, org = {}) {
     company: org.company ?? '',
     support_phone: org.supportPhone ?? '',
     support_email: org.supportEmail ?? '',
-    paybill: org.paybill ?? '',
+    // KopoKopo is hotspot-only (schema-enforced) — a tenant running it
+    // alongside Daraja, or running it alone, must never have its till
+    // handed to a PPPoE customer as "the" paybill, so orgVars keeps the two
+    // separate and this picks the one this subscriber can actually pay.
+    paybill: (s.service === 'hotspot' ? org.paybillHotspot : org.paybillPppoe) ?? '',
     portal: org.portal ?? '',
   };
 }
+
+// Hotspot -> Settings -> "Payment method" is the tenant's actual choice of
+// which gateway takes hotspot money (see the STK-push route's own comment on
+// this same mapping) — the SMS {paybill} token for a hotspot customer must
+// name that same gateway's till/shortcode, not just whichever hotspot-enabled
+// row happens to be flagged default.
+const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till: 'manual_till', bankstk: 'bankstk' };
 
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
 export async function orgVars(tenantId) {
   const { rows: [t] } = await pool.query(
     'select name, support_phone, subdomain from tenants where id=$1', [tenantId]);
-  const { rows: [gw] } = await pool.query(
-    `select shortcode from tenant_payment_config
+  const { rows: gws } = await pool.query(
+    `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
       where tenant_id=$1 and shortcode is not null
-      order by is_default desc nulls last limit 1`, [tenantId]).catch(() => ({ rows: [] }));
+      order by is_default desc nulls last`, [tenantId]).catch(() => ({ rows: [] }));
+  const { rows: [hs] } = await pool.query(
+    'select payment_method from hotspot_settings where tenant_id=$1', [tenantId]).catch(() => ({ rows: [] }));
+  const hotspotProvider = HOTSPOT_METHOD_PROVIDER[hs?.payment_method] ?? null;
   // app_settings is one row per tenant with jsonb blobs, not key/value pairs.
   const { rows: [cfg] } = await pool.query(
     "select prefs->>'supportEmail' as email, smtp->>'from' as smtp_from from app_settings where tenant_id=$1",
@@ -249,7 +263,12 @@ export async function orgVars(tenantId) {
     // Falls back to whatever address the mail gateway sends as, which is the
     // address customers would reply to anyway.
     supportEmail: cfg?.email ?? cfg?.smtp_from ?? '',
-    paybill: gw?.shortcode ?? '',
+    paybillPppoe: gws.find((g) => g.enabled_pppoe)?.shortcode ?? '',
+    paybillHotspot: (
+      gws.find((g) => g.provider === hotspotProvider)?.shortcode
+      ?? gws.find((g) => g.enabled_hotspot)?.shortcode
+      ?? ''
+    ),
     // {portal} in a welcome message or reminder — a link a new customer can
     // tap straight to sign-in, instead of typing the subdomain from memory.
     portal: t?.subdomain ? `https://${t.subdomain}.${root}/customer` : '',
