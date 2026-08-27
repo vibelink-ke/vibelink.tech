@@ -775,14 +775,19 @@ export default function Clients() {
                 title: 'Let this line dial in from a different router — a tech swapped equipment, or the customer moved',
               }]
             : []),
-          {
-            label: 'Add another line',
-            title: 'A second connection for this same customer — same account number, a new line tag',
-            onClick: () => navigate(
-              `/clients/new?account=${encodeURIComponent(detail.account_code)}`
-              + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
-            ),
-          },
+          // PPPoE has its own "+ Add service" inline, in the section below —
+          // this stays here only for a non-PPPoE (hotspot) account, which has
+          // no such section of its own.
+          ...(detail.service !== 'pppoe'
+            ? [{
+                label: 'Add another line',
+                title: 'A second connection for this same customer — same account number, a new line tag',
+                onClick: () => navigate(
+                  `/clients/new?account=${encodeURIComponent(detail.account_code)}`
+                  + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
+                ),
+              }]
+            : []),
           { label: 'Edit', onClick: () => setEditing({ ...detail }), tone: 'primary' },
           { label: 'Delete', tone: 'danger', onClick: () => removeClient(detail) },
         ] : []}
@@ -822,19 +827,28 @@ export default function Clients() {
                 }
               />
             )}
-            {/* Every line on this account, this one included — a customer with
-                two PPPoE connections is one person paying one account number,
-                not two strangers who happen to share it, and until now the
-                only way to see the second line was to close this drawer and
-                go find its own row in the table. */}
+            {/* PPPoE services on this account, as their own section rather
+                than folded into the generic fields above — a customer with
+                two PPPoE connections is one person paying one account
+                number, not two strangers who happen to share it, and this is
+                where a second (or third) one gets added, not just viewed. */}
             {(() => {
               const siblings = clients
-                .filter((c) => c.account_code === detail.account_code)
+                .filter((c) => c.account_code === detail.account_code && c.service === 'pppoe')
                 .sort((a, b) => (a.line_label ?? '').localeCompare(b.line_label ?? ''));
-              if (siblings.length < 2) return null;
+              if (detail.service !== 'pppoe' && siblings.length === 0) return null;
+              const addService = () => navigate(
+                `/clients/new?account=${encodeURIComponent(detail.account_code)}`
+                + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
+              );
               return (
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-                  <span style={{ fontSize: 12.5, color: color.muted }}>Services on this account ({siblings.length})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 12.5, color: color.muted }}>PPPoE services ({siblings.length})</span>
+                    <span onClick={addService} style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}>
+                      + Add service
+                    </span>
+                  </div>
                   <div style={{ display: 'grid', gap: 8 }}>
                     {siblings.map((line) => {
                       const p = planById[line.plan_id];
