@@ -6,7 +6,7 @@ import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
-import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Textarea } from '../ui/primitives';
+import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
 // KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
 // it can't actually charge a PPPoE customer, so it's not offered here.
@@ -137,32 +137,16 @@ export default function Clients() {
   const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
   const [thread, setThread] = useState(null);
-  const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
 
   // Fetched fresh whenever a different client's drawer opens — messages
   // already existed (Messaging's own "Send message" writes here, and every
   // automated SMS/WhatsApp logs to the same table), there was just nowhere
-  // to see a given customer's actual conversation.
+  // to see what a given customer had actually been sent.
   useEffect(() => {
     if (!detail) { setThread(null); return; }
     setThread(null);
     api.messages(detail.id).then(setThread).catch(() => setThread([]));
   }, [detail?.id]);
-
-  const sendReply = async () => {
-    if (!draft.trim() || !detail) return;
-    setSending(true);
-    try {
-      const m = await api.sendMessage({ subscriberId: detail.id, body: draft.trim(), channel: 'sms' });
-      setThread((t) => [...(t ?? []), m]);
-      setDraft('');
-    } catch (e) {
-      store.toast(`Could not send: ${e.message}`);
-    } finally {
-      setSending(false);
-    }
-  };
 
   const clients = store.clients ?? [];
   // subscribers.plan_id references plans, not tariffs.
@@ -946,58 +930,31 @@ export default function Clients() {
               })()}
             </div>
 
-            {/* Every SMS/WhatsApp exchange with this customer, in one place —
-                the messages table already held all of it (automated
-                reminders/receipts and Messaging's own "Send message" both
-                write here), there was just no way to see a customer's actual
-                conversation short of querying the table directly. */}
+            {/* A record of what this customer has actually been told — every
+                automated reminder/receipt and every manual "Send message"
+                from Messaging logs here. Outbound only, and just a log: not
+                a place to start typing back and forth with a customer. */}
             <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>Communication</span>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Communication — messages sent to this customer</span>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
                 {thread === null ? (
                   <span style={{ fontSize: 12.5, color: color.neutralInk }}>Loading…</span>
-                ) : thread.length === 0 ? (
-                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>No messages with this customer yet.</span>
+                ) : thread.filter((m) => m.direction === 'out').length === 0 ? (
+                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>Nothing sent to this customer yet.</span>
                 ) : (
-                  thread.map((m) => (
-                    <div key={m.id} style={{ display: 'flex', justifyContent: m.direction === 'out' ? 'flex-end' : 'flex-start' }}>
-                      <div
-                        style={{
-                          maxWidth: '82%',
-                          background: m.direction === 'out' ? color.green : color.tileBg,
-                          color: m.direction === 'out' ? '#fff' : color.ink,
-                          borderRadius: 10,
-                          padding: '7px 10px',
-                          fontSize: 12.5,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 2,
-                        }}
-                      >
+                  thread
+                    .filter((m) => m.direction === 'out')
+                    .slice()
+                    .reverse()
+                    .map((m) => (
+                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5, paddingBottom: 6, borderBottom: `1px solid ${color.line}` }}>
                         <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
-                        <span style={{ fontSize: 10, color: m.direction === 'out' ? 'rgba(255,255,255,.75)' : color.muted, alignSelf: 'flex-end' }}>
+                        <span style={{ fontSize: 11, color: color.muted }}>
                           {m.channel} · {new Date(m.sent_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                         </span>
                       </div>
-                    </div>
-                  ))
+                    ))
                 )}
-              </div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                <div style={{ flex: 1 }}>
-                  <Textarea
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    placeholder="Message this customer — sends as SMS…"
-                    rows={2}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); }
-                    }}
-                  />
-                </div>
-                <Button variant="primary" onClick={sendReply} disabled={sending || !draft.trim()}>
-                  {sending ? 'Sending…' : 'Send'}
-                </Button>
               </div>
             </div>
 
