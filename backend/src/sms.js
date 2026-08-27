@@ -350,6 +350,7 @@ async function sendViaPlatform(tenantId, to, body) {
     // tenant is never charged a credit for a message that never went out.
     await pool.query(
       'update tenants set platform_sms_balance = greatest(platform_sms_balance - 1, 0) where id=$1', [tenantId]);
+    cache.delete('__platform__');
     await log(tenantId, `platform:${cfg.provider}`, to, body, 'sent',
       `HTTP ${res.status} ${JSON.stringify(res?.data ?? '').slice(0, 200)} (platform gateway)`);
     return { ok: true, provider: `platform:${cfg.provider}` };
@@ -556,6 +557,36 @@ export async function smsBalance(tenantId, { force = false } = {}) {
   }
 
   cache.set(tenantId, { at: Date.now(), value });
+  return value;
+}
+
+/**
+ * The real balance on the platform owner's own gateway account — separate
+ * from any tenant's platform_sms_balance, which is only ever how many
+ * messages that tenant is allowed to spend from it. This is "how much is
+ * actually left on the account before every tenant's fallback stops
+ * working," which is what the platform owner actually needs to watch.
+ */
+export async function platformSmsBalance({ force = false } = {}) {
+  const key = '__platform__';
+  const hit = cache.get(key);
+  if (!force && hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
+
+  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+
+  let value;
+  if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
+    value = { configured: false, provider: cfg?.provider ?? null, credits: 0, checkedAt: new Date().toISOString() };
+  } else {
+    try {
+      const credits = await BALANCE[cfg.provider](cfg.credentials);
+      value = { configured: true, provider: cfg.provider, credits: credits ?? 0, checkedAt: new Date().toISOString() };
+    } catch (e) {
+      value = { configured: true, provider: cfg.provider, credits: 0, error: e.message, checkedAt: new Date().toISOString() };
+    }
+  }
+
+  cache.set(key, { at: Date.now(), value });
   return value;
 }
 

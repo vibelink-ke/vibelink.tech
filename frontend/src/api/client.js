@@ -264,6 +264,7 @@ export const api = {
   platformHealth: () => get('/api/platform/health'),
   restartApi: () => post('/api/platform/restart', {}),
   platformSmsConfig: () => get('/api/platform/sms-config'),
+  platformSmsBalance: (force) => get(`/api/platform/sms-balance${force ? '?force=1' : ''}`),
   savePlatformSmsConfig: (cfg) => put('/api/platform/sms-config', cfg),
   setTenantSmsBalance: (id, body) => post(`/api/tenants/${id}/sms-balance`, body),
   createTenant: (t) => post('/api/tenants', t),

@@ -678,9 +678,22 @@ export default function Settings() {
           </Card>
 
           <Card title="Configured gateways">
+            {(gw?.platformBalance ?? 0) > 0 && (
+              <div
+                style={{
+                  fontSize: 12.5, color: color.green, background: '#eef7f0', border: `1px solid ${color.green}33`,
+                  borderRadius: radius.md, padding: '9px 11px', marginBottom: 10,
+                }}
+              >
+                Also covered: {gw.platformBalance} message{gw.platformBalance === 1 ? '' : 's'} can send through the
+                platform's own gateway if yours is missing or fails.
+              </div>
+            )}
             {smsConfigured.length === 0 ? (
               <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 13, color: color.muted }}>
-                None configured — messaging will not send
+                {(gw?.platformBalance ?? 0) > 0
+                  ? 'None of your own configured yet.'
+                  : 'None configured — messaging will not send'}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

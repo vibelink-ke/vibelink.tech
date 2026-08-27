@@ -33,6 +33,8 @@ export default function Tenants() {
   const [gwSaved, setGwSaved] = useState(null);   // { provider, credentialKeys, fields }
   const [gwBusy, setGwBusy] = useState(false);
   const [gwOpen, setGwOpen] = useState(false);
+  const [gwBalance, setGwBalance] = useState(null);   // real account balance, not any tenant's allocation
+  const [gwBalanceLoading, setGwBalanceLoading] = useState(false);
 
   const loadGatewayConfig = async () => {
     try {
@@ -42,6 +44,17 @@ export default function Tenants() {
     } catch { /* the card just shows "not set" */ }
   };
 
+  const checkGatewayBalance = async (force) => {
+    setGwBalanceLoading(true);
+    try {
+      setGwBalance(await api.platformSmsBalance(force));
+    } catch (e) {
+      store.toast(`Could not check balance: ${e.message}`);
+    } finally {
+      setGwBalanceLoading(false);
+    }
+  };
+
   const saveGatewayConfig = async () => {
     setGwBusy(true);
     try {
@@ -49,6 +62,7 @@ export default function Tenants() {
       store.toast('Platform SMS gateway saved');
       setGwCreds({});
       await loadGatewayConfig();
+      await checkGatewayBalance(true);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
@@ -72,7 +86,7 @@ export default function Tenants() {
     }
   };
 
-  useEffect(() => { loadGatewayConfig(); }, []);
+  useEffect(() => { loadGatewayConfig(); checkGatewayBalance(false); }, []);
 
   if (!store.isPlatformOwner) {
     return (
@@ -202,7 +216,21 @@ export default function Tenants() {
       <Card
         title="Platform SMS gateway"
         subtitle="Your own gateway — a tenant with none of their own configured falls back to sending through this, spending only from the balance you give them below"
-        actions={<Button onClick={() => setGwOpen((v) => !v)}>{gwOpen ? 'Hide' : gwSaved?.provider ? `Set: ${gwSaved.provider}` : 'Set up'}</Button>}
+        actions={
+          <>
+            {gwSaved?.provider && (
+              <span style={{ fontSize: 12.5, color: color.muted, fontFamily: font.mono, marginRight: 4 }}>
+                {gwBalanceLoading ? 'checking…' : gwBalance?.configured
+                  ? `${gwBalance.credits} credit${gwBalance.credits === 1 ? '' : 's'} left on account`
+                  : gwBalance && !gwBalance.configured ? 'balance unavailable' : ''}
+              </span>
+            )}
+            {gwSaved?.provider && (
+              <Button onClick={() => checkGatewayBalance(true)} disabled={gwBalanceLoading}>Check balance</Button>
+            )}
+            <Button onClick={() => setGwOpen((v) => !v)}>{gwOpen ? 'Hide' : gwSaved?.provider ? `Set: ${gwSaved.provider}` : 'Set up'}</Button>
+          </>
+        }
       >
         {gwOpen && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>

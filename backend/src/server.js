@@ -2537,6 +2537,13 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select provider, priority, enabled, credentials from tenant_sms_config where tenant_id=$1 order by priority',
     [req.tenant.id]);
+  // How many messages this tenant may still send through the platform
+  // owner's own gateway if their own is missing or fails — shown so a
+  // tenant with no gateway of their own configured knows why messages are
+  // still going out (or why they suddenly stopped, once this reaches 0),
+  // rather than it being invisible to them entirely.
+  const { rows: [t] } = await pool.query(
+    'select platform_sms_balance from tenants where id=$1', [req.tenant.id]);
   res.json({
     available: providerNames,
     // The form renders from this, so it cannot ask for a different set of fields
@@ -2550,6 +2557,7 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
         .map(([k]) => k),
       missing: missingCredentials(g.provider, credentials ?? {}),
     })),
+    platformBalance: t?.platform_sms_balance ?? 0,
   });
 }));
 
@@ -6858,6 +6866,12 @@ app.get('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
       .map(([k]) => k),
     fields: PROVIDER_FIELDS,
   });
+}));
+
+/** The real balance on the platform owner's own gateway account — cached 5 minutes, same as a tenant's own. */
+app.get('/api/platform/sms-balance', superAdminOnly, wrap(async (req, res) => {
+  const { platformSmsBalance } = await import('./sms.js');
+  res.json(await platformSmsBalance({ force: req.query.force === '1' }));
 }));
 
 app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
