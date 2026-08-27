@@ -141,6 +141,8 @@ export default function ClientDetail() {
       phone: client.phone ?? '', phoneAlt: client.phone_alt ?? '',
       location: client.location ?? '',
       lat: client.lat ?? '', lng: client.lng ?? '',
+      email: client.email ?? '', birthday: client.birthday ? String(client.birthday).slice(0, 10) : '',
+      category: client.category ?? '', identification: client.identification ?? '',
     });
   }, [client?.id]);
 
@@ -155,6 +157,10 @@ export default function ClientDetail() {
         location: infoForm.location || null,
         lat: infoForm.lat === '' ? null : Number(infoForm.lat),
         lng: infoForm.lng === '' ? null : Number(infoForm.lng),
+        email: infoForm.email || null,
+        birthday: infoForm.birthday || null,
+        category: infoForm.category || null,
+        identification: infoForm.identification || null,
       });
       store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
       store.toast('Client info saved');
@@ -368,10 +374,16 @@ export default function ClientDetail() {
       <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: 12.5, color: color.muted }}>
         <span>Created {client.created_at ? new Date(client.created_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}</span>
         <span>Location {client.location ?? router?.name ?? '—'}</span>
+        <span>Phone {client.phone ?? '—'}{client.phone_alt ? ` · ${client.phone_alt}` : ''}</span>
         <span>
-          Balance{' '}
-          <span style={{ fontWeight: 700, color: Number(client.net_balance ?? client.credit) < 0 ? color.rust : color.ink }}>
-            KES {kes(client.net_balance ?? client.credit)}
+          {/* credit is money actually sitting on the account — an
+              overpayment carried forward, spendable against the next
+              invoice — which is what "wallet" means. net_balance (credit
+              minus what's owed) is the different question of whether they're
+              paid up, and stays on Billing rather than the header. */}
+          Wallet{' '}
+          <span style={{ fontWeight: 700, color: color.ink }}>
+            KES {kes(client.credit)}
           </span>
         </span>
       </div>
@@ -502,6 +514,24 @@ export default function ClientDetail() {
               </Field>
               <Field label="Second number" hint="Optional — also receives every notification">
                 <Input value={infoForm.phoneAlt} onChange={(e) => setInfoForm((s) => ({ ...s, phoneAlt: e.target.value }))} />
+              </Field>
+              <Field label="Email" hint="Optional">
+                <Input type="email" value={infoForm.email} onChange={(e) => setInfoForm((s) => ({ ...s, email: e.target.value }))} />
+              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Birthday" hint="Optional">
+                  <Input type="date" value={infoForm.birthday} onChange={(e) => setInfoForm((s) => ({ ...s, birthday: e.target.value }))} />
+                </Field>
+                <Field label="Category">
+                  <Select
+                    value={infoForm.category}
+                    onChange={(e) => setInfoForm((s) => ({ ...s, category: e.target.value }))}
+                    options={['', 'Individual Monthly', 'Individual Prepaid', 'Business Monthly', 'Business Contract']}
+                  />
+                </Field>
+              </div>
+              <Field label="Identification" hint="Optional — ID or passport number">
+                <Input value={infoForm.identification} onChange={(e) => setInfoForm((s) => ({ ...s, identification: e.target.value }))} />
               </Field>
               <Button variant="primary" onClick={saveInfo} disabled={infoBusy} style={{ alignSelf: 'flex-start' }}>
                 {infoBusy ? 'Saving…' : 'Save changes'}

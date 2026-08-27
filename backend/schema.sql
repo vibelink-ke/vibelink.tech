@@ -1712,3 +1712,10 @@ alter table tenants add column if not exists platform_sms_balance int not null d
 -- What a tenant pays (to the platform owner, not to their own gateway) to
 -- buy more platform SMS credit once their given balance runs out.
 alter table platform_sms_config add column if not exists price_per_credit numeric(12,2) not null default 2;
+
+-- Optional customer-profile fields for the Client-info tab — none of these
+-- drive billing or RADIUS, they're just what an operator records about who
+-- the customer is, so all three are nullable with no default.
+alter table subscribers add column if not exists email text;
+alter table subscribers add column if not exists category text;
+alter table subscribers add column if not exists identification text;

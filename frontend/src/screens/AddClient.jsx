@@ -198,6 +198,10 @@ export default function AddClient() {
         location: f.location || null,
         lat: f.lat,
         lng: f.lng,
+        email: f.email || null,
+        birthday: f.birthday || null,
+        category: f.category || null,
+        identification: f.identification || null,
         allowDuplicatePhone: differentCustomer || !!linkedAccount,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);

@@ -5200,7 +5200,8 @@ function coord(value, limit) {
 
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
-          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy } = req.body;
+          pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy,
+          email, birthday, category, identification } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   // KopoKopo is hotspot-only by policy everywhere else in this codebase
   // (kopokopo_hotspot_only db constraint, till-based flow, settings screen's
@@ -5287,11 +5288,13 @@ app.post('/api/subscribers', wrap(async (req, res) => {
 
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
-       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label, referred_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) returning *`,
+       router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label, referred_by,
+       email, birthday, category, identification)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *`,
     [req.tenant.id, account, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
-     location || null, coord(lat, 90), coord(lng, 180), label, referrerId]);
+     location || null, coord(lat, 90), coord(lng, 180), label, referrerId,
+     email || null, birthday || null, category || null, identification || null]);
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.
@@ -5347,7 +5350,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'credit'];
+                   'credit', 'email', 'category', 'identification'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
 
@@ -5365,6 +5368,9 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   // numeric cast error, or a pin somewhere out at sea.
   if ('lat' in req.body) req.body.lat = coord(req.body.lat, 90);
   if ('lng' in req.body) req.body.lng = coord(req.body.lng, 180);
+  // An empty string is a blank date field being cleared, not a real date —
+  // postgres rejects '' for a date column outright.
+  if ('birthday' in req.body) req.body.birthday = req.body.birthday || null;
 
   // Numbers only, and the same lengths the generator uses. These get dictated
   // over the phone and typed into a router by someone who is not looking at a
