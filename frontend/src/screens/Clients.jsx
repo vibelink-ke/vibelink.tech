@@ -137,6 +137,9 @@ export default function Clients() {
   const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
   const [thread, setThread] = useState(null);
+  const [addingService, setAddingService] = useState(null);   // the account being added to, or null
+  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '' });
+  const [serviceBusy, setServiceBusy] = useState(false);
 
   // Fetched fresh whenever a different client's drawer opens — messages
   // already existed (Messaging's own "Send message" writes here, and every
@@ -147,6 +150,50 @@ export default function Clients() {
     setThread(null);
     api.messages(detail.id).then(setThread).catch(() => setThread([]));
   }, [detail?.id]);
+
+  /**
+   * "+ Add service" used to redirect to the full new-client form — every
+   * field a brand-new customer needs (category, billing, birthday, ID,
+   * location, referrer…), just pre-filled with this account's name and
+   * phone. Adding a second PPPoE line to a customer already on file needs
+   * none of that: same account, same person, just another connection —
+   * label, plan, router, IP. This stays on the same drawer instead.
+   */
+  const openAddService = (acct) => {
+    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '' });
+    setAddingService(acct);
+  };
+
+  const submitAddService = async () => {
+    if (!addingService) return;
+    if (!serviceForm.lineLabel.trim()) return store.toast('Give this line a tag — "Shop", "Flat 3" — to tell it apart from the others');
+    setServiceBusy(true);
+    try {
+      const { account, password } = await api.newSubscriberCredentials();
+      const created = await api.createSubscriber({
+        accountCode: addingService.account_code,
+        name: addingService.name,
+        phone: addingService.phone,
+        phoneAlt: addingService.phone_alt,
+        service: 'pppoe',
+        planId: serviceForm.planId || null,
+        routerId: serviceForm.routerId || null,
+        pppoeUser: account,
+        pppoePass: password,
+        staticIp: serviceForm.staticIp || null,
+        lineLabel: serviceForm.lineLabel.trim(),
+        allowDuplicatePhone: true,
+      });
+      store.setCollection('clients', (cs) => [created, ...cs]);
+      store.toast(`${serviceForm.lineLabel.trim()} added to ${addingService.account_code}`);
+      setAddingService(null);
+      setDetail(created);
+    } catch (e) {
+      store.toast(`Could not add service: ${e.message}`);
+    } finally {
+      setServiceBusy(false);
+    }
+  };
 
   const clients = store.clients ?? [];
   // subscribers.plan_id references plans, not tariffs.
@@ -837,15 +884,11 @@ export default function Clients() {
                 .filter((c) => c.account_code === detail.account_code && c.service === 'pppoe')
                 .sort((a, b) => (a.line_label ?? '').localeCompare(b.line_label ?? ''));
               if (detail.service !== 'pppoe' && siblings.length === 0) return null;
-              const addService = () => navigate(
-                `/clients/new?account=${encodeURIComponent(detail.account_code)}`
-                + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
-              );
               return (
                 <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span style={{ fontSize: 12.5, color: color.muted }}>PPPoE services ({siblings.length})</span>
-                    <span onClick={addService} style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}>
+                    <span onClick={() => openAddService(detail)} style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}>
                       + Add service
                     </span>
                   </div>
@@ -1050,6 +1093,55 @@ export default function Clients() {
           </>
         )}
       </Drawer>
+
+      <Modal
+        open={!!addingService}
+        title={`Add a PPPoE service — account ${addingService?.account_code ?? ''}`}
+        onClose={() => { if (!serviceBusy) setAddingService(null); }}
+        footer={
+          <>
+            <Button onClick={() => setAddingService(null)} disabled={serviceBusy}>Cancel</Button>
+            <Button variant="primary" onClick={submitAddService} disabled={serviceBusy}>
+              {serviceBusy ? 'Adding…' : 'Add service'}
+            </Button>
+          </>
+        }
+      >
+        {addingService && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Line tag" span={2} hint={`Told apart from ${addingService.name}'s other line(s) — "Shop", "Flat 3"`}>
+              <Input
+                value={serviceForm.lineLabel}
+                onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))}
+                autoFocus
+              />
+            </Field>
+            <Field label="Plan">
+              <Select
+                value={serviceForm.planId}
+                onChange={(e) => setServiceForm((s) => ({ ...s, planId: e.target.value }))}
+                options={[
+                  { value: '', label: 'No plan yet' },
+                  ...(store.plans ?? []).filter((p) => p.service === 'pppoe').map((p) => ({ value: p.id, label: p.title })),
+                ]}
+              />
+            </Field>
+            <Field label="Router">
+              <Select
+                value={serviceForm.routerId}
+                onChange={(e) => setServiceForm((s) => ({ ...s, routerId: e.target.value }))}
+                options={[
+                  { value: '', label: 'Not assigned yet' },
+                  ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name })),
+                ]}
+              />
+            </Field>
+            <Field label="Static IP" span={2} hint="Optional — leave blank if this line dials in for a dynamic address">
+              <Input value={serviceForm.staticIp} onChange={(e) => setServiceForm((s) => ({ ...s, staticIp: e.target.value }))} />
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!editing}
