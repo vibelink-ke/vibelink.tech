@@ -162,6 +162,7 @@ export const api = {
 
   messages: (subscriberId) => get(`/api/messages/${subscriberId}`),
   sendMessage: (m) => post('/api/messages', m),
+  conversations: () => get('/api/conversations'),
 
   liveChats: () => get('/api/live-chats'),
   acceptChat: (id, staffId) => post(`/api/live-chats/${id}/accept`, { staffId }),

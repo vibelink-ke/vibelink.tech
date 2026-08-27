@@ -3053,6 +3053,28 @@ app.post('/api/messages', async (req, res) => {
   res.json(m);
 });
 
+/**
+ * One row per subscriber who has ever exchanged a message (sms/whatsapp
+ * logged to `messages`), newest conversation first — the inbox list the
+ * Communications screen shows before you open any one thread. Left off
+ * everyone with no history at all, same as an email inbox does not list
+ * every contact you've never mailed.
+ */
+app.get('/api/conversations', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select distinct on (m.subscriber_id)
+            m.subscriber_id, s.name, s.account_code, s.phone, s.service,
+            m.body as last_body, m.direction as last_direction,
+            m.channel as last_channel, m.sent_at as last_sent_at
+       from messages m
+       join subscribers s on s.id = m.subscriber_id
+      where m.tenant_id=$1
+      order by m.subscriber_id, m.sent_at desc`,
+    [req.tenant.id]);
+  rows.sort((a, b) => new Date(b.last_sent_at) - new Date(a.last_sent_at));
+  res.json(rows);
+}));
+
 app.get('/api/live-chats', async (req, res) => {
   const { rows } = await pool.query("select * from live_chats where tenant_id=$1 and status<>'closed' order by started_at", [req.tenant.id]);
   res.json(rows);

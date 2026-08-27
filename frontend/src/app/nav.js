@@ -8,6 +8,7 @@ export const NAV_SECTIONS = [
     items: [
       { to: '/', label: 'Dashboard', end: true },
       { to: '/clients', label: 'Clients', count: (s) => s.clients.length },
+      { to: '/communications', label: 'Communications' },
       { to: '/hotspot', label: 'Hotspot', count: (s) => s.vouchers.length },
       { to: '/networks', label: 'Networks' },
       { to: '/tariffs', label: 'Internet tariffs' },
