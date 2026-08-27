@@ -160,6 +160,23 @@ export default function Clients() {
     return f?.match ? clients.filter(f.match) : clients;
   }, [clients, filter]);
 
+  // One row per account, not one per line — a customer with several PPPoE
+  // connections is one account paying one bill, not several strangers who
+  // happen to share a number. The primary line (no line_label, or just the
+  // first) carries the row; the rest show as a "N services" count that
+  // opens the same account's Services tab.
+  const visibleAccounts = useMemo(() => {
+    const groups = new Map();
+    for (const c of visible) {
+      if (!groups.has(c.account_code)) groups.set(c.account_code, []);
+      groups.get(c.account_code).push(c);
+    }
+    return [...groups.values()].map((lines) => ({
+      primary: lines.find((l) => !l.line_label) ?? lines[0],
+      lines,
+    }));
+  }, [visible]);
+
   const allSelected = visible.length > 0 && visible.every((c) => selected.has(c.id));
 
   const toggle = (id) =>
@@ -456,7 +473,7 @@ export default function Clients() {
 
       {view === 'list' && (
       <div style={{ background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 8px' }} className="scroll-x">
-        {visible.length === 0 ? (
+        {visibleAccounts.length === 0 ? (
           <Empty action={<Button variant="primary" onClick={() => navigate('/clients/new')}>+ Add your first client</Button>}>
             {clients.length === 0 ? 'No clients yet' : `No ${filter} clients`}
           </Empty>
@@ -477,12 +494,13 @@ export default function Clients() {
               </tr>
             </thead>
             <tbody>
-              {visible.map((c) => {
+              {visibleAccounts.map(({ primary: c, lines }) => {
+                const multi = lines.length > 1;
                 const plan = planById[c.plan_id];
                 const rtr = routerById[c.router_id];
                 const [exp, note] = expiryLabel(c);
                 return (
-                  <tr key={c.id}>
+                  <tr key={c.account_code}>
                     <td style={{ padding: '13px 10px 13px 0', borderTop: '1px solid #f1f3ef' }}>
                       <input
                         type="checkbox"
@@ -498,53 +516,66 @@ export default function Clients() {
                           {c.name}
                         </span>
                         <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>
-                          {c.account_code}
-                          {/* The tag, where there is one. Two rows with the same
-                              account number and no way to tell them apart is
-                              worse than not supporting several lines at all. */}
-                          {c.line_label && (
-                            <span style={{
-                              marginLeft: 6, padding: '1px 7px', borderRadius: 999,
-                              background: color.tileBg, border: `1px solid ${color.line}`,
-                              fontSize: 11, fontWeight: 600, color: color.inkSoft,
-                            }}>
-                              {c.line_label}
-                            </span>
-                          )}
-                          {' · '}{c.phone}
+                          {c.account_code}{' · '}{c.phone}
                         </span>
                       </div>
                     </td>
                     <td style={{ ...td, fontSize: 13.5 }}>
-                      {plan?.title ?? '—'}
-                      <br />
-                      <span style={{ fontSize: 11.5, color: color.muted }}>KES {kes(plan?.price)} / mo</span>
+                      {/* An account with several connections collapses to a
+                          count here — the per-line plan/price/status/MAC each
+                          has is what the Services tab on its own page is for,
+                          not something this list can show N of at once. */}
+                      {multi ? (
+                        <span
+                          onClick={() => navigate(`/clients/${c.id}?tab=services`)}
+                          style={{
+                            display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
+                            fontSize: 11.5, fontWeight: 600, background: color.tileBg, color: color.green, cursor: 'pointer',
+                          }}
+                        >
+                          {lines.length} services
+                        </span>
+                      ) : (
+                        <>
+                          {plan?.title ?? '—'}
+                          <br />
+                          <span style={{ fontSize: 11.5, color: color.muted }}>KES {kes(plan?.price)} / mo</span>
+                        </>
+                      )}
                     </td>
                     <td style={{ ...td, fontFamily: font.mono, fontSize: 12, color: '#4a524c' }}>
-                      {rtr?.name ?? '—'}
-                      <br />
-                      {/* The address the router actually gave them, falling back
-                          to the one assigned here. Showing only the assigned one
-                          hid the case that matters: a customer connected on a
-                          different address from the one on file. */}
-                      {c.current_ip ? (
-                        <span title="Address on the live session">{c.current_ip}</span>
-                      ) : c.static_ip ? (
-                        <span style={{ color: color.muted }} title="Assigned here; not connected">
-                          {c.static_ip}
-                        </span>
-                      ) : '—'}
-                      {c.current_ip && c.static_ip && c.current_ip !== String(c.static_ip).split('/')[0] && (
-                        <span style={{ display: 'block', color: color.amberInk, fontSize: 11 }}
-                              title={`Assigned ${c.static_ip}`}>
-                          not the assigned IP
-                        </span>
+                      {multi ? <span style={{ color: color.muted }}>—</span> : (
+                        <>
+                          {rtr?.name ?? '—'}
+                          <br />
+                          {/* The address the router actually gave them, falling back
+                              to the one assigned here. Showing only the assigned one
+                              hid the case that matters: a customer connected on a
+                              different address from the one on file. */}
+                          {c.current_ip ? (
+                            <span title="Address on the live session">{c.current_ip}</span>
+                          ) : c.static_ip ? (
+                            <span style={{ color: color.muted }} title="Assigned here; not connected">
+                              {c.static_ip}
+                            </span>
+                          ) : '—'}
+                          {c.current_ip && c.static_ip && c.current_ip !== String(c.static_ip).split('/')[0] && (
+                            <span style={{ display: 'block', color: color.amberInk, fontSize: 11 }}
+                                  title={`Assigned ${c.static_ip}`}>
+                              not the assigned IP
+                            </span>
+                          )}
+                        </>
                       )}
                     </td>
                     <td style={{ ...td, fontSize: 13.5 }}>
-                      {exp}
-                      <br />
-                      <span style={{ fontSize: 11.5, color: color.muted }}>{note}</span>
+                      {multi ? <span style={{ color: color.muted }}>—</span> : (
+                        <>
+                          {exp}
+                          <br />
+                          <span style={{ fontSize: 11.5, color: color.muted }}>{note}</span>
+                        </>
+                      )}
                     </td>
                     <td style={td}>
                       <span
@@ -562,7 +593,11 @@ export default function Clients() {
                       </span>
                     </td>
                     <td style={td}>
-                      {(() => {
+                      {multi ? (
+                        <span style={{ fontSize: 12.5, color: color.muted }}>
+                          {lines.filter((l) => l.online).length} online
+                        </span>
+                      ) : (() => {
                         const p = presence(c);
                         return (
                           <>
@@ -582,10 +617,11 @@ export default function Clients() {
                       <RowActions>
                       <RowAction onClick={() => navigate(`/clients/${c.id}`)}>View</RowAction>
                       {/* PPPoE: Pause/Suspend/Send STK/Edit/Delete now live under
-                          that account's own "PPPoE services" section in View —
-                          each line's own row there, not duplicated here too.
-                          Hotspot has no such section, so it keeps them here. */}
-                      {c.service !== 'pppoe' && (
+                          that account's own Services tab on its own page — each
+                          line's own row there, not duplicated here too. Hotspot
+                          has no such tab, so a single-line hotspot row keeps
+                          them here. */}
+                      {c.service !== 'pppoe' && !multi && (
                         <>
                           <RowAction tone={color.amberInk} onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')}>
                             {c.status === 'active' ? 'Pause' : 'Resume'}

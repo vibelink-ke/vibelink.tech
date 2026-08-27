@@ -1,9 +1,48 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
+
+/** A draggable pin — click or drag to set the exact spot, same Leaflet
+ * pattern the Map screen already uses (no react-leaflet dependency). */
+function LocationMap({ lat, lng, onChange }) {
+  const holder = useRef(null);
+  const map = useRef(null);
+  const marker = useRef(null);
+
+  useEffect(() => {
+    if (!holder.current || map.current) return;
+    const center = [lat ?? -1.2921, lng ?? 36.8219];
+    map.current = L.map(holder.current, { scrollWheelZoom: false }).setView(center, lat != null ? 15 : 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+    }).addTo(map.current);
+    marker.current = L.marker(center, { draggable: true }).addTo(map.current);
+    marker.current.on('dragend', () => {
+      const p = marker.current.getLatLng();
+      onChange(p.lat, p.lng);
+    });
+    map.current.on('click', (e) => {
+      marker.current.setLatLng(e.latlng);
+      onChange(e.latlng.lat, e.latlng.lng);
+    });
+    return () => { map.current?.remove(); map.current = null; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Typing lat/lng by hand moves the pin too, without fighting the drag handler.
+  useEffect(() => {
+    if (map.current && marker.current && lat != null && lng != null) {
+      marker.current.setLatLng([lat, lng]);
+    }
+  }, [lat, lng]);
+
+  return <div ref={holder} style={{ height: 240, borderRadius: radius.md, overflow: 'hidden', border: `1px solid ${color.line}` }} />;
+}
 
 const AUTOPAY_OPTIONS = [
   { value: '', label: 'Off' },
@@ -88,6 +127,56 @@ export default function ClientDetail() {
       return n;
     });
   const [revealed, setRevealed] = useState(() => new Set());
+
+  // Client info as an editable form rather than a read-only KV list —
+  // first/last name split from the one name column we actually store, plus
+  // location/coordinates, which the map below can also set by dragging.
+  const [infoForm, setInfoForm] = useState(null);
+  const [infoBusy, setInfoBusy] = useState(false);
+  useEffect(() => {
+    if (!client) { setInfoForm(null); return; }
+    const [firstName = '', ...rest] = (client.name ?? '').trim().split(/\s+/);
+    setInfoForm({
+      firstName, lastName: rest.join(' '),
+      phone: client.phone ?? '', phoneAlt: client.phone_alt ?? '',
+      location: client.location ?? '',
+      lat: client.lat ?? '', lng: client.lng ?? '',
+    });
+  }, [client?.id]);
+
+  const saveInfo = async () => {
+    if (!infoForm) return;
+    const name = `${infoForm.firstName} ${infoForm.lastName}`.trim();
+    if (!name) return store.toast('Give the client a name first');
+    setInfoBusy(true);
+    try {
+      const updated = await api.updateSubscriber(client.id, {
+        name, phone: infoForm.phone, phone_alt: infoForm.phoneAlt || null,
+        location: infoForm.location || null,
+        lat: infoForm.lat === '' ? null : Number(infoForm.lat),
+        lng: infoForm.lng === '' ? null : Number(infoForm.lng),
+      });
+      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
+      store.toast('Client info saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setInfoBusy(false);
+    }
+  };
+
+  const [portalBusy, setPortalBusy] = useState(false);
+  const genPortalPassword = async () => {
+    setPortalBusy(true);
+    try {
+      await api.generatePortalPassword(client.id);
+      store.toast(`New portal password for ${client.name}, sent by SMS`);
+    } catch (e) {
+      store.toast(`Could not generate: ${e.message}`);
+    } finally {
+      setPortalBusy(false);
+    }
+  };
 
   // Communication and Billing are account-wide — every line's own messages
   // and payments, not just whichever line happens to be first.
@@ -389,25 +478,67 @@ export default function ClientDetail() {
         </div>
       )}
 
-      {tab === 'info' && (
-        <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px', display: 'grid', gap: 8 }}>
-          <KV k="Account" v={client.account_code} />
-          <KV k="Name" v={client.name} />
-          <KV k="Phone" v={client.phone} />
-          {client.phone_alt && <KV k="Second number" v={client.phone_alt} />}
-          <KV k="Location" v={client.location ?? '—'} />
-          {lat != null && lng != null && (
-            <KV
-              k={client.lat == null ? 'Coordinates (from router)' : 'Coordinates'}
-              v={<a href={`https://www.google.com/maps?q=${lat},${lng}`} target="_blank" rel="noreferrer" style={{ color: color.green, fontWeight: 600 }}>
-                {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}
-              </a>}
-            />
-          )}
-          <KV k="Auto-pay" v={client.autopay ?? 'Off'} />
-          {client.service === 'pppoe' && (
-            <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
-          )}
+      {tab === 'info' && infoForm && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 14, alignItems: 'start' }}>
+          <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Basic info</div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <Field label="Portal login [ Account number ]" hint="Fixed once created — a customer's account number">
+                <Input value={client.account_code} disabled style={{ fontFamily: font.mono }} />
+              </Field>
+              <Field label="Portal password" hint="Hashed — generate a new one to hand the customer, sent to them by SMS">
+                <Button onClick={genPortalPassword} disabled={portalBusy}>{portalBusy ? 'Generating…' : 'Generate'}</Button>
+              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="First name">
+                  <Input value={infoForm.firstName} onChange={(e) => setInfoForm((s) => ({ ...s, firstName: e.target.value }))} />
+                </Field>
+                <Field label="Last name">
+                  <Input value={infoForm.lastName} onChange={(e) => setInfoForm((s) => ({ ...s, lastName: e.target.value }))} />
+                </Field>
+              </div>
+              <Field label="Phone" hint="Used for M-Pesa matching">
+                <Input value={infoForm.phone} onChange={(e) => setInfoForm((s) => ({ ...s, phone: e.target.value }))} />
+              </Field>
+              <Field label="Second number" hint="Optional — also receives every notification">
+                <Input value={infoForm.phoneAlt} onChange={(e) => setInfoForm((s) => ({ ...s, phoneAlt: e.target.value }))} />
+              </Field>
+              <Button variant="primary" onClick={saveInfo} disabled={infoBusy} style={{ alignSelf: 'flex-start' }}>
+                {infoBusy ? 'Saving…' : 'Save changes'}
+              </Button>
+            </div>
+          </div>
+
+          <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Location data</div>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <Field label="Location / building">
+                <Input value={infoForm.location} onChange={(e) => setInfoForm((s) => ({ ...s, location: e.target.value }))} placeholder="Eldama Ravine" />
+              </Field>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Latitude">
+                  <Input value={infoForm.lat} onChange={(e) => setInfoForm((s) => ({ ...s, lat: e.target.value }))} />
+                </Field>
+                <Field label="Longitude">
+                  <Input value={infoForm.lng} onChange={(e) => setInfoForm((s) => ({ ...s, lng: e.target.value }))} />
+                </Field>
+              </div>
+              <span style={{ fontSize: 11.5, color: color.muted, letterSpacing: '.03em' }}>MOVE THE MAP MARKER FOR A PRECISE LOCATION</span>
+              <LocationMap
+                lat={infoForm.lat === '' ? null : Number(infoForm.lat)}
+                lng={infoForm.lng === '' ? null : Number(infoForm.lng)}
+                onChange={(la, lo) => setInfoForm((s) => ({ ...s, lat: la.toFixed(6), lng: lo.toFixed(6) }))}
+              />
+            </div>
+          </div>
+
+          <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px', gridColumn: '1 / -1' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Other</div>
+            <KV k="Auto-pay" v={client.autopay ?? 'Off'} />
+            {client.service === 'pppoe' && (
+              <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
+            )}
+          </div>
         </div>
       )}
 
