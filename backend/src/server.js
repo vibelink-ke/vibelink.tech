@@ -6952,11 +6952,11 @@ app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
 
   await pool.query(
     `insert into platform_sms_config (id, provider, credentials, price_per_credit)
-     values (true, $1, $2, coalesce($3, 2))
+     values (true, $1, $2, coalesce($3::numeric, 2))
      on conflict (id) do update set
        provider = excluded.provider,
        credentials = platform_sms_config.credentials || excluded.credentials,
-       price_per_credit = coalesce($3, platform_sms_config.price_per_credit)`,
+       price_per_credit = coalesce($3::numeric, platform_sms_config.price_per_credit)`,
     [provider, incoming, pricePerCredit != null ? Number(pricePerCredit) : null]);
   res.json({ ok: true });
 }));
