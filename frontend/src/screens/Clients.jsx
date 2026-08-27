@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -6,7 +6,7 @@ import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
-import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
+import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Textarea } from '../ui/primitives';
 
 // KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
 // it can't actually charge a PPPoE customer, so it's not offered here.
@@ -136,6 +136,33 @@ export default function Clients() {
   const [selected, setSelected] = useState(() => new Set());
   const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
+  const [thread, setThread] = useState(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+
+  // Fetched fresh whenever a different client's drawer opens — messages
+  // already existed (Messaging's own "Send message" writes here, and every
+  // automated SMS/WhatsApp logs to the same table), there was just nowhere
+  // to see a given customer's actual conversation.
+  useEffect(() => {
+    if (!detail) { setThread(null); return; }
+    setThread(null);
+    api.messages(detail.id).then(setThread).catch(() => setThread([]));
+  }, [detail?.id]);
+
+  const sendReply = async () => {
+    if (!draft.trim() || !detail) return;
+    setSending(true);
+    try {
+      const m = await api.sendMessage({ subscriberId: detail.id, body: draft.trim(), channel: 'sms' });
+      setThread((t) => [...(t ?? []), m]);
+      setDraft('');
+    } catch (e) {
+      store.toast(`Could not send: ${e.message}`);
+    } finally {
+      setSending(false);
+    }
+  };
 
   const clients = store.clients ?? [];
   // subscribers.plan_id references plans, not tariffs.
@@ -917,6 +944,61 @@ export default function Clients() {
                   </div>
                 );
               })()}
+            </div>
+
+            {/* Every SMS/WhatsApp exchange with this customer, in one place —
+                the messages table already held all of it (automated
+                reminders/receipts and Messaging's own "Send message" both
+                write here), there was just no way to see a customer's actual
+                conversation short of querying the table directly. */}
+            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
+              <span style={{ fontSize: 12.5, color: color.muted }}>Communication</span>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
+                {thread === null ? (
+                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>Loading…</span>
+                ) : thread.length === 0 ? (
+                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>No messages with this customer yet.</span>
+                ) : (
+                  thread.map((m) => (
+                    <div key={m.id} style={{ display: 'flex', justifyContent: m.direction === 'out' ? 'flex-end' : 'flex-start' }}>
+                      <div
+                        style={{
+                          maxWidth: '82%',
+                          background: m.direction === 'out' ? color.green : color.tileBg,
+                          color: m.direction === 'out' ? '#fff' : color.ink,
+                          borderRadius: 10,
+                          padding: '7px 10px',
+                          fontSize: 12.5,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 2,
+                        }}
+                      >
+                        <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
+                        <span style={{ fontSize: 10, color: m.direction === 'out' ? 'rgba(255,255,255,.75)' : color.muted, alignSelf: 'flex-end' }}>
+                          {m.channel} · {new Date(m.sent_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+                <div style={{ flex: 1 }}>
+                  <Textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    placeholder="Message this customer — sends as SMS…"
+                    rows={2}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendReply(); }
+                    }}
+                  />
+                </div>
+                <Button variant="primary" onClick={sendReply} disabled={sending || !draft.trim()}>
+                  {sending ? 'Sending…' : 'Send'}
+                </Button>
+              </div>
             </div>
 
             {/* Credentials are behind a button rather than on screen by default.

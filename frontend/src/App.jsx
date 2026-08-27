@@ -44,7 +44,6 @@ const PlatformMonitor = lazy(() => import('./screens/PlatformMonitor'));
 const Analytics = lazy(() => import('./screens/Analytics'));
 const Leads = lazy(() => import('./screens/Leads'));
 const Messaging = lazy(() => import('./screens/Messaging'));
-const Communications = lazy(() => import('./screens/Communications'));
 const LiveSupport = lazy(() => import('./screens/LiveSupport'));
 const Outages = lazy(() => import('./screens/Outages'));
 const Sla = lazy(() => import('./screens/Sla'));
@@ -233,7 +232,6 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/new" element={<AddClient />} />
-            <Route path="/communications" element={<Communications />} />
             <Route path="/hotspot/*" element={<Hotspot />} />
             <Route path="/networks" element={<Networks />} />
             <Route path="/tariffs" element={<Tariffs />} />
