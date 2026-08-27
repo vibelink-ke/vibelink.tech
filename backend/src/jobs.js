@@ -430,8 +430,20 @@ async function watchdog() {
     `select id, tenant_id, name, host, offline_since, offline_notified
        from routers where tenant_id in (${enabledTenants})`, ['watchdog']);
 
+  // Failover onboarding gives WireGuard and OVPN the identical tunnel
+  // address specifically so this ping is meant to succeed over either
+  // transport — but a router mid-failover can be genuinely reachable on
+  // OVPN while ICMP to that shared address still fails (asymmetric
+  // routing, a firewall rule scoped to the WG interface, an OVPN
+  // ifconfig-push that drifted from what's on file). OpenVPN's own status
+  // log is a second, independent signal: if it shows this exact address
+  // actively routing right now, that outranks one failed ping.
+  const { liveTunnels } = await import('./tunnel.js');
+  const liveAddresses = new Set((await liveTunnels().catch(() => [])).map((t) => t.address));
+
   for (const r of rows) {
-    const up = await ping(r.host);
+    const host = String(r.host).split('/')[0];
+    const up = (await ping(r.host)) || liveAddresses.has(host);
 
     if (up) {
       await pool.query(
