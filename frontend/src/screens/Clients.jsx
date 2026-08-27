@@ -885,22 +885,34 @@ export default function Clients() {
             <KV k="Location" v={detail.location ?? '—'} />
             {/* A link rather than an embedded map: this drawer is opened dozens
                 of times a day and almost never for directions, and whoever needs
-                them wants their own maps app with navigation, not a picture. */}
-            {detail.lat != null && detail.lng != null && (
-              <KV
-                k="Coordinates"
-                v={
-                  <a
-                    href={`https://www.google.com/maps?q=${detail.lat},${detail.lng}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: color.green, fontWeight: 600 }}
-                  >
-                    {Number(detail.lat).toFixed(5)}, {Number(detail.lng).toFixed(5)}
-                  </a>
-                }
-              />
-            )}
+                them wants their own maps app with navigation, not a picture.
+                A line added without its own GPS pin (every service added from
+                the modal above, or an installer who skipped "Use my
+                location") falls back to the router it dials into — the
+                tower/site is still a real answer to "where is this," rather
+                than the drawer showing nothing at all. */}
+            {(() => {
+              const router = routerById[detail.router_id];
+              const lat = detail.lat ?? router?.lat;
+              const lng = detail.lng ?? router?.lng;
+              const fromRouter = detail.lat == null && lat != null;
+              if (lat == null || lng == null) return null;
+              return (
+                <KV
+                  k={fromRouter ? 'Coordinates (from router)' : 'Coordinates'}
+                  v={
+                    <a
+                      href={`https://www.google.com/maps?q=${lat},${lng}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: color.green, fontWeight: 600 }}
+                    >
+                      {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}
+                    </a>
+                  }
+                />
+              );
+            })()}
             {/* PPPoE services on this account, as their own section rather
                 than folded into the generic fields above — a customer with
                 two PPPoE connections is one person paying one account
@@ -945,12 +957,33 @@ export default function Clients() {
                               {p?.title ?? 'No plan'} · {line.static_ip ?? 'no IP'} ·{' '}
                               <span style={{ color: STATUS_DOT[line.status] ?? color.muted, fontWeight: 600 }}>{line.status}</span>
                             </span>
+                            {/* Its own MAC lock and expiry, not the account's —
+                                two lines on one account can be on different
+                                routers with different renewal dates entirely. */}
+                            <span style={{ fontSize: 11, color: color.muted, fontFamily: font.mono }}>
+                              {line.locked_mac ?? 'no MAC lock'} · expires{' '}
+                              {line.expires_at ? new Date(line.expires_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' }) : '—'}
+                            </span>
                           </div>
                           <RowActions>
                             <RowAction tone={color.amberInk} onClick={() => setAccess(line, line.status === 'active' ? 'pause' : 'resume')}>
                               {line.status === 'active' ? 'Pause' : 'Resume'}
                             </RowAction>
+                            <RowAction tone={color.green} onClick={() => giveDays(line)} title="Outage credit or a grace period — extends this line's own expiry">
+                              Extend
+                            </RowAction>
                             <RowAction tone={color.green} onClick={() => setEditing({ ...line })}>Edit</RowAction>
+                            <RowAction
+                              tone={color.rust}
+                              onClick={() => {
+                                if (window.confirm(`Delete ${line.line_label || 'this line'} on account ${line.account_code}? This cannot be undone.`)) {
+                                  removeClient(line);
+                                  if (isOpen) setDetail(null);
+                                }
+                              }}
+                            >
+                              Delete
+                            </RowAction>
                           </RowActions>
                         </div>
                       );
