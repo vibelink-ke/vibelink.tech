@@ -310,13 +310,20 @@ export default function Dashboard() {
         />
         <Tile
           label="SMS BALANCE"
-          value={store.smsCredits?.configured ? store.smsCredits.credits : (platformSmsBalance ?? '—')}
-          valueColor={
+          value={store.smsCredits?.configured ? store.smsCredits.credits : 0}
+          valueColor={store.smsCredits?.configured ? undefined : color.muted}
+          hint={
             store.smsCredits?.configured
-              ? undefined
-              : (platformSmsBalance ?? 0) > 0 ? color.amberInk : color.rust
+              ? `on ${store.smsCredits.provider} · +${platformSmsBalance ?? 0} on system default`
+              : 'own gateway not set — using system default'
           }
-          hint={store.smsCredits?.configured ? `on ${store.smsCredits.provider}` : 'on system default gateway'}
+          onClick={() => navigate('/settings?tab=sms')}
+        />
+        <Tile
+          label="SYSTEM DEFAULT SMS"
+          value={platformSmsBalance ?? '—'}
+          valueColor={(platformSmsBalance ?? 0) > 0 ? undefined : color.rust}
+          hint="platform fallback credits — used when your own gateway is missing or fails"
           onClick={() => navigate('/settings?tab=sms')}
         />
       </div>

@@ -7284,6 +7284,17 @@ app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
 
 app.put('/api/payment-gateways/:id', wrap(async (req, res) => {
   const { label, shortcode, credentials, enabledPppoe, enabledHotspot } = req.body;
+
+  // Checked before the update runs, not after: the CHECK constraint would
+  // otherwise reject the query first and this route would never get to send
+  // back the clear "hotspot-only" message — the caller just saw a raw 500.
+  if (enabledPppoe) {
+    const { rows: [existing] } = await pool.query(
+      'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+    if (existing?.provider === 'kopokopo')
+      return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
+  }
+
   const { rows: [g] } = await pool.query(
     `update tenant_payment_config set
        label = coalesce($3, label),
@@ -7298,8 +7309,6 @@ app.put('/api/payment-gateways/:id', wrap(async (req, res) => {
      typeof enabledPppoe === 'boolean' ? enabledPppoe : null,
      typeof enabledHotspot === 'boolean' ? enabledHotspot : null]);
   if (!g) return res.status(404).json({ error: 'not found' });
-  if (g.provider === 'kopokopo' && enabledPppoe)
-    return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
   res.json({ ok: true });
 }));
 

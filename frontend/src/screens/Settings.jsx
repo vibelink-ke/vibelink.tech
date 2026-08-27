@@ -338,6 +338,10 @@ export default function Settings() {
   // `?? ` is wrong here: the initial value is an empty array, which is not nullish,
   // so the fallback would never fire. Check for content instead.
   const available = gw?.available?.length ? gw.available : Object.keys(fieldsByProvider);
+  // Not a real provider — it has no credentials of its own, only a shared
+  // balance — but it still belongs in the same picker as everything else a
+  // tenant can send through, not off on its own.
+  const availableWithPlatform = [{ value: 'platform_default', label: 'System default (platform)' }, ...available];
   const configured = gw?.configured ?? [];
 
   const [provider, setProvider] = useState('hostpinnacle');
@@ -680,34 +684,46 @@ export default function Settings() {
           >
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Field label="Gateway">
-                <Select value={provider} onChange={(e) => { setProvider(e.target.value); setCreds({}); }} options={available} />
+                <Select value={provider} onChange={(e) => { setProvider(e.target.value); setCreds({}); }} options={availableWithPlatform} />
               </Field>
 
-              <Field
-                label="Priority"
-                hint="Lowest number is tried first; the rest are failover in order"
-              >
-                <Input type="number" min="0" value={priority} onChange={(e) => setPriority(e.target.value)} />
-              </Field>
-              {providerFields.map((f) => (
-                <Field
-                  key={f.key}
-                  label={f.required ? f.label : `${f.label} (optional)`}
-                  hint={savedKeys.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
-                >
-                  <Input
-                    type={f.secret ? 'password' : 'text'}
-                    autoComplete="off"
-                    value={creds[f.key] ?? ''}
-                    onChange={setC(f.key)}
-                    placeholder={savedKeys.includes(f.key) ? '••••••••' : ''}
-                  />
-                </Field>
-              ))}
+              {provider === 'platform_default' ? (
+                <div style={{ fontSize: 12.5, color: color.muted, padding: '4px 0' }}>
+                  Nothing to configure — this is the platform's own gateway, shared credentials you
+                  don't manage here. It's used automatically whenever your own gateways are missing
+                  or fail, spending from the balance shown as "System default" below.
+                </div>
+              ) : (
+                <>
+                  <Field
+                    label="Priority"
+                    hint="Lowest number is tried first; the rest are failover in order"
+                  >
+                    <Input type="number" min="0" value={priority} onChange={(e) => setPriority(e.target.value)} />
+                  </Field>
+                  {providerFields.map((f) => (
+                    <Field
+                      key={f.key}
+                      label={f.required ? f.label : `${f.label} (optional)`}
+                      hint={savedKeys.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
+                    >
+                      <Input
+                        type={f.secret ? 'password' : 'text'}
+                        autoComplete="off"
+                        value={creds[f.key] ?? ''}
+                        onChange={setC(f.key)}
+                        placeholder={savedKeys.includes(f.key) ? '••••••••' : ''}
+                      />
+                    </Field>
+                  ))}
+                </>
+              )}
               <div style={{ display: 'flex', gap: 8 }}>
-                <Button variant="primary" onClick={saveGateway} disabled={busy}>
-                  {busy ? 'Saving…' : 'Save gateway'}
-                </Button>
+                {provider !== 'platform_default' && (
+                  <Button variant="primary" onClick={saveGateway} disabled={busy}>
+                    {busy ? 'Saving…' : 'Save gateway'}
+                  </Button>
+                )}
                 <Button
                   onClick={async () => {
                     try {
