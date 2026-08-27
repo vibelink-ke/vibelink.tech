@@ -119,4 +119,12 @@ until psql -h "${PGHOST:-db}" -p "${PGPORT:-5432}" -U "${PGUSER:-billing}" \
 done
 echo "database reachable"
 
+# The status file is rewritten from scratch every 10s (server.conf's `status`
+# line), each time as root with whatever this container's default umask
+# gives it — 600 here, unreadable by the api container's non-root process
+# that wants it for jobs.js's OVPN-status fallback (see tunnel.js's
+# liveTunnels()). A one-time chmod would not survive the next rewrite, so
+# this keeps reapplying it in the background for as long as openvpn runs.
+( while true; do chmod 644 /run/openvpn/status.log 2>/dev/null; sleep 5; done ) &
+
 exec "$@"
