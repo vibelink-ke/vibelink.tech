@@ -92,8 +92,13 @@ export default function Topbar() {
 
   const sms = store.smsCredits;             // null until the first read comes back
   const known = sms != null;
-  const credits = sms?.credits ?? 0;
   const smsConfigured = sms?.configured;
+  // Own gateway credits when set up; otherwise the platform's shared
+  // fallback balance — the same either-or the Settings and Buy-credits UI
+  // already show, so this chip never reads "0 / not set" while a working
+  // fallback is actually covering every send.
+  const platformBalance = store.smsGateways?.platformBalance ?? 0;
+  const credits = smsConfigured ? (sms?.credits ?? 0) : platformBalance;
 
   return (
     <header
@@ -239,7 +244,7 @@ export default function Topbar() {
       <div
         style={chip}
         onClick={() => navigate('/settings?tab=sms')}
-        title={!known ? 'Checking SMS balance…' : smsConfigured ? 'SMS gateway connected' : 'No SMS gateway configured'}
+        title={!known ? 'Checking SMS balance…' : smsConfigured ? 'SMS gateway connected' : 'No gateway of your own — sending through the platform default'}
       >
         <span style={{ color: color.neutralInk }}>SMS</span>
         <span
@@ -252,7 +257,9 @@ export default function Topbar() {
         >
           {known ? credits.toLocaleString() : '—'}
         </span>
-        <span style={{ fontSize: 10.5, color: color.muted }}>{sms?.provider ?? (known ? 'not set' : 'checking…')}</span>
+        <span style={{ fontSize: 10.5, color: color.muted }}>
+          {smsConfigured ? sms.provider : known ? 'system default' : 'checking…'}
+        </span>
       </div>
 
       <div

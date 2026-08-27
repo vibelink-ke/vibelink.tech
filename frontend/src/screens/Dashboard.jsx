@@ -71,11 +71,6 @@ export default function Dashboard() {
   const [range, setRange] = useState('Today');
   const [menuOpen, setMenuOpen] = useState(false);
 
-  // Own gateway credits already live on store.smsCredits (polled every 3s);
-  // the platform fallback balance isn't part of that poll, so it's fetched
-  // once here just to decide which figure the tile should show.
-  const [platformSmsBalance, setPlatformSmsBalance] = useState(null);
-  useEffect(() => { api.smsGateways().then((g) => setPlatformSmsBalance(g.platformBalance ?? 0)).catch(() => {}); }, []);
 
   const today = useMemo(
     () =>
@@ -307,24 +302,6 @@ export default function Dashboard() {
           valueColor={store.unmatched.length ? color.rust : color.neutralInk}
           hint="unmatched payments →"
           onClick={() => navigate('/payments')}
-        />
-        <Tile
-          label="SMS BALANCE"
-          value={store.smsCredits?.configured ? store.smsCredits.credits : 0}
-          valueColor={store.smsCredits?.configured ? undefined : color.muted}
-          hint={
-            store.smsCredits?.configured
-              ? `on ${store.smsCredits.provider} · +${platformSmsBalance ?? 0} on system default`
-              : 'own gateway not set — using system default'
-          }
-          onClick={() => navigate('/settings?tab=sms')}
-        />
-        <Tile
-          label="SYSTEM DEFAULT SMS"
-          value={platformSmsBalance ?? '—'}
-          valueColor={(platformSmsBalance ?? 0) > 0 ? undefined : color.rust}
-          hint="platform fallback credits — used when your own gateway is missing or fails"
-          onClick={() => navigate('/settings?tab=sms')}
         />
       </div>
 
