@@ -2834,7 +2834,7 @@ app.get('/api/leads/sales-performance', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/leads', async (req, res) => {
+app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
   const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp } = req.body;
 
   let referrer = null;
@@ -3106,7 +3106,7 @@ app.get('/api/tariffs', async (req, res) => {
   const { rows } = await pool.query('select * from tariffs where tenant_id=$1 and active order by price', [req.tenant.id]);
   res.json(rows);
 });
-app.post('/api/tariffs', async (req, res) => {
+app.post('/api/tariffs', requirePermission('tariffs.create'), async (req, res) => {
   const { title, price: p, speedDown, speedUp, fairUse } = req.body;
   const { rows: [t] } = await pool.query(
     'insert into tariffs (tenant_id, title, price, speed_down, speed_up, fair_use) values ($1,$2,$3,$4,$5,$6) returning *',
@@ -5213,7 +5213,7 @@ async function logActivity(req, subscriberId, accountCode, action, detail = null
   } catch (e) { console.error('logActivity', e.message); }
 }
 
-app.post('/api/subscribers', wrap(async (req, res) => {
+app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy,
           email, category, identification, billingType } = req.body;
@@ -6012,7 +6012,7 @@ app.get('/api/plans', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/plans', wrap(async (req, res) => {
+app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
           rateDown, rateUp, dataCapMb, radiusProfile } = req.body;
   const { rows: [row] } = await pool.query(
@@ -6245,7 +6245,7 @@ app.get('/api/staff', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/staff', wrap(async (req, res) => {
+app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) => {
   const { name, phone, email, role = 'support' } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   const { rows: [s] } = await pool.query(
@@ -6662,7 +6662,7 @@ app.post('/api/sms/send', wrap(async (req, res) => {
 }));
 
 /** Bulk SMS. Audience is resolved server-side so the browser never sends a phone list. */
-app.post('/api/sms/bulk', wrap(async (req, res) => {
+app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (req, res) => {
   const { audience = 'all', routerId, planId, body } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'body is required' });
 

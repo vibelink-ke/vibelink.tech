@@ -14,6 +14,7 @@ const all = (owner = true) => ({ owner, cashier: false, technician: false, suppo
 
 export const DEFAULT_PERMISSIONS = {
   'clients.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: true },
+  'clients.create':  { owner: true, cashier: true,  technician: false, support: false, sales: true },
   'clients.edit':    { owner: true, cashier: false, technician: false, support: false, sales: false },
   'clients.suspend': { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'clients.delete':  { owner: true, cashier: false, technician: false, support: false, sales: false },
@@ -24,6 +25,7 @@ export const DEFAULT_PERMISSIONS = {
   'routers.delete':    all(),
 
   'tariffs.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: true },
+  'tariffs.create':  all(),
   'tariffs.edit':    all(),
   'tariffs.delete':  all(),
 
@@ -37,11 +39,16 @@ export const DEFAULT_PERMISSIONS = {
   'tickets.delete':  all(),
 
   'leads.view':      { owner: true, cashier: false, technician: false, support: false, sales: true },
+  'leads.create':    { owner: true, cashier: false, technician: false, support: false, sales: true },
   'leads.edit':      { owner: true, cashier: false, technician: false, support: false, sales: true },
   'leads.delete':    all(),
 
-  'messaging.view':  { owner: true, cashier: true,  technician: false, support: true,  sales: false },
-  'messaging.send':  { owner: true, cashier: false, technician: false, support: true,  sales: false },
+  'messaging.view':      { owner: true, cashier: true,  technician: false, support: true,  sales: false },
+  'messaging.send':      { owner: true, cashier: false, technician: false, support: true,  sales: false },
+  // Bulk is its own key, not folded into messaging.send — one bad template
+  // sent to one customer is a mistake; the same mistake sent to the whole
+  // base is an incident, so it gets its own, narrower default.
+  'messaging.send_bulk': { owner: true, cashier: false, technician: false, support: false, sales: false },
 
   'kb.view':         { owner: true, cashier: true,  technician: true,  support: true,  sales: true },
   'kb.edit':         { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -52,6 +59,7 @@ export const DEFAULT_PERMISSIONS = {
   'payments.edit':   all(),
 
   'staff.view':               all(),
+  'staff.create':             all(),
   'staff.edit':               all(),
   'staff.delete':             all(),
   // Separate from staff.edit on purpose — someone allowed to fix a
@@ -65,6 +73,7 @@ export const DEFAULT_PERMISSIONS = {
 
 export const PERMISSION_META = [
   { key: 'clients.view',    page: 'Clients',          action: 'View' },
+  { key: 'clients.create',  page: 'Clients',          action: 'Create' },
   { key: 'clients.edit',    page: 'Clients',          action: 'Edit' },
   { key: 'clients.suspend', page: 'Clients',          action: 'Pause / suspend / resume' },
   { key: 'clients.delete',  page: 'Clients',          action: 'Delete' },
@@ -73,6 +82,7 @@ export const PERMISSION_META = [
   { key: 'routers.configure', page: 'Routers',         action: 'Push config to a router' },
   { key: 'routers.delete',    page: 'Routers',         action: 'Delete' },
   { key: 'tariffs.view',   page: 'Internet tariffs', action: 'View' },
+  { key: 'tariffs.create', page: 'Internet tariffs', action: 'Create' },
   { key: 'tariffs.edit',   page: 'Internet tariffs', action: 'Edit' },
   { key: 'tariffs.delete', page: 'Internet tariffs', action: 'Delete' },
   { key: 'hotspot.view',     page: 'Hotspot', action: 'View' },
@@ -83,10 +93,12 @@ export const PERMISSION_META = [
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },
   { key: 'leads.view',     page: 'Leads', action: 'View' },
+  { key: 'leads.create',   page: 'Leads', action: 'Create' },
   { key: 'leads.edit',     page: 'Leads', action: 'Edit' },
   { key: 'leads.delete',   page: 'Leads', action: 'Delete' },
-  { key: 'messaging.view', page: 'Messaging', action: 'View history' },
-  { key: 'messaging.send', page: 'Messaging', action: 'Send' },
+  { key: 'messaging.view',      page: 'Messaging', action: 'View history' },
+  { key: 'messaging.send',      page: 'Messaging', action: 'Send' },
+  { key: 'messaging.send_bulk', page: 'Messaging', action: 'Send bulk' },
   { key: 'kb.view',   page: 'Knowledge base', action: 'View' },
   { key: 'kb.edit',   page: 'Knowledge base', action: 'Edit / publish' },
   { key: 'kb.delete', page: 'Knowledge base', action: 'Delete' },
@@ -94,6 +106,7 @@ export const PERMISSION_META = [
   { key: 'payments.apply', page: 'Payments', action: 'Apply / match' },
   { key: 'payments.edit',  page: 'Payments', action: 'Edit gateway credentials' },
   { key: 'staff.view',               page: 'Staff & roles', action: 'View' },
+  { key: 'staff.create',             page: 'Staff & roles', action: 'Invite' },
   { key: 'staff.edit',               page: 'Staff & roles', action: 'Edit' },
   { key: 'staff.delete',             page: 'Staff & roles', action: 'Delete' },
   { key: 'staff.manage_permissions', page: 'Staff & roles', action: 'Change the permission matrix' },
