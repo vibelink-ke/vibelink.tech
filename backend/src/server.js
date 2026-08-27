@@ -7487,6 +7487,7 @@ const AUTOMATION_JOBS = [
    * that would quietly do nothing.
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
+  { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
   /**
    * Same gap this list's own comment above already describes, caught by

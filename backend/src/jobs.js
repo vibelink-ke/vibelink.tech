@@ -49,6 +49,7 @@ export function startJobs() {
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
+  cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   // Tenant billing is WHMCS's job now. Vibelink used to raise its own SaaS
@@ -598,6 +599,83 @@ export async function healRouters() {
   }
 }
 
+/**
+ * Zero-touch first connect — the TR-069/ACS pattern every ISP platform
+ * reviewed for this leads with (auto-configure a device the moment it's
+ * seen, rather than an operator pressing a button): a router whose tunnel
+ * just came up for the first time, and whose one-time admin login is
+ * already on file (entered once during onboarding — this never prompts),
+ * gets RADIUS and PPP/hotspot accounting pushed automatically instead of
+ * sitting there reachable-but-blank until someone remembers to press
+ * Configure.
+ *
+ * Deliberately scoped to just RADIUS + accounting, not the full Configure/
+ * Hotspot push — a bridge, DHCP pool, walled garden or NAT rule needs an
+ * operator's own input (which LAN ports, what network) that nothing here
+ * can safely guess, so those stay a deliberate manual action.
+ */
+export async function autoProvisionNewRouters() {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { SERVER_IP } = await import('./tunnel.js');
+
+  const { rows } = await pool.query(
+    `select id, tenant_id, name, host, api_port, role, secret,
+            service_user, service_password_enc
+       from routers
+      where status = 'up'
+        and autoconfig_last_at is null
+        and service_user is not null
+        and service_password_enc is not null
+        and tenant_id in (${enabledTenants})`, ['autoProvisionNewRouters']);
+
+  for (const r of rows) {
+    const host = String(r.host).split('/')[0];
+    let conn;
+    try {
+      const password = secrets.decrypt(r.service_password_enc);
+      if (!password) continue;
+
+      conn = await ros.connect({ host, port: r.api_port ?? 8728, user: r.service_user, password });
+
+      const coaPort = Number(process.env.RADIUS_COA_PORT ?? 3799);
+      await ros.applyRadius(conn, {
+        serverIp: SERVER_IP,
+        secret: r.secret,
+        coaPort,
+        services: r.role === 'both' ? 'ppp,hotspot' : r.role,
+      });
+      if (r.role === 'both' || r.role === 'pppoe') await ros.applyPpp(conn);
+      if (r.role === 'both' || r.role === 'hotspot') {
+        await ros.applyHotspot(conn);
+        const { rows: [hs] } = await pool.query(
+          'select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1',
+          [r.tenant_id]);
+        await ros.ensureHotspotUserProfile(conn, {
+          sharedUsers: hs?.multi_device ? 3 : 1,
+          idleSeconds: hs?.idle_timeout_sec ?? 30,
+          bindMac: hs?.bind_mac ?? true,
+        });
+      }
+
+      await pool.query(
+        `update routers set autoconfig_last_at = now(), autoconfig_last_ok = true,
+                autoconfig_last_error = null where id = $1`, [r.id]);
+      console.log('autoProvisionNewRouters: provisioned', r.name, host);
+      await notifyOwner(r.tenant_id,
+        `${r.name} came online for the first time and RADIUS/accounting were set up automatically. `
+        + 'Press Hotspot or Configure once it has LAN ports to finish the rest.');
+    } catch (e) {
+      // Left with autoconfig_last_at still null on failure, on purpose — a
+      // router that only just connected and isn't answering the API yet
+      // (still booting, tunnel still settling) should be retried next run,
+      // not marked as a permanent failure after one attempt.
+      console.error('autoProvisionNewRouters:', r.name, host, e.message);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+}
 
 /**
  * Close sessions the router stopped talking about.
