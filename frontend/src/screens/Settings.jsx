@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import Gateways from './settings/Gateways';
-import { Badge, Button, Card, Field, Input, Screen, Select, Tabs } from '../ui/primitives';
+import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
 
 const CURRENCIES = ['KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS — Tanzanian shilling', 'USD — US dollar'];
 const TIMEZONES = ['Africa/Nairobi (EAT)', 'Africa/Kampala (EAT)', 'Africa/Dar_es_Salaam (EAT)', 'UTC'];
@@ -507,6 +507,54 @@ export default function Settings() {
     }
   };
 
+  const [buyOpen, setBuyOpen] = useState(false);
+  const [buyQty, setBuyQty] = useState('50');
+  const [buyPhone, setBuyPhone] = useState('');
+  const [buyBusy, setBuyBusy] = useState(false);
+  const [buyMsg, setBuyMsg] = useState('');
+  const buyPoll = useRef(null);
+  useEffect(() => () => clearInterval(buyPoll.current), []);
+
+  const pricePerCredit = gw?.platformPricePerCredit ?? 2;
+  const buyCost = Math.round((Number(buyQty) || 0) * pricePerCredit);
+
+  const buyCredits = async () => {
+    const qty = Math.round(Number(buyQty));
+    if (!(qty > 0)) return setBuyMsg('Enter how many credits to buy.');
+    if (!buyPhone.trim()) return setBuyMsg('Enter the M-Pesa number to pay from.');
+    setBuyBusy(true);
+    setBuyMsg('');
+    try {
+      const r = await api.buySmsCredits(qty, buyPhone.trim());
+      setBuyMsg('Check your phone and enter your M-Pesa PIN.');
+      clearInterval(buyPoll.current);
+      let elapsed = 0;
+      buyPoll.current = setInterval(async () => {
+        elapsed += 3;
+        try {
+          const s = await api.buySmsCreditsStatus(r.checkoutId);
+          if (s.status === 'success') {
+            clearInterval(buyPoll.current);
+            setBuyMsg(`Paid — ${qty} credits added.`);
+            setBuyBusy(false);
+            await loadGateways();
+          } else if (s.status === 'failed' || s.status === 'timeout') {
+            clearInterval(buyPoll.current);
+            setBuyMsg(s.result_desc || 'The payment did not go through.');
+            setBuyBusy(false);
+          } else if (elapsed >= 90) {
+            clearInterval(buyPoll.current);
+            setBuyMsg('Still waiting — if you paid, the balance will update shortly.');
+            setBuyBusy(false);
+          }
+        } catch { /* keep polling; a dropped check is not a failure */ }
+      }, 3000);
+    } catch (e) {
+      setBuyMsg(e.message);
+      setBuyBusy(false);
+    }
+  };
+
   return (
     <Screen title="Settings" subtitle="Organisation, billing preferences and the gateways this tenant sends through.">
       <Tabs
@@ -678,26 +726,45 @@ export default function Settings() {
           </Card>
 
           <Card title="Configured gateways">
-            {(gw?.platformBalance ?? 0) > 0 && (
-              <div
-                style={{
-                  fontSize: 12.5, color: color.green, background: '#eef7f0', border: `1px solid ${color.green}33`,
-                  borderRadius: radius.md, padding: '9px 11px', marginBottom: 10,
-                }}
-              >
-                Also covered: {gw.platformBalance} message{gw.platformBalance === 1 ? '' : 's'} can send through the
-                platform's own gateway if yours is missing or fails.
+            {smsConfigured.length === 0 && (gw?.platformBalance ?? 0) === 0 && (
+              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 13, color: color.muted }}>
+                None configured — messaging will not send
               </div>
             )}
-            {smsConfigured.length === 0 ? (
-              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 13, color: color.muted }}>
-                {(gw?.platformBalance ?? 0) > 0
-                  ? 'None of your own configured yet.'
-                  : 'None configured — messaging will not send'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '9px 11px',
+                  border: `1px solid ${color.line}`,
+                  borderRadius: radius.md,
+                  fontSize: 13,
+                }}
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500 }}>System default</span>
+                  <span style={{ fontSize: 11.5, color: color.muted }}>
+                    Used when your own gateways are missing or fail
+                  </span>
+                </span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontFamily: font.mono, fontSize: 12, color: color.muted }}>
+                    {gw?.platformBalance ?? 0} credit{(gw?.platformBalance ?? 0) === 1 ? '' : 's'}
+                  </span>
+                  <Badge tone={(gw?.platformBalance ?? 0) > 0 ? 'active' : 'unused'}>
+                    {(gw?.platformBalance ?? 0) > 0 ? 'on' : 'empty'}
+                  </Badge>
+                  <span
+                    onClick={() => { setBuyOpen(true); setBuyMsg(''); }}
+                    style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Buy more
+                  </span>
+                </span>
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {smsConfigured.map((g) => (
+              {smsConfigured.map((g) => (
                   <div
                     key={g.provider}
                     style={{
@@ -741,11 +808,34 @@ export default function Settings() {
                     </span>
                   </div>
                 ))}
-              </div>
-            )}
+            </div>
           </Card>
         </div>
       )}
+
+      <Modal
+        open={buyOpen}
+        title="Buy platform SMS credits"
+        onClose={() => { if (!buyBusy) setBuyOpen(false); }}
+        footer={
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <Button onClick={() => setBuyOpen(false)} disabled={buyBusy}>Close</Button>
+            <Button variant="primary" onClick={buyCredits} disabled={buyBusy}>
+              {buyBusy ? 'Working…' : `Pay KES ${buyCost}`}
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <Field label="How many credits" hint={`KES ${pricePerCredit} per credit`}>
+            <Input type="number" min="1" value={buyQty} onChange={(e) => setBuyQty(e.target.value)} />
+          </Field>
+          <Field label="M-Pesa phone number">
+            <Input value={buyPhone} onChange={(e) => setBuyPhone(e.target.value)} placeholder="07xx xxx xxx" />
+          </Field>
+          {buyMsg && <div style={{ fontSize: 12.5, color: color.muted }}>{buyMsg}</div>}
+        </div>
+      </Modal>
 
       {tab === 'whatsapp' && (
         <Card

@@ -1708,3 +1708,7 @@ create table if not exists platform_sms_config (
   constraint platform_sms_config_singleton check (id)
 );
 alter table tenants add column if not exists platform_sms_balance int not null default 0;
+
+-- What a tenant pays (to the platform owner, not to their own gateway) to
+-- buy more platform SMS credit once their given balance runs out.
+alter table platform_sms_config add column if not exists price_per_credit numeric(12,2) not null default 2;

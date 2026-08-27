@@ -2544,6 +2544,7 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
   // rather than it being invisible to them entirely.
   const { rows: [t] } = await pool.query(
     'select platform_sms_balance from tenants where id=$1', [req.tenant.id]);
+  const { rows: [pcfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
   res.json({
     available: providerNames,
     // The form renders from this, so it cannot ask for a different set of fields
@@ -2558,7 +2559,69 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
       missing: missingCredentials(g.provider, credentials ?? {}),
     })),
     platformBalance: t?.platform_sms_balance ?? 0,
+    platformPricePerCredit: Number(pcfg?.price_per_credit ?? 2),
   });
+}));
+
+/**
+ * Buy more platform SMS credit once a tenant's given balance runs out.
+ * Charged to the platform owner's own tenant's own configured Daraja
+ * gateway — this is a purchase from the platform, not from this tenant's
+ * own payment setup, which may not even exist yet if that's exactly why
+ * they need the fallback in the first place.
+ */
+app.post('/api/sms/buy-credits', wrap(async (req, res) => {
+  const quantity = Math.round(Number(req.body?.quantity));
+  if (!(quantity > 0)) return res.status(400).json({ error: 'Enter how many credits to buy.' });
+
+  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  const price = Number(cfg?.price_per_credit ?? 2);
+  const amount = Math.round(quantity * price);
+
+  const { rows: [owner] } = await pool.query(
+    "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+  if (!owner) return res.status(503).json({ error: 'Platform billing is not set up yet — ask the platform owner.' });
+
+  let phone = String(req.body?.phone ?? '').trim();
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  try {
+    const r = await mpesa.stkPush(owner.tenant_id, {
+      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits`,
+    });
+    const checkoutId = r.CheckoutRequestID;
+    if (!checkoutId) {
+      return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+    }
+    // Filed under the platform owner's own tenant_id — that is whose Daraja
+    // credentials the push actually went out on, and handleStkResult looks
+    // this row up by (provider, checkout_id) alone regardless of whose
+    // balance purpose.tenant_id says to credit.
+    await pool.query(
+      `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+       values ($1,'daraja',$2,$3,$4,$5)
+       on conflict (tenant_id, provider, checkout_id) do nothing`,
+      [owner.tenant_id, checkoutId, phone, amount, { type: 'sms_credit', tenant_id: req.tenant.id, quantity }]);
+    res.json({ checkoutId, amount, quantity });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/**
+ * Scoped by purpose.tenant_id, not stk_requests.tenant_id (that row lives
+ * under the platform owner's own tenant) — otherwise any signed-in staff
+ * could poll another tenant's in-flight purchase by guessing its checkout id.
+ */
+app.get('/api/sms/buy-credits/:checkoutId', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    `select status, result_desc from stk_requests
+      where provider='daraja' and checkout_id=$1 and (purpose->>'tenant_id')=$2`,
+    [req.params.checkoutId, req.tenant.id]);
+  res.json(r ?? { status: 'unknown' });
 }));
 
 // ─────────────── web push ──────────────────
@@ -6858,13 +6921,15 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
  */
 app.get('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
   const { PROVIDER_FIELDS } = await import('./sms.js');
-  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  const { rows: [cfg] } = await pool.query(
+    'select provider, credentials, price_per_credit from platform_sms_config where id=true');
   res.json({
     provider: cfg?.provider ?? null,
     credentialKeys: Object.entries(cfg?.credentials ?? {})
       .filter(([, v]) => String(v ?? '').trim())
       .map(([k]) => k),
     fields: PROVIDER_FIELDS,
+    pricePerCredit: Number(cfg?.price_per_credit ?? 2),
   });
 }));
 
@@ -6875,7 +6940,7 @@ app.get('/api/platform/sms-balance', superAdminOnly, wrap(async (req, res) => {
 }));
 
 app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
-  const { provider, credentials = {} } = req.body ?? {};
+  const { provider, credentials = {}, pricePerCredit } = req.body ?? {};
   const { PROVIDER_FIELDS } = await import('./sms.js');
   if (!PROVIDER_FIELDS[provider]) return res.status(400).json({ error: 'unknown gateway' });
 
@@ -6886,11 +6951,13 @@ app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
     Object.entries(credentials).filter(([, v]) => String(v ?? '').trim() !== ''));
 
   await pool.query(
-    `insert into platform_sms_config (id, provider, credentials) values (true, $1, $2)
+    `insert into platform_sms_config (id, provider, credentials, price_per_credit)
+     values (true, $1, $2, coalesce($3, 2))
      on conflict (id) do update set
        provider = excluded.provider,
-       credentials = platform_sms_config.credentials || excluded.credentials`,
-    [provider, incoming]);
+       credentials = platform_sms_config.credentials || excluded.credentials,
+       price_per_credit = coalesce($3, platform_sms_config.price_per_credit)`,
+    [provider, incoming, pricePerCredit != null ? Number(pricePerCredit) : null]);
   res.json({ ok: true });
 }));
 

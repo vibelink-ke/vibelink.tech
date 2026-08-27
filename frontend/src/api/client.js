@@ -127,6 +127,8 @@ export const api = {
   smsHistory: () => get('/api/sms/history'),
   sendBulkSms: (payload) => post('/api/sms/bulk', payload),
   sendSms: (phone, body) => post('/api/sms/send', { phone, body }),
+  buySmsCredits: (quantity, phone) => post('/api/sms/buy-credits', { quantity, phone }),
+  buySmsCreditsStatus: (checkoutId) => get(`/api/sms/buy-credits/${checkoutId}`),
 
   // ── email gateway ──
   emailGateway: () => get('/api/email/gateway'),

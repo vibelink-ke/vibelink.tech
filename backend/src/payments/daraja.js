@@ -251,6 +251,33 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
    */
   try {
     /**
+     * A tenant buying platform SMS credit — charged to the platform owner's
+     * own tenant (req.tenant_id here, since that owns the Daraja
+     * credentials the STK push actually went out on), crediting a
+     * *different* tenant's platform_sms_balance (p.tenant_id, whoever
+     * actually requested the purchase). Recorded as its own payments row
+     * for the payout tenant rather than folded into applyPayment/
+     * settleSubscriber below, which only know how to credit a subscriber
+     * or issue a voucher — neither applies to buying SMS credit.
+     */
+    if (p.type === 'sms_credit') {
+      const ins = await pool.query(
+        `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, status, applied_at, payload)
+         values ($1,$2,$3,$4,$5,'applied',now(),$6)
+         on conflict (tenant_id, provider, provider_ref) do nothing
+         returning id`,
+        [req.tenant_id, provider, tx.ref, Number(req.amount), tx.phone, { type: 'sms_credit', for_tenant: p.tenant_id, quantity: p.quantity }]);
+      // Only on the row actually being new — a replayed webhook (Safaricom
+      // retries a slow-to-acknowledge callback) must not credit twice for
+      // one payment.
+      if (ins.rows[0]) {
+        await pool.query('update tenants set platform_sms_balance = platform_sms_balance + $2 where id=$1',
+          [p.tenant_id, Number(p.quantity) || 0]);
+      }
+      return;
+    }
+
+    /**
      * The amount credited is what we asked the gateway to charge, recorded
      * in stk_requests when the push went out — never tx.amount, whatever
      * the callback claims. bankstk.js's webhook had no signature at all
