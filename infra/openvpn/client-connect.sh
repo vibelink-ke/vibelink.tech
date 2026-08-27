@@ -39,6 +39,24 @@ fi
 echo "ifconfig-push $ip 255.255.0.0" > "$OUT"
 echo "openvpn-connect: $username -> $ip" >&2
 
+# WireGuard installs a /32 route for this same address the moment its peer
+# is configured — regardless of whether that peer's tunnel is actually up —
+# and a /32 always outranks tun0's own /16 supernet route by longest-prefix
+# match. Without this, a router that failed over to OVPN because WireGuard
+# died still had every server-initiated packet routed straight back into
+# the dead WireGuard tunnel: OpenVPN's control channel would show it
+# connected while nothing — not a ping, not a RouterOS API call — could
+# actually reach it. `route replace`, not `route add`, so this overwrites
+# that entry at the same prefix rather than leaving two /32s to the same
+# address arbitrating by metric.
+if command -v ip >/dev/null 2>&1; then
+  if ip route replace "$ip/32" dev tun0 2>/dev/null; then
+    echo "openvpn-connect: routed $ip via tun0 (overriding any stale wg0 route)" >&2
+  else
+    echo "openvpn-connect: could not set route for $ip via tun0 — non-fatal, but RouterOS API calls to it may hang" >&2
+  fi
+fi
+
 # Per-tenant tunnel isolation. client-to-client is on (server.conf) so a
 # staff peer's laptop can reach its own tenant's routers — but on its own
 # that would let it, and every other peer, reach everyone's. A router peer

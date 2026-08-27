@@ -38,4 +38,24 @@ for rip in $router_ips; do
   iptables -D VIBELINK_TUNNEL_ISOLATION -s "$rip" -d "$ip" -j ACCEPT 2>/dev/null || true
 done
 echo "openvpn-disconnect: closed tunnel holes for $username ($ip)" >&2
+
+# The other half of client-connect.sh's route override: hand the /32 back
+# rather than leaving it pointed at a tun0 that no longer carries it. If
+# this router still has an enabled WireGuard peer, restore its route so a
+# recovered WireGuard tunnel is actually usable again the moment it
+# reconnects; otherwise just drop the override and let it fall through to
+# whatever broader route exists.
+if command -v ip >/dev/null 2>&1; then
+  wg_enabled=$(/usr/bin/psql -h "${PGHOST:-db}" -p "${PGPORT:-5432}" -U "${PGUSER:-billing}" \
+         -d "${PGDATABASE:-billing}" -tA -v ip="$ip" <<'SQL' 2>/dev/null
+select 1 from wg_peers where host(assigned_ip) = :'ip' and enabled limit 1
+SQL
+  )
+  if [ -n "$wg_enabled" ]; then
+    ip route replace "$ip/32" dev wg0 2>/dev/null \
+      && echo "openvpn-disconnect: restored $ip to wg0" >&2
+  else
+    ip route del "$ip/32" dev tun0 2>/dev/null || true
+  fi
+fi
 exit 0
