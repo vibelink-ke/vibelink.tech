@@ -138,8 +138,30 @@ export default function Clients() {
   const [editing, setEditing] = useState(null);
   const [thread, setThread] = useState(null);
   const [addingService, setAddingService] = useState(null);   // the account being added to, or null
-  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '' });
+  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
   const [serviceBusy, setServiceBusy] = useState(false);
+  // Free addresses on whichever router is picked in the Add-service modal —
+  // same pool lookup AddClient uses, so this line's IP comes from the same
+  // place a brand-new customer's does, not a free-text box a typo can break.
+  const [serviceFreeIps, setServiceFreeIps] = useState({ addresses: [], pools: [], loading: false });
+  useEffect(() => {
+    if (!serviceForm.routerId) return setServiceFreeIps({ addresses: [], pools: [], loading: false });
+    let live = true;
+    setServiceFreeIps((s) => ({ ...s, loading: true }));
+    api.routerFreeIps(serviceForm.routerId)
+      .then((r) => live && setServiceFreeIps({ addresses: r.addresses ?? [], pools: r.pools ?? [], loading: false }))
+      .catch(() => live && setServiceFreeIps({ addresses: [], pools: [], loading: false }));
+    return () => { live = false; };
+  }, [serviceForm.routerId]);
+
+  const genServiceCredentials = async () => {
+    try {
+      const { account, password } = await api.newSubscriberCredentials();
+      setServiceForm((s) => ({ ...s, pppoeUser: account, pppoePass: password }));
+    } catch (e) {
+      store.toast(`Could not generate: ${e.message}`);
+    }
+  };
 
   // Fetched fresh whenever a different client's drawer opens — messages
   // already existed (Messaging's own "Send message" writes here, and every
@@ -159,9 +181,15 @@ export default function Clients() {
    * none of that: same account, same person, just another connection —
    * label, plan, router, IP. This stays on the same drawer instead.
    */
-  const openAddService = (acct) => {
-    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '' });
+  const openAddService = async (acct) => {
+    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
     setAddingService(acct);
+    // A real login from the moment the modal opens, same reasoning AddClient
+    // itself uses — an operator can still overwrite either field by hand.
+    try {
+      const { account, password } = await api.newSubscriberCredentials();
+      setServiceForm((s) => ({ ...s, pppoeUser: account, pppoePass: password }));
+    } catch { /* Generate button in the modal covers a retry */ }
   };
 
   const submitAddService = async () => {
@@ -169,7 +197,6 @@ export default function Clients() {
     if (!serviceForm.lineLabel.trim()) return store.toast('Give this line a tag — "Shop", "Flat 3" — to tell it apart from the others');
     setServiceBusy(true);
     try {
-      const { account, password } = await api.newSubscriberCredentials();
       const created = await api.createSubscriber({
         accountCode: addingService.account_code,
         name: addingService.name,
@@ -178,8 +205,8 @@ export default function Clients() {
         service: 'pppoe',
         planId: serviceForm.planId || null,
         routerId: serviceForm.routerId || null,
-        pppoeUser: account,
-        pppoePass: password,
+        pppoeUser: serviceForm.pppoeUser || null,
+        pppoePass: serviceForm.pppoePass || null,
         staticIp: serviceForm.staticIp || null,
         lineLabel: serviceForm.lineLabel.trim(),
         allowDuplicatePhone: true,
@@ -1129,15 +1156,53 @@ export default function Clients() {
             <Field label="Router">
               <Select
                 value={serviceForm.routerId}
-                onChange={(e) => setServiceForm((s) => ({ ...s, routerId: e.target.value }))}
+                onChange={(e) => setServiceForm((s) => ({ ...s, routerId: e.target.value, staticIp: '' }))}
                 options={[
                   { value: '', label: 'Not assigned yet' },
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name })),
                 ]}
               />
             </Field>
-            <Field label="Static IP" span={2} hint="Optional — leave blank if this line dials in for a dynamic address">
-              <Input value={serviceForm.staticIp} onChange={(e) => setServiceForm((s) => ({ ...s, staticIp: e.target.value }))} />
+            {/* Free addresses from that router's own pool — same lookup
+                AddClient uses — rather than a text box where a typo hands the
+                line an address someone else already has. */}
+            <Field
+              label="Static IP"
+              span={2}
+              hint={
+                !serviceForm.routerId ? 'Pick a router first — or leave on "Next free address" for a dynamic one'
+                  : serviceFreeIps.loading ? 'Reading the pool…'
+                  : serviceFreeIps.addresses.length ? `${serviceFreeIps.addresses.length} free in ${serviceFreeIps.pools.join(', ')}`
+                  : 'No pool on this router — add one under Networks'
+              }
+            >
+              <Select
+                value={serviceForm.staticIp}
+                onChange={(e) => setServiceForm((s) => ({ ...s, staticIp: e.target.value }))}
+                options={[
+                  { value: '', label: 'Next free address' },
+                  ...serviceFreeIps.addresses.map((ip) => ({ value: ip, label: ip })),
+                ]}
+              />
+            </Field>
+            <Field label="PPPoE username" hint="What they dial in with">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input
+                  value={serviceForm.pppoeUser}
+                  onChange={(e) => setServiceForm((s) => ({ ...s, pppoeUser: e.target.value.replace(/\D/g, '').slice(0, 5) }))}
+                  inputMode="numeric"
+                  style={{ fontFamily: font.mono }}
+                />
+                <Button onClick={genServiceCredentials}>Generate</Button>
+              </div>
+            </Field>
+            <Field label="PPPoE password" hint="7 digits">
+              <Input
+                value={serviceForm.pppoePass}
+                onChange={(e) => setServiceForm((s) => ({ ...s, pppoePass: e.target.value.replace(/\D/g, '').slice(0, 7) }))}
+                inputMode="numeric"
+                style={{ fontFamily: font.mono }}
+              />
             </Field>
           </div>
         )}
