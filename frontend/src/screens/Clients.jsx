@@ -794,29 +794,30 @@ export default function Clients() {
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right' }}>
                       <RowActions>
                       <RowAction onClick={() => { closeCreds(); setDetail(c); }}>View</RowAction>
-                      <RowAction tone={color.amberInk} onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')}>
-                        {c.status === 'active' ? 'Pause' : 'Resume'}
-                      </RowAction>
-                      {/* Distinct from Pause: this is a block, and only an admin
-                          sees it. Hidden once they are already suspended. */}
-                      {store.isAdmin && c.status !== 'suspended' && (
-                        <RowAction
-                          tone={color.rust}
-                          onClick={() => setAccess(c, 'suspend')}
-                          title="Block this customer — a payment clears it"
-                        >
-                          Suspend
-                        </RowAction>
+                      {/* PPPoE: Pause/Suspend/Send STK/Edit/Delete now live under
+                          that account's own "PPPoE services" section in View —
+                          each line's own row there, not duplicated here too.
+                          Hotspot has no such section, so it keeps them here. */}
+                      {c.service !== 'pppoe' && (
+                        <>
+                          <RowAction tone={color.amberInk} onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')}>
+                            {c.status === 'active' ? 'Pause' : 'Resume'}
+                          </RowAction>
+                          {store.isAdmin && c.status !== 'suspended' && (
+                            <RowAction
+                              tone={color.rust}
+                              onClick={() => setAccess(c, 'suspend')}
+                              title="Block this customer — a payment clears it"
+                            >
+                              Suspend
+                            </RowAction>
+                          )}
+                          <RowAction tone={color.green} onClick={() => setEditing({ ...c })}>Edit</RowAction>
+                          <RowAction tone={color.rust} onClick={() => removeClient(c)}>
+                            Delete
+                          </RowAction>
+                        </>
                       )}
-                      {c.service === 'pppoe' && c.phone && (
-                        <RowAction onClick={() => stkPush(c)} title="Send an M-Pesa STK prompt to their phone">
-                          Send STK
-                        </RowAction>
-                      )}
-                      <RowAction tone={color.green} onClick={() => setEditing({ ...c })}>Edit</RowAction>
-                      <RowAction tone={color.rust} onClick={() => removeClient(c)}>
-                        Delete
-                      </RowAction>
                       </RowActions>
                     </td>
                   </tr>
@@ -950,7 +951,7 @@ export default function Clients() {
                             style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, cursor: isOpen ? 'default' : 'pointer' }}
                           >
                             <span style={{ fontSize: 12.5, fontWeight: 600 }}>
-                              {line.line_label || 'Primary line'}
+                              {line.line_label || routerById[line.router_id]?.name || 'Primary line'}
                               {isOpen && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: color.green }}>viewing</span>}
                             </span>
                             <span style={{ fontSize: 11.5, color: color.muted }}>
