@@ -7162,6 +7162,53 @@ app.get('/api/fup-usage', wrap(async (req, res) => {
   res.json(await usageReport(req.tenant.id));
 }));
 
+/**
+ * MRR, churn and revenue — the real-time-dashboard metrics every ISP
+ * platform reviewed for this feature (Sonar's "MRR, churn and network
+ * health on one dashboard") leads with, none of which existed anywhere in
+ * this app before. MRR is normalised to a monthly-equivalent figure per
+ * plan (duration_min lets a plan be weekly/quarterly/whatever and still
+ * roll up honestly) rather than just summing sticker prices, which would
+ * overstate a base with non-monthly plans on it.
+ */
+app.get('/api/analytics/mrr', wrap(async (req, res) => {
+  const { rows: [mrrRow] } = await pool.query(
+    `select coalesce(sum(p.price * (43200.0 / greatest(p.duration_min, 1))), 0) as mrr,
+            count(*) as active_count
+       from subscribers s join plans p on p.id = s.plan_id
+      where s.tenant_id=$1 and s.status in ('active','grace')`,
+    [req.tenant.id]);
+
+  const { rows: [monthRow] } = await pool.query(
+    `select
+       (select count(*) from subscribers where tenant_id=$1 and created_at >= date_trunc('month', now())) as new_this_month,
+       (select count(*) from subscribers where tenant_id=$1 and status in ('expired','suspended')
+          and expires_at >= date_trunc('month', now())) as churned_this_month,
+       (select coalesce(sum(amount), 0) from payments
+         where tenant_id=$1 and status='applied' and received_at >= date_trunc('month', now())) as revenue_this_month`,
+    [req.tenant.id]);
+
+  const { rows: [baseRow] } = await pool.query(
+    `select count(*) filter (where status in ('active','grace')) as retained,
+            count(*) filter (where status in ('expired','suspended')) as lost
+       from subscribers where tenant_id=$1`,
+    [req.tenant.id]);
+
+  const base = Number(baseRow.retained) + Number(baseRow.lost);
+  res.json({
+    mrr: Math.round(Number(mrrRow.mrr)),
+    activeCount: Number(mrrRow.active_count),
+    newThisMonth: Number(monthRow.new_this_month),
+    churnedThisMonth: Number(monthRow.churned_this_month),
+    revenueThisMonth: Number(monthRow.revenue_this_month),
+    // Snapshot churn — current lost/base, not a rolling cohort measure —
+    // for the same reason ARPU below is a snapshot: there is no
+    // status-history table to compute a true monthly cohort rate from yet.
+    churnRatePct: base ? Math.round((Number(baseRow.lost) / base) * 1000) / 10 : 0,
+    arpu: mrrRow.active_count > 0 ? Math.round(Number(mrrRow.mrr) / Number(mrrRow.active_count)) : 0,
+  });
+}));
+
 /** Run enforcement now rather than waiting for the quarter-hour cron. */
 app.post('/api/fup-enforce', wrap(async (req, res) => {
   const { enforceForTenant } = await import('./fup.js');

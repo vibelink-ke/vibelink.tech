@@ -1,11 +1,20 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { api } from '../api/client';
 import { Bar, Card, Grid, Screen, Select, Stat, Table } from '../ui/primitives';
 
 export default function Analytics() {
   const store = useStore();
   const [month, setMonth] = useState('This month');
+
+  // MRR/churn need real per-plan and per-payment math (a plan's own billing
+  // period, actual applied payments) that the client-side store doesn't
+  // hold — this is the same "MRR, churn and revenue on one dashboard" every
+  // platform reviewed for this leads with, computed server-side once
+  // rather than re-derived from whatever happens to be in the store.
+  const [mrr, setMrr] = useState(null);
+  useEffect(() => { api.mrrAnalytics().then(setMrr).catch(() => setMrr(null)); }, []);
 
   const clients = store.clients ?? [];
   const routers = store.routers ?? [];
@@ -42,7 +51,23 @@ export default function Analytics() {
       <Grid min={200} gap={14}>
         <Stat label="Subscribers" value={clients.length} hint="all statuses" />
         <Stat label="Active" value={byStatus.active ?? 0} tone={color.green} hint="paying and online" />
-        <Stat label="Avg. plan price" value={`KES ${kes(arpu)}`} hint="mean tariff" />
+        <Stat
+          label="MRR"
+          value={mrr ? `KES ${kes(mrr.mrr)}` : '—'}
+          hint={mrr ? `ARPU KES ${kes(mrr.arpu)} · ${mrr.activeCount} active` : 'loading…'}
+        />
+        <Stat
+          label="Churn rate"
+          value={mrr ? `${mrr.churnRatePct}%` : '—'}
+          tone={mrr?.churnRatePct > 5 ? color.rust : undefined}
+          hint={mrr ? `${mrr.churnedThisMonth} churned, ${mrr.newThisMonth} new this month` : 'loading…'}
+        />
+        <Stat
+          label="Revenue this month"
+          value={mrr ? `KES ${kes(mrr.revenueThisMonth)}` : '—'}
+          tone={color.green}
+          hint="applied payments, month to date"
+        />
         <Stat label="Churn risk" value={churnRisk} tone={churnRisk ? color.rust : undefined} hint="expired or suspended" />
       </Grid>
 

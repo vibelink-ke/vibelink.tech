@@ -186,6 +186,7 @@ export const api = {
   updateFupPolicy: (id, p) => put(`/api/fup-policies/${id}`, p),
   deleteFupPolicy: (id) => del(`/api/fup-policies/${id}`),
   fupUsage: () => get('/api/fup-usage'),
+  mrrAnalytics: () => get('/api/analytics/mrr'),
   runFupEnforcement: () => post('/api/fup-enforce', {}),
   restoreFupSpeed: (subscriberId) => post(`/api/fup-usage/${subscriberId}/restore`, {}),
 

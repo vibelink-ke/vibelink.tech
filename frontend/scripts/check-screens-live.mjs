@@ -105,6 +105,7 @@ const ROUTES = [
   [/\/api\/(auth\/)?session$/, { id: 's1', name: 'Administrator', email: 'admin@example.com', role: 'owner', company: 'Vibelink ISP', superAdmin: true }],
   [/\/api\/platform\/sms-config$/, { provider: null, credentialKeys: [], fields: { hostpinnacle: [], africastalking: [] } }],
   [/\/api\/platform\/sms-balance$/, { configured: false, provider: null, credits: 0 }],
+  [/\/api\/analytics\/mrr$/, { mrr: 15000, activeCount: 10, newThisMonth: 2, churnedThisMonth: 1, revenueThisMonth: 15000, churnRatePct: 5, arpu: 1500 }],
   [/\/api\/leads\/sales-performance$/, [
     { id: 'st1', name: 'Amina W', leads_assigned: 12, leads_won: 5, won_this_month: 2, earned_this_month: 3500, earned_total: 9200 },
     { id: 'st2', name: 'Brian K', leads_assigned: 8, leads_won: 3, won_this_month: 1, earned_this_month: 1200, earned_total: 4100 },
