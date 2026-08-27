@@ -14,6 +14,7 @@ import { color, font } from './theme/tokens';
 
 import Dashboard from './screens/Dashboard';
 import Clients from './screens/Clients';
+import ClientDetail from './screens/ClientDetail';
 import AddClient from './screens/AddClient';
 import Networks from './screens/Networks';
 import Tariffs from './screens/Tariffs';
@@ -232,6 +233,7 @@ export default function App() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/new" element={<AddClient />} />
+            <Route path="/clients/:id" element={<ClientDetail />} />
             <Route path="/hotspot/*" element={<Hotspot />} />
             <Route path="/networks" element={<Networks />} />
             <Route path="/tariffs" element={<Tariffs />} />

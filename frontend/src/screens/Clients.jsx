@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -6,7 +6,7 @@ import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
-import { Button, Drawer, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
+import { Button, Empty, Field, Input, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
 
 // KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
 // it can't actually charge a PPPoE customer, so it's not offered here.
@@ -134,93 +134,7 @@ export default function Clients() {
   // "what does this week look like".
   const [view, setView] = useState('list');
   const [selected, setSelected] = useState(() => new Set());
-  const [detail, setDetail] = useState(null);
   const [editing, setEditing] = useState(null);
-  const [thread, setThread] = useState(null);
-  const [addingService, setAddingService] = useState(null);   // the account being added to, or null
-  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
-  const [serviceBusy, setServiceBusy] = useState(false);
-  // Free addresses on whichever router is picked in the Add-service modal —
-  // same pool lookup AddClient uses, so this line's IP comes from the same
-  // place a brand-new customer's does, not a free-text box a typo can break.
-  const [serviceFreeIps, setServiceFreeIps] = useState({ addresses: [], pools: [], loading: false });
-  useEffect(() => {
-    if (!serviceForm.routerId) return setServiceFreeIps({ addresses: [], pools: [], loading: false });
-    let live = true;
-    setServiceFreeIps((s) => ({ ...s, loading: true }));
-    api.routerFreeIps(serviceForm.routerId)
-      .then((r) => live && setServiceFreeIps({ addresses: r.addresses ?? [], pools: r.pools ?? [], loading: false }))
-      .catch(() => live && setServiceFreeIps({ addresses: [], pools: [], loading: false }));
-    return () => { live = false; };
-  }, [serviceForm.routerId]);
-
-  const genServiceCredentials = async () => {
-    try {
-      const { account, password } = await api.newSubscriberCredentials();
-      setServiceForm((s) => ({ ...s, pppoeUser: account, pppoePass: password }));
-    } catch (e) {
-      store.toast(`Could not generate: ${e.message}`);
-    }
-  };
-
-  // Fetched fresh whenever a different client's drawer opens — messages
-  // already existed (Messaging's own "Send message" writes here, and every
-  // automated SMS/WhatsApp logs to the same table), there was just nowhere
-  // to see what a given customer had actually been sent.
-  useEffect(() => {
-    if (!detail) { setThread(null); return; }
-    setThread(null);
-    api.messages(detail.id).then(setThread).catch(() => setThread([]));
-  }, [detail?.id]);
-
-  /**
-   * "+ Add service" used to redirect to the full new-client form — every
-   * field a brand-new customer needs (category, billing, birthday, ID,
-   * location, referrer…), just pre-filled with this account's name and
-   * phone. Adding a second PPPoE line to a customer already on file needs
-   * none of that: same account, same person, just another connection —
-   * label, plan, router, IP. This stays on the same drawer instead.
-   */
-  const openAddService = async (acct) => {
-    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
-    setAddingService(acct);
-    // A real login from the moment the modal opens, same reasoning AddClient
-    // itself uses — an operator can still overwrite either field by hand.
-    try {
-      const { account, password } = await api.newSubscriberCredentials();
-      setServiceForm((s) => ({ ...s, pppoeUser: account, pppoePass: password }));
-    } catch { /* Generate button in the modal covers a retry */ }
-  };
-
-  const submitAddService = async () => {
-    if (!addingService) return;
-    if (!serviceForm.lineLabel.trim()) return store.toast('Give this line a tag — "Shop", "Flat 3" — to tell it apart from the others');
-    setServiceBusy(true);
-    try {
-      const created = await api.createSubscriber({
-        accountCode: addingService.account_code,
-        name: addingService.name,
-        phone: addingService.phone,
-        phoneAlt: addingService.phone_alt,
-        service: 'pppoe',
-        planId: serviceForm.planId || null,
-        routerId: serviceForm.routerId || null,
-        pppoeUser: serviceForm.pppoeUser || null,
-        pppoePass: serviceForm.pppoePass || null,
-        staticIp: serviceForm.staticIp || null,
-        lineLabel: serviceForm.lineLabel.trim(),
-        allowDuplicatePhone: true,
-      });
-      store.setCollection('clients', (cs) => [created, ...cs]);
-      store.toast(`${serviceForm.lineLabel.trim()} added to ${addingService.account_code}`);
-      setAddingService(null);
-      setDetail(created);
-    } catch (e) {
-      store.toast(`Could not add service: ${e.message}`);
-    } finally {
-      setServiceBusy(false);
-    }
-  };
 
   const clients = store.clients ?? [];
   // subscribers.plan_id references plans, not tariffs.
@@ -290,49 +204,6 @@ export default function Clients() {
     );
     const sent = results.filter((r) => r.status === 'fulfilled').length;
     store.toast(sent === picked.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${picked.length}`);
-  };
-
-  /**
-   * One client, not the bulk selection — outage credit and a one-off grace
-   * period are the same operation underneath (push expires_at out by N days),
-   * so this is the single-customer door onto the same endpoint bulkCompensate
-   * already uses, rather than a second thing to maintain.
-   */
-  const giveDays = async (c) => {
-    const raw = window.prompt(`Free days to add for ${c.name} — outage credit or a grace period:`, '1');
-    if (raw === null) return;
-    const days = Number(raw);
-    if (!Number.isFinite(days) || days <= 0) return store.toast('Enter a positive number of days');
-    try {
-      const out = await api.compensateSubscribers([c.id], days);
-      const hit = out.rows?.[0];
-      if (hit) {
-        store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, expires_at: hit.expires_at } : x)));
-        setDetail((d) => (d?.id === c.id ? { ...d, expires_at: hit.expires_at } : d));
-      }
-      store.toast(`Added ${out.days} day(s) for ${c.name}`);
-    } catch (e) {
-      store.toast(`Could not add days: ${e.message}`);
-    }
-  };
-
-  /**
-   * A PPPoE line locks to whichever router it first dials in from — see the
-   * PPPoE MAC lock job — so a shared password stops working from a
-   * different site. That is exactly wrong after a legitimate equipment
-   * change (a tech swaps a dead router, the customer buys their own), so
-   * this is the escape hatch: clear it, and the next dial-in locks fresh.
-   */
-  const clearMacLock = async (c) => {
-    if (!window.confirm(`Clear the MAC lock for ${c.name}? Whichever router dials in next will be the new locked one.`)) return;
-    try {
-      await api.clearMacLock(c.id);
-      store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, locked_mac: null } : x)));
-      setDetail((d) => (d?.id === c.id ? { ...d, locked_mac: null } : d));
-      store.toast(`MAC lock cleared for ${c.name}`);
-    } catch (e) {
-      store.toast(`Could not clear the lock: ${e.message}`);
-    }
   };
 
   const bulkCompensate = async () => {
@@ -439,73 +310,6 @@ export default function Clients() {
    * They used to be one button writing the same status, so nobody could tell the
    * two situations apart afterwards. Both are admin-only.
    */
-  /**
-   * Credentials are fetched on demand rather than arriving with the client list.
-   * The list is reloaded by half the app; passwords riding along in it would end
-   * up in every cache and devtools panel that ever had Clients open.
-   */
-  const [creds, setCreds] = useState(null);          // { id, ...values } once loaded
-  const [credsEdit, setCredsEdit] = useState(null);  // the form, while editing
-  const [credsBusy, setCredsBusy] = useState(false);
-
-  // Opening a different client must not inherit the last one's revealed password.
-  const closeCreds = () => { setCreds(null); setCredsEdit(null); };
-
-  const loadCreds = async (c) => {
-    setCredsBusy(true);
-    try {
-      const v = await api.subscriberCredentials(c.id);
-      setCreds({ id: c.id, ...v });
-    } catch (e) {
-      store.toast(`Could not read credentials: ${e.message}`);
-    } finally {
-      setCredsBusy(false);
-    }
-  };
-
-  const saveCreds = async (c) => {
-    setCredsBusy(true);
-    try {
-      const { pppoeUser, pppoePassword, portalPassword } = credsEdit;
-      const before = creds ?? {};
-
-      // Only send what actually changed. Rewriting the PPPoE username with its
-      // own value would drop and re-add the RADIUS row for no reason.
-      const patch = {};
-      if (pppoeUser !== before.pppoeUser) patch.pppoe_user = pppoeUser;
-      if (pppoePassword !== before.pppoePassword) patch.pppoe_pass = pppoePassword;
-      if (Object.keys(patch).length) {
-        const updated = await api.updateSubscriber(c.id, patch);
-        store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? updated : x)));
-        setDetail(updated);
-      }
-      if (portalPassword && portalPassword !== before.portalPassword) {
-        await api.generatePortalPassword(c.id, portalPassword);
-      }
-
-      await loadCreds(c);
-      setCredsEdit(null);
-      store.toast('Credentials updated');
-    } catch (e) {
-      store.toast(`Could not save: ${e.message}`);
-    } finally {
-      setCredsBusy(false);
-    }
-  };
-
-  const makePortalPassword = async (c) => {
-    setCredsBusy(true);
-    try {
-      await api.generatePortalPassword(c.id);
-      await loadCreds(c);
-      store.toast(`New portal password for ${c.name}, sent by SMS`);
-    } catch (e) {
-      store.toast(`Could not generate: ${e.message}`);
-    } finally {
-      setCredsBusy(false);
-    }
-  };
-
   const setAccess = async (c, action) => {
     try {
       const updated = await api.setSubscriberAccess(c.id, action);
@@ -513,23 +317,6 @@ export default function Clients() {
       store.toast(`${c.name} ${{ pause: 'paused', suspend: 'suspended', resume: 'resumed' }[action]}`);
     } catch (e) {
       store.toast(`Could not update: ${e.message}`);
-    }
-  };
-
-  /**
-   * Push an M-Pesa prompt to their own phone — for a customer paying over
-   * the phone, or one whose portal login isn't working. Daraja only: this
-   * hits the same admin route that refuses KopoKopo for a PPPoE line.
-   */
-  const stkPush = async (c) => {
-    const ask = window.prompt(
-      `Send an M-Pesa prompt to ${c.phone}?\nAmount (KES), or leave blank for their plan price:`, '');
-    if (ask === null) return;
-    try {
-      const res = await api.stkPushSubscriber(c.id, ask.trim() ? Number(ask) : null);
-      store.toast(`Sent — KES ${res.amount} to ${res.phone}`);
-    } catch (e) {
-      store.toast(`Could not send: ${e.message}`);
     }
   };
 
@@ -602,7 +389,7 @@ export default function Clients() {
           background: '#fff', border: `1px solid ${color.line}`,
           borderRadius: radius.lg, padding: 18,
         }}>
-          <ExpiryCalendar clients={clients} onOpen={(c) => { closeCreds(); setDetail(c); }} />
+          <ExpiryCalendar clients={clients} onOpen={(c) => navigate(`/clients/${c.id}`)} />
         </div>
       )}
 
@@ -707,7 +494,7 @@ export default function Clients() {
                     </td>
                     <td style={td}>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span onClick={() => { closeCreds(); setDetail(c); }} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
+                        <span onClick={() => navigate(`/clients/${c.id}`)} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
                           {c.name}
                         </span>
                         <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>
@@ -793,7 +580,7 @@ export default function Clients() {
                     </td>
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right' }}>
                       <RowActions>
-                      <RowAction onClick={() => { closeCreds(); setDetail(c); }}>View</RowAction>
+                      <RowAction onClick={() => navigate(`/clients/${c.id}`)}>View</RowAction>
                       {/* PPPoE: Pause/Suspend/Send STK/Edit/Delete now live under
                           that account's own "PPPoE services" section in View —
                           each line's own row there, not duplicated here too.
@@ -828,419 +615,6 @@ export default function Clients() {
         )}
       </div>
       )}
-
-      <Drawer
-        open={!!detail}
-        title={detail?.name}
-        subtitle={detail ? `${detail.account_code} · ${detail.phone}` : undefined}
-        onClose={() => { setDetail(null); closeCreds(); }}
-        actions={detail ? [
-          { label: detail.status === 'active' ? 'Pause' : 'Resume', onClick: () => setAccess(detail, detail.status === 'active' ? 'pause' : 'resume') },
-          ...(store.isAdmin && detail.status !== 'suspended'
-            ? [{ label: 'Suspend', tone: 'danger', onClick: () => setAccess(detail, 'suspend'), title: 'Block this customer — a payment clears it' }]
-            : []),
-          ...(detail.service === 'pppoe' && detail.phone
-            ? [{ label: `Send STK to ${detail.phone}`, onClick: () => stkPush(detail) }]
-            : []),
-          { label: 'Give free days', onClick: () => giveDays(detail), title: 'Outage credit or a grace period — extends their expiry' },
-          ...(detail.service === 'pppoe' && detail.locked_mac
-            ? [{
-                label: 'Clear MAC lock',
-                onClick: () => clearMacLock(detail),
-                title: 'Let this line dial in from a different router — a tech swapped equipment, or the customer moved',
-              }]
-            : []),
-          // PPPoE has its own "+ Add service" inline, in the section below —
-          // this stays here only for a non-PPPoE (hotspot) account, which has
-          // no such section of its own.
-          ...(detail.service !== 'pppoe'
-            ? [{
-                label: 'Add another line',
-                title: 'A second connection for this same customer — same account number, a new line tag',
-                onClick: () => navigate(
-                  `/clients/new?account=${encodeURIComponent(detail.account_code)}`
-                  + `&name=${encodeURIComponent(detail.name)}&phone=${encodeURIComponent(detail.phone ?? '')}`
-                ),
-              }]
-            : []),
-          { label: 'Edit', onClick: () => setEditing({ ...detail }), tone: 'primary' },
-          { label: 'Delete', tone: 'danger', onClick: () => removeClient(detail) },
-        ] : []}
-      >
-        {detail && (
-          <>
-            <KV k="Account" v={detail.account_code} />
-            {detail.line_label && <KV k="Line" v={detail.line_label} />}
-            <KV k="Phone" v={detail.phone} />
-            <KV k="Service" v={detail.service} />
-            <KV k="PPPoE user" v={detail.pppoe_user ?? '—'} />
-            {detail.service === 'pppoe' && (
-              <KV
-                k="MAC lock"
-                v={detail.locked_mac
-                  ? `${detail.locked_mac} — locked`
-                  : 'Not locked yet — sets on first dial-in'}
-              />
-            )}
-            <KV k="Static IP" v={detail.static_ip ?? '—'} />
-            <KV k="Location" v={detail.location ?? '—'} />
-            {/* A link rather than an embedded map: this drawer is opened dozens
-                of times a day and almost never for directions, and whoever needs
-                them wants their own maps app with navigation, not a picture.
-                A line added without its own GPS pin (every service added from
-                the modal above, or an installer who skipped "Use my
-                location") falls back to the router it dials into — the
-                tower/site is still a real answer to "where is this," rather
-                than the drawer showing nothing at all. */}
-            {(() => {
-              const router = routerById[detail.router_id];
-              const lat = detail.lat ?? router?.lat;
-              const lng = detail.lng ?? router?.lng;
-              const fromRouter = detail.lat == null && lat != null;
-              if (lat == null || lng == null) return null;
-              return (
-                <KV
-                  k={fromRouter ? 'Coordinates (from router)' : 'Coordinates'}
-                  v={
-                    <a
-                      href={`https://www.google.com/maps?q=${lat},${lng}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: color.green, fontWeight: 600 }}
-                    >
-                      {Number(lat).toFixed(5)}, {Number(lng).toFixed(5)}
-                    </a>
-                  }
-                />
-              );
-            })()}
-            {/* PPPoE services on this account, as their own section rather
-                than folded into the generic fields above — a customer with
-                two PPPoE connections is one person paying one account
-                number, not two strangers who happen to share it, and this is
-                where a second (or third) one gets added, not just viewed. */}
-            {(() => {
-              const siblings = clients
-                .filter((c) => c.account_code === detail.account_code && c.service === 'pppoe')
-                .sort((a, b) => (a.line_label ?? '').localeCompare(b.line_label ?? ''));
-              if (detail.service !== 'pppoe' && siblings.length === 0) return null;
-              return (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span style={{ fontSize: 12.5, color: color.muted }}>PPPoE services ({siblings.length})</span>
-                    <span onClick={() => openAddService(detail)} style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}>
-                      + Add service
-                    </span>
-                  </div>
-                  <div style={{ display: 'grid', gap: 8 }}>
-                    {siblings.map((line) => {
-                      const p = planById[line.plan_id];
-                      const isOpen = line.id === detail.id;
-                      return (
-                        <div
-                          key={line.id}
-                          style={{
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-                            padding: '9px 11px', borderRadius: radius.md,
-                            background: isOpen ? color.subtleBg : 'transparent',
-                            border: `1px solid ${isOpen ? color.line : 'transparent'}`,
-                          }}
-                        >
-                          <div
-                            onClick={() => { if (!isOpen) { closeCreds(); setDetail(line); } }}
-                            style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, cursor: isOpen ? 'default' : 'pointer' }}
-                          >
-                            <span style={{ fontSize: 12.5, fontWeight: 600 }}>
-                              {line.line_label || routerById[line.router_id]?.name || 'Primary line'}
-                              {isOpen && <span style={{ marginLeft: 6, fontSize: 10.5, fontWeight: 600, color: color.green }}>viewing</span>}
-                            </span>
-                            <span style={{ fontSize: 11.5, color: color.muted }}>
-                              {p?.title ?? 'No plan'} · {line.static_ip ?? 'no IP'} ·{' '}
-                              <span style={{ color: STATUS_DOT[line.status] ?? color.muted, fontWeight: 600 }}>{line.status}</span>
-                            </span>
-                            {/* Its own MAC lock and expiry, not the account's —
-                                two lines on one account can be on different
-                                routers with different renewal dates entirely. */}
-                            <span style={{ fontSize: 11, color: color.muted, fontFamily: font.mono }}>
-                              {line.locked_mac ?? 'no MAC lock'} · expires{' '}
-                              {line.expires_at ? new Date(line.expires_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' }) : '—'}
-                            </span>
-                          </div>
-                          <RowActions>
-                            <RowAction tone={color.amberInk} onClick={() => setAccess(line, line.status === 'active' ? 'pause' : 'resume')}>
-                              {line.status === 'active' ? 'Pause' : 'Resume'}
-                            </RowAction>
-                            <RowAction tone={color.green} onClick={() => giveDays(line)} title="Outage credit or a grace period — extends this line's own expiry">
-                              Extend
-                            </RowAction>
-                            <RowAction tone={color.green} onClick={() => setEditing({ ...line })}>Edit</RowAction>
-                            <RowAction
-                              tone={color.rust}
-                              onClick={() => {
-                                if (window.confirm(`Delete ${line.line_label || 'this line'} on account ${line.account_code}? This cannot be undone.`)) {
-                                  removeClient(line);
-                                  if (isOpen) setDetail(null);
-                                }
-                              }}
-                            >
-                              Delete
-                            </RowAction>
-                          </RowActions>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })()}
-
-            <KV k="Plan" v={planById[detail.plan_id]?.title ?? '—'} />
-            <KV k="Router" v={routerById[detail.router_id]?.name ?? '—'} />
-            <KV k="Status" v={detail.status} />
-            {/* credit alone is only ever overpayment carried forward — it resets to
-                0 on any partial payment and never represented what they owe. Balance
-                nets that against open/partial invoices, which is what "do they owe
-                us anything" actually means. */}
-            <KV
-              k="Balance"
-              v={
-                <span style={{ color: Number(detail.net_balance ?? detail.credit) < 0 ? color.rust : undefined, fontWeight: 600 }}>
-                  KES {kes(detail.net_balance ?? detail.credit)}
-                </span>
-              }
-            />
-            <KV k="Credit (overpayment on file)" v={`KES ${kes(detail.credit)}`} />
-            <KV k="Expires" v={detail.expires_at ? new Date(detail.expires_at).toLocaleString('en-KE') : '—'} />
-            <KV k="Auto-pay" v={detail.autopay ?? 'Off'} />
-            {detail.service === 'pppoe' && (
-              <KV k="Pay to paybill" v={detail.paybill ?? 'Not configured — see Settings → Payment gateways'} />
-            )}
-
-            {/* A payment landing correctly in the ledger was never visible from
-                here — this drawer showed the balance and expiry that a payment
-                changes, but not the payment itself, so "did it actually apply"
-                had no answer short of asking someone to query the database. */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>Payment history</span>
-              {(() => {
-                const history = (store.mpesaTx ?? [])
-                  .filter((p) => p.subscriber_id === detail.id)
-                  .sort((a, b) => new Date(b.received_at) - new Date(a.received_at))
-                  .slice(0, 8);
-                if (!history.length) {
-                  return <span style={{ fontSize: 12.5, color: color.neutralInk }}>No payments recorded for this account yet.</span>;
-                }
-                return (
-                  <div style={{ display: 'grid', gap: 6 }}>
-                    {history.map((p) => (
-                      <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', fontSize: 12.5 }}>
-                        <span style={{ display: 'flex', flexDirection: 'column' }}>
-                          <span style={{ fontFamily: font.mono }}>{p.provider_ref}</span>
-                          <span style={{ color: color.muted, fontSize: 11 }}>
-                            {p.provider} · {new Date(p.received_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </span>
-                        <span style={{ fontWeight: 600 }}>KES {kes(p.amount)}</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* A record of what this customer has actually been told — every
-                automated reminder/receipt and every manual "Send message"
-                from Messaging logs here. Outbound only, and just a log: not
-                a place to start typing back and forth with a customer. */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 8 }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>Communication — messages sent to this customer</span>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflowY: 'auto' }}>
-                {thread === null ? (
-                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>Loading…</span>
-                ) : thread.filter((m) => m.direction === 'out').length === 0 ? (
-                  <span style={{ fontSize: 12.5, color: color.neutralInk }}>Nothing sent to this customer yet.</span>
-                ) : (
-                  thread
-                    .filter((m) => m.direction === 'out')
-                    .slice()
-                    .reverse()
-                    .map((m) => (
-                      <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5, paddingBottom: 6, borderBottom: `1px solid ${color.line}` }}>
-                        <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
-                        <span style={{ fontSize: 11, color: color.muted }}>
-                          {m.channel} · {new Date(m.sent_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    ))
-                )}
-              </div>
-            </div>
-
-            {/* Credentials are behind a button rather than on screen by default.
-                Support has this drawer open while sharing a screen or sitting in
-                an open office, and the customer's password does not need to be
-                visible for the nine times out of ten the question is about
-                something else. */}
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${color.line}`, display: 'grid', gap: 10 }}>
-              <span style={{ fontSize: 12.5, color: color.muted }}>Credentials</span>
-
-              {creds?.id !== detail.id ? (
-                <Button onClick={() => loadCreds(detail)} disabled={credsBusy}>
-                  {credsBusy ? 'Loading…' : 'Show credentials'}
-                </Button>
-              ) : credsEdit ? (
-                <>
-                  <Field label="PPPoE username">
-                    <Input
-                      value={credsEdit.pppoeUser ?? ''}
-                      inputMode="numeric"
-                      onChange={(e) => setCredsEdit({ ...credsEdit, pppoeUser: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="PPPoE password">
-                    <Input
-                      value={credsEdit.pppoePassword ?? ''}
-                      inputMode="numeric"
-                      onChange={(e) => setCredsEdit({ ...credsEdit, pppoePassword: e.target.value })}
-                    />
-                  </Field>
-                  <Field label="Portal password">
-                    <Input
-                      value={credsEdit.portalPassword ?? ''}
-                      inputMode="numeric"
-                      onChange={(e) => setCredsEdit({ ...credsEdit, portalPassword: e.target.value })}
-                    />
-                  </Field>
-                  <span style={{ fontSize: 12, color: color.muted }}>
-                    Digits only. Changing the PPPoE username signs the old one out.
-                  </span>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Button onClick={() => saveCreds(detail)} disabled={credsBusy}>
-                      {credsBusy ? 'Saving…' : 'Save'}
-                    </Button>
-                    <Button onClick={() => setCredsEdit(null)} disabled={credsBusy}>Cancel</Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <KV k="PPPoE username" v={creds.pppoeUser ?? '—'} />
-                  <KV k="PPPoE password" v={creds.pppoePassword ?? '—'} />
-                  <KV k="Portal login" v={creds.account} />
-                  <KV
-                    k="Portal password"
-                    v={creds.portalPassword
-                      ?? (creds.portalPasswordSet
-                        ? 'Set before passwords could be shown — generate a new one to see it'
-                        : 'Not set')}
-                  />
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <Button
-                      onClick={() => setCredsEdit({
-                        pppoeUser: creds.pppoeUser ?? '',
-                        pppoePassword: creds.pppoePassword ?? '',
-                        portalPassword: creds.portalPassword ?? '',
-                      })}
-                    >
-                      Edit
-                    </Button>
-                    <Button onClick={() => makePortalPassword(detail)} disabled={credsBusy}>
-                      New portal password
-                    </Button>
-                    <Button onClick={() => setCreds(null)}>Hide</Button>
-                  </div>
-                </>
-              )}
-            </div>
-          </>
-        )}
-      </Drawer>
-
-      <Modal
-        open={!!addingService}
-        title={`Add a PPPoE service — account ${addingService?.account_code ?? ''}`}
-        onClose={() => { if (!serviceBusy) setAddingService(null); }}
-        footer={
-          <>
-            <Button onClick={() => setAddingService(null)} disabled={serviceBusy}>Cancel</Button>
-            <Button variant="primary" onClick={submitAddService} disabled={serviceBusy}>
-              {serviceBusy ? 'Adding…' : 'Add service'}
-            </Button>
-          </>
-        }
-      >
-        {addingService && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Line tag" span={2} hint={`Told apart from ${addingService.name}'s other line(s) — "Shop", "Flat 3"`}>
-              <Input
-                value={serviceForm.lineLabel}
-                onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))}
-                autoFocus
-              />
-            </Field>
-            <Field label="Plan">
-              <Select
-                value={serviceForm.planId}
-                onChange={(e) => setServiceForm((s) => ({ ...s, planId: e.target.value }))}
-                options={[
-                  { value: '', label: 'No plan yet' },
-                  ...(store.plans ?? []).filter((p) => p.service === 'pppoe').map((p) => ({ value: p.id, label: p.title })),
-                ]}
-              />
-            </Field>
-            <Field label="Router">
-              <Select
-                value={serviceForm.routerId}
-                onChange={(e) => setServiceForm((s) => ({ ...s, routerId: e.target.value, staticIp: '' }))}
-                options={[
-                  { value: '', label: 'Not assigned yet' },
-                  ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name })),
-                ]}
-              />
-            </Field>
-            {/* Free addresses from that router's own pool — same lookup
-                AddClient uses — rather than a text box where a typo hands the
-                line an address someone else already has. */}
-            <Field
-              label="Static IP"
-              span={2}
-              hint={
-                !serviceForm.routerId ? 'Pick a router first — or leave on "Next free address" for a dynamic one'
-                  : serviceFreeIps.loading ? 'Reading the pool…'
-                  : serviceFreeIps.addresses.length ? `${serviceFreeIps.addresses.length} free in ${serviceFreeIps.pools.join(', ')}`
-                  : 'No pool on this router — add one under Networks'
-              }
-            >
-              <Select
-                value={serviceForm.staticIp}
-                onChange={(e) => setServiceForm((s) => ({ ...s, staticIp: e.target.value }))}
-                options={[
-                  { value: '', label: 'Next free address' },
-                  ...serviceFreeIps.addresses.map((ip) => ({ value: ip, label: ip })),
-                ]}
-              />
-            </Field>
-            <Field label="PPPoE username" hint="What they dial in with">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Input
-                  value={serviceForm.pppoeUser}
-                  onChange={(e) => setServiceForm((s) => ({ ...s, pppoeUser: e.target.value.replace(/\D/g, '').slice(0, 5) }))}
-                  inputMode="numeric"
-                  style={{ fontFamily: font.mono }}
-                />
-                <Button onClick={genServiceCredentials}>Generate</Button>
-              </div>
-            </Field>
-            <Field label="PPPoE password" hint="7 digits">
-              <Input
-                value={serviceForm.pppoePass}
-                onChange={(e) => setServiceForm((s) => ({ ...s, pppoePass: e.target.value.replace(/\D/g, '').slice(0, 7) }))}
-                inputMode="numeric"
-                style={{ fontFamily: font.mono }}
-              />
-            </Field>
-          </div>
-        )}
-      </Modal>
 
       <Modal
         open={!!editing}
