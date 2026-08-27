@@ -5366,7 +5366,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'credit', 'email', 'category', 'identification', 'billing_type', 'tags'];
+                   'credit', 'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
 

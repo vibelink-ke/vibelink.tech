@@ -1722,6 +1722,16 @@ alter table subscribers add column if not exists identification text;
 alter table subscribers add column if not exists billing_type text;
 alter table subscribers add column if not exists tags text[] not null default '{}';
 
+-- Splynx's "linked accounts": one customer with several separate sites —
+-- a landlord's flats, a business with branches — each billed as its own
+-- account_code (not one account with several lines, which line_label
+-- already covers), grouped only for a consolidated view. An arbitrary
+-- operator-chosen string rather than a parent/child table: the grouping is
+-- informational, nothing downstream (billing, RADIUS) needs to know about
+-- it, and a free-text tag is enough to bring them all up together.
+alter table subscribers add column if not exists customer_ref text;
+create index if not exists subscribers_customer_ref_idx on subscribers (tenant_id, customer_ref) where customer_ref is not null;
+
 -- What actually happened to an account, for the Activity log tab — status
 -- changes, edits, credential resets. subscriber_id is set null (not
 -- cascaded) on delete so the history of a removed line still shows under

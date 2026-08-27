@@ -147,6 +147,7 @@ export default function ClientDetail() {
       email: client.email ?? '',
       category: client.category ?? '', identification: client.identification ?? '',
       billingType: client.billing_type ?? '', tags: client.tags ?? [],
+      customerRef: client.customer_ref ?? '',
     });
     // A different line's password must not inherit the last one's revealed value.
     setPortalPassword(undefined);
@@ -168,6 +169,7 @@ export default function ClientDetail() {
         identification: infoForm.identification || null,
         billing_type: infoForm.billingType || null,
         tags: infoForm.tags,
+        customer_ref: infoForm.customerRef.trim() || null,
       });
       store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
       store.toast('Client info saved');
@@ -604,6 +606,12 @@ export default function ClientDetail() {
                   />
                 </Field>
               </div>
+              <Field
+                label="Linked-accounts reference"
+                hint="Optional — give two separate accounts (different billing IDs, e.g. a landlord's flats or a business's branches) the same reference to see them together below"
+              >
+                <Input value={infoForm.customerRef} onChange={(e) => setInfoForm((s) => ({ ...s, customerRef: e.target.value }))} placeholder="e.g. KAMAU-PROPERTIES" />
+              </Field>
               <Field label="Tags" hint="Type a tag and press Enter — group clients by estate, sales rep, anything useful to filter by later">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', border: `1px solid ${color.line}`, borderRadius: radius.md, padding: 6 }}>
                   {infoForm.tags.map((t) => (
@@ -674,6 +682,51 @@ export default function ClientDetail() {
               <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
             )}
           </div>
+
+          {/* Splynx's "linked accounts" — one customer, several separate
+              billing IDs (a landlord's flats, a business's branches), each
+              on its own account_code rather than lines sharing one, grouped
+              purely by an operator-chosen reference for a combined view. */}
+          {client.customer_ref && (() => {
+            const linked = clients.filter((c) => c.customer_ref === client.customer_ref && c.account_code !== client.account_code);
+            if (!linked.length) return null;
+            const byAccount = new Map();
+            for (const c of linked) {
+              if (!byAccount.has(c.account_code)) byAccount.set(c.account_code, []);
+              byAccount.get(c.account_code).push(c);
+            }
+            return (
+              <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px', gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>
+                  Linked accounts ({byAccount.size}) — "{client.customer_ref}"
+                </div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {[...byAccount.entries()].map(([code, lines]) => {
+                    const primary = lines.find((l) => !l.line_label) ?? lines[0];
+                    const wallet = lines.reduce((a, l) => a + Number(l.credit ?? 0), 0);
+                    return (
+                      <div
+                        key={code}
+                        onClick={() => navigate(`/clients/${primary.id}`)}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                          padding: '9px 11px', borderRadius: radius.md, border: `1px solid ${color.line}`, cursor: 'pointer',
+                        }}
+                      >
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontSize: 12.5, fontWeight: 600 }}>{primary.name}</span>
+                          <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>
+                            {code} · {lines.length} service{lines.length === 1 ? '' : 's'}
+                          </span>
+                        </span>
+                        <span style={{ fontSize: 12.5, color: color.muted }}>Wallet KES {kes(wallet)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
