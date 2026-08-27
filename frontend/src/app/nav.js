@@ -38,6 +38,11 @@ export const NAV_SECTIONS = [
       // lead's "referral" channel actually points, not a separate concern,
       // so one count covers both.
       { to: '/leads', label: 'Leads', count: (s) => s.leads.length + s.referrers.length },
+      {
+        to: '/field-tech',
+        label: 'My jobs',
+        count: (s) => s.tickets.filter((t) => t.assigned_to === s.session?.id && t.status !== 'resolved').length,
+      },
       { to: '/messaging', label: 'Messaging' },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],
