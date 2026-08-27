@@ -1694,3 +1694,17 @@ update wg_peers p set router_id = r.id
 -- approving one needs a real column to act on rather than string-matching
 -- a plan title that could have been renamed or gone inactive since.
 alter table tickets add column if not exists requested_plan_id uuid references plans on delete set null;
+
+-- ─────────────── platform-owned SMS gateway (shared, per-tenant credit) ───────────────
+-- For a tenant with no SMS gateway of their own configured (or one that ran
+-- dry) to still send, on the platform owner's own account and credentials —
+-- not pooled: each tenant only ever spends from a balance the platform
+-- owner explicitly gave them, so one tenant's usage can never eat into
+-- another's or run up a bill nobody agreed to.
+create table if not exists platform_sms_config (
+  id          boolean primary key default true,
+  provider    text,
+  credentials jsonb not null default '{}'::jsonb,
+  constraint platform_sms_config_singleton check (id)
+);
+alter table tenants add column if not exists platform_sms_balance int not null default 0;

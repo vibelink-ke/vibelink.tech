@@ -6839,6 +6839,64 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
  * Never returns password_hash — the operator has no use for the hash itself,
  * only the ability to reset it below.
  */
+/**
+ * The platform owner's own SMS gateway — a tenant with none of their own
+ * configured (or an exhausted one) falls back to sending through this, at
+ * the platform owner's expense, up to whatever balance that tenant was
+ * individually given (see the /sms-balance route below). One row, shared
+ * by every tenant that falls back to it; credentials only ever come back
+ * as which keys are set, matching how a tenant's own SMS gateway settings
+ * already behave.
+ */
+app.get('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
+  const { PROVIDER_FIELDS } = await import('./sms.js');
+  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  res.json({
+    provider: cfg?.provider ?? null,
+    credentialKeys: Object.entries(cfg?.credentials ?? {})
+      .filter(([, v]) => String(v ?? '').trim())
+      .map(([k]) => k),
+    fields: PROVIDER_FIELDS,
+  });
+}));
+
+app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
+  const { provider, credentials = {} } = req.body ?? {};
+  const { PROVIDER_FIELDS } = await import('./sms.js');
+  if (!PROVIDER_FIELDS[provider]) return res.status(400).json({ error: 'unknown gateway' });
+
+  // Blank fields keep whatever secret is already stored, same as a
+  // tenant's own SMS gateway form — the operator never has to re-type an
+  // API key just to change one other field.
+  const incoming = Object.fromEntries(
+    Object.entries(credentials).filter(([, v]) => String(v ?? '').trim() !== ''));
+
+  await pool.query(
+    `insert into platform_sms_config (id, provider, credentials) values (true, $1, $2)
+     on conflict (id) do update set
+       provider = excluded.provider,
+       credentials = platform_sms_config.credentials || excluded.credentials`,
+    [provider, incoming]);
+  res.json({ ok: true });
+}));
+
+/**
+ * Top up (or set) how many messages a tenant may send through the platform
+ * gateway before it stops — deliberately a small, explicit balance per
+ * tenant rather than a switch, so one tenant's volume can never quietly
+ * become the platform owner's own bill without them having chosen it.
+ */
+app.post('/api/tenants/:id/sms-balance', superAdminOnly, wrap(async (req, res) => {
+  const { delta, set } = req.body ?? {};
+  const { rows: [t] } = await pool.query(
+    set != null
+      ? 'update tenants set platform_sms_balance=$2 where id=$1 returning platform_sms_balance'
+      : 'update tenants set platform_sms_balance=greatest(platform_sms_balance + $2, 0) where id=$1 returning platform_sms_balance',
+    [req.params.id, set != null ? Number(set) : Number(delta) || 0]);
+  if (!t) return res.status(404).json({ error: 'No such tenant' });
+  res.json({ platform_sms_balance: t.platform_sms_balance });
+}));
+
 app.get('/api/tenants/:id/staff', superAdminOnly, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, name, phone, email, username, role, is_super_admin, last_seen

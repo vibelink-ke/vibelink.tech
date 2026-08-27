@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -24,6 +24,55 @@ export default function Tenants() {
   const [staffLoading, setStaffLoading] = useState(false);
   const [resetting, setResetting] = useState(null);
   const [resetResult, setResetResult] = useState(null);
+  const [balanceFor, setBalanceFor] = useState(null);   // tenant row being topped up
+  const [balanceInput, setBalanceInput] = useState('');
+  const [balanceBusy, setBalanceBusy] = useState(false);
+
+  const [gwProvider, setGwProvider] = useState('hostpinnacle');
+  const [gwCreds, setGwCreds] = useState({});
+  const [gwSaved, setGwSaved] = useState(null);   // { provider, credentialKeys, fields }
+  const [gwBusy, setGwBusy] = useState(false);
+  const [gwOpen, setGwOpen] = useState(false);
+
+  const loadGatewayConfig = async () => {
+    try {
+      const cfg = await api.platformSmsConfig();
+      setGwSaved(cfg);
+      if (cfg.provider) setGwProvider(cfg.provider);
+    } catch { /* the card just shows "not set" */ }
+  };
+
+  const saveGatewayConfig = async () => {
+    setGwBusy(true);
+    try {
+      await api.savePlatformSmsConfig({ provider: gwProvider, credentials: gwCreds });
+      store.toast('Platform SMS gateway saved');
+      setGwCreds({});
+      await loadGatewayConfig();
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setGwBusy(false);
+    }
+  };
+
+  const saveBalance = async () => {
+    if (!balanceFor) return;
+    setBalanceBusy(true);
+    try {
+      const r = await api.setTenantSmsBalance(balanceFor.id, { set: Number(balanceInput) || 0 });
+      store.setCollection('tenants', (ts) => ts.map((x) =>
+        (x.id === balanceFor.id ? { ...x, platform_sms_balance: r.platform_sms_balance } : x)));
+      store.toast(`${balanceFor.name}: ${r.platform_sms_balance} platform SMS credits`);
+      setBalanceFor(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setBalanceBusy(false);
+    }
+  };
+
+  useEffect(() => { loadGatewayConfig(); }, []);
 
   if (!store.isPlatformOwner) {
     return (
@@ -150,6 +199,42 @@ export default function Tenants() {
         <Stat label="Suspended" value={byStatus('suspended')} tone={byStatus('suspended') ? color.rust : undefined} hint="API returns 402" />
       </Grid>
 
+      <Card
+        title="Platform SMS gateway"
+        subtitle="Your own gateway — a tenant with none of their own configured falls back to sending through this, spending only from the balance you give them below"
+        actions={<Button onClick={() => setGwOpen((v) => !v)}>{gwOpen ? 'Hide' : gwSaved?.provider ? `Set: ${gwSaved.provider}` : 'Set up'}</Button>}
+      >
+        {gwOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
+            <Field label="Gateway">
+              <Select
+                value={gwProvider}
+                onChange={(e) => { setGwProvider(e.target.value); setGwCreds({}); }}
+                options={Object.keys(gwSaved?.fields ?? { hostpinnacle: 1, africastalking: 1, twilio: 1 })}
+              />
+            </Field>
+            {(gwSaved?.fields?.[gwProvider] ?? []).map((f) => (
+              <Field
+                key={f.key}
+                label={f.required ? f.label : `${f.label} (optional)`}
+                hint={gwSaved?.provider === gwProvider && gwSaved?.credentialKeys?.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
+              >
+                <Input
+                  type={f.secret ? 'password' : 'text'}
+                  autoComplete="off"
+                  value={gwCreds[f.key] ?? ''}
+                  onChange={(e) => setGwCreds((s) => ({ ...s, [f.key]: e.target.value }))}
+                  placeholder={gwSaved?.provider === gwProvider && gwSaved?.credentialKeys?.includes(f.key) ? '••••••••' : ''}
+                />
+              </Field>
+            ))}
+            <Button variant="primary" onClick={saveGatewayConfig} disabled={gwBusy} style={{ alignSelf: 'flex-start' }}>
+              {gwBusy ? 'Saving…' : 'Save gateway'}
+            </Button>
+          </div>
+        )}
+      </Card>
+
       <Card title="Tenants">
         <Table
           rowKey={(t) => t.id}
@@ -180,6 +265,23 @@ export default function Tenants() {
               },
             },
             { key: 'devices', label: 'Active', align: 'right', render: (t) => <span style={{ fontFamily: font.mono }}>{t.devices ?? 0}</span> },
+            {
+              key: 'sms_balance',
+              label: 'SMS credit',
+              align: 'right',
+              render: (t) => (
+                <span
+                  onClick={() => { setBalanceFor(t); setBalanceInput(String(t.platform_sms_balance ?? 0)); }}
+                  title="From the platform gateway — click to change"
+                  style={{
+                    fontFamily: font.mono, cursor: 'pointer',
+                    color: Number(t.platform_sms_balance) > 0 ? color.green : color.muted,
+                  }}
+                >
+                  {t.platform_sms_balance ?? 0}
+                </span>
+              ),
+            },
             { key: 'status', label: 'Status', render: (t) => <Badge tone={t.status}>{t.status}</Badge> },
             {
               key: 'created_at',
@@ -471,6 +573,30 @@ export default function Tenants() {
             </Field>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={!!balanceFor}
+        title={`SMS credit — ${balanceFor?.name ?? ''}`}
+        onClose={() => setBalanceFor(null)}
+        footer={
+          <>
+            <Button onClick={() => setBalanceFor(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveBalance} disabled={balanceBusy}>
+              {balanceBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+            How many messages this tenant may send through your platform gateway before it stops —
+            only spent when they have no working gateway of their own.
+          </p>
+          <Field label="Credits">
+            <Input type="number" min="0" value={balanceInput} onChange={(e) => setBalanceInput(e.target.value)} />
+          </Field>
+        </div>
       </Modal>
     </Screen>
   );

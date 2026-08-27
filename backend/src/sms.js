@@ -281,9 +281,12 @@ async function sendSms(tenantId, to, template, vars) {
   const { rows: gateways } = await pool.query(
     "select provider, credentials, templates from tenant_sms_config where tenant_id=$1 and enabled and provider <> 'twilio_whatsapp' order by priority",
     [tenantId]);
-  if (!gateways.length) return console.warn('no sms gateway for tenant', tenantId);
+  const body = render(gateways[0]?.templates?.[template] ?? DEFAULTS[template], vars);
 
-  const body = render(gateways[0].templates?.[template] ?? DEFAULTS[template], vars);
+  if (!gateways.length) {
+    console.warn('no sms gateway for tenant', tenantId);
+    return sendViaPlatform(tenantId, to, body);
+  }
 
   let tried = 0;
   for (const g of gateways) {
@@ -314,8 +317,46 @@ async function sendSms(tenantId, to, template, vars) {
       await log(tenantId, g.provider, to, body, 'failed', e.message);
     }
   }
-  if (!tried) console.warn('no usable sms gateway for tenant', tenantId);
-  return { ok: false };
+  console.warn(tried ? 'every sms gateway rejected the message' : 'no usable sms gateway for tenant', tenantId);
+  return sendViaPlatform(tenantId, to, body);
+}
+
+/**
+ * The platform owner's own gateway, spent from a balance only they can top
+ * up (Tenants -> a tenant's own "SMS balance") — for a tenant with nothing
+ * of their own configured, or whose own gateway just failed, rather than
+ * that tenant's customers simply never getting a text. Never pooled: a
+ * tenant with 0 credits here gets nothing from this path, regardless of
+ * what any other tenant has been given.
+ */
+async function sendViaPlatform(tenantId, to, body) {
+  const { rows: [t] } = await pool.query(
+    'select platform_sms_balance from tenants where id=$1', [tenantId]);
+  if (!t || t.platform_sms_balance <= 0) return { ok: false };
+
+  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
+    console.warn('platform sms gateway not configured');
+    return { ok: false };
+  }
+
+  try {
+    const res = await PROVIDERS[cfg.provider](cfg.credentials, to, body);
+    if (!accepted(cfg.provider, res)) {
+      await log(tenantId, `platform:${cfg.provider}`, to, body, 'rejected', JSON.stringify(res?.data ?? '').slice(0, 300));
+      return { ok: false };
+    }
+    // Decremented only once, tied to the send actually succeeding — a
+    // tenant is never charged a credit for a message that never went out.
+    await pool.query(
+      'update tenants set platform_sms_balance = greatest(platform_sms_balance - 1, 0) where id=$1', [tenantId]);
+    await log(tenantId, `platform:${cfg.provider}`, to, body, 'sent',
+      `HTTP ${res.status} ${JSON.stringify(res?.data ?? '').slice(0, 200)} (platform gateway)`);
+    return { ok: true, provider: `platform:${cfg.provider}` };
+  } catch (e) {
+    await log(tenantId, `platform:${cfg.provider}`, to, body, 'failed', e.message);
+    return { ok: false };
+  }
 }
 
 /** Its own row (provider='twilio_whatsapp'), read directly rather than through the failover list above. */
