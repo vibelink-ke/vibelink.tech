@@ -133,6 +133,8 @@ export default function ClientDetail() {
   // location/coordinates, which the map below can also set by dragging.
   const [infoForm, setInfoForm] = useState(null);
   const [infoBusy, setInfoBusy] = useState(false);
+  const [portalPassword, setPortalPassword] = useState(undefined);   // undefined = not fetched yet
+
   useEffect(() => {
     if (!client) { setInfoForm(null); return; }
     const [firstName = '', ...rest] = (client.name ?? '').trim().split(/\s+/);
@@ -144,6 +146,8 @@ export default function ClientDetail() {
       email: client.email ?? '', birthday: client.birthday ? String(client.birthday).slice(0, 10) : '',
       category: client.category ?? '', identification: client.identification ?? '',
     });
+    // A different line's password must not inherit the last one's revealed value.
+    setPortalPassword(undefined);
   }, [client?.id]);
 
   const saveInfo = async () => {
@@ -172,10 +176,26 @@ export default function ClientDetail() {
   };
 
   const [portalBusy, setPortalBusy] = useState(false);
+  // Not the hash — a separately-stored, reversible copy the credentials
+  // route decrypts, the same one the old drawer's "Show credentials" used.
+  // A password set before that reversible copy existed has no decrypted
+  // form at all, so this can genuinely come back empty even on success.
+  const showPortalPassword = async () => {
+    setPortalBusy(true);
+    try {
+      const v = await api.subscriberCredentials(client.id);
+      setPortalPassword(v.portalPassword ?? (v.portalPasswordSet ? null : ''));
+    } catch (e) {
+      store.toast(`Could not read: ${e.message}`);
+    } finally {
+      setPortalBusy(false);
+    }
+  };
   const genPortalPassword = async () => {
     setPortalBusy(true);
     try {
-      await api.generatePortalPassword(client.id);
+      const v = await api.generatePortalPassword(client.id);
+      setPortalPassword(v.password ?? '');
       store.toast(`New portal password for ${client.name}, sent by SMS`);
     } catch (e) {
       store.toast(`Could not generate: ${e.message}`);
@@ -498,8 +518,30 @@ export default function ClientDetail() {
               <Field label="Portal login [ Account number ]" hint="Fixed once created — a customer's account number">
                 <Input value={client.account_code} disabled style={{ fontFamily: font.mono }} />
               </Field>
-              <Field label="Portal password" hint="Hashed — generate a new one to hand the customer, sent to them by SMS">
-                <Button onClick={genPortalPassword} disabled={portalBusy}>{portalBusy ? 'Generating…' : 'Generate'}</Button>
+              <Field label="Date registered">
+                <Input
+                  value={client.created_at ? new Date(client.created_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                  disabled
+                />
+              </Field>
+              <Field
+                label="Portal password"
+                hint={
+                  portalPassword === null
+                    ? 'Set before passwords could be shown — generate a new one to see it'
+                    : portalPassword
+                      ? undefined
+                      : 'Stored as a hash — Show reads back the decrypted copy if there is one'
+                }
+              >
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {portalPassword ? (
+                    <Input value={portalPassword} disabled style={{ fontFamily: font.mono }} />
+                  ) : (
+                    <Button onClick={showPortalPassword} disabled={portalBusy}>{portalBusy ? 'Reading…' : 'Show'}</Button>
+                  )}
+                  <Button onClick={genPortalPassword} disabled={portalBusy}>{portalBusy ? 'Generating…' : 'Generate new'}</Button>
+                </div>
               </Field>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <Field label="First name">

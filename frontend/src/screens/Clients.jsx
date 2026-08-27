@@ -488,6 +488,7 @@ export default function Clients() {
                 <th style={th}>PLAN</th>
                 <th style={th}>ROUTER / IP</th>
                 <th style={th}>EXPIRY</th>
+                <th style={th}>WALLET</th>
                 <th style={th}>AUTO-PAY</th>
                 <th style={th}>STATUS</th>
                 <th style={{ padding: '14px 0 10px' }} />
@@ -576,6 +577,13 @@ export default function Clients() {
                           <span style={{ fontSize: 11.5, color: color.muted }}>{note}</span>
                         </>
                       )}
+                    </td>
+                    <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
+                      {/* Money actually sitting on the account — an
+                          overpayment carried forward, spendable against the
+                          next invoice — summed across every line for a
+                          multi-service account rather than just the primary. */}
+                      KES {kes(lines.reduce((a, l) => a + Number(l.credit ?? 0), 0))}
                     </td>
                     <td style={td}>
                       <span
