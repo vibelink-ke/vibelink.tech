@@ -71,6 +71,12 @@ export default function Dashboard() {
   const [range, setRange] = useState('Today');
   const [menuOpen, setMenuOpen] = useState(false);
 
+  // Own gateway credits already live on store.smsCredits (polled every 3s);
+  // the platform fallback balance isn't part of that poll, so it's fetched
+  // once here just to decide which figure the tile should show.
+  const [platformSmsBalance, setPlatformSmsBalance] = useState(null);
+  useEffect(() => { api.smsGateways().then((g) => setPlatformSmsBalance(g.platformBalance ?? 0)).catch(() => {}); }, []);
+
   const today = useMemo(
     () =>
       new Date().toLocaleDateString('en-KE', {
@@ -301,6 +307,17 @@ export default function Dashboard() {
           valueColor={store.unmatched.length ? color.rust : color.neutralInk}
           hint="unmatched payments →"
           onClick={() => navigate('/payments')}
+        />
+        <Tile
+          label="SMS BALANCE"
+          value={store.smsCredits?.configured ? store.smsCredits.credits : (platformSmsBalance ?? '—')}
+          valueColor={
+            store.smsCredits?.configured
+              ? undefined
+              : (platformSmsBalance ?? 0) > 0 ? color.amberInk : color.rust
+          }
+          hint={store.smsCredits?.configured ? `on ${store.smsCredits.provider}` : 'on system default gateway'}
+          onClick={() => navigate('/settings?tab=sms')}
         />
       </div>
 

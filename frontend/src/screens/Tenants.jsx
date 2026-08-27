@@ -35,12 +35,14 @@ export default function Tenants() {
   const [gwOpen, setGwOpen] = useState(false);
   const [gwBalance, setGwBalance] = useState(null);   // real account balance, not any tenant's allocation
   const [gwBalanceLoading, setGwBalanceLoading] = useState(false);
+  const [gwPrice, setGwPrice] = useState('2');   // KES a tenant pays per credit when they buy more
 
   const loadGatewayConfig = async () => {
     try {
       const cfg = await api.platformSmsConfig();
       setGwSaved(cfg);
       if (cfg.provider) setGwProvider(cfg.provider);
+      if (cfg.pricePerCredit != null) setGwPrice(String(cfg.pricePerCredit));
     } catch { /* the card just shows "not set" */ }
   };
 
@@ -58,7 +60,7 @@ export default function Tenants() {
   const saveGatewayConfig = async () => {
     setGwBusy(true);
     try {
-      await api.savePlatformSmsConfig({ provider: gwProvider, credentials: gwCreds });
+      await api.savePlatformSmsConfig({ provider: gwProvider, credentials: gwCreds, pricePerCredit: Number(gwPrice) || 0 });
       store.toast('Platform SMS gateway saved');
       setGwCreds({});
       await loadGatewayConfig();
@@ -256,6 +258,9 @@ export default function Tenants() {
                 />
               </Field>
             ))}
+            <Field label="Price per credit" hint="What a tenant pays (KES) when they buy more via M-Pesa">
+              <Input type="number" min="0" step="0.5" value={gwPrice} onChange={(e) => setGwPrice(e.target.value)} />
+            </Field>
             <Button variant="primary" onClick={saveGatewayConfig} disabled={gwBusy} style={{ alignSelf: 'flex-start' }}>
               {gwBusy ? 'Saving…' : 'Save gateway'}
             </Button>
