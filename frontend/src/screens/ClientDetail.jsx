@@ -714,16 +714,32 @@ export default function ClientDetail() {
               .filter((i) => ids.has(i.subscriber_id))
               .sort((a, b) => new Date(b.due_date) - new Date(a.due_date));
             if (!invoices.length) return <Empty>No invoices raised for this account.</Empty>;
+            // Display-only tax breakdown (UISP's "Pricing Mode") — set under
+            // Settings -> Preferences -> Tax. Doesn't change what's charged,
+            // only how the amount is broken out on the line.
+            const rate = Number(store.settings?.prefs?.taxRate) || 0;
+            const inclusive = (store.settings?.prefs?.taxInclusive ?? 'Yes') !== 'No';
+            const taxOf = (amount) => (rate <= 0 ? null
+              : inclusive ? amount - amount / (1 + rate / 100)
+              : amount * (rate / 100));
             return (
               <div style={{ display: 'grid', gap: 8 }}>
-                {invoices.map((inv) => (
-                  <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
-                    <span style={{ fontFamily: font.mono }}>{inv.number}</span>
-                    <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
-                    <span>KES {kes(inv.paid)} / {kes(inv.amount)}</span>
-                    <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
-                  </div>
-                ))}
+                {invoices.map((inv) => {
+                  const tax = taxOf(Number(inv.amount));
+                  return (
+                    <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
+                      <span style={{ fontFamily: font.mono }}>{inv.number}</span>
+                      <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
+                      <span>
+                        KES {kes(inv.paid)} / {kes(inv.amount)}
+                        {tax != null && (
+                          <span style={{ color: color.muted }}> ({inclusive ? 'incl.' : 'excl.'} KES {kes(tax)} tax)</span>
+                        )}
+                      </span>
+                      <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}

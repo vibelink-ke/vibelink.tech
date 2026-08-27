@@ -13,7 +13,13 @@ import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Table } from '..
  * a "tariff" therefore produced something no other screen could see — you would
  * add one, open the client form, and be told there were no plans yet.
  */
+// UISP's own "billing period" setting is the direct model here — a
+// business customer on an annual or quarterly contract is common enough
+// that Monthly/Weekly/Daily alone forced every such plan into a manual
+// workaround (a giant "monthly" price nobody's invoice actually matched).
 const PERIODS = [
+  { value: 525600, label: 'Annual' },
+  { value: 129600, label: 'Quarterly' },
   { value: 43200, label: 'Monthly' },
   { value: 10080, label: 'Weekly' },
   { value: 1440, label: 'Daily' },

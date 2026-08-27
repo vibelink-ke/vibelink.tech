@@ -264,7 +264,10 @@ export default function Settings() {
   const [faviconVersion, setFaviconVersion] = useState(0);
   const [org, setOrg] = useState({ name: '', domain: '', currency: CURRENCIES[0], timezone: TIMEZONES[0], kraPin: '', whatsapp: '' });
   const [smtp, setSmtp] = useState({ host: '', port: '587', security: SECURITY[0], user: '', pass: '', from: '', fromName: '' });
-  const [prefs, setPrefs] = useState({ hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps' });
+  const [prefs, setPrefs] = useState({
+    hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps',
+    taxRate: '', taxInclusive: 'Yes',
+  });
   const [saving, setSaving] = useState(false);
 
   // Seed the forms once the server payload lands.
@@ -978,6 +981,37 @@ export default function Settings() {
           <div style={{ marginTop: 14 }}>
             <Button variant="primary" onClick={() => persist({ prefs }, 'Preferences')} disabled={saving}>
               {saving ? 'Saving…' : 'Save preferences'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'prefs' && (
+        <Card
+          title="Tax"
+          subtitle="What plan prices actually mean — UISP calls this Pricing Mode. Purely a display setting: it changes how invoices and receipts break out tax, not the price a customer is charged."
+          style={{ marginTop: 14 }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            <Field label="Tax rate (%)" hint="Leave blank or 0 to show no tax breakdown at all">
+              <Input type="number" min="0" step="0.5" value={prefs.taxRate} onChange={setP('taxRate')} placeholder="16" />
+            </Field>
+            <Field
+              label="Plan prices are"
+              hint={prefs.taxInclusive === 'Yes'
+                ? 'A KES 1,500 plan already includes tax — the receipt shows the tax portion, not an add-on'
+                : 'A KES 1,500 plan is before tax — the receipt adds tax on top'}
+            >
+              <Select
+                value={prefs.taxInclusive}
+                onChange={setP('taxInclusive')}
+                options={[{ value: 'Yes', label: 'Tax-inclusive' }, { value: 'No', label: 'Tax-exclusive' }]}
+              />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Button variant="primary" onClick={() => persist({ prefs }, 'Tax settings')} disabled={saving}>
+              {saving ? 'Saving…' : 'Save tax settings'}
             </Button>
           </div>
         </Card>
