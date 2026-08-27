@@ -1732,6 +1732,24 @@ alter table subscribers add column if not exists tags text[] not null default '{
 alter table subscribers add column if not exists customer_ref text;
 create index if not exists subscribers_customer_ref_idx on subscribers (tenant_id, customer_ref) where customer_ref is not null;
 
+-- ─────────────── role permission matrix ───────────────
+-- The "Roles & permissions" tab on Staff always looked real but was pure
+-- decoration: DEFAULT_PERMISSIONS lived in a useState with nothing to load
+-- from or save to, and no backend route ever checked a role against a
+-- permission key — a support login could hit any route an owner could,
+-- the matrix's checkboxes notwithstanding. This table is what a checkbox
+-- there now actually controls; requirePermission() in server.js reads it.
+-- Only overrides from the built-in default are stored — an unrecognized
+-- (tenant, role, key) falls back to DEFAULT_PERMISSIONS, so a fresh tenant
+-- needs no rows here at all to behave exactly as the matrix always showed.
+create table if not exists role_permissions (
+  tenant_id uuid not null references tenants on delete cascade,
+  role      text not null,
+  perm_key  text not null,
+  allowed   boolean not null default false,
+  primary key (tenant_id, role, perm_key)
+);
+
 -- What actually happened to an account, for the Activity log tab — status
 -- changes, edits, credential resets. subscriber_id is set null (not
 -- cascaded) on delete so the history of a removed line still shows under

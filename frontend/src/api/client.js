@@ -247,6 +247,8 @@ export const api = {
   // ── org ──
   staff: () => get('/api/staff'),
   createStaff: (s) => post('/api/staff', s),
+  permissions: () => get('/api/permissions'),
+  savePermissions: (matrix) => put('/api/permissions', { matrix }),
   deleteStaff: (id) => del(`/api/staff/${id}`),
   technicians: () => get('/api/staff?role=technician'),
   salesReps: () => get('/api/staff?role=sales'),

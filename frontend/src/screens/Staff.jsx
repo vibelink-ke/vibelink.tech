@@ -1,82 +1,66 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Tabs, Toggle } from '../ui/primitives';
 
-/** Permission matrix, transcribed verbatim from `state.permissions` / `state.permissionMeta`. */
-// Sales closes leads rather than answering tickets or touching money —
-// added for the leads leaderboard/commission feature, since assigning a
-// lead to "chase" needs a real role behind it (store.salesReps filtered on
-// role=sales, previously always empty because nothing ever offered it).
-const DEFAULT_ROLES = ['Owner', 'Cashier', 'Technician', 'Support', 'Sales'];
-
-const DEFAULT_PERMISSIONS = {
-  'view.clients':    { Owner: true, Cashier: true,  Technician: true,  Support: true,  Sales: true },
-  'edit.clients':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
-  'view.money':      { Owner: true, Cashier: true,  Technician: false, Support: false, Sales: false },
-  'apply.payments':  { Owner: true, Cashier: true,  Technician: false, Support: false, Sales: false },
-  'edit.paymentcfg': { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
-  'manage.routers':  { Owner: true, Cashier: false, Technician: true,  Support: false, Sales: false },
-  'manage.tickets':  { Owner: true, Cashier: false, Technician: true,  Support: true,  Sales: false },
-  'manage.staff':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
-  'view.tenants':    { Owner: true, Cashier: false, Technician: false, Support: false, Sales: false },
-  'edit.kb':         { Owner: true, Cashier: false, Technician: true,  Support: true,  Sales: false },
-};
-
-const PERMISSION_META = [
-  { key: 'view.clients',    label: 'View clients',             detail: 'See the subscriber list and details' },
-  { key: 'edit.clients',    label: 'Add / edit clients',       detail: 'Create, edit, suspend or delete subscribers' },
-  { key: 'view.money',      label: 'View money screens',       detail: 'Payments, invoices and revenue reports' },
-  { key: 'apply.payments',  label: 'Apply & match payments',   detail: 'Resolve unmatched payments, issue receipts' },
-  { key: 'edit.paymentcfg', label: 'Edit payment credentials', detail: 'Paybill, till, KopoKopo and bank config' },
-  { key: 'manage.routers',  label: 'Manage routers & network', detail: 'Onboard MikroTiks, IP pools, RADIUS' },
-  { key: 'manage.tickets',  label: 'Work tickets',             detail: 'Assign, update and close support tickets' },
-  { key: 'manage.staff',    label: 'Manage staff & roles',     detail: 'Invite people and change permissions' },
-  { key: 'view.tenants',    label: 'Platform owner screens',   detail: 'ISP tenants and SaaS revenue' },
-  { key: 'edit.kb',         label: 'Edit knowledge base',      detail: 'Write and publish help articles' },
+// The five roles the backend actually understands (requirePermission,
+// requireRole and staff.role are all keyed on these lowercase strings) —
+// no more "Add role", which only ever added a name to this screen's own
+// state with nothing behind it: a staff member given a made-up role could
+// never pass any permission check, since the API has no idea what it means.
+const ROLES = [
+  { value: 'owner', label: 'Owner' },
+  { value: 'cashier', label: 'Cashier' },
+  { value: 'technician', label: 'Technician' },
+  { value: 'support', label: 'Support' },
+  // Sales closes leads rather than answering tickets or touching money —
+  // added for the leads leaderboard/commission feature, since assigning a
+  // lead to "chase" needs a real role behind it (store.salesReps filtered
+  // on role=sales, previously always empty because nothing ever offered it).
+  { value: 'sales', label: 'Sales' },
 ];
 
-const BLANK = { name: '', phone: '', email: '', role: 'Cashier' };
+const BLANK = { name: '', phone: '', email: '', role: 'cashier' };
 
 export default function Staff() {
   const store = useStore();
   const [tab, setTab] = useState('people');
-  const [roles, setRoles] = useState(DEFAULT_ROLES);
-  const [perms, setPerms] = useState(DEFAULT_PERMISSIONS);
+  // The matrix and its labels now come from the server (permissions.js) —
+  // this used to be a hardcoded local copy with no save button at all, so
+  // every checkbox on this tab reverted itself on refresh and nothing any
+  // route ever checked read it anyway.
+  const [perms, setPerms] = useState(null);       // { matrix, meta }
+  const [permsBusy, setPermsBusy] = useState(false);
+  const [permsDirty, setPermsDirty] = useState(false);
+  useEffect(() => {
+    if (tab !== 'roles' || perms) return;
+    api.permissions().then(setPerms).catch((e) => store.toast(`Could not load permissions: ${e.message}`));
+  }, [tab]);
+
+  const togglePerm = (key, role) => {
+    setPerms((p) => ({ ...p, matrix: { ...p.matrix, [key]: { ...p.matrix[key], [role]: !p.matrix[key]?.[role] } } }));
+    setPermsDirty(true);
+  };
+
+  const savePerms = async () => {
+    setPermsBusy(true);
+    try {
+      const saved = await api.savePermissions(perms.matrix);
+      setPerms((p) => ({ ...p, matrix: saved.matrix }));
+      setPermsDirty(false);
+      store.toast('Permissions saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setPermsBusy(false);
+    }
+  };
   const [invite, setInvite] = useState(null);
-  const [newRole, setNewRole] = useState('');
   const [aiAssign, setAiAssign] = useState(true);
 
   const staff = store.staff ?? [];
   const set = (k) => (e) => setInvite((s) => ({ ...s, [k]: e.target.value }));
-
-  const toggle = (key, role) =>
-    setPerms((p) => ({ ...p, [key]: { ...p[key], [role]: !p[key]?.[role] } }));
-
-  const addRole = () => {
-    const name = newRole.trim();
-    if (!name) return;
-    if (roles.includes(name)) return store.toast('That role already exists');
-    setRoles((r) => [...r, name]);
-    setPerms((p) => Object.fromEntries(Object.entries(p).map(([k, v]) => [k, { ...v, [name]: false }])));
-    setNewRole('');
-    store.toast(`Role "${name}" added`);
-  };
-
-  const removeRole = (name) => {
-    if (name === 'Owner') return store.toast('The Owner role cannot be removed');
-    setRoles((r) => r.filter((x) => x !== name));
-    setPerms((p) =>
-      Object.fromEntries(
-        Object.entries(p).map(([k, v]) => {
-          const { [name]: _drop, ...rest } = v;
-          return [k, rest];
-        })
-      )
-    );
-    store.toast(`Role "${name}" removed`);
-  };
 
   const [busy, setBusy] = useState(false);
 
@@ -117,9 +101,9 @@ export default function Staff() {
     >
       <Grid min={200} gap={14}>
         <Stat label="People" value={staff.length} hint="with access" />
-        <Stat label="Roles" value={roles.length} hint="defined" />
+        <Stat label="Roles" value={ROLES.length} hint="defined" />
         <Stat label="Online" value={staff.filter((s) => s.last_seen).length} hint="seen recently" />
-        <Stat label="Permissions" value={PERMISSION_META.length} hint="assignable" />
+        <Stat label="Permissions" value={perms?.meta?.length ?? '—'} hint="assignable" />
       </Grid>
 
       <Tabs
@@ -178,85 +162,72 @@ export default function Staff() {
       ) : (
         <>
           <Card
-            title="Roles"
+            title="Permission matrix"
+            subtitle="Tick what each role may do, per page — view, edit and delete are checked separately"
             actions={
-              <div style={{ display: 'flex', gap: 6 }}>
-                <Input value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder="New role name" style={{ width: 160 }} />
-                <Button size="sm" onClick={addRole}>Add</Button>
-              </div>
+              <Button variant="primary" onClick={savePerms} disabled={permsBusy || !permsDirty}>
+                {permsBusy ? 'Saving…' : 'Save changes'}
+              </Button>
             }
           >
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {roles.map((r) => (
-                <span
-                  key={r}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 7,
-                    padding: '5px 11px',
-                    borderRadius: radius.pill,
-                    background: color.tileBg,
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: color.inkSoft,
-                  }}
-                >
-                  {r}
-                  {r !== 'Owner' && (
-                    <span onClick={() => removeRole(r)} style={{ cursor: 'pointer', color: color.muted }} title={`Remove ${r}`}>
-                      ×
-                    </span>
-                  )}
-                </span>
-              ))}
-            </div>
-          </Card>
-
-          <Card title="Permission matrix" subtitle="Tick what each role may do">
-            <div className="scroll-x">
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted, borderBottom: `1px solid ${color.line}` }}>
-                      Permission
-                    </th>
-                    {roles.map((r) => (
-                      <th
-                        key={r}
-                        style={{ textAlign: 'center', padding: '8px 10px', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted, borderBottom: `1px solid ${color.line}` }}
-                      >
-                        {r}
+            {!perms ? (
+              <div style={{ padding: '20px 0', textAlign: 'center', fontSize: 13, color: color.muted }}>Loading…</div>
+            ) : (
+              <div className="scroll-x">
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 640 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: 'left', padding: '8px 10px', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted, borderBottom: `1px solid ${color.line}` }}>
+                        Page / action
                       </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {PERMISSION_META.map((m) => (
-                    <tr key={m.key}>
-                      <td style={{ padding: '10px', borderBottom: `1px solid ${color.line}` }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                          <span style={{ fontWeight: 500 }}>{m.label}</span>
-                          <span style={{ fontSize: 11.5, color: color.muted }}>{m.detail}</span>
-                        </div>
-                      </td>
-                      {roles.map((r) => (
-                        <td key={r} style={{ textAlign: 'center', padding: '10px', borderBottom: `1px solid ${color.line}` }}>
-                          <input
-                            type="checkbox"
-                            checked={!!perms[m.key]?.[r]}
-                            disabled={r === 'Owner'}
-                            onChange={() => toggle(m.key, r)}
-                            aria-label={`${m.label} for ${r}`}
-                            style={{ cursor: r === 'Owner' ? 'not-allowed' : 'pointer' }}
-                          />
-                        </td>
+                      {ROLES.map((r) => (
+                        <th
+                          key={r.value}
+                          style={{ textAlign: 'center', padding: '8px 10px', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted, borderBottom: `1px solid ${color.line}` }}
+                        >
+                          {r.label}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {(() => {
+                      // Grouped by page with one heading row, rather than
+                      // repeating the page name on every action's own row —
+                      // 30 rows of Clients/Clients/Clients read worse than
+                      // one Clients heading over its three actions.
+                      const pages = [...new Set(perms.meta.map((m) => m.page))];
+                      return pages.map((page) => (
+                        <React.Fragment key={page}>
+                          <tr>
+                            <td colSpan={ROLES.length + 1} style={{ padding: '12px 10px 4px', fontSize: 11.5, fontWeight: 700, color: color.inkSoft, textTransform: 'uppercase', letterSpacing: '.03em' }}>
+                              {page}
+                            </td>
+                          </tr>
+                          {perms.meta.filter((m) => m.page === page).map((m) => (
+                            <tr key={m.key}>
+                              <td style={{ padding: '8px 10px 8px 20px', borderBottom: `1px solid ${color.line}` }}>{m.action}</td>
+                              {ROLES.map((r) => (
+                                <td key={r.value} style={{ textAlign: 'center', padding: '8px 10px', borderBottom: `1px solid ${color.line}` }}>
+                                  <input
+                                    type="checkbox"
+                                    checked={!!perms.matrix[m.key]?.[r.value]}
+                                    disabled={r.value === 'owner'}
+                                    onChange={() => togglePerm(m.key, r.value)}
+                                    aria-label={`${m.action} on ${page} for ${r.label}`}
+                                    style={{ cursor: r.value === 'owner' ? 'not-allowed' : 'pointer' }}
+                                  />
+                                </td>
+                              ))}
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </Card>
 
           <Card title="Assignment">
@@ -295,7 +266,7 @@ export default function Staff() {
               <Input value={invite.email} onChange={set('email')} type="email" />
             </Field>
             <Field label="Role">
-              <Select value={invite.role} onChange={set('role')} options={roles} />
+              <Select value={invite.role} onChange={set('role')} options={ROLES.map((r) => ({ value: r.value, label: r.label }))} />
             </Field>
           </div>
         )}

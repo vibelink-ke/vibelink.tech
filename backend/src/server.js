@@ -15,6 +15,7 @@ import * as mpesa from './payments/daraja.js';
 import { startJobs } from './jobs.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
+import { requirePermission, loadPermissions, savePermissions, PERMISSION_META } from './permissions.js';
 import axios from 'axios';
 
 /**
@@ -5363,7 +5364,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
   for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});
 }
 
-app.patch('/api/subscribers/:id', wrap(async (req, res) => {
+app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
                    'credit', 'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref'];
@@ -5617,7 +5618,7 @@ app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
   res.json(s);
 }));
 
-app.delete('/api/subscribers/:id', wrap(async (req, res) => {
+app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(async (req, res) => {
   // Read the username first: once the row is gone there is nothing to link the
   // RADIUS credentials back to, and a deleted customer whose credentials still
   // authenticate is a customer still getting free service.
@@ -6057,7 +6058,7 @@ app.put('/api/plans/:id', wrap(async (req, res) => {
  * already sent. That row has to stay, and the honest thing is to say so rather
  * than either lying about a delete or destroying a receipt.
  */
-app.delete('/api/plans/:id', wrap(async (req, res) => {
+app.delete('/api/plans/:id', requirePermission('tariffs.delete'), wrap(async (req, res) => {
   const { rows: [p] } = await pool.query(
     'select id, title from plans where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!p) return res.status(404).json({ error: 'No such plan' });
@@ -6111,7 +6112,7 @@ app.put('/api/tariffs/:id', wrap(async (req, res) => {
 // there is no history to protect and no reason to keep a row the operator has
 // asked to be rid of. It used to flip `active=false`, which emptied the screen
 // and left the row behind forever.
-app.delete('/api/tariffs/:id', wrap(async (req, res) => {
+app.delete('/api/tariffs/:id', requirePermission('tariffs.delete'), wrap(async (req, res) => {
   const { rowCount } = await pool.query(
     'delete from tariffs where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'No such tariff' });
@@ -6255,7 +6256,25 @@ app.post('/api/staff', wrap(async (req, res) => {
   res.json(s);
 }));
 
-app.delete('/api/staff/:id', wrap(async (req, res) => {
+/**
+ * The permission matrix Staff -> "Roles & permissions" edits. Previously a
+ * local useState with nothing to load from or save to — every checkbox
+ * there was decoration, and no route anywhere checked a role against it.
+ * requirePermission() (permissions.js), now applied to a first real set of
+ * routes, is what makes a checkbox here actually do something.
+ */
+app.get('/api/permissions', requirePermission('staff.view'), wrap(async (req, res) => {
+  res.json({ matrix: await loadPermissions(req.tenant.id), meta: PERMISSION_META });
+}));
+
+app.put('/api/permissions', requirePermission('staff.edit'), wrap(async (req, res) => {
+  const matrix = req.body?.matrix;
+  if (!matrix || typeof matrix !== 'object') return res.status(400).json({ error: 'matrix is required' });
+  await savePermissions(req.tenant.id, matrix);
+  res.json({ matrix: await loadPermissions(req.tenant.id) });
+}));
+
+app.delete('/api/staff/:id', requirePermission('staff.delete'), wrap(async (req, res) => {
   // Never your own login. An owner who deletes it locks the tenant out of its
   // own portal, and the only way back is through us — nothing the person who
   // did it can undo. Refused rather than confirmed.
@@ -6290,7 +6309,7 @@ app.delete('/api/staff/:id', wrap(async (req, res) => {
 }));
 
 // ── tickets and leads: status changes ─────────────
-app.patch('/api/tickets/:id', wrap(async (req, res) => {
+app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req, res) => {
   const allowed = ['status', 'priority', 'assigned_to', 'subject', 'description', 'due_at'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
@@ -6307,7 +6326,7 @@ app.patch('/api/tickets/:id', wrap(async (req, res) => {
   res.json(t);
 }));
 
-app.delete('/api/tickets/:id', wrap(async (req, res) => {
+app.delete('/api/tickets/:id', requirePermission('tickets.delete'), wrap(async (req, res) => {
   await pool.query('delete from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
@@ -6362,7 +6381,7 @@ app.post('/api/tickets/:id/approve-plan-change', wrap(async (req, res) => {
   res.json(updated);
 }));
 
-app.patch('/api/leads/:id', wrap(async (req, res) => {
+app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, res) => {
   // referred_by_client_id is not a real column — resolved to a referrer_id
   // (finding or creating a customer-type referrer for that subscriber, same
   // as the create route) before it ever reaches the update below.
@@ -6416,7 +6435,7 @@ app.patch('/api/leads/:id', wrap(async (req, res) => {
   res.json(l);
 }));
 
-app.delete('/api/leads/:id', wrap(async (req, res) => {
+app.delete('/api/leads/:id', requirePermission('leads.delete'), wrap(async (req, res) => {
   await pool.query('delete from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
@@ -6525,7 +6544,7 @@ app.put('/api/kb-articles/:id', wrap(async (req, res) => {
   res.json(a);
 }));
 
-app.delete('/api/kb-articles/:id', wrap(async (req, res) => {
+app.delete('/api/kb-articles/:id', requirePermission('kb.delete'), wrap(async (req, res) => {
   await pool.query('delete from kb_articles where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
