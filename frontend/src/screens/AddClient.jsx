@@ -17,7 +17,6 @@ const BLANK = {
   phoneAlt: '',
   category: 'Individual Monthly',
   billing: 'Monthly (prepaid)',
-  birthday: '',
   identification: '',
   location: '',
   lineLabel: '',
@@ -199,9 +198,9 @@ export default function AddClient() {
         lat: f.lat,
         lng: f.lng,
         email: f.email || null,
-        birthday: f.birthday || null,
         category: f.category || null,
         identification: f.identification || null,
+        billingType: f.billing || null,
         allowDuplicatePhone: differentCustomer || !!linkedAccount,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
@@ -263,9 +262,6 @@ export default function AddClient() {
             </Field>
             <Field label="Email">
               <Input value={f.email} onChange={set('email')} type="email" />
-            </Field>
-            <Field label="Birthday">
-              <Input value={f.birthday} onChange={set('birthday')} type="date" />
             </Field>
             <Field label="ID number">
               <Input value={f.identification} onChange={set('identification')} />

@@ -133,6 +133,7 @@ export default function ClientDetail() {
   // location/coordinates, which the map below can also set by dragging.
   const [infoForm, setInfoForm] = useState(null);
   const [infoBusy, setInfoBusy] = useState(false);
+  const [tagDraft, setTagDraft] = useState('');
   const [portalPassword, setPortalPassword] = useState(undefined);   // undefined = not fetched yet
 
   useEffect(() => {
@@ -143,8 +144,9 @@ export default function ClientDetail() {
       phone: client.phone ?? '', phoneAlt: client.phone_alt ?? '',
       location: client.location ?? '',
       lat: client.lat ?? '', lng: client.lng ?? '',
-      email: client.email ?? '', birthday: client.birthday ? String(client.birthday).slice(0, 10) : '',
+      email: client.email ?? '',
       category: client.category ?? '', identification: client.identification ?? '',
+      billingType: client.billing_type ?? '', tags: client.tags ?? [],
     });
     // A different line's password must not inherit the last one's revealed value.
     setPortalPassword(undefined);
@@ -162,9 +164,10 @@ export default function ClientDetail() {
         lat: infoForm.lat === '' ? null : Number(infoForm.lat),
         lng: infoForm.lng === '' ? null : Number(infoForm.lng),
         email: infoForm.email || null,
-        birthday: infoForm.birthday || null,
         category: infoForm.category || null,
         identification: infoForm.identification || null,
+        billing_type: infoForm.billingType || null,
+        tags: infoForm.tags,
       });
       store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
       store.toast('Client info saved');
@@ -213,6 +216,23 @@ export default function ClientDetail() {
     Promise.all(siblings.map((s) => api.messages(s.id).catch(() => [])))
       .then((lists) => setThread(lists.flat().sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at))));
   }, [siblings.map((s) => s.id).join(',')]);
+
+  // Usage and activity are per-line (a customer's second connection has its
+  // own traffic and its own history), fetched only once that tab is opened
+  // rather than for every line up front.
+  const [usage, setUsage] = useState(null);
+  useEffect(() => {
+    if (tab !== 'statistics' || !client) return;
+    setUsage(null);
+    api.subscriberUsage(client.id).then(setUsage).catch(() => setUsage([]));
+  }, [tab, client?.id]);
+
+  const [activity, setActivity] = useState(null);
+  useEffect(() => {
+    if (tab !== 'activity' || !client) return;
+    setActivity(null);
+    api.subscriberActivity(client.id).then(setActivity).catch(() => setActivity([]));
+  }, [tab, client?.id]);
 
   const [addingService, setAddingService] = useState(null);
   const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
@@ -572,8 +592,51 @@ export default function ClientDetail() {
                   />
                 </Field>
               </div>
-              <Field label="Identification" hint="Optional — ID or passport number">
-                <Input value={infoForm.identification} onChange={(e) => setInfoForm((s) => ({ ...s, identification: e.target.value }))} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <Field label="Identification" hint="Optional — ID or passport number">
+                  <Input value={infoForm.identification} onChange={(e) => setInfoForm((s) => ({ ...s, identification: e.target.value }))} />
+                </Field>
+                <Field label="Billing type">
+                  <Select
+                    value={infoForm.billingType}
+                    onChange={(e) => setInfoForm((s) => ({ ...s, billingType: e.target.value }))}
+                    options={['', 'Monthly (prepaid)', 'Monthly (postpaid)', 'Weekly', 'Daily']}
+                  />
+                </Field>
+              </div>
+              <Field label="Tags" hint="Type a tag and press Enter — group clients by estate, sales rep, anything useful to filter by later">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', border: `1px solid ${color.line}`, borderRadius: radius.md, padding: 6 }}>
+                  {infoForm.tags.map((t) => (
+                    <span
+                      key={t}
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 8px',
+                        borderRadius: radius.pill, background: color.tileBg, fontSize: 12, fontWeight: 600,
+                      }}
+                    >
+                      {t}
+                      <span
+                        onClick={() => setInfoForm((s) => ({ ...s, tags: s.tags.filter((x) => x !== t) }))}
+                        style={{ cursor: 'pointer', color: color.muted }}
+                      >
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                  <input
+                    value={tagDraft}
+                    onChange={(e) => setTagDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || !tagDraft.trim()) return;
+                      e.preventDefault();
+                      const t = tagDraft.trim();
+                      setInfoForm((s) => (s.tags.includes(t) ? s : { ...s, tags: [...s.tags, t] }));
+                      setTagDraft('');
+                    }}
+                    placeholder="Add a tag…"
+                    style={{ border: 'none', outline: 'none', flex: 1, minWidth: 90, fontSize: 13, fontFamily: 'inherit' }}
+                  />
+                </div>
               </Field>
               <Button variant="primary" onClick={saveInfo} disabled={infoBusy} style={{ alignSelf: 'flex-start' }}>
                 {infoBusy ? 'Saving…' : 'Save changes'}
@@ -689,9 +752,53 @@ export default function ClientDetail() {
         </div>
       )}
 
-      {tab === 'statistics' && <Soon label="Usage statistics" />}
+      {tab === 'statistics' && (
+        <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Data used, last 30 days</div>
+          {usage === null ? (
+            <span style={{ fontSize: 13, color: color.muted }}>Loading…</span>
+          ) : usage.length === 0 ? (
+            <Empty>No session data recorded for this line in the last 30 days.</Empty>
+          ) : (() => {
+            const peak = Math.max(1, ...usage.map((d) => d.mb));
+            return (
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 160, paddingTop: 10 }}>
+                {usage.map((d) => (
+                  <div key={d.day} title={`${new Date(d.day).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}: ${d.mb} MB`}
+                       style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', gap: 4 }}>
+                    <div style={{ height: `${Math.max(2, (d.mb / peak) * 100)}%`, background: color.green, borderRadius: '2px 2px 0 0' }} />
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
       {tab === 'live' && <Soon label="Live session data" />}
-      {tab === 'activity' && <Soon label="Activity log" />}
+      {tab === 'activity' && (
+        <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Activity log</div>
+          {activity === null ? (
+            <span style={{ fontSize: 13, color: color.muted }}>Loading…</span>
+          ) : activity.length === 0 ? (
+            <Empty>Nothing recorded for this account yet.</Empty>
+          ) : (
+            <div style={{ display: 'grid', gap: 8 }}>
+              {activity.map((a, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
+                  <span>
+                    <span style={{ fontWeight: 600 }}>{a.action}</span>
+                    {a.detail && <span style={{ color: color.muted }}> — {a.detail}</span>}
+                  </span>
+                  <span style={{ color: color.muted, whiteSpace: 'nowrap' }}>
+                    {a.actor} · {new Date(a.created_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <Modal
         open={!!addingService}

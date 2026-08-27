@@ -1719,3 +1719,21 @@ alter table platform_sms_config add column if not exists price_per_credit numeri
 alter table subscribers add column if not exists email text;
 alter table subscribers add column if not exists category text;
 alter table subscribers add column if not exists identification text;
+alter table subscribers add column if not exists billing_type text;
+alter table subscribers add column if not exists tags text[] not null default '{}';
+
+-- What actually happened to an account, for the Activity log tab — status
+-- changes, edits, credential resets. subscriber_id is set null (not
+-- cascaded) on delete so the history of a removed line still shows under
+-- the account it belonged to, tagged by account_code in the detail text.
+create table if not exists activity_log (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  subscriber_id uuid references subscribers on delete set null,
+  account_code  text,
+  actor         text,
+  action        text not null,
+  detail        text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists activity_log_subscriber_idx on activity_log (subscriber_id, created_at desc);

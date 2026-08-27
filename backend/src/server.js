@@ -5198,10 +5198,24 @@ function coord(value, limit) {
   return Number.isFinite(n) && Math.abs(n) <= limit ? n : null;
 }
 
+/**
+ * A row in the Activity log tab. Best-effort and fire-and-forget — a client
+ * mutation succeeding is what matters; failing to record that it happened is
+ * not worth failing the request over.
+ */
+async function logActivity(req, subscriberId, accountCode, action, detail = null) {
+  try {
+    await pool.query(
+      `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
+       values ($1,$2,$3,$4,$5,$6)`,
+      [req.tenant.id, subscriberId, accountCode, req.session?.name ?? 'system', action, detail]);
+  } catch (e) { console.error('logActivity', e.message); }
+}
+
 app.post('/api/subscribers', wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy,
-          email, birthday, category, identification } = req.body;
+          email, category, identification, billingType } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   // KopoKopo is hotspot-only by policy everywhere else in this codebase
   // (kopokopo_hotspot_only db constraint, till-based flow, settings screen's
@@ -5289,12 +5303,14 @@ app.post('/api/subscribers', wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
        router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label, referred_by,
-       email, birthday, category, identification)
+       email, category, identification, billing_type)
      values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *`,
     [req.tenant.id, account, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
      location || null, coord(lat, 90), coord(lng, 180), label, referrerId,
-     email || null, birthday || null, category || null, identification || null]);
+     email || null, category || null, identification || null, billingType || null]);
+  await logActivity(req, s.id, s.account_code, sameAccount.length ? 'Service added' : 'Account created',
+    label ? `Line "${label}"` : null);
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.
@@ -5350,7 +5366,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'credit', 'email', 'category', 'identification'];
+                   'credit', 'email', 'category', 'identification', 'billing_type', 'tags'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
 
@@ -5368,9 +5384,6 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
   // numeric cast error, or a pin somewhere out at sea.
   if ('lat' in req.body) req.body.lat = coord(req.body.lat, 90);
   if ('lng' in req.body) req.body.lng = coord(req.body.lng, 180);
-  // An empty string is a blank date field being cleared, not a real date —
-  // postgres rejects '' for a date column outright.
-  if ('birthday' in req.body) req.body.birthday = req.body.birthday || null;
 
   // Numbers only, and the same lengths the generator uses. These get dictated
   // over the phone and typed into a router by someone who is not looking at a
@@ -5410,6 +5423,11 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
   }
 
+  // Which fields, not their values — a credential or balance change belongs
+  // in the log as the fact that it happened, not as a second place a
+  // password or a customer's new balance sits in plain text.
+  await logActivity(req, s.id, s.account_code, 'Edited', sets.join(', '));
+
   res.json(s);
 }));
 
@@ -5425,7 +5443,7 @@ app.patch('/api/subscribers/:id', wrap(async (req, res) => {
  */
 app.post('/api/subscribers/:id/clear-mac-lock', wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
-    'update subscribers set locked_mac=null where id=$1 and tenant_id=$2 returning pppoe_user',
+    'update subscribers set locked_mac=null where id=$1 and tenant_id=$2 returning pppoe_user, account_code',
     [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
 
@@ -5434,6 +5452,7 @@ app.post('/api/subscribers/:id/clear-mac-lock', wrap(async (req, res) => {
     await radius.clearPppoeMacLock(pool, req.tenant.id, s.pppoe_user)
       .catch((e) => console.warn('clear-mac-lock: radius not updated —', e?.message ?? e));
   }
+  await logActivity(req, req.params.id, s.account_code, 'MAC lock cleared');
   res.json({ ok: true });
 }));
 
@@ -5473,6 +5492,41 @@ app.get('/api/subscribers/:id/credentials', requireRole('owner'), wrap(async (re
 }));
 
 /**
+ * Data used per day, for the last 30 days — the Statistics tab's staff-
+ * facing counterpart to /portal/usage above, scoped by tenant/session
+ * rather than a customer's own portal cookie.
+ */
+app.get('/api/subscribers/:id/usage', wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select date(started_at) as day,
+            sum(coalesce(bytes_in,0) + coalesce(bytes_out,0)) as bytes
+       from sessions
+      where tenant_id=$1 and subscriber_id=$2
+        and started_at >= now() - interval '30 days'
+      group by date(started_at)
+      order by day`, [req.tenant.id, req.params.id]);
+  res.json(rows.map((r) => ({ day: r.day, mb: Math.round(Number(r.bytes) / (1024 * 1024)) })));
+}));
+
+/**
+ * What's happened on this line — status changes, edits, credential resets —
+ * for the Activity log tab. Matched by account_code too, not just
+ * subscriber_id: a deleted line's own log rows have subscriber_id cleared
+ * (see the delete route) but stay filed under the account they belonged to.
+ */
+app.get('/api/subscribers/:id/activity', wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    'select account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+  const { rows } = await pool.query(
+    `select actor, action, detail, created_at from activity_log
+      where tenant_id=$1 and account_code=$2
+      order by created_at desc limit 100`,
+    [req.tenant.id, s.account_code]);
+  res.json(rows);
+}));
+
+/**
  * Give a customer a fresh portal password.
  *
  * Six digits, for the same reason the rest are: it gets read out over the phone
@@ -5495,6 +5549,7 @@ app.post('/api/subscribers/:id/portal-password', wrap(async (req, res) => {
      secrets.configured() ? secrets.encrypt(password) : null]);
   if (!s) return res.status(404).json({ error: 'not found' });
 
+  await logActivity(req, req.params.id, s.account_code, 'Portal password reset');
   res.json({ password, account: s.account_code });
 
   // Texted as well as shown: the operator generating it is rarely the person who
@@ -5558,6 +5613,7 @@ app.post('/api/subscribers/:id/access', wrap(async (req, res) => {
     else await radius.walledGarden(c, req.tenant.id, s.id);
   }).catch((e) => console.warn('access change: radius not updated —', e?.message ?? e));
 
+  await logActivity(req, s.id, s.account_code, { pause: 'Paused', suspend: 'Suspended', resume: 'Resumed' }[action]);
   res.json(s);
 }));
 
@@ -5566,7 +5622,7 @@ app.delete('/api/subscribers/:id', wrap(async (req, res) => {
   // RADIUS credentials back to, and a deleted customer whose credentials still
   // authenticate is a customer still getting free service.
   const { rows: [s] } = await pool.query(
-    'select pppoe_user from subscribers where tenant_id=$1 and id=$2',
+    'select pppoe_user, account_code, line_label from subscribers where tenant_id=$1 and id=$2',
     [req.tenant.id, req.params.id]);
   if (!s) return res.status(404).json({ error: 'No such client' });
 
@@ -5581,6 +5637,10 @@ app.delete('/api/subscribers/:id', wrap(async (req, res) => {
     const radius = await import('./radius.js');
     await radius.forgetSubscriberCredentials(pool, s.pppoe_user, req.tenant.id);
   }
+  // subscriber_id is already gone by the time this runs (on delete set null),
+  // so the row is filed under account_code alone — still findable from the
+  // account's Activity log even though the line itself no longer exists.
+  await logActivity(req, null, s.account_code, 'Service deleted', s.line_label ? `Line "${s.line_label}"` : null);
   res.json({ ok: true });
 }));
 
@@ -5887,9 +5947,11 @@ app.post('/api/subscribers/compensate', wrap(async (req, res) => {
     `update subscribers
        set expires_at = greatest(coalesce(expires_at, now()), now()) + ($3 || ' days')::interval
      where tenant_id=$1 and id = any($2::uuid[])
-     returning id, name, expires_at`,
+     returning id, name, expires_at, account_code`,
     [req.tenant.id, ids, String(Number(days) || 1)]);
-  res.json({ compensated: rows.length, days: Number(days) || 1, rows });
+  const n = Number(days) || 1;
+  for (const r of rows) await logActivity(req, r.id, r.account_code, 'Extended', `${n} day${n === 1 ? '' : 's'}`);
+  res.json({ compensated: rows.length, days: n, rows });
 }));
 
 /** Report which required credentials a payment channel is still missing. */

@@ -67,6 +67,8 @@ export const api = {
   generatePortalPassword: (id, password) => post(`/api/subscribers/${id}/portal-password`,
     password ? { password } : {}),
   subscriberCredentials: (id) => get(`/api/subscribers/${id}/credentials`),
+  subscriberUsage: (id) => get(`/api/subscribers/${id}/usage`),
+  subscriberActivity: (id) => get(`/api/subscribers/${id}/activity`),
   smsPlaceholders: () => get('/api/sms/placeholders'),
   smsTemplates: () => get('/api/sms/templates'),
   saveSmsTemplates: (templates) => put('/api/sms/templates', { templates }),
