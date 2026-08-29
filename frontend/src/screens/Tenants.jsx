@@ -90,6 +90,14 @@ export default function Tenants() {
 
   useEffect(() => { loadGatewayConfig(); checkGatewayBalance(false); }, []);
 
+  // The global 30s poll (store.jsx) keeps every screen current in the
+  // background, but it's on its own clock — navigate here right after it
+  // just ticked and this shows data up to 30s stale until the next one,
+  // reading as "doesn't refresh" to someone switching tabs to check on a
+  // tenant they just changed elsewhere. Refreshing the moment this screen
+  // is actually opened closes that gap without polling any faster overall.
+  useEffect(() => { store.reload({ quiet: true }); }, []);
+
   if (!store.isPlatformOwner) {
     return (
       <Screen title="ISP tenants">
