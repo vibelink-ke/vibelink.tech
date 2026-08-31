@@ -6911,8 +6911,11 @@ app.post('/api/vouchers/purge-expired', wrap(async (req, res) => {
 app.get('/api/staff', wrap(async (req, res) => {
   const { role } = req.query;
   // platform_admin is our own standing maintenance login — never shown to the tenant.
+  // Never password_hash either — nothing on this screen has a use for it,
+  // and there's no reason to put a password hash on the wire on every load.
   const { rows } = await pool.query(
-    `select * from staff where tenant_id=$1 and role<>'platform_admin' ${role ? 'and role=$2' : ''} order by name`,
+    `select id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin
+       from staff where tenant_id=$1 and role<>'platform_admin' ${role ? 'and role=$2' : ''} order by name`,
     role ? [req.tenant.id, role] : [req.tenant.id]);
   res.json(rows);
 }));
@@ -6952,6 +6955,64 @@ app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) 
   } catch (e) {
     // The pre-checks above cover the common case; this is the race-condition
     // backstop for two invites landing at the same instant.
+    if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });
+    throw e;
+  }
+}));
+
+/**
+ * Edit an existing staff member — name, phone, email, username, role.
+ *
+ * Same collision safety as the invite route, checked against every other
+ * row (not itself), and the same protection the delete route already has
+ * against an owner's role being changed by anyone but the platform owner —
+ * this is exactly the gap a colliding invite exploited by accident once
+ * already (see the comment on the invite route above), so an edit gets the
+ * same guard rather than reopening it through a different door.
+ */
+app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res) => {
+  const { name, phone, email, username, role } = req.body;
+
+  const { rows: [target] } = await pool.query(
+    'select * from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!target) return res.status(404).json({ error: 'No such member of staff' });
+
+  if ((target.role === 'owner' || target.role === 'platform_admin') && role && role !== target.role && !req.session.is_super_admin) {
+    return res.status(403).json({ error: "Only the platform owner can change an owner's role." });
+  }
+
+  if (phone && phone !== target.phone) {
+    const { rows: [clash] } = await pool.query(
+      'select name from staff where tenant_id=$1 and phone=$2 and id<>$3', [req.tenant.id, phone, target.id]);
+    if (clash) return res.status(409).json({ error: `${clash.name} already uses that phone number.` });
+  }
+  if (email !== undefined && email && email.toLowerCase() !== (target.email ?? '').toLowerCase()) {
+    const { rows: [clash] } = await pool.query(
+      'select name from staff where lower(email)=lower($1) and id<>$2', [email, target.id]);
+    if (clash) return res.status(409).json({ error: `${clash.name} already uses that email address.` });
+  }
+  if (username !== undefined && username && username.toLowerCase() !== (target.username ?? '').toLowerCase()) {
+    const { rows: [clash] } = await pool.query(
+      'select name from staff where lower(username)=lower($1) and id<>$2', [username, target.id]);
+    if (clash) return res.status(409).json({ error: `${clash.name} already uses that username.` });
+  }
+
+  try {
+    const { rows: [updated] } = await pool.query(
+      `update staff set
+         name = coalesce($3, name),
+         phone = coalesce($4, phone),
+         email = $5,
+         username = $6,
+         role = coalesce($7, role)
+       where id=$1 and tenant_id=$2
+       returning id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin`,
+      [req.params.id, req.tenant.id, name?.trim() || null, phone?.trim() || null,
+       email !== undefined ? (email?.trim() || null) : target.email,
+       username !== undefined ? (username?.trim() || null) : target.username,
+       role || null]);
+    res.json(updated);
+  } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });
     throw e;
   }

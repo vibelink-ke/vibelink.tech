@@ -57,6 +57,8 @@ export default function Staff() {
     }
   };
   const [invite, setInvite] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [editBusy, setEditBusy] = useState(false);
   const [aiAssign, setAiAssign] = useState(true);
 
   const staff = store.staff ?? [];
@@ -76,6 +78,24 @@ export default function Staff() {
       store.toast(`Could not invite: ${e.message}`);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openEdit = (s) => setEditing({ id: s.id, name: s.name, phone: s.phone, email: s.email ?? '', username: s.username ?? '', role: s.role });
+  const setEdit = (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value }));
+
+  const saveEdit = async () => {
+    if (!editing.name.trim() || !editing.phone.trim()) return store.toast('Name and phone are required');
+    setEditBusy(true);
+    try {
+      const updated = await api.updateStaff(editing.id, editing);
+      store.setCollection('staff', (xs) => xs.map((x) => (x.id === updated.id ? updated : x)));
+      store.toast(`${updated.name} updated`);
+      setEditing(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setEditBusy(false);
     }
   };
 
@@ -123,6 +143,7 @@ export default function Staff() {
             rows={staff}
             columns={[
               { key: 'name', label: 'Name', render: (s) => <span style={{ fontWeight: 600 }}>{s.name}</span> },
+              { key: 'username', label: 'Username', render: (s) => s.username ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{s.username}</span> : <span style={{ color: color.muted }}>—</span> },
               { key: 'phone', label: 'Phone', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{s.phone}</span> },
               { key: 'email', label: 'Email', render: (s) => s.email ?? '—' },
               { key: 'role', label: 'Role', render: (s) => <Badge tone="default">{s.role}</Badge> },
@@ -131,30 +152,24 @@ export default function Staff() {
                 key: 'act',
                 label: '',
                 align: 'right',
-                render: (s) => {
-                  /*
-                   * An owner login is not another member of staff's to remove
-                   * — the server refuses it too, but showing an active-looking
-                   * link that always fails is its own small trap. Only the
-                   * platform owner sees a working Remove here; anyone else sees
-                   * why it is not theirs to press.
-                   */
-                  if (s.role === 'owner' && !store.isPlatformOwner) {
-                    return (
-                      <span
-                        title="Only the platform owner can remove an owner login"
-                        style={{ color: color.muted, fontSize: 12.5 }}
-                      >
-                        Owner
-                      </span>
-                    );
-                  }
-                  return (
+                render: (s) => (
+                  <span style={{ whiteSpace: 'nowrap' }}>
+                    <span onClick={() => openEdit(s)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
+                      View / Edit
+                    </span>
+                    {/*
+                      Always shown, even on an owner's own row — the server
+                      is what actually enforces "not your own login" and
+                      "only the platform owner may remove an owner", with a
+                      message explaining why. A link that quietly vanishes
+                      for some rows reads as broken; an error that says why
+                      it refused reads as intentional.
+                    */}
                     <span onClick={() => removeStaff(s)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
                       Remove
                     </span>
-                  );
-                },
+                  </span>
+                ),
               },
             ]}
           />
@@ -267,6 +282,40 @@ export default function Staff() {
             </Field>
             <Field label="Role">
               <Select value={invite.role} onChange={set('role')} options={ROLES.map((r) => ({ value: r.value, label: r.label }))} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!editing}
+        title={editing ? `${editing.name}` : ''}
+        onClose={() => setEditing(null)}
+        footer={
+          <>
+            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveEdit} disabled={editBusy}>
+              {editBusy ? 'Saving…' : 'Save changes'}
+            </Button>
+          </>
+        }
+      >
+        {editing && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Name">
+              <Input value={editing.name} onChange={setEdit('name')} />
+            </Field>
+            <Field label="Phone" hint="They sign in with this number">
+              <Input value={editing.phone} onChange={setEdit('phone')} placeholder="07xx xxx xxx" />
+            </Field>
+            <Field label="Email">
+              <Input value={editing.email} onChange={setEdit('email')} type="email" />
+            </Field>
+            <Field label="Username" hint="Alternative login, instead of phone or email">
+              <Input value={editing.username} onChange={setEdit('username')} style={{ fontFamily: font.mono }} />
+            </Field>
+            <Field label="Role" hint={editing.role === 'owner' ? 'Only the platform owner can change an owner\'s role' : undefined}>
+              <Select value={editing.role} onChange={setEdit('role')} options={ROLES.map((r) => ({ value: r.value, label: r.label }))} />
             </Field>
           </div>
         )}

@@ -267,6 +267,7 @@ export const api = {
   // ── org ──
   staff: () => get('/api/staff'),
   createStaff: (s) => post('/api/staff', s),
+  updateStaff: (id, s) => put(`/api/staff/${id}`, s),
   permissions: () => get('/api/permissions'),
   savePermissions: (matrix) => put('/api/permissions', { matrix }),
   deleteStaff: (id) => del(`/api/staff/${id}`),
