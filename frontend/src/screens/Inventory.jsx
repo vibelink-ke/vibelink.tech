@@ -15,7 +15,7 @@ const LOCATION_LABEL = { warehouse: 'Warehouse', van: 'Van', premises: 'Premises
 
 const blank = () => ({
   name: '', category: 'Router', macAddress: '', serialNumber: '',
-  ownedByTenant: true, subscriberId: '', routerId: '', status: 'in_stock', notes: '', quantity: '1', unit: '',
+  ownedByTenant: true, status: 'in_stock', notes: '', quantity: '1', unit: '',
 });
 
 function locationText(i) {
@@ -54,7 +54,7 @@ export default function Inventory() {
   const openEdit = (i) => setForm({
     id: i.id, name: i.name, category: i.category || 'Other', macAddress: i.mac_address || '',
     serialNumber: i.serial_number || '', ownedByTenant: i.owned_by_tenant,
-    subscriberId: i.subscriber_id || '', routerId: i.router_id || '', status: i.status, notes: i.notes || '',
+    status: i.status, notes: i.notes || '',
     quantity: String(i.quantity ?? 1), unit: i.unit || '',
   });
 
@@ -107,7 +107,7 @@ export default function Inventory() {
     }
   };
 
-  const openIssue = (i) => setIssuing({ item: i, staffId: '', quantity: '1', macAddress: '', serialNumber: '', note: '' });
+  const openIssue = (i) => setIssuing({ item: i, staffId: '', quantity: '1', macAddress: '', serialNumber: '', subscriberId: '', routerId: '', note: '' });
 
   const submitIssue = async () => {
     if (!issuing.staffId) return store.toast('Pick a technician');
@@ -122,6 +122,8 @@ export default function Inventory() {
         quantity: issuing.item.tracking === 'bulk' ? Number(issuing.quantity) || 1 : undefined,
         macAddress: issuing.macAddress || undefined,
         serialNumber: issuing.serialNumber || undefined,
+        subscriberId: issuing.subscriberId || undefined,
+        routerId: issuing.routerId || undefined,
         note: issuing.note || undefined,
       });
       store.setCollection('inventory', await api.inventory());
@@ -319,27 +321,6 @@ export default function Inventory() {
               />
             </Field>
 
-            {!isBulk && (
-              <>
-                <Field label="Client installed at" span={2}>
-                  <Select
-                    value={form.subscriberId}
-                    onChange={set('subscriberId')}
-                    options={[
-                      { value: '', label: 'Unassigned' },
-                      ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
-                    ]}
-                  />
-                </Field>
-                <Field label="Site" span={2} hint="Optional — for gear tied to a site rather than one client">
-                  <Select
-                    value={form.routerId}
-                    onChange={set('routerId')}
-                    options={[{ value: '', label: 'None' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
-                  />
-                </Field>
-              </>
-            )}
             <Field label="Notes" span={2}>
               <Textarea rows={3} value={form.notes} onChange={set('notes')} placeholder="Any other detail worth keeping" />
             </Field>
@@ -397,6 +378,23 @@ export default function Inventory() {
                 MAC {issuing.item.mac_address || '—'} · Serial {issuing.item.serial_number || '—'}
               </div>
             )}
+            <Field label="Client installed at" hint="Optional — leave unassigned if it's just going into the tech's van for now">
+              <Select
+                value={issuing.subscriberId}
+                onChange={(e) => setIssuing((s) => ({ ...s, subscriberId: e.target.value }))}
+                options={[
+                  { value: '', label: 'Not yet — goes to the van' },
+                  ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
+                ]}
+              />
+            </Field>
+            <Field label="Site" hint="Optional — for gear tied to a site rather than one client">
+              <Select
+                value={issuing.routerId}
+                onChange={(e) => setIssuing((s) => ({ ...s, routerId: e.target.value }))}
+                options={[{ value: '', label: 'None' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+              />
+            </Field>
             <Field label="Note" hint="Optional">
               <Textarea rows={2} value={issuing.note} onChange={(e) => setIssuing((s) => ({ ...s, note: e.target.value }))} />
             </Field>

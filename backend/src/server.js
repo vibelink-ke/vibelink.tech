@@ -4885,12 +4885,16 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
     if (!rowCount) return res.status(404).json({ error: 'No such router' });
   }
 
-  // Editing a client link by hand (as opposed to the dedicated issue/return
-  // actions below) still deserves a location that matches — assigning a
-  // client moves it to the client's premises, clearing one without picking
-  // a new location falls back to the warehouse.
-  const newSubscriberId = isBulk ? null : (subscriberId || null);
-  const newLocation = newSubscriberId ? 'premises' : (newSubscriberId !== (before.subscriber_id ?? null) ? 'warehouse' : before.location);
+  // The edit form no longer carries a client/site link at all — that's set
+  // by the dedicated Issue action now, not by editing a stock line — so an
+  // absent key here means "leave it alone," not "clear it." Only an
+  // explicitly-sent value (including an explicit empty string, to
+  // unassign) actually changes it.
+  const newSubscriberId = isBulk ? null : (subscriberId !== undefined ? (subscriberId || null) : before.subscriber_id);
+  const newRouterId = isBulk ? null : (routerId !== undefined ? (routerId || null) : before.router_id);
+  const newLocation = newSubscriberId
+    ? 'premises'
+    : (newSubscriberId !== (before.subscriber_id ?? null) ? 'warehouse' : before.location);
 
   try {
     const { rows: [item] } = await pool.query(
@@ -4915,7 +4919,7 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
        isBulk ? null : serialNumber?.trim() || null,
        typeof ownedByTenant === 'boolean' ? ownedByTenant : null,
        newSubscriberId,
-       isBulk ? null : routerId || null,
+       newRouterId,
        status || null, notes || null, isBulk ? 'bulk' : 'serialized',
        qty,
        isBulk ? unit?.trim() || null : null,
@@ -4967,11 +4971,26 @@ app.post('/api/inventory/:id/adjust-quantity', requirePermission('inventory.edit
  * only accepted when quantity is exactly 1.
  */
 app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(async (req, res) => {
-  const { staffId, quantity, macAddress, serialNumber, note } = req.body;
+  const { staffId, quantity, macAddress, serialNumber, note, subscriberId, routerId } = req.body;
   if (!staffId) return res.status(400).json({ error: 'Pick a technician' });
   const { rowCount: staffOk } = await pool.query(
     'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
   if (!staffOk) return res.status(404).json({ error: 'No such staff member' });
+
+  // Where it's going, decided at issue time rather than when it was first
+  // added as stock — a freshly received gadget has nowhere installed yet;
+  // that only becomes known once a technician actually takes it out.
+  if (subscriberId) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+  }
+  if (routerId) {
+    const { rowCount } = await pool.query(
+      'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such router' });
+  }
+  const destination = subscriberId ? 'premises' : 'van';
 
   const { rows: [item] } = await pool.query(
     'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
@@ -4993,19 +5012,22 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
     }
 
     await pool.query('update inventory_items set quantity = quantity - $2, updated_at = now() where id=$1', [item.id, qty]);
-    await logInventoryMovement(req.tenant.id, item.id, 'issued', { toLocation: 'van', staffId, quantity: qty, note });
+    await logInventoryMovement(req.tenant.id, item.id, destination === 'premises' ? 'installed' : 'issued', {
+      toLocation: destination, staffId, subscriberId: subscriberId || null, quantity: qty, note,
+    });
 
     let createdId = null;
     if (qty === 1) {
       try {
         const { rows: [child] } = await pool.query(
           `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
-             owned_by_tenant, status, tracking, quantity, location, assigned_staff_id)
-           values ($1,$2,$3,$4,$5,$6,'in_stock','serialized',1,'van',$7) returning id`,
+             owned_by_tenant, status, tracking, quantity, location, assigned_staff_id, subscriber_id, router_id)
+           values ($1,$2,$3,$4,$5,$6,'in_stock','serialized',1,$7,$8,$9,$10) returning id`,
           [req.tenant.id, item.name, item.category, macAddress?.trim().toUpperCase() || null,
-           serialNumber?.trim() || null, item.owned_by_tenant, staffId]);
+           serialNumber?.trim() || null, item.owned_by_tenant, destination, staffId,
+           subscriberId || null, routerId || null]);
         createdId = child.id;
-        await logInventoryMovement(req.tenant.id, child.id, 'created', { toLocation: 'van', staffId, note: `Issued from "${item.name}" stock` });
+        await logInventoryMovement(req.tenant.id, child.id, 'created', { toLocation: destination, staffId, subscriberId: subscriberId || null, note: `Issued from "${item.name}" stock` });
       } catch (e) {
         if (e.code !== '23505') throw e;
         // MAC collision on the child row: the bulk deduction and movement
@@ -5026,9 +5048,11 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
   }
 
   await pool.query(
-    `update inventory_items set location='van', assigned_staff_id=$2, subscriber_id=null, updated_at=now() where id=$1`,
-    [item.id, staffId]);
-  await logInventoryMovement(req.tenant.id, item.id, 'issued', { fromLocation: item.location, toLocation: 'van', staffId, note });
+    `update inventory_items set location=$2, assigned_staff_id=$3, subscriber_id=$4, router_id=coalesce($5, router_id), updated_at=now() where id=$1`,
+    [item.id, destination, staffId, subscriberId || null, routerId || null]);
+  await logInventoryMovement(req.tenant.id, item.id, destination === 'premises' ? 'installed' : 'issued', {
+    fromLocation: item.location, toLocation: destination, staffId, subscriberId: subscriberId || null, note,
+  });
   res.json({ ok: true });
 }));
 
