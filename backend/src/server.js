@@ -834,7 +834,11 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
     });
   }
-  if (!kk && !daraja) {
+  // No gateway of the tenant's own — same fallback PPPoE already gets via
+  // stkPushForSubscriber: route through the platform owner's paybill instead
+  // of leaving the guest with a hard failure, when the tenant opted into it.
+  const usePlatformCollect = !kk && !daraja && !!tenant.platform_collect_enabled;
+  if (!kk && !daraja && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
         + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
@@ -848,6 +852,28 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac: null, routerId, service: 'hotspot',
       });
+    } else if (usePlatformCollect) {
+      const { rows: [owner] } = await pool.query(
+        "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+      if (!owner) return res.status(503).json({ error: 'Platform collection is not set up yet — ask the platform owner.' });
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(owner.tenant_id, {
+        phone, amount: Number(plan.price),
+        accountRef: `${tenant.subdomain}-HOTSPOT`.slice(0, 20), description: plan.title,
+        platformCollect: true,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [owner.tenant_id, checkoutId, phone, Number(plan.price), {
+          type: 'platform_collect', tenant_id: tenant.id, plan_id: plan.id, router_id: routerId,
+          commissionPct: Number(tenant.settlement_commission_pct ?? 5),
+        }]);
     } else {
       const gw = await import('./payments/daraja.js');
       const r = await gw.stkPush(tenant.id, {
@@ -1164,7 +1190,9 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
     });
   }
-  if (!kk && !daraja) {
+  // Same platform-paybill fallback as /hotspot/buy above.
+  const usePlatformCollect = !kk && !daraja && !!tenant.platform_collect_enabled;
+  if (!kk && !daraja && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
         + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
@@ -1178,6 +1206,28 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, label, service: 'hotspot',
       });
+    } else if (usePlatformCollect) {
+      const { rows: [owner] } = await pool.query(
+        "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+      if (!owner) return res.status(503).json({ error: 'Platform collection is not set up yet — ask the platform owner.' });
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(owner.tenant_id, {
+        phone, amount: Number(plan.price),
+        accountRef: `${tenant.subdomain}-HOTSPOT`.slice(0, 20), description: plan.title,
+        platformCollect: true,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [owner.tenant_id, checkoutId, phone, Number(plan.price), {
+          type: 'platform_collect', tenant_id: tenant.id, plan_id: plan.id, mac, router_id: router.id, label,
+          commissionPct: Number(tenant.settlement_commission_pct ?? 5),
+        }]);
     } else {
       const gw = await import('./payments/daraja.js');
       const r = await gw.stkPush(tenant.id, {
