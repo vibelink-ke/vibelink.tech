@@ -4811,6 +4811,13 @@ app.get('/api/inventory/:id/movements', requirePermission('inventory.view'), wra
   res.json(rows);
 }));
 
+// The only categories with no individual identity worth tracking — a length
+// of cable or a bag of connectors is a count, not a set of accountable
+// units. Everything else must carry a MAC or a serial, which in practice
+// means it can only ever be added one at a time (quantity 1): a single row
+// can hold one identifier, never one per unit in a batch.
+const UNSERIALIZED_CATEGORIES = new Set(['Cable', 'Connector']);
+
 app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (req, res) => {
   const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
           status, notes, quantity, unit } = req.body;
@@ -4824,6 +4831,16 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
   // against a quantity line it can't actually mean anything for.
   const qty = Math.max(1, Math.trunc(Number(quantity)) || 1);
   const isBulk = qty > 1;
+  const exempt = UNSERIALIZED_CATEGORIES.has(category);
+
+  if (isBulk && !exempt) {
+    return res.status(400).json({
+      error: `Only ${[...UNSERIALIZED_CATEGORIES].join('/')} can be added as a quantity line — add ${category || 'this'} one at a time with its own MAC or serial.`,
+    });
+  }
+  if (!isBulk && !exempt && !macAddress?.trim() && !serialNumber?.trim()) {
+    return res.status(400).json({ error: 'Record a MAC address or serial number for this gadget.' });
+  }
 
   if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(
@@ -4873,6 +4890,19 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
 
   const qty = quantity !== undefined ? Math.max(1, Math.trunc(Number(quantity)) || 1) : before.quantity;
   const isBulk = qty > 1;
+  const effectiveCategory = category !== undefined ? category : before.category;
+  const exempt = UNSERIALIZED_CATEGORIES.has(effectiveCategory);
+  const effectiveMac = macAddress !== undefined ? macAddress : before.mac_address;
+  const effectiveSerial = serialNumber !== undefined ? serialNumber : before.serial_number;
+
+  if (isBulk && !exempt) {
+    return res.status(400).json({
+      error: `Only ${[...UNSERIALIZED_CATEGORIES].join('/')} can be a quantity line — add ${effectiveCategory || 'this'} one at a time with its own MAC or serial.`,
+    });
+  }
+  if (!isBulk && !exempt && !effectiveMac?.trim() && !effectiveSerial?.trim()) {
+    return res.status(400).json({ error: 'Record a MAC address or serial number for this gadget.' });
+  }
 
   if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(

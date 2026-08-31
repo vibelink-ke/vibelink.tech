@@ -52,8 +52,12 @@ function useSearchResults(q, store) {
       if (hit(v.code) || hit(v.phone))
         out.push({ kind: 'Voucher', title: v.code, detail: v.status, to: '/hotspot' });
     }
+    for (const i of store.inventory ?? []) {
+      if (hit(i.name) || hit(i.mac_address) || hit(i.serial_number) || hit(i.category))
+        out.push({ kind: 'Inventory', title: i.name, detail: i.mac_address || i.serial_number || `${i.quantity ?? 1}${i.unit ? ` ${i.unit}` : ''}`, to: '/inventory' });
+    }
     return out.slice(0, 40);
-  }, [q, store.clients, store.unmatched, store.tickets, store.routers, store.vouchers]);
+  }, [q, store.clients, store.unmatched, store.tickets, store.routers, store.vouchers, store.inventory]);
 }
 
 /**

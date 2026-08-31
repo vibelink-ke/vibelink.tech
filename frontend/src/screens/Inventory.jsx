@@ -5,6 +5,11 @@ import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 
 const CATEGORIES = ['Router', 'ONT', 'CPE', 'Switch', 'Cable', 'Connector', 'Antenna', 'Other'];
+// The only categories with no individual identity to speak of — a length of
+// cable or a bag of connectors is a count, not a set of accountable units.
+// Everything else needs a MAC or a serial precisely because it's the kind
+// of gadget that goes missing and needs tracing back to someone.
+const UNSERIALIZED_CATEGORIES = ['Cable', 'Connector'];
 const STATUSES = [
   { value: 'in_stock', label: 'In stock' },
   { value: 'installed', label: 'Installed' },
@@ -43,6 +48,7 @@ export default function Inventory() {
   const [form, setForm] = useState(null);   // null = closed, object = open (new or editing)
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [adjustBusy, setAdjustBusy] = useState(null);
   const [issuing, setIssuing] = useState(null);   // { item, staffId, quantity, macAddress, serialNumber, note }
   const [issueBusy, setIssueBusy] = useState(false);
@@ -66,6 +72,13 @@ export default function Inventory() {
   const save = async () => {
     if (!form.name.trim()) return store.toast('Name it');
     if (!(Number(form.quantity) >= 1)) return store.toast('Quantity must be at least 1');
+    const exempt = UNSERIALIZED_CATEGORIES.includes(form.category);
+    if (!exempt && isBulk) {
+      return store.toast(`Only ${UNSERIALIZED_CATEGORIES.join('/')} can be added as a quantity line — add ${form.category} one at a time with its own MAC or serial.`);
+    }
+    if (!exempt && !isBulk && !form.macAddress.trim() && !form.serialNumber.trim()) {
+      return store.toast('Record a MAC address or serial number for this gadget');
+    }
     setBusy(true);
     try {
       if (form.id) {
@@ -158,13 +171,22 @@ export default function Inventory() {
   };
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return items;
-    if (filter === 'ours') return items.filter((i) => i.owned_by_tenant);
-    if (filter === 'client') return items.filter((i) => !i.owned_by_tenant);
-    if (filter === 'bulk') return items.filter((i) => i.tracking === 'bulk');
-    if (filter.startsWith('loc:')) return items.filter((i) => i.location === filter.slice(4));
-    return items.filter((i) => i.status === filter);
-  }, [items, filter]);
+    let rows = items;
+    if (filter === 'ours') rows = rows.filter((i) => i.owned_by_tenant);
+    else if (filter === 'client') rows = rows.filter((i) => !i.owned_by_tenant);
+    else if (filter === 'bulk') rows = rows.filter((i) => i.tracking === 'bulk');
+    else if (filter.startsWith('loc:')) rows = rows.filter((i) => i.location === filter.slice(4));
+    else if (filter !== 'all') rows = rows.filter((i) => i.status === filter);
+
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      rows = rows.filter((i) =>
+        (i.mac_address ?? '').toLowerCase().includes(needle) ||
+        (i.serial_number ?? '').toLowerCase().includes(needle) ||
+        (i.name ?? '').toLowerCase().includes(needle));
+    }
+    return rows;
+  }, [items, filter, search]);
 
   const oursCount = items.filter((i) => i.owned_by_tenant).length;
   const bulkCount = items.filter((i) => i.tracking === 'bulk').length;
@@ -188,6 +210,13 @@ export default function Inventory() {
       <Card
         title="Gadgets & stock"
         actions={
+          <>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by MAC, serial or name…"
+            style={{ fontFamily: font.mono, fontSize: 12.5, width: 220 }}
+          />
           <Select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -203,6 +232,7 @@ export default function Inventory() {
               ...STATUSES,
             ]}
           />
+          </>
         }
       >
         <Table
