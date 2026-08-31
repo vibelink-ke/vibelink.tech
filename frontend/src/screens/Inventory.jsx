@@ -54,6 +54,8 @@ export default function Inventory() {
   const [issueBusy, setIssueBusy] = useState(false);
   const [history, setHistory] = useState(null);   // { item, rows, loading }
   const [viewing, setViewing] = useState(null);   // a serialized group being inspected
+  const [replacing, setReplacing] = useState(null);   // { faulty, replacementId, note }
+  const [replaceBusy, setReplaceBusy] = useState(false);
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target?.value ?? e }));
 
@@ -180,6 +182,33 @@ export default function Inventory() {
       store.toast(`${i.name} returned to the warehouse`);
     } catch (e) {
       store.toast(`Could not return: ${e.message}`);
+    }
+  };
+
+  // A same-name, same-category unit sitting unused in the warehouse — the
+  // pool of things that could stand in for a faulty gadget. Drawn from
+  // whichever group is currently open rather than the whole inventory,
+  // since a replacement has to actually be the same kind of gadget.
+  const replacementCandidates = (faulty) =>
+    (viewing?.units ?? items.filter((x) => x.name === faulty.name && x.category === faulty.category))
+      .filter((x) => x.id !== faulty.id && x.location === 'warehouse' && x.status !== 'faulty');
+
+  const openReplace = (i) => setReplacing({ faulty: i, replacementId: '', note: '' });
+
+  const submitReplace = async () => {
+    if (!replacing.replacementId) return store.toast('Pick a replacement unit');
+    setReplaceBusy(true);
+    try {
+      await api.replaceInventoryItem(replacing.faulty.id, { replacementId: replacing.replacementId, note: replacing.note || undefined });
+      const fresh = await api.inventory();
+      store.setCollection('inventory', fresh);
+      setViewing((v) => (v ? { ...v, units: fresh.filter((x) => x.name === v.name && x.category === v.category) } : v));
+      store.toast(`${replacing.faulty.name} replaced — the faulty unit is now at the repair bench`);
+      setReplacing(null);
+    } catch (e) {
+      store.toast(`Could not replace: ${e.message}`);
+    } finally {
+      setReplaceBusy(false);
     }
   };
 
@@ -511,6 +540,45 @@ export default function Inventory() {
         )}
       </Modal>
 
+      <Modal
+        open={!!replacing}
+        title={`Replace ${replacing?.faulty?.name ?? ''}`}
+        onClose={() => setReplacing(null)}
+        footer={
+          <>
+            <Button onClick={() => setReplacing(null)}>Cancel</Button>
+            <Button variant="primary" onClick={submitReplace} disabled={replaceBusy}>
+              {replaceBusy ? 'Replacing…' : 'Replace'}
+            </Button>
+          </>
+        }
+      >
+        {replacing && (() => {
+          const candidates = replacementCandidates(replacing.faulty);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ fontSize: 12.5, color: color.muted }}>
+                The replacement takes over exactly where this one was — {locationText(replacing.faulty).toLowerCase()} —
+                and inherits its ownership. The faulty unit moves to the repair bench instead of disappearing from the record.
+              </div>
+              <Field label="Replacement unit" hint={candidates.length ? undefined : 'No matching, working units currently in the warehouse'}>
+                <Select
+                  value={replacing.replacementId}
+                  onChange={(e) => setReplacing((s) => ({ ...s, replacementId: e.target.value }))}
+                  options={[
+                    { value: '', label: candidates.length ? 'Select…' : 'None available' },
+                    ...candidates.map((c) => ({ value: c.id, label: `${c.mac_address || c.serial_number || c.id}` })),
+                  ]}
+                />
+              </Field>
+              <Field label="Note" hint="Optional">
+                <Textarea rows={2} value={replacing.note} onChange={(e) => setReplacing((s) => ({ ...s, note: e.target.value }))} />
+              </Field>
+            </div>
+          );
+        })()}
+      </Modal>
+
       <Drawer open={!!viewing} title={`${viewing?.name ?? ''} — ${viewing?.units?.length ?? 0} unit(s)`} onClose={() => setViewing(null)} width={640}>
         {viewing && (
           <Table
@@ -538,6 +606,9 @@ export default function Inventory() {
                     )}
                     {(i.location === 'van' || i.location === 'repair_bench') && (
                       <span onClick={() => returnItem(i)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Return</span>
+                    )}
+                    {i.status === 'faulty' && (i.location === 'premises' || i.location === 'van') && (
+                      <span onClick={() => openReplace(i)} title="Swap in a working unit from the warehouse" style={{ color: color.amberInk, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Replace</span>
                     )}
                     <span onClick={() => openHistory(i)} style={{ color: color.neutralInk, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>History</span>
                     <span onClick={() => openEdit(i)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Edit</span>

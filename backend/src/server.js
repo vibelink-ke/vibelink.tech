@@ -5127,6 +5127,66 @@ app.post('/api/inventory/:id/return', requirePermission('inventory.edit'), wrap(
   res.json({ ok: true });
 }));
 
+/**
+ * Swap a faulty gadget out for a working one from the warehouse, in one
+ * step — the replacement inherits exactly where the faulty one was (the
+ * same client's premises, or the same technician's van) and who it belongs
+ * to, while the faulty one moves to the repair bench rather than
+ * disappearing from the record. Two separate calls (Return the faulty one,
+ * then Issue a replacement) would work too, but would leave the client
+ * connectionless in between and lose the "this one replaced that one"
+ * link this keeps in the movement history of both.
+ */
+app.post('/api/inventory/:id/replace', requirePermission('inventory.edit'), wrap(async (req, res) => {
+  const { replacementId, note } = req.body;
+  if (!replacementId) return res.status(400).json({ error: 'Pick a replacement unit' });
+
+  const { rows: [faulty] } = await pool.query(
+    'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!faulty) return res.status(404).json({ error: 'not found' });
+  if (faulty.status !== 'faulty') return res.status(400).json({ error: 'Only a gadget marked faulty can be replaced this way.' });
+  if (!['premises', 'van'].includes(faulty.location)) {
+    return res.status(400).json({ error: "This gadget isn't currently deployed anywhere — use Issue instead of Replace." });
+  }
+
+  const { rows: [replacement] } = await pool.query(
+    'select * from inventory_items where id=$1 and tenant_id=$2', [replacementId, req.tenant.id]);
+  if (!replacement) return res.status(404).json({ error: 'No such replacement unit' });
+  if (replacement.tracking !== 'serialized') return res.status(400).json({ error: 'The replacement must be an individually tracked gadget, not a bulk stock line.' });
+  if (replacement.location !== 'warehouse') return res.status(409).json({ error: 'The replacement must currently be sitting in the warehouse.' });
+  if (replacement.status === 'faulty') return res.status(400).json({ error: 'The replacement is itself marked faulty.' });
+
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query(
+      `update inventory_items set location=$2, subscriber_id=$3, router_id=$4, assigned_staff_id=$5,
+         owned_by_tenant=$6, status='in_stock', updated_at=now() where id=$1`,
+      [replacement.id, faulty.location, faulty.subscriber_id, faulty.router_id, faulty.assigned_staff_id, faulty.owned_by_tenant]);
+    await c.query(
+      `update inventory_items set location='repair_bench', subscriber_id=null, router_id=null, assigned_staff_id=null, updated_at=now() where id=$1`,
+      [faulty.id]);
+    await c.query('commit');
+  } catch (e) {
+    await c.query('rollback');
+    throw e;
+  } finally {
+    c.release();
+  }
+
+  const swapNote = note?.trim() || null;
+  await logInventoryMovement(req.tenant.id, replacement.id, 'replaced', {
+    fromLocation: 'warehouse', toLocation: faulty.location, subscriberId: faulty.subscriber_id, staffId: faulty.assigned_staff_id,
+    note: swapNote || `Replacing faulty ${faulty.name} (${faulty.mac_address || faulty.serial_number || faulty.id})`,
+  });
+  await logInventoryMovement(req.tenant.id, faulty.id, 'replaced', {
+    fromLocation: faulty.location, toLocation: 'repair_bench',
+    note: swapNote || `Replaced by ${replacement.name} (${replacement.mac_address || replacement.serial_number || replacement.id})`,
+  });
+
+  res.json({ ok: true, replacementId: replacement.id, faultyId: faulty.id });
+}));
+
 app.delete('/api/inventory/:id', requirePermission('inventory.delete'), wrap(async (req, res) => {
   const { rowCount } = await pool.query(
     'delete from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);

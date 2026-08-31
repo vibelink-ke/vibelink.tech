@@ -209,6 +209,7 @@ export const api = {
   adjustInventoryQuantity: (id, delta) => post(`/api/inventory/${id}/adjust-quantity`, { delta }),
   issueInventoryItem: (id, body) => post(`/api/inventory/${id}/issue`, body),
   returnInventoryItem: (id, note) => post(`/api/inventory/${id}/return`, { note }),
+  replaceInventoryItem: (id, body) => post(`/api/inventory/${id}/replace`, body),
   inventoryMovements: (id) => get(`/api/inventory/${id}/movements`),
   platformUpdates: () => get('/api/platform/updates'),
   createPlatformUpdate: (u) => post('/api/platform/updates', u),
