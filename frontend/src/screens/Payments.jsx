@@ -59,6 +59,21 @@ export default function Payments() {
   const pendingSettlement = settlements
     .filter((s) => s.status === 'pending' || s.status === 'processing')
     .reduce((a, s) => a + Number(s.amount ?? 0), 0);
+  const hasPendingPayout = settlements.some((s) => s.status === 'pending');
+  const [payoutBusy, setPayoutBusy] = useState(false);
+
+  const requestPayout = async () => {
+    setPayoutBusy(true);
+    try {
+      const r = await api.requestSettlementPayout();
+      await store.reload();
+      store.toast(`Payout of KES ${kes(r.amount)} queued — it lands once M-Pesa confirms it`);
+    } catch (e) {
+      store.toast(e.message);
+    } finally {
+      setPayoutBusy(false);
+    }
+  };
 
   const collected = all.filter((p) => p.status === 'applied').reduce((a, p) => a + Number(p.amount ?? 0), 0);
   const openInvoices = invoices.filter((i) => i.status === 'open' || i.status === 'partial');
@@ -530,7 +545,15 @@ export default function Payments() {
           )}
 
           {tab === 'settlements' && (
-            <Table
+            <>
+              {hasPendingPayout && (
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                  <Button variant="primary" onClick={requestPayout} disabled={payoutBusy}>
+                    {payoutBusy ? 'Requesting…' : 'Request payout now'}
+                  </Button>
+                </div>
+              )}
+              <Table
               rowKey={(r) => r.id}
               empty="No settlements yet — this fills in once platform collection is switched on and customers start paying"
               rows={settlements}
@@ -542,7 +565,8 @@ export default function Payments() {
                 { key: 'created_at', label: 'Accrued since', render: (r) => when(r.created_at) },
                 { key: 'settled_at', label: 'Paid out', render: (r) => when(r.settled_at) },
               ]}
-            />
+              />
+            </>
           )}
         </div>
       </div>

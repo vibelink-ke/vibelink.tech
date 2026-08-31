@@ -12,7 +12,7 @@ import { router as bank } from './payments/bankstk.js';
 import { router as manual } from './payments/manual.js';
 import * as kk from './payments/kopokopo.js';
 import * as mpesa from './payments/daraja.js';
-import { startJobs } from './jobs.js';
+import { startJobs, payoutTenantNow } from './jobs.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
 import { requirePermission, loadPermissions, savePermissions, PERMISSION_META } from './permissions.js';
@@ -6129,6 +6129,22 @@ app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req,
   const { rows } = await pool.query(
     'select * from settlements where tenant_id=$1 order by created_at desc', [req.tenant.id]);
   res.json(rows);
+}));
+
+/**
+ * On-demand payout, instead of waiting for the 2am settleTenants sweep — see
+ * jobs.js's payoutTenantNow for the actual B2C call and its failure modes
+ * (nothing pending, below the KES 100 minimum, no settlement_phone set, or
+ * the platform payout account missing). Those all come back as a normal
+ * 400/503 with a message meant to be shown directly, not logged.
+ */
+app.post('/api/settlements/payout', requirePermission('payments.request_payout'), wrap(async (req, res) => {
+  try {
+    const result = await payoutTenantNow(req.tenant.id);
+    res.json(result);
+  } catch (e) {
+    res.status(e.status ?? 500).json({ error: e.message });
+  }
 }));
 
 // ── catalogue: plans and tariffs ──────────────────

@@ -57,6 +57,7 @@ export const DEFAULT_PERMISSIONS = {
   'payments.view':   { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'payments.apply':  { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'payments.edit':   all(),
+  'payments.request_payout': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
   'staff.view':               all(),
   'staff.create':             all(),
@@ -105,6 +106,7 @@ export const PERMISSION_META = [
   { key: 'payments.view',  page: 'Payments', action: 'View' },
   { key: 'payments.apply', page: 'Payments', action: 'Apply / match' },
   { key: 'payments.edit',  page: 'Payments', action: 'Edit gateway credentials' },
+  { key: 'payments.request_payout', page: 'Payments', action: 'Request settlement payout' },
   { key: 'staff.view',               page: 'Staff & roles', action: 'View' },
   { key: 'staff.create',             page: 'Staff & roles', action: 'Invite' },
   { key: 'staff.edit',               page: 'Staff & roles', action: 'Edit' },

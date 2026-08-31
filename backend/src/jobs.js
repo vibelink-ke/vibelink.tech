@@ -696,6 +696,33 @@ export async function autoProvisionNewRouters() {
  */
 const SETTLEMENT_MIN_KES = 100;
 
+async function platformOwnerTenantId() {
+  const { rows: [owner] } = await pool.query(
+    "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+  return owner?.tenant_id ?? null;
+}
+
+/**
+ * The actual B2C call, shared by the nightly sweep and the on-demand
+ * "Request payout" route (POST /api/settlements/payout, server.js) so a
+ * tenant-triggered payout goes through the exact same accounting as the
+ * automatic one.
+ */
+async function payoutRow(row, ownerTenantId) {
+  const daraja = await import('./payments/daraja.js');
+  const { conversationId } = await daraja.b2c(ownerTenantId, {
+    phone: row.settlement_phone, amount: row.amount,
+    remarks: 'Vibelink settlement', occasion: row.tenant_id,
+  });
+  // 'processing' rather than 'paid' here — Safaricom answers this call
+  // with "queued", not a result; b2c-result (daraja.js) is what
+  // actually confirms it, matched back to this row by conversation_id.
+  await pool.query(
+    "update settlements set status='processing', conversation_id=$2 where id=$1",
+    [row.settlement_id, conversationId]);
+  return conversationId;
+}
+
 export async function settleTenants() {
   const { rows } = await pool.query(
     `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name
@@ -705,31 +732,46 @@ export async function settleTenants() {
     [SETTLEMENT_MIN_KES]);
   if (!rows.length) return;
 
-  const { rows: [owner] } = await pool.query(
-    "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
-  if (!owner) {
+  const ownerTenantId = await platformOwnerTenantId();
+  if (!ownerTenantId) {
     console.warn('settleTenants: no platform-owner tenant found — nothing paid out');
     return;
   }
 
-  const daraja = await import('./payments/daraja.js');
   for (const r of rows) {
     try {
-      const { conversationId } = await daraja.b2c(owner.tenant_id, {
-        phone: r.settlement_phone, amount: r.amount,
-        remarks: 'Vibelink settlement', occasion: r.tenant_id,
-      });
-      // 'processing' rather than 'paid' here — Safaricom answers this call
-      // with "queued", not a result; b2c-result (daraja.js) is what
-      // actually confirms it, matched back to this row by conversation_id.
-      await pool.query(
-        "update settlements set status='processing', conversation_id=$2 where id=$1",
-        [r.settlement_id, conversationId]);
+      const conversationId = await payoutRow(r, ownerTenantId);
       console.log('settleTenants: queued payout', r.name, `KES ${r.amount}`, conversationId);
     } catch (e) {
       console.error('settleTenants:', r.name, e.message);
     }
   }
+}
+
+/**
+ * A tenant clicking "Request payout" on the Settlements tab rather than
+ * waiting for the 2am sweep. Same minimum, same destination account, same
+ * 'processing' handoff to the b2c-result webhook — this just runs it now,
+ * for one tenant, and reports failure back to the click instead of only a
+ * server log.
+ */
+export async function payoutTenantNow(tenantId) {
+  const { rows: [row] } = await pool.query(
+    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name
+       from settlements s join tenants t on t.id = s.tenant_id
+      where s.tenant_id=$1 and s.status='pending'`,
+    [tenantId]);
+  if (!row) throw Object.assign(new Error('Nothing pending to settle.'), { status: 400 });
+  if (Number(row.amount) < SETTLEMENT_MIN_KES) {
+    throw Object.assign(new Error(`Minimum payout is KES ${SETTLEMENT_MIN_KES} — keep collecting until then.`), { status: 400 });
+  }
+  if (!row.settlement_phone) throw Object.assign(new Error('Set a settlement M-Pesa number first.'), { status: 400 });
+
+  const ownerTenantId = await platformOwnerTenantId();
+  if (!ownerTenantId) throw Object.assign(new Error('Platform payout account is not set up yet.'), { status: 503 });
+
+  const conversationId = await payoutRow(row, ownerTenantId);
+  return { amount: Number(row.amount), conversationId };
 }
 
 /**
