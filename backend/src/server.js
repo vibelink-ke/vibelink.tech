@@ -4813,15 +4813,17 @@ app.get('/api/inventory/:id/movements', requirePermission('inventory.view'), wra
 
 app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (req, res) => {
   const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
-          status, notes, tracking, quantity, unit } = req.body;
+          status, notes, quantity, unit } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
 
-  // Bulk stock has no individual identity and isn't installed anywhere —
-  // any MAC/serial/premises/router the form still carried from a prior
-  // serialized entry is dropped rather than saved against a quantity line
-  // it can't actually mean anything for.
-  const isBulk = tracking === 'bulk';
-  if (isBulk && !(Number(quantity) >= 0)) return res.status(400).json({ error: 'Quantity must be zero or more' });
+  // One add-stock form covers both cases now — whether this is a single,
+  // individually identified gadget or a multi-unit stock line is decided by
+  // the quantity itself, not a separate toggle. More than one unit has no
+  // individual identity and isn't installed anywhere: any MAC/serial/
+  // premises/site the form still carried is dropped rather than saved
+  // against a quantity line it can't actually mean anything for.
+  const qty = Math.max(1, Math.trunc(Number(quantity)) || 1);
+  const isBulk = qty > 1;
 
   if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(
@@ -4847,12 +4849,12 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
        isBulk ? null : subscriberId || null,
        isBulk ? null : routerId || null,
        status || 'in_stock', notes || null, isBulk ? 'bulk' : 'serialized',
-       isBulk ? Math.trunc(Number(quantity)) : 1, isBulk ? unit?.trim() || null : null,
+       qty, isBulk ? unit?.trim() || null : null,
        !isBulk && subscriberId ? 'premises' : 'warehouse']);
     await logInventoryMovement(req.tenant.id, item.id, 'created', {
       toLocation: !isBulk && subscriberId ? 'premises' : 'warehouse',
       subscriberId: !isBulk ? subscriberId || null : null,
-      quantity: isBulk ? Math.trunc(Number(quantity)) : 1,
+      quantity: qty,
     });
     res.json({ id: item.id, ok: true });
   } catch (e) {
@@ -4863,16 +4865,14 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
 
 app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (req, res) => {
   const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
-          status, notes, tracking, quantity, unit } = req.body;
+          status, notes, quantity, unit } = req.body;
 
   const { rows: [before] } = await pool.query(
     'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!before) return res.status(404).json({ error: 'not found' });
 
-  const isBulk = tracking === 'bulk';
-  if (isBulk && quantity !== undefined && !(Number(quantity) >= 0)) {
-    return res.status(400).json({ error: 'Quantity must be zero or more' });
-  }
+  const qty = quantity !== undefined ? Math.max(1, Math.trunc(Number(quantity)) || 1) : before.quantity;
+  const isBulk = qty > 1;
 
   if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(
@@ -4904,8 +4904,8 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
          router_id = $9,
          status = coalesce($10, status),
          notes = $11,
-         tracking = coalesce($12, tracking),
-         quantity = coalesce($13, quantity),
+         tracking = $12,
+         quantity = $13,
          unit = $14,
          location = $15,
          updated_at = now()
@@ -4916,8 +4916,8 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
        typeof ownedByTenant === 'boolean' ? ownedByTenant : null,
        newSubscriberId,
        isBulk ? null : routerId || null,
-       status || null, notes || null, tracking || null,
-       quantity !== undefined ? Math.trunc(Number(quantity)) : null,
+       status || null, notes || null, isBulk ? 'bulk' : 'serialized',
+       qty,
        isBulk ? unit?.trim() || null : null,
        newLocation]);
     if (!item) return res.status(404).json({ error: 'not found' });
@@ -4984,12 +4984,19 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
     if (qty > 1 && (macAddress || serialNumber)) {
       return res.status(400).json({ error: 'A MAC or serial can only be recorded when issuing exactly 1 unit.' });
     }
+    // Issuing exactly one unit is the moment it stops being an anonymous
+    // count and becomes a specific, accountable gadget — both identifiers
+    // are required here, not optional, so a unit can never leave the shelf
+    // without something to hold whoever's carrying it accountable for it.
+    if (qty === 1 && (!macAddress?.trim() || !serialNumber?.trim())) {
+      return res.status(400).json({ error: 'Record both the MAC address and serial number of the unit being issued.' });
+    }
 
     await pool.query('update inventory_items set quantity = quantity - $2, updated_at = now() where id=$1', [item.id, qty]);
     await logInventoryMovement(req.tenant.id, item.id, 'issued', { toLocation: 'van', staffId, quantity: qty, note });
 
     let createdId = null;
-    if (qty === 1 && (macAddress?.trim() || serialNumber?.trim())) {
+    if (qty === 1) {
       try {
         const { rows: [child] } = await pool.query(
           `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
@@ -5008,6 +5015,14 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
       }
     }
     return res.json({ ok: true, quantity: item.quantity - qty, createdId });
+  }
+
+  // A gadget that was never given both identifiers at creation has nothing
+  // to hold whoever's carrying it accountable for it — same rule as issuing
+  // a single unit out of bulk stock, just checked against what's already on
+  // the record instead of what's typed in now.
+  if (!item.mac_address || !item.serial_number) {
+    return res.status(400).json({ error: 'This gadget is missing a MAC address or serial number — add both (Edit) before issuing it.' });
   }
 
   await pool.query(
