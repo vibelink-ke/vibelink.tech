@@ -1929,3 +1929,12 @@ create table if not exists inventory_movements (
 );
 create index if not exists inventory_movements_item_idx on inventory_movements (item_id, created_at desc);
 create index if not exists inventory_movements_tenant_idx on inventory_movements (tenant_id, created_at desc);
+
+-- A newly invited staff member used to get no notification at all — no
+-- password, no username, no link, nothing telling them an account even
+-- existed. 'invite' is a third login_tokens purpose alongside reset/magic,
+-- redeemed at /accept-invite to set both a password and a username for the
+-- first time, sent by SMS (always, since phone is the one field invite
+-- actually requires) and email (if one was given).
+alter table login_tokens drop constraint if exists login_tokens_purpose_check;
+alter table login_tokens add constraint login_tokens_purpose_check check (purpose in ('reset', 'magic', 'invite'));

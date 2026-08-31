@@ -104,17 +104,34 @@ export const pruneHandoffs = () =>
 
 const RESET_MINUTES = 30;
 const MAGIC_MINUTES = 15;
+// An invite isn't urgent the way a password reset is — the person may not
+// see the SMS/email for a day or two — so it gets far longer to be redeemed.
+const INVITE_MINUTES = 60 * 24 * 3;
 
 /** Minted for a staff row before any session exists — that is what it is for. */
 export async function createLoginToken(staffId, purpose) {
   const token = crypto.randomBytes(24).toString('base64url');
-  const minutes = purpose === 'magic' ? MAGIC_MINUTES : RESET_MINUTES;
+  const minutes = purpose === 'magic' ? MAGIC_MINUTES : purpose === 'invite' ? INVITE_MINUTES : RESET_MINUTES;
   await pool.query(
     `insert into login_tokens (token, staff_id, purpose, expires_at)
      values ($1, $2, $3, now() + ($4 || ' minutes')::interval)`,
     [token, staffId, purpose, minutes]
   );
   return token;
+}
+
+/**
+ * Check whether a token is still redeemable without spending it — used
+ * before asking for the rest of a form (a username, which might turn out
+ * to be taken) so a fixable mistake doesn't burn a one-time invite link.
+ */
+export async function peekLoginToken(token, purpose) {
+  if (!token) return null;
+  const { rows: [row] } = await pool.query(
+    `select staff_id from login_tokens where token=$1 and purpose=$2 and used_at is null and expires_at > now()`,
+    [token, purpose]
+  );
+  return row?.staff_id ?? null;
 }
 
 /** Redeem at most once, and only for the purpose it was minted for. */

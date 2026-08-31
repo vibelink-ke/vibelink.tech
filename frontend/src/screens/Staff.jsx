@@ -72,7 +72,7 @@ export default function Staff() {
     try {
       const created = await api.createStaff({ ...invite, role: invite.role.toLowerCase() });
       store.setCollection('staff', (s) => [...s.filter((x) => x.id !== created.id), created]);
-      store.toast(`${created.name} invited`);
+      store.toast(`${created.name} invited — a setup link was texted to them${created.email ? ' and emailed' : ''}`);
       setInvite(null);
     } catch (e) {
       store.toast(`Could not invite: ${e.message}`);

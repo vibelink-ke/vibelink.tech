@@ -53,6 +53,8 @@ export const api = {
   logout: () => post('/api/auth/logout', {}),
   forgotPassword: (identifier) => post('/api/auth/forgot', { identifier }),
   resetPassword: (token, password) => post('/api/auth/reset', { token, password }),
+  inviteInfo: (token) => get(`/api/auth/invite-info?token=${encodeURIComponent(token)}`),
+  acceptInvite: (token, username, password) => post('/api/auth/accept-invite', { token, username, password }),
   requestMagicLink: (identifier) => post('/api/auth/magic-link', { identifier }),
 
   // ── subscribers ──

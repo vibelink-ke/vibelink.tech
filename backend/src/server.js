@@ -462,6 +462,49 @@ app.post('/api/auth/reset', wrap(async (req, res) => {
 }));
 
 /**
+ * What /accept-invite shows before asking for anything — just enough to
+ * greet the right person by name and tenant, and to tell a dead link apart
+ * from one that hasn't been opened yet. Never reveals the staff row's own
+ * details beyond its first name and the company inviting them.
+ */
+app.get('/api/auth/invite-info', wrap(async (req, res) => {
+  const staffId = await auth.peekLoginToken(String(req.query.token ?? ''), 'invite');
+  if (!staffId) return res.status(400).json({ error: 'That invite link is invalid or has expired.' });
+  const { rows: [s] } = await pool.query(
+    `select st.name, t.name as tenant_name from staff st join tenants t on t.id = st.tenant_id where st.id=$1`, [staffId]);
+  res.json({ name: s?.name ?? null, tenant: s?.tenant_name ?? 'Vibelink' });
+}));
+
+/**
+ * Where an invite link actually lands: choose a username and a first
+ * password in one step. The username check runs before the token is
+ * consumed — a taken username is a fixable mistake, and burning a
+ * one-time invite link over it would mean asking whoever sent the invite
+ * to send another.
+ */
+app.post('/api/auth/accept-invite', wrap(async (req, res) => {
+  const { token, username, password } = req.body ?? {};
+  if (String(password ?? '').length < 8)
+    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  const uname = String(username ?? '').trim();
+  if (!uname) return res.status(400).json({ error: 'Choose a username.' });
+
+  const staffId = await auth.peekLoginToken(token, 'invite');
+  if (!staffId) return res.status(400).json({ error: 'That invite link is invalid or has expired.' });
+
+  const { rows: [clash] } = await pool.query(
+    'select 1 from staff where lower(username)=lower($1) and id<>$2', [uname, staffId]);
+  if (clash) return res.status(409).json({ error: 'That username is already taken — pick another.' });
+
+  const consumed = await auth.consumeLoginToken(token, 'invite');
+  if (!consumed) return res.status(400).json({ error: 'That invite link is invalid or has expired.' });
+
+  await pool.query('update staff set username=$2, password_hash=$3 where id=$1',
+    [staffId, uname, await auth.hashPassword(password)]);
+  res.json({ ok: true });
+}));
+
+/**
  * Passwordless sign-in: emails a one-use link instead of asking for a
  * password at all. Email only, unlike /api/auth/forgot — a texted link this
  * short-lived (15 min) that also signs someone in is a heavier thing to trust
@@ -6947,17 +6990,39 @@ app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) 
     if (emailClash) return res.status(409).json({ error: `${emailClash.name} already uses that email address.` });
   }
 
+  let s;
   try {
-    const { rows: [s] } = await pool.query(
+    ({ rows: [s] } = await pool.query(
       `insert into staff (tenant_id, name, phone, email, role) values ($1,$2,$3,$4,$5) returning *`,
-      [req.tenant.id, name, phone, email ?? null, role]);
-    res.json(s);
+      [req.tenant.id, name, phone, email ?? null, role]));
   } catch (e) {
     // The pre-checks above cover the common case; this is the race-condition
     // backstop for two invites landing at the same instant.
     if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });
     throw e;
   }
+
+  // The row existing was previously the whole "invite" — nothing was ever
+  // sent to the person it names, so they had no password, no username, and
+  // no way to discover either fact short of being told by hand. SMS always
+  // (phone is the one field this route actually requires); email too if
+  // one was given. Best-effort: the account is real either way, and a
+  // delivery hiccup shouldn't fail the invite itself.
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const brand = req.tenant.name || 'Vibelink';
+  auth.createLoginToken(s.id, 'invite').then(async (token) => {
+    const link = `https://${req.tenant.subdomain}.${root}/accept-invite?token=${token}`;
+    const sms = await import('./sms.js');
+    await sms.send(req.tenant.id, s.phone, 'custom',
+      { body: `You've been added to ${brand}'s team. Set up your login: ${link} (valid 3 days)` }).catch(() => {});
+    if (s.email) {
+      const email = await import('./email.js');
+      await email.sendSystem(req.tenant.id, s.email, `You've been invited to ${brand}`,
+        `Set up your login: ${link}\n\nThis link expires in 3 days. If this wasn't expected, ignore it.`).catch(() => {});
+    }
+  }).catch(() => {});
+
+  res.json(s);
 }));
 
 /**
