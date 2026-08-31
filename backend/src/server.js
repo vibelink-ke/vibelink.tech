@@ -4134,7 +4134,8 @@ app.post('/api/routers/:id/devices/unlock', requirePermission('routers.configure
 }));
 
 /**
- * Read the PPPoE accounts off a router, and optionally create clients from them.
+ * Read the PPPoE and hotspot accounts off a router, and optionally create
+ * clients from them.
  *
  * Two steps on purpose. GET-like preview first, because importing several
  * hundred customers is not something to trigger by misclicking, and the
@@ -4144,7 +4145,55 @@ app.post('/api/routers/:id/devices/unlock', requirePermission('routers.configure
  * updated: the database is authoritative once a customer is billed from here,
  * and quietly overwriting a password from a router that has drifted would cut
  * that customer off.
+ *
+ * A /ppp/secret with no password used to be skipped outright — nothing to
+ * authenticate it with, and inventing a password for an account nobody can
+ * confirm is real risks billing a stale entry from someone who left months
+ * ago. /ppp/active (live right now) is what turns that risk into a fact:
+ * a no-password secret that the router currently shows connected, or a live
+ * PPPoE session with no /ppp/secret entry at all (a router relying purely on
+ * RADIUS), is unambiguously a real customer. Both get a freshly generated
+ * password here — RADIUS (radius.js's syncSubscriberCredentials), not the
+ * router's own /ppp/secret, is what actually authenticates a subscriber once
+ * billed from this platform, so the router's local secret being empty or
+ * missing entirely is not a blocker once we know the account is live.
+ *
+ * Active hotspot sessions come from the same /ppp/active,/ip/hotspot/active
+ * read (routeros.js's activeSessions) and are matched by MAC — a hotspot
+ * login commonly has no stable username at all, but the device does.
  */
+/**
+ * The sorting logic behind import-secrets, pulled out on its own: pure data
+ * in, categorized data out, no router or DB I/O — so it can be tested
+ * directly against fixed router-shaped rows instead of only through a live
+ * RouterOS socket, which is exactly the class of bug (an ordering/reference
+ * mistake with no easy manual repro) this file has already shipped once.
+ */
+function categorizeImport(found, sessions, knownPppoe, knownMac) {
+  const activeByUser = new Map(
+    sessions.filter((s) => s.service === 'pppoe').map((s) => [s.username, s]));
+
+  const importable = found.filter((f) => f.password && !knownPppoe.has(f.name));
+  const already = found.filter((f) => knownPppoe.has(f.name)).map((f) => f.name);
+
+  const noPasswordAll = found.filter((f) => !f.password && !knownPppoe.has(f.name));
+  const noPasswordActive = noPasswordAll.filter((f) => activeByUser.has(f.name));
+  const noPassword = noPasswordAll.filter((f) => !activeByUser.has(f.name)).map((f) => f.name);
+
+  const secretNames = new Set(found.map((f) => f.name));
+  const orphanActive = sessions.filter((s) =>
+    s.service === 'pppoe' && !secretNames.has(s.username) && !knownPppoe.has(s.username));
+
+  const seenMac = new Set();
+  const hotspotImportable = sessions.filter((s) => {
+    if (s.service !== 'hotspot' || !s.mac || knownMac.has(s.mac) || seenMac.has(s.mac)) return false;
+    seenMac.add(s.mac);
+    return true;
+  });
+
+  return { importable, already, noPassword, noPasswordActive, orphanActive, hotspotImportable, activeByUser };
+}
+
 app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -4164,19 +4213,17 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
     conn = await step('connect', () =>
       ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
     const found = await step('read /ppp/secret', () => ros.pppSecrets(conn), 30000);
+    const sessions = await step('read active sessions', () => ros.activeSessions(conn), 30000);
     ros.close(conn);
     conn = null;
 
-    const { rows: existing } = await pool.query(
-      'select pppoe_user from subscribers where tenant_id=$1 and pppoe_user is not null',
-      [req.tenant.id]);
-    const known = new Set(existing.map((x) => x.pppoe_user));
+    const { rows: existingSubs } = await pool.query(
+      'select pppoe_user, locked_mac from subscribers where tenant_id=$1', [req.tenant.id]);
+    const knownPppoe = new Set(existingSubs.map((x) => x.pppoe_user).filter(Boolean));
+    const knownMac = new Set(existingSubs.map((x) => x.locked_mac).filter(Boolean));
 
-    const importable = found.filter((f) => f.password && !known.has(f.name));
-    const already = found.filter((f) => known.has(f.name)).map((f) => f.name);
-    // A secret with no password cannot be authenticated from here, and inventing
-    // one would lock the customer out at their next reconnect.
-    const noPassword = found.filter((f) => !f.password).map((f) => f.name);
+    const { importable, already, noPassword, noPasswordActive, orphanActive, hotspotImportable, activeByUser } =
+      categorizeImport(found, sessions, knownPppoe, knownMac);
 
     if (!apply) {
       return res.json({
@@ -4185,11 +4232,20 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
         importable: importable.map((f) => ({ name: f.name, remoteAddress: f.remoteAddress })),
         already,
         noPassword,
+        importableActive: [
+          ...noPasswordActive.map((f) => ({ name: f.name, address: activeByUser.get(f.name)?.address ?? null })),
+          ...orphanActive.map((s) => ({ name: s.username, address: s.address })),
+        ],
+        hotspotImportable: hotspotImportable.map((s) => ({ mac: s.mac, address: s.address, username: s.username })),
       });
     }
 
+    const genPass = () => String(Math.floor(1000000 + Math.random() * 9000000));
     const created = [];
+    const hotspotCreated = [];
     const failed = [];
+
+    // Real-password PPPoE secrets — the router's own password comes across as-is.
     for (const f of importable) {
       try {
         // Per row rather than one transaction: one malformed secret should not
@@ -4207,13 +4263,53 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
       }
     }
 
-    // Every imported client has an empty phone: /ppp/secret does not hold one.
-    // Said plainly, because payments are matched on the phone number and an
-    // import that looks complete but silently breaks matching is worse than one
-    // that admits what it left undone.
+    // Confirmed-live PPPoE accounts with no usable router-side password —
+    // minted fresh, since RADIUS is what actually authenticates them from here.
+    for (const f of [
+      ...noPasswordActive.map((f) => ({ name: f.name, address: activeByUser.get(f.name)?.address ?? null })),
+      ...orphanActive.map((s) => ({ name: s.username, address: s.address })),
+    ]) {
+      try {
+        const password = genPass();
+        const { rows: [sub] } = await pool.query(
+          `insert into subscribers (tenant_id, account_code, name, phone, service,
+             pppoe_user, pppoe_pass, router_id, static_ip)
+           values ($1,$2,$3,$4,'pppoe',$5,$6,$7,$8) returning id`,
+          [req.tenant.id, f.name, f.name, '', f.name, password, r.id, f.address || null]);
+        await radius.syncSubscriberCredentials(pool, req.tenant.id, sub.id);
+        created.push(f.name);
+      } catch (e) {
+        failed.push({ name: f.name, error: e.message });
+      }
+    }
+
+    // Active hotspot sessions, matched by device MAC rather than a username
+    // a hotspot login commonly does not have.
+    for (const s of hotspotImportable) {
+      try {
+        const account = await allocateAccountCode(req.tenant.id);
+        if (!account) throw new Error('Could not find a free account number.');
+        await pool.query(
+          `insert into subscribers (tenant_id, account_code, name, phone, service,
+             router_id, locked_mac, static_ip)
+           values ($1,$2,$3,$4,'hotspot',$5,$6,$7)`,
+          [req.tenant.id, account, s.username || s.mac, '', r.id, s.mac, s.address || null]);
+        hotspotCreated.push(s.mac);
+      } catch (e) {
+        failed.push({ name: s.mac, error: e.message });
+      }
+    }
+
+    // Every imported client has an empty phone, and every imported hotspot
+    // client has no plan assigned — /ppp/secret and /ip/hotspot/active hold
+    // neither. Said plainly, because payments are matched on the phone number
+    // and an import that looks complete but silently breaks matching is worse
+    // than one that admits what it left undone.
     res.json({
-      imported: created.length, created, already, noPassword, failed,
-      needPhone: created.length,
+      imported: created.length + hotspotCreated.length,
+      created, hotspotCreated, already, noPassword, failed,
+      needPhone: created.length + hotspotCreated.length,
+      needPlan: hotspotCreated.length,
     });
   } catch (e) {
     res.status(502).json({

@@ -1879,6 +1879,11 @@ export async function activeSessions(conn) {
         // PPP calls it address, hotspot calls it address too, but a hotspot row
         // may carry only a MAC — an entry with no username is no use to us.
         address: String(row.address ?? '').trim() || null,
+        // PPP's own device identifier is caller-id; hotspot's is mac-address.
+        // Used by import-secrets to match a live hotspot session back to a
+        // MAC-locked subscriber rather than by username, which a hotspot
+        // login commonly does not have at all.
+        mac: String(row['caller-id'] ?? row['mac-address'] ?? '').trim().toUpperCase() || null,
       })).filter((r) => r.username);
     } catch {
       return [];

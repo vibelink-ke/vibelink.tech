@@ -1483,9 +1483,14 @@ Revoke anyway?`
               <Button
                 variant="primary"
                 onClick={applyImport}
-                disabled={importing.busy || !importing.preview.importable.length}
+                disabled={
+                  importing.busy ||
+                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length)
+                }
               >
-                {importing.busy ? 'Importing…' : `Import ${importing.preview.importable.length}`}
+                {importing.busy
+                  ? 'Importing…'
+                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length}`}
               </Button>
             )}
           </>
@@ -1495,14 +1500,14 @@ Revoke anyway?`
           <div style={{ fontSize: 13, color: color.rust }}>{importing.error}</div>
         )}
         {importing?.busy && !importing?.preview && (
-          <div style={{ fontSize: 13, color: color.muted }}>Reading /ppp/secret…</div>
+          <div style={{ fontSize: 13, color: color.muted }}>Reading /ppp/secret and active sessions…</div>
         )}
 
         {importing?.preview && !importing?.result && (
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
             <span>
               <strong>{importing.preview.importable.length}</strong> new of{' '}
-              {importing.preview.total} account(s) on the router.
+              {importing.preview.total} PPPoE account(s) on the router.
             </span>
             {!!importing.preview.already.length && (
               <span style={{ color: color.muted }}>
@@ -1510,11 +1515,27 @@ Revoke anyway?`
                 system is authoritative once a customer is billed from it.
               </span>
             )}
+            {!!importing.preview.importableActive.length && (
+              <span style={{ color: color.green }}>
+                <strong>{importing.preview.importableActive.length}</strong> more are connected to
+                the router right now with no usable password on file (either an empty secret, or no
+                secret at all — just RADIUS) — a fresh password is generated for each on import:{' '}
+                {importing.preview.importableActive.slice(0, 5).map((x) => x.name).join(', ')}
+                {importing.preview.importableActive.length > 5 ? '…' : ''}
+              </span>
+            )}
             {!!importing.preview.noPassword.length && (
               <span style={{ color: color.amberInk }}>
-                {importing.preview.noPassword.length} have no password on the router and cannot be
-                imported: {importing.preview.noPassword.slice(0, 5).join(', ')}
+                {importing.preview.noPassword.length} have no password and are not currently
+                connected, so there is nothing to confirm they are still real customers —
+                skipped: {importing.preview.noPassword.slice(0, 5).join(', ')}
                 {importing.preview.noPassword.length > 5 ? '…' : ''}
+              </span>
+            )}
+            {!!importing.preview.hotspotImportable.length && (
+              <span style={{ color: color.green }}>
+                <strong>{importing.preview.hotspotImportable.length}</strong> active hotspot
+                device(s), matched by MAC, will also be imported as clients.
               </span>
             )}
             {!!importing.preview.importable.length && (
@@ -1534,6 +1555,12 @@ Revoke anyway?`
               <span style={{ color: color.amberInk }}>
                 None have a phone number — the router does not store one. Payments are matched on
                 the phone number, so add them before these customers pay.
+              </span>
+            )}
+            {!!importing.result.needPlan && (
+              <span style={{ color: color.amberInk }}>
+                {importing.result.needPlan} imported hotspot client(s) have no plan assigned yet —
+                the router's active-session list does not carry one.
               </span>
             )}
             {!!importing.result.failed?.length && (
