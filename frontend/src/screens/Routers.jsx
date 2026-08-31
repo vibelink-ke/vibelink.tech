@@ -551,6 +551,67 @@ export default function Routers() {
   }, [traffic?.router?.id]);
 
   /**
+   * Lock a device (a TV, a printer — anything with no browser to log into a
+   * hotspot page with) to a fixed IP by its MAC address. bindDeviceByMac/
+   * unbindDeviceByMac on the server already existed and worked, driving the
+   * public hotspot voucher flow's own "get this TV online" button — this is
+   * the same thing, reachable directly by an operator for a device that
+   * isn't going through a voucher purchase at all.
+   */
+  const [devices, setDevices] = useState(null);   // { router, nearby, locked, error, busyMac, form }
+
+  const openDevices = async (r) => {
+    setDevices({ router: r, nearby: null, locked: null, error: null, busyMac: null, form: null });
+    try {
+      const out = await api.routerDevices(r.id);
+      setDevices((d) => (d?.router?.id === r.id ? { ...d, ...out } : d));
+    } catch (e) {
+      setDevices((d) => (d?.router?.id === r.id ? { ...d, error: e.message } : d));
+    }
+  };
+
+  const refreshDevices = async () => {
+    if (!devices?.router) return;
+    try {
+      const out = await api.routerDevices(devices.router.id);
+      setDevices((d) => (d ? { ...d, ...out, error: null } : d));
+    } catch (e) {
+      setDevices((d) => (d ? { ...d, error: e.message } : d));
+    }
+  };
+
+  const submitLock = async () => {
+    const { mac, downKbps, upKbps, label } = devices.form;
+    setDevices((d) => ({ ...d, busyMac: mac }));
+    try {
+      await api.lockRouterDevice(devices.router.id, {
+        mac, downKbps: Number(downKbps) || 2000, upKbps: Number(upKbps) || 1000, label,
+      });
+      store.toast(`${label || mac} locked to a fixed IP`);
+      setDevices((d) => ({ ...d, form: null }));
+      await refreshDevices();
+    } catch (e) {
+      store.toast(`Could not lock: ${e.message}`);
+    } finally {
+      setDevices((d) => (d ? { ...d, busyMac: null } : d));
+    }
+  };
+
+  const unlockDevice = async (mac, label) => {
+    if (!window.confirm(`Unlock ${label || mac}? It will need to log into the hotspot page again next time.`)) return;
+    setDevices((d) => ({ ...d, busyMac: mac }));
+    try {
+      await api.unlockRouterDevice(devices.router.id, mac);
+      store.toast(`${label || mac} unlocked`);
+      await refreshDevices();
+    } catch (e) {
+      store.toast(`Could not unlock: ${e.message}`);
+    } finally {
+      setDevices((d) => (d ? { ...d, busyMac: null } : d));
+    }
+  };
+
+  /**
    * Import the router's own PPPoE accounts.
    *
    * Preview first, always. Creating several hundred customers is not something
@@ -1069,6 +1130,12 @@ Revoke anyway?`
                       Traffic
                     </MenuItem>
                     <MenuItem
+                      onClick={() => { setMenuFor(null); openDevices(r); }}
+                      title="Lock a device (a TV, anything without a browser) to a fixed IP by its MAC address"
+                    >
+                      Devices
+                    </MenuItem>
+                    <MenuItem
                       onClick={() => { setMenuFor(null); previewImport(r); }}
                       title="Create clients from the PPPoE accounts already on this router"
                     >
@@ -1269,6 +1336,137 @@ Revoke anyway?`
               Updating every 5 seconds. Down and up are from the router's point of
               view: down is what it received on that port.
             </div>
+          </>
+        )}
+      </Modal>
+
+      {/* Lock a device (TV, printer, anything with no browser) to a fixed IP
+          by MAC — the admin-facing door onto bindDeviceByMac/
+          unbindDeviceByMac, which until now only the public hotspot voucher
+          flow could reach. */}
+      <Modal
+        open={!!devices}
+        title={`Devices on ${devices?.router?.name ?? ''}`}
+        onClose={() => setDevices(null)}
+        footer={<Button onClick={() => setDevices(null)}>Close</Button>}
+        width={620}
+      >
+        {devices?.error && (
+          <div style={{ fontSize: 13, color: color.rust, marginBottom: 10 }}>{devices.error}</div>
+        )}
+        {!devices?.nearby && !devices?.locked && !devices?.error && (
+          <div style={{ fontSize: 13, color: color.muted }}>Reading the router…</div>
+        )}
+        {devices?.form ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: color.muted }}>
+              Locking <span style={{ fontFamily: font.mono, color: color.ink }}>{devices.form.mac}</span> to a fixed IP —
+              it will get online with no login page at all from now on.
+            </div>
+            <Field label="Label" hint={'What to call it — "TV, living room"'}>
+              <Input
+                value={devices.form.label}
+                onChange={(e) => setDevices((d) => ({ ...d, form: { ...d.form, label: e.target.value } }))}
+                autoFocus
+              />
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Download limit (Kbps)">
+                <Input
+                  type="number" min="0"
+                  value={devices.form.downKbps}
+                  onChange={(e) => setDevices((d) => ({ ...d, form: { ...d.form, downKbps: e.target.value } }))}
+                />
+              </Field>
+              <Field label="Upload limit (Kbps)">
+                <Input
+                  type="number" min="0"
+                  value={devices.form.upKbps}
+                  onChange={(e) => setDevices((d) => ({ ...d, form: { ...d.form, upKbps: e.target.value } }))}
+                />
+              </Field>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button onClick={() => setDevices((d) => ({ ...d, form: null }))}>Cancel</Button>
+              <Button variant="primary" onClick={submitLock} disabled={devices.busyMac === devices.form.mac}>
+                {devices.busyMac === devices.form.mac ? 'Locking…' : 'Lock this device'}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {devices?.locked && (
+              <div style={{ marginBottom: devices?.nearby?.length ? 18 : 0 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: color.muted, marginBottom: 8 }}>
+                  Locked to a fixed IP ({devices.locked.length})
+                </div>
+                {devices.locked.length === 0 ? (
+                  <div style={{ fontSize: 13, color: color.muted }}>Nothing locked yet.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {devices.locked.map((dv) => (
+                      <div
+                        key={dv.mac}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                          padding: '9px 11px', border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: 13,
+                        }}
+                      >
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                          <span style={{ fontWeight: 600 }}>{dv.comment || dv.hostname || dv.vendor || 'Unnamed device'}</span>
+                          <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>
+                            {dv.mac} · {dv.ip ?? 'no IP yet'}
+                            {dv.downKbps ? ` · ${dv.downKbps}/${dv.upKbps} Kbps` : ''}
+                          </span>
+                        </span>
+                        <Button size="sm" onClick={() => unlockDevice(dv.mac, dv.comment)} disabled={devices.busyMac === dv.mac}>
+                          {devices.busyMac === dv.mac ? 'Working…' : 'Unlock'}
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {devices?.nearby && (
+              <div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: color.muted, marginBottom: 8 }}>
+                  On the network, not locked ({devices.nearby.length})
+                </div>
+                {devices.nearby.length === 0 ? (
+                  <div style={{ fontSize: 13, color: color.muted }}>
+                    Nothing here — connect the device to this hotspot's WiFi first, then reopen this.
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {devices.nearby.map((dv) => (
+                      <div
+                        key={dv.mac}
+                        style={{
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                          padding: '9px 11px', border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: 13,
+                        }}
+                      >
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                          <span style={{ fontWeight: 600 }}>{dv.hostname || dv.vendor || 'Unknown device'}</span>
+                          <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>
+                            {dv.mac} · {dv.address ?? 'no IP yet'}
+                          </span>
+                        </span>
+                        <Button
+                          size="sm" variant="primary"
+                          onClick={() => setDevices((d) => ({
+                            ...d, form: { mac: dv.mac, label: dv.hostname ?? '', downKbps: '2000', upKbps: '1000' },
+                          }))}
+                        >
+                          Lock to fixed IP
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </Modal>

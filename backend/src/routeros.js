@@ -1808,6 +1808,40 @@ export async function unbindDeviceByMac(conn, { mac }) {
   }
 }
 
+/**
+ * Every device this router has locked to a fixed IP — the admin-facing
+ * counterpart to bindDeviceByMac/unbindDeviceByMac, which until now were
+ * only ever called from the public hotspot voucher flow. bindDeviceByMac's
+ * own bypassed ip-binding is exactly what makes a device invisible to
+ * nearbyDevices() (already-online devices have nothing left to add), so
+ * this reads that same table directly rather than trying to derive "locked"
+ * from a list built to show the opposite.
+ */
+export async function boundDevices(conn) {
+  const [bindings, leases, queues] = await Promise.all([
+    conn.write('/ip/hotspot/ip-binding/print', ['?type=bypassed']).catch(() => []),
+    conn.write('/ip/dhcp-server/lease/print', []).catch(() => []),
+    conn.write('/queue/simple/print', []).catch(() => []),
+  ]);
+  const leaseByMac = new Map(leases.map((l) => [String(l['mac-address'] ?? '').toUpperCase(), l]));
+  const queueByTarget = new Map(queues.map((q) => [String(q.target ?? '').split('/')[0], q]));
+
+  return bindings
+    .filter((b) => isManaged(b))
+    .map((b) => {
+      const mac = String(b['mac-address'] ?? '').toUpperCase();
+      const lease = leaseByMac.get(mac);
+      const ip = lease?.address ?? null;
+      const queue = ip ? queueByTarget.get(ip) : null;
+      const [upK, downK] = String(queue?.['max-limit'] ?? '').split('/').map((v) => parseInt(v, 10) || null);
+      return {
+        mac, ip, hostname: lease?.['host-name'] || null, vendor: vendorFor(mac),
+        comment: String(b.comment ?? '').replace(/^ispHotspot device /, '').replace(/\s*\((managed|vibelink)\)$/, ''),
+        downKbps: downK, upKbps: upK,
+      };
+    });
+}
+
 /** "01:23:45" (RouterOS uptime/idle-time shape) -> seconds, for sorting by how recently a device was active. */
 function hhmmssToSeconds(v) {
   const parts = String(v).match(/(\d+)d|(\d+)h|(\d+)m|(\d+)s/g) ?? [];

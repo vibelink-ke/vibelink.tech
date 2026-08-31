@@ -4005,6 +4005,100 @@ app.post('/api/routers/:id/traffic', wrap(async (req, res) => {
 }));
 
 /**
+ * Devices connected to this router's hotspot, split into two lists: not
+ * locked yet (nearbyDevices — a guest's phone, or a TV nobody has pinned
+ * down) and already locked to a fixed IP (boundDevices). bindDeviceByMac/
+ * unbindDeviceByMac already existed and worked — they're what the public
+ * hotspot voucher flow uses to get a TV online with no login page at all —
+ * but nothing let an operator do this directly for a device that isn't
+ * going through a voucher purchase at all (a customer's own smart TV,
+ * printer, or anything else worth always finding at the same address).
+ */
+app.get('/api/routers/:id/devices', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const [nearby, locked] = await Promise.all([
+      step('nearby devices', () => ros.nearbyDevices(conn), 15000),
+      step('locked devices', () => ros.boundDevices(conn), 15000),
+    ]);
+    res.json({ nearby, locked });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+app.post('/api/routers/:id/devices/lock', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { mac, downKbps, upKbps, label } = req.body ?? {};
+  if (!mac) return res.status(400).json({ error: 'mac is required' });
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const result = await step('lock device', () => ros.bindDeviceByMac(conn, {
+      mac, downKbps: Number(downKbps) || 2000, upKbps: Number(upKbps) || 1000, comment: label ?? '',
+    }), 20000);
+    res.json(result);
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+app.post('/api/routers/:id/devices/unlock', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { mac } = req.body ?? {};
+  if (!mac) return res.status(400).json({ error: 'mac is required' });
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    await step('unlock device', () => ros.unbindDeviceByMac(conn, { mac }), 20000);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/**
  * Read the PPPoE accounts off a router, and optionally create clients from them.
  *
  * Two steps on purpose. GET-like preview first, because importing several
