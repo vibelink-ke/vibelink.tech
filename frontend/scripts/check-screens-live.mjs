@@ -30,7 +30,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const screensDir = path.join(here, '..', 'src', 'screens');
 
 const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
-  url: 'https://vibelink.vibelink.tech/',
+  url: 'https://billing.vibelink.tech/',
   pretendToBeVisual: true,
 });
 globalThis.window = dom.window;

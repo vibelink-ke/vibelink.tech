@@ -178,7 +178,7 @@ export default function App() {
      * to be signed in on that browser.
      *
      * Signing in happens on a subdomain — the platform owner's own portal is
-     * vibelink.vibelink.tech like any other tenant's.
+     * billing.vibelink.tech like any other tenant's.
      */
     return (
       <Suspense fallback={null}>
