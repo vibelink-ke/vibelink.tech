@@ -202,6 +202,10 @@ export const api = {
   gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),
   registerGatewayUrls: (id) => post(`/api/payment-gateways/${id}/register-urls`, {}),
   deleteGateway: (id) => del(`/api/payment-gateways/${id}`),
+  platformUpdates: () => get('/api/platform/updates'),
+  createPlatformUpdate: (u) => post('/api/platform/updates', u),
+  deletePlatformUpdate: (id) => del(`/api/platform/updates/${id}`),
+  markUpdatesSeen: () => post('/api/updates/seen', {}),
 
   // ── automation ──
   automation: () => get('/api/automation'),

@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import { color, font, radius, TOPBAR_H } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useMediaQuery } from './useMediaQuery';
+import { api } from '../api/client';
+import { Button, Drawer, Field, Input, Textarea } from '../ui/primitives';
 
 const chip = {
   display: 'flex',
@@ -52,6 +54,117 @@ function useSearchResults(q, store) {
     }
     return out.slice(0, 40);
   }, [q, store.clients, store.unmatched, store.tickets, store.routers, store.vouchers]);
+}
+
+/**
+ * "What's new" — see platform_updates in schema.sql. A tenant admin sees
+ * every update the platform owner has posted, oldest badge cleared the
+ * moment they open the drawer; the platform owner additionally gets a form
+ * right here to post the next one, so shipping a feature and telling every
+ * tenant about it are the same click rather than two separate systems.
+ */
+function UpdatesBell({ store }) {
+  const [open, setOpen] = useState(false);
+  const [composing, setComposing] = useState(false);
+  const [form, setForm] = useState({ title: '', body: '' });
+  const [busy, setBusy] = useState(false);
+  const [items, setItems] = useState(store.updates.items);
+
+  const openDrawer = () => {
+    setOpen(true);
+    setItems(store.updates.items);
+    if (store.updates.unread > 0) store.markUpdatesSeen();
+  };
+
+  const post = async () => {
+    if (!form.title.trim() || !form.body.trim()) return store.toast('Title and body are both required');
+    setBusy(true);
+    try {
+      const u = await api.createPlatformUpdate(form);
+      setItems((xs) => [u, ...xs]);
+      setForm({ title: '', body: '' });
+      setComposing(false);
+      store.toast('Posted — every tenant will see it');
+    } catch (e) {
+      store.toast(`Could not post: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (u) => {
+    if (!window.confirm(`Delete "${u.title}"? This removes it for every tenant.`)) return;
+    try {
+      await api.deletePlatformUpdate(u.id);
+      setItems((xs) => xs.filter((x) => x.id !== u.id));
+    } catch (e) {
+      store.toast(`Could not delete: ${e.message}`);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ ...chip, position: 'relative' }} onClick={openDrawer} title="What's new">
+        <span style={{ color: color.neutralInk }}>🔔</span>
+        {store.updates.unread > 0 && (
+          <span
+            style={{
+              position: 'absolute', top: -4, right: -4, minWidth: 15, height: 15, borderRadius: radius.pill,
+              background: color.rust, color: '#fff', fontSize: 9.5, fontWeight: 700,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px',
+            }}
+          >
+            {store.updates.unread}
+          </span>
+        )}
+      </div>
+
+      <Drawer open={open} title="What's new" onClose={() => setOpen(false)} width={480}>
+        {store.isPlatformOwner && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 14, borderBottom: `1px solid ${color.line}`, marginBottom: 4 }}>
+            {composing ? (
+              <>
+                <Field label="Title">
+                  <Input value={form.title} onChange={(e) => setForm((s) => ({ ...s, title: e.target.value }))} placeholder="e.g. Platform-collect settlements" />
+                </Field>
+                <Field label="What changed">
+                  <Textarea rows={4} value={form.body} onChange={(e) => setForm((s) => ({ ...s, body: e.target.value }))} placeholder="Plain language — this is what every tenant reads." />
+                </Field>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button onClick={() => setComposing(false)}>Cancel</Button>
+                  <Button variant="primary" onClick={post} disabled={busy}>{busy ? 'Posting…' : 'Post to all tenants'}</Button>
+                </div>
+              </>
+            ) : (
+              <Button variant="primary" onClick={() => setComposing(true)}>+ Post an update</Button>
+            )}
+          </div>
+        )}
+        {items.length === 0 ? (
+          <div style={{ fontSize: 13, color: color.muted, padding: '8px 0' }}>Nothing posted yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {items.map((u) => (
+              <div key={u.id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 14 }}>{u.title}</span>
+                  <span style={{ fontSize: 11, color: color.muted, whiteSpace: 'nowrap' }}>
+                    {new Date(u.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short' })}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 13, color: color.inkSoft, whiteSpace: 'pre-wrap' }}>{u.body}</p>
+                {store.isPlatformOwner && (
+                  <span onClick={() => remove(u)} style={{ fontSize: 11.5, color: color.rust, cursor: 'pointer', alignSelf: 'flex-start' }}>
+                    Delete
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Drawer>
+    </>
+  );
 }
 
 export default function Topbar() {
@@ -240,6 +353,8 @@ export default function Topbar() {
       </div>
 
       <div style={{ flex: '1 1 0', minWidth: 0 }} />
+
+      <UpdatesBell store={store} />
 
       <div
         style={chip}

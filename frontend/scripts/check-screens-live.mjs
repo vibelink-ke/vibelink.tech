@@ -192,6 +192,7 @@ const COLLECTION_ROUTES = [
   [/\/api\/kb-articles$/, COLLECTIONS.articles],
   [/\/api\/tenants$/, COLLECTIONS.tenants],
   [/\/api\/settlements$/, COLLECTIONS.settlements],
+  [/\/api\/platform\/updates$/, { updates: [{ id: 'u1', title: 'Settlement payouts', body: 'Tenants can now request an on-demand payout.', created_at: iso(-1) }], unread: 1 }],
   [/\/api\/sms\/history$/, COLLECTIONS.smsHistory],
   [/\/api\/site-profiles$/, COLLECTIONS.siteProfiles],
   [/\/api\/technicians$/, COLLECTIONS.technicians],

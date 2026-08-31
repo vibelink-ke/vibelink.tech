@@ -7888,6 +7888,39 @@ app.post('/api/me/password', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/**
+ * "What's new" feed — see schema.sql's platform_updates. Read by every
+ * tenant; unread is computed here (against tenants.last_update_seen_at)
+ * rather than left to the frontend, so a tenant that never opened it before
+ * still gets a correct count on the very first load.
+ */
+app.get('/api/platform/updates', wrap(async (req, res) => {
+  const { rows: updates } = await pool.query(
+    'select * from platform_updates order by created_at desc limit 30');
+  const seenAt = req.tenant.last_update_seen_at ? new Date(req.tenant.last_update_seen_at) : null;
+  const unread = updates.filter((u) => !seenAt || new Date(u.created_at) > seenAt).length;
+  res.json({ updates, unread });
+}));
+
+app.post('/api/platform/updates', superAdminOnly, wrap(async (req, res) => {
+  const { title, body } = req.body;
+  if (!title?.trim() || !body?.trim()) return res.status(400).json({ error: 'Title and body are required' });
+  const { rows: [u] } = await pool.query(
+    'insert into platform_updates (title, body) values ($1,$2) returning *',
+    [title.trim(), body.trim()]);
+  res.json(u);
+}));
+
+app.delete('/api/platform/updates/:id', superAdminOnly, wrap(async (req, res) => {
+  await pool.query('delete from platform_updates where id=$1', [req.params.id]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/updates/seen', wrap(async (req, res) => {
+  await pool.query('update tenants set last_update_seen_at=now() where id=$1', [req.tenant.id]);
+  res.json({ ok: true });
+}));
+
 app.get('/api/settings', wrap(async (req, res) => {
   const { rows: [extra] } = await pool.query('select * from app_settings where tenant_id=$1', [req.tenant.id]);
   const { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status } = req.tenant;

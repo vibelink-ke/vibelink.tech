@@ -1837,3 +1837,19 @@ on conflict (min_amount) do nothing;
 -- send time (jobs.js's payoutRow) so the Settlements tab can show the real
 -- deduction, not just infer it after the fact from a changed tariff table.
 alter table settlements add column if not exists fee numeric(12,2) not null default 0;
+
+-- ─────────────── platform changelog ───────────────
+-- "What's new" feed, authored by the platform owner (POST is superAdminOnly)
+-- and readable by every tenant — so a feature shipped centrally actually
+-- reaches the people running on it, instead of living only in a commit
+-- message nobody but the platform owner ever reads.
+create table if not exists platform_updates (
+  id         uuid primary key default gen_random_uuid(),
+  title      text not null,
+  body       text not null,
+  created_at timestamptz not null default now()
+);
+-- Per tenant, not per staff member: one admin opening the feed clears the
+-- badge for their whole team, the same way a shared inbox works. Simpler
+-- than per-staff read receipts, and nobody asked for those.
+alter table tenants add column if not exists last_update_seen_at timestamptz;

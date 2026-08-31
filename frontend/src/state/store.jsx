@@ -65,6 +65,7 @@ export function StoreProvider({ children }) {
   const [smsCredits, setSmsCredits] = useState(null);
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [settings, setSettings] = useState({ org: {}, smtp: {}, prefs: {} });
+  const [updates, setUpdates] = useState({ items: [], unread: 0 });
 
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState({});
@@ -209,6 +210,7 @@ export function StoreProvider({ children }) {
       api.smsBalance(),
       api.paymentMethods(),
       api.settings(),
+      api.platformUpdates(),
     ]);
     const val = (i, fallback) => (extras[i].status === 'fulfilled' ? extras[i].value ?? fallback : fallback);
 
@@ -220,9 +222,24 @@ export function StoreProvider({ children }) {
     setSmsCredits(val(3, null));
     setPaymentMethods(val(4, []));
     setSettings(val(5, { org: {}, smtp: {}, prefs: {} }));
+    const updatesVal = val(6, { updates: [], unread: 0 });
+    setUpdates({ items: updatesVal.updates ?? [], unread: updatesVal.unread ?? 0 });
     setErrors(errs);
     setLoading(false);
   }, [session, notifyNewCustomerActivity]);
+
+  /**
+   * Opening the "What's new" feed clears the badge for the whole tenant, not
+   * just this browser tab — see platform_updates/last_update_seen_at in
+   * schema.sql. Optimistic: the badge disappears immediately rather than
+   * waiting on the round trip, since there is nothing to roll back if it fails.
+   */
+  const markUpdatesSeen = useCallback(async () => {
+    setUpdates((u) => ({ ...u, unread: 0 }));
+    try {
+      await api.markUpdatesSeen();
+    } catch { /* the next reload() will just show it as unread again */ }
+  }, []);
 
   /**
    * Keep every screen current without anyone pressing anything.
@@ -409,6 +426,8 @@ export function StoreProvider({ children }) {
       paymentMethods,
       settings,
       setSettings,
+      updates,
+      markUpdatesSeen,
       loading,
       errors,
       session,
@@ -442,9 +461,9 @@ export function StoreProvider({ children }) {
       setSmsCredits,
     }),
     [
-      data, unmatched, hotspotSettings, smsGateways, smsCredits, paymentMethods, settings,
+      data, unmatched, hotspotSettings, smsGateways, smsCredits, paymentMethods, settings, updates,
       loading, errors, session, signIn, signOut, dark, navOpen, role, searchQuery, toastMsg, toastAction, toast,
-      dismissToast, reload, setCollection,
+      dismissToast, reload, setCollection, markUpdatesSeen,
     ]
   );
 

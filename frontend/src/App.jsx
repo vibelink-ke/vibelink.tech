@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
 import Toast from './app/Toast';
+import UpdateAvailableBanner from './app/UpdateAvailableBanner';
 import AuthGate from './app/AuthGate';
 import ResetPassword from './app/ResetPassword';
 import { isPlatformHost } from './app/host';
@@ -271,6 +272,7 @@ export default function App() {
         </div>
       </main>
       <Toast />
+      <UpdateAvailableBanner />
     </div>
   );
 }

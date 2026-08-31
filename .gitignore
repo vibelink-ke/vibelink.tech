@@ -30,6 +30,12 @@ infra/wireguard/
 # Source tarballs and other downloaded artifacts
 *.tar.gz
 
+# Regenerated on every `npm run build` by scripts/write-version.mjs — the
+# frontend's own update-available banner polls this to notice a new deploy,
+# so committing whatever value happened to be current would be meaningless
+# and just create a diff on every build.
+frontend/public/version.json
+
 # OS/editor artifacts
 Thumbs.db
 .vscode/
