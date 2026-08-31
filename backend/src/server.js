@@ -4818,61 +4818,84 @@ app.get('/api/inventory/:id/movements', requirePermission('inventory.view'), wra
 // can hold one identifier, never one per unit in a batch.
 const UNSERIALIZED_CATEGORIES = new Set(['Cable', 'Connector']);
 
+/**
+ * Adding stock never decides ownership or where it ends up — a gadget just
+ * received is in the warehouse and unowned by anyone in particular yet;
+ * "has the client paid for it" and "installed where" are both Issue-time
+ * questions (POST /api/inventory/:id/issue), not add-time ones. Every
+ * created row defaults to the company's own, in the warehouse.
+ *
+ * Quantity decides the shape, same as before, but a multi-unit batch of an
+ * individually-identified category (anything but Cable/Connector) no
+ * longer gets rejected outright — it creates one row per unit instead of
+ * one row with a count, since "10 routers" is 10 accountable gadgets, each
+ * needing its own MAC or serial, not an anonymous quantity of 10. They
+ * share a name for display grouping; each is its own record from here on,
+ * addressable and issuable individually by its own MAC.
+ */
 app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (req, res) => {
-  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
-          status, notes, quantity, unit } = req.body;
+  const { name, category, macAddress, serialNumber, units, status, notes, quantity, unit } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
 
-  // One add-stock form covers both cases now — whether this is a single,
-  // individually identified gadget or a multi-unit stock line is decided by
-  // the quantity itself, not a separate toggle. More than one unit has no
-  // individual identity and isn't installed anywhere: any MAC/serial/
-  // premises/site the form still carried is dropped rather than saved
-  // against a quantity line it can't actually mean anything for.
   const qty = Math.max(1, Math.trunc(Number(quantity)) || 1);
   const isBulk = qty > 1;
   const exempt = UNSERIALIZED_CATEGORIES.has(category);
 
-  if (isBulk && !exempt) {
-    return res.status(400).json({
-      error: `Only ${[...UNSERIALIZED_CATEGORIES].join('/')} can be added as a quantity line — add ${category || 'this'} one at a time with its own MAC or serial.`,
-    });
+  // A true bulk consumable — one row, a count, no per-unit identity.
+  if (isBulk && exempt) {
+    const { rows: [item] } = await pool.query(
+      `insert into inventory_items (tenant_id, name, category, owned_by_tenant, status, notes, tracking, quantity, unit, location)
+       values ($1,$2,$3,true,$4,$5,'bulk',$6,$7,'warehouse') returning id`,
+      [req.tenant.id, name.trim(), category || null, status || 'in_stock', notes || null, qty, unit?.trim() || null]);
+    await logInventoryMovement(req.tenant.id, item.id, 'created', { toLocation: 'warehouse', quantity: qty });
+    return res.json({ id: item.id, ok: true });
   }
-  if (!isBulk && !exempt && !macAddress?.trim() && !serialNumber?.trim()) {
+
+  // Several identical, individually accountable units added in one go.
+  if (isBulk && !exempt) {
+    const list = Array.isArray(units) ? units : [];
+    if (list.length !== qty) return res.status(400).json({ error: `Provide a MAC or serial for each of the ${qty} units.` });
+    for (const u of list) {
+      if (!u?.macAddress?.trim() && !u?.serialNumber?.trim())
+        return res.status(400).json({ error: 'Every unit needs a MAC address or serial number.' });
+    }
+    const c = await pool.connect();
+    const createdIds = [];
+    try {
+      await c.query('begin');
+      for (const u of list) {
+        const { rows: [item] } = await c.query(
+          `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
+             owned_by_tenant, status, notes, tracking, quantity, location)
+           values ($1,$2,$3,$4,$5,true,$6,$7,'serialized',1,'warehouse') returning id`,
+          [req.tenant.id, name.trim(), category || null, u.macAddress?.trim().toUpperCase() || null,
+           u.serialNumber?.trim() || null, status || 'in_stock', notes || null]);
+        createdIds.push(item.id);
+      }
+      await c.query('commit');
+    } catch (e) {
+      await c.query('rollback');
+      if (e.code === '23505') return res.status(409).json({ error: 'One of those MAC addresses is already in inventory.' });
+      throw e;
+    } finally {
+      c.release();
+    }
+    for (const id of createdIds) await logInventoryMovement(req.tenant.id, id, 'created', { toLocation: 'warehouse', quantity: 1 });
+    return res.json({ ids: createdIds, ok: true });
+  }
+
+  // A single, individually identified gadget — the original case.
+  if (!exempt && !macAddress?.trim() && !serialNumber?.trim()) {
     return res.status(400).json({ error: 'Record a MAC address or serial number for this gadget.' });
   }
-
-  if (!isBulk && subscriberId) {
-    const { rowCount } = await pool.query(
-      'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
-    if (!rowCount) return res.status(404).json({ error: 'No such client' });
-  }
-  if (!isBulk && routerId) {
-    const { rowCount } = await pool.query(
-      'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
-    if (!rowCount) return res.status(404).json({ error: 'No such router' });
-  }
-
   try {
     const { rows: [item] } = await pool.query(
       `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
-         owned_by_tenant, subscriber_id, router_id, status, notes, tracking, quantity, unit,
-         location)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
-      [req.tenant.id, name.trim(), category || null,
-       isBulk ? null : macAddress?.trim().toUpperCase() || null,
-       isBulk ? null : serialNumber?.trim() || null,
-       ownedByTenant !== false,
-       isBulk ? null : subscriberId || null,
-       isBulk ? null : routerId || null,
-       status || 'in_stock', notes || null, isBulk ? 'bulk' : 'serialized',
-       qty, isBulk ? unit?.trim() || null : null,
-       !isBulk && subscriberId ? 'premises' : 'warehouse']);
-    await logInventoryMovement(req.tenant.id, item.id, 'created', {
-      toLocation: !isBulk && subscriberId ? 'premises' : 'warehouse',
-      subscriberId: !isBulk ? subscriberId || null : null,
-      quantity: qty,
-    });
+         owned_by_tenant, status, notes, tracking, quantity, location)
+       values ($1,$2,$3,$4,$5,true,$6,$7,'serialized',1,'warehouse') returning id`,
+      [req.tenant.id, name.trim(), category || null, macAddress?.trim().toUpperCase() || null,
+       serialNumber?.trim() || null, status || 'in_stock', notes || null]);
+    await logInventoryMovement(req.tenant.id, item.id, 'created', { toLocation: 'warehouse', quantity: 1 });
     res.json({ id: item.id, ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
@@ -5001,8 +5024,13 @@ app.post('/api/inventory/:id/adjust-quantity', requirePermission('inventory.edit
  * only accepted when quantity is exactly 1.
  */
 app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(async (req, res) => {
-  const { staffId, quantity, macAddress, serialNumber, note, subscriberId, routerId } = req.body;
+  const { staffId, quantity, macAddress, serialNumber, note, subscriberId, routerId, ownedByTenant } = req.body;
   if (!staffId) return res.status(400).json({ error: 'Pick a technician' });
+  // "Has the client paid for it, or does it remain ours?" only actually
+  // means anything once it's going to a specific client — issuing to a
+  // van, with no client picked yet, leaves ownership exactly as it always
+  // defaults: the company's.
+  const clientOwns = subscriberId ? ownedByTenant === false : false;
   const { rowCount: staffOk } = await pool.query(
     'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
   if (!staffOk) return res.status(404).json({ error: 'No such staff member' });
@@ -5054,8 +5082,8 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
              owned_by_tenant, status, tracking, quantity, location, assigned_staff_id, subscriber_id, router_id)
            values ($1,$2,$3,$4,$5,$6,'in_stock','serialized',1,$7,$8,$9,$10) returning id`,
           [req.tenant.id, item.name, item.category, macAddress?.trim().toUpperCase() || null,
-           serialNumber?.trim() || null, item.owned_by_tenant, destination, staffId,
-           subscriberId || null, routerId || null]);
+           serialNumber?.trim() || null, destination === 'premises' ? !clientOwns : item.owned_by_tenant,
+           destination, staffId, subscriberId || null, routerId || null]);
         createdId = child.id;
         await logInventoryMovement(req.tenant.id, child.id, 'created', { toLocation: destination, staffId, subscriberId: subscriberId || null, note: `Issued from "${item.name}" stock` });
       } catch (e) {
@@ -5078,8 +5106,9 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
   }
 
   await pool.query(
-    `update inventory_items set location=$2, assigned_staff_id=$3, subscriber_id=$4, router_id=coalesce($5, router_id), updated_at=now() where id=$1`,
-    [item.id, destination, staffId, subscriberId || null, routerId || null]);
+    `update inventory_items set location=$2, assigned_staff_id=$3, subscriber_id=$4, router_id=coalesce($5, router_id),
+       owned_by_tenant = case when $2='premises' then $6 else owned_by_tenant end, updated_at=now() where id=$1`,
+    [item.id, destination, staffId, subscriberId || null, routerId || null, !clientOwns]);
   await logInventoryMovement(req.tenant.id, item.id, destination === 'premises' ? 'installed' : 'issued', {
     fromLocation: item.location, toLocation: destination, staffId, subscriberId: subscriberId || null, note,
   });
