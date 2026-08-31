@@ -1,7 +1,7 @@
 import axios from 'axios';
 import express from 'express';
 import crypto from 'node:crypto';
-import { config, tenantByShortcode } from '../db.js';
+import { config, platformCollectConfig, tenantByShortcode } from '../db.js';
 import { applyPayment, accrueSettlement } from './apply.js';
 
 const BASE = process.env.DARAJA_ENV === 'sandbox'
@@ -71,9 +71,22 @@ export async function testAuth(tenantId) {
   }
 }
 
+/**
+ * Which config a Daraja call actually goes through: the tenant's ordinary
+ * (default) paybill, or — when platformCollect is true — that tenant's
+ * dedicated platform-collect paybill, if one has been set up. Falls back to
+ * the ordinary one when it hasn't, so collect-and-settle keeps working for a
+ * tenant who hasn't configured a separate paybill yet.
+ */
+async function resolveConfig(tenantId, provider, platformCollect) {
+  if (!platformCollect) return config(tenantId, provider);
+  return (await platformCollectConfig(tenantId, provider)) ?? config(tenantId, provider);
+}
+
 /** STK push on a paybill — used for PPPoE auto-charge and portal payments. */
-export async function stkPush(tenantId, { phone, amount, accountRef, description }) {
-  const cfg = await config(tenantId, 'daraja');
+export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false }) {
+  const cfg = await resolveConfig(tenantId, 'daraja', platformCollect);
+  if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
   const ts = stamp();
   const password = Buffer.from(cfg.shortcode + cfg.credentials.passkey + ts).toString('base64');
   const { data } = await axios.post(`${BASE}/mpesa/stkpush/v1/processrequest`, {
@@ -103,7 +116,17 @@ export async function stkPush(tenantId, { phone, amount, accountRef, description
  * https://github.com/safaricom/mpesa-node-library/issues/56
  */
 export async function registerC2B(tenantId) {
-  const cfg = await config(tenantId, 'daraja');
+  return registerC2BForConfig(await config(tenantId, 'daraja'));
+}
+
+/**
+ * Same call, but against a specific gateway row rather than whichever
+ * config() picks — needed once a tenant holds more than one Daraja config
+ * (the ordinary paybill plus a dedicated platform-collect one): registering
+ * URLs for gateway A must not silently register gateway B's shortcode
+ * instead just because it happens to be the default.
+ */
+export async function registerC2BForConfig(cfg) {
   const { data } = await axios.post(`${BASE}/mpesa/c2b/v2/registerurl`, {
     ShortCode: cfg.shortcode,
     ResponseType: 'Completed',
@@ -128,8 +151,8 @@ export async function registerC2B(tenantId) {
  * been decided, and records nothing itself — the caller owns the ledger, so a
  * retry after a timeout cannot invent a second payment.
  */
-export async function b2c(tenantId, { phone, amount, remarks = 'Settlement', occasion = '' }) {
-  const cfg = await config(tenantId, 'daraja');
+export async function b2c(tenantId, { phone, amount, remarks = 'Settlement', occasion = '', platformCollect = false }) {
+  const cfg = await resolveConfig(tenantId, 'daraja', platformCollect);
   if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
 
   const { initiator_name: initiator, initiator_password: initiatorPassword } = cfg.credentials ?? {};

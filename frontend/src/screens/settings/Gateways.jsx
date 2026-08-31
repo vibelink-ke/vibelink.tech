@@ -188,6 +188,25 @@ export default function Gateways() {
     }
   };
 
+  /**
+   * Only ever takes effect on the platform-owner's own tenant — daraja.js
+   * only looks this up against whichever tenant is_super_admin belongs to.
+   * Kept separate from "Make default" on purpose: this paybill should not
+   * also be the one used for our own SaaS billing, or a tenant's payments
+   * and the platform's own traffic end up mixed on the same shortcode.
+   */
+  const togglePlatformCollect = async (g) => {
+    try {
+      await api.setGatewayPlatformCollect(g.id, !g.is_platform_collect);
+      await load();
+      store.toast(g.is_platform_collect
+        ? `${g.label || g.shortcode} is no longer the platform-collect paybill`
+        : `${g.label || g.shortcode} is now the platform-collect paybill`);
+    } catch (e) {
+      store.toast(`Could not update: ${e.message}`);
+    }
+  };
+
   const remove = async (g) => {
     try {
       await api.deleteGateway(g.id);
@@ -251,6 +270,7 @@ export default function Gateways() {
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ fontWeight: 600 }}>{g.label || '—'}</span>
                       {g.is_default && <Badge tone="active">default</Badge>}
+                      {g.is_platform_collect && <Badge tone="pending">platform-collect</Badge>}
                     </span>
                   ),
                 },
@@ -303,6 +323,15 @@ export default function Gateways() {
                       {!g.is_default && (
                         <span onClick={() => makeDefault(g)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
                           Make default
+                        </span>
+                      )}
+                      {store.isPlatformOwner && g.provider === 'daraja' && (
+                        <span
+                          onClick={() => togglePlatformCollect(g)}
+                          title="The paybill used when a gatewayless tenant collects on our behalf"
+                          style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
+                        >
+                          {g.is_platform_collect ? 'Stop platform-collect' : 'Use for platform-collect'}
                         </span>
                       )}
                       <span onClick={() => test(g)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Test</span>

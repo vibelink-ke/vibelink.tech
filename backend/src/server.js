@@ -1903,6 +1903,7 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
 
     const data = await mpesa.stkPush(owner.tenant_id, {
       phone, amount, accountRef: `${t.subdomain}-${accountCode}`.slice(0, 20), description,
+      platformCollect: true,
     });
     const checkoutId = data?.CheckoutRequestID ?? null;
     if (checkoutId) {
@@ -6094,7 +6095,10 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
   if (!required) return res.status(400).json({ error: 'unknown channel' });
 
   const { rows: [cfg] } = await pool.query(
-    'select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2',
+    // A tenant can hold more than one gateway per provider now (e.g. an
+    // ordinary Daraja paybill plus a dedicated platform-collect one) — this
+    // tests the default, same as config() would pick for an ordinary charge.
+    'select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2 order by is_default desc, id limit 1',
     [req.tenant.id, req.params.provider]);
   if (!cfg) return res.status(404).json({ error: 'Not configured yet — save credentials first.' });
 
@@ -7461,7 +7465,7 @@ app.delete('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
 // ── payment gateways: several per provider ────────
 app.get('/api/payment-gateways', wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `select id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot,
+    `select id, provider, label, shortcode, is_default, is_platform_collect, enabled_pppoe, enabled_hotspot,
             last_callback_at, credentials
      from tenant_payment_config where tenant_id=$1
      order by provider, is_default desc, label nulls last`, [req.tenant.id]);
@@ -7531,7 +7535,7 @@ app.get('/api/payment-gateways/:id/credentials', wrap(async (req, res) => {
  */
 app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
-    'select provider, shortcode from tenant_payment_config where id=$1 and tenant_id=$2',
+    'select * from tenant_payment_config where id=$1 and tenant_id=$2',
     [req.params.id, req.tenant.id]);
   if (!g) return res.status(404).json({ error: 'not found' });
   if (g.provider !== 'daraja')
@@ -7544,7 +7548,12 @@ app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
     });
 
   try {
-    const out = await mpesa.registerC2B(req.tenant.id);
+    // Registers this specific gateway's own shortcode/credentials — not
+    // whichever one config()'s is_default pick would return, which used to
+    // silently register the wrong paybill for any tenant holding more than
+    // one Daraja config (a real gap now that a tenant can hold both an
+    // ordinary paybill and a dedicated platform-collect one).
+    const out = await mpesa.registerC2BForConfig(g);
     res.json({
       ok: true,
       confirmation: `${base}/webhooks/daraja/confirm`,
@@ -7601,6 +7610,42 @@ app.post('/api/payment-gateways/:id/default', wrap(async (req, res) => {
     await c.query('update tenant_payment_config set is_default=false where tenant_id=$1 and provider=$2',
       [req.tenant.id, g.provider]);
     await c.query('update tenant_payment_config set is_default=true where id=$1', [req.params.id]);
+    await c.query('commit');
+    res.json({ ok: true });
+  } catch (e) {
+    await c.query('rollback');
+    throw e;
+  } finally {
+    c.release();
+  }
+}));
+
+/**
+ * Only meaningful on the platform-owner's own tenant — daraja.js's
+ * resolveConfig() only ever looks this up against whichever tenant the
+ * is_super_admin staff row belongs to, so flipping it on any other tenant's
+ * gateway would have no effect at all. Gated on is_super_admin rather than
+ * that being enforced structurally, since nothing stops a request for a
+ * tenant that isn't the owner — it would just be a no-op, and this avoids
+ * the confusion of a toggle that appears to work but silently does nothing.
+ */
+app.post('/api/payment-gateways/:id/platform-collect', wrap(async (req, res) => {
+  if (!req.session.is_super_admin)
+    return res.status(403).json({ error: 'Only the platform owner can designate a platform-collect paybill.' });
+  const { rows: [g] } = await pool.query(
+    'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!g) return res.status(404).json({ error: 'not found' });
+  const on = req.body?.on !== false;
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    if (on) {
+      await c.query('update tenant_payment_config set is_platform_collect=false where tenant_id=$1 and provider=$2',
+        [req.tenant.id, g.provider]);
+      await c.query('update tenant_payment_config set is_platform_collect=true where id=$1', [req.params.id]);
+    } else {
+      await c.query('update tenant_payment_config set is_platform_collect=false where id=$1', [req.params.id]);
+    }
     await c.query('commit');
     res.json({ ok: true });
   } catch (e) {

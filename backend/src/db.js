@@ -64,6 +64,21 @@ export async function config(tenantId, provider) {
   return rows[0] ?? null;
 }
 
+/**
+ * The platform owner's dedicated paybill for collect-and-settle (see
+ * tenant_payment_config.is_platform_collect) — deliberately separate from
+ * config()'s pick, which is whatever that same tenant uses for its own
+ * ordinary SaaS billing. Callers fall back to config() when this returns
+ * null, so setting one up is optional, not a breaking requirement.
+ */
+export async function platformCollectConfig(tenantId, provider) {
+  const { rows } = await pool.query(
+    `select * from tenant_payment_config where tenant_id=$1 and provider=$2 and is_platform_collect limit 1`,
+    [tenantId, provider]
+  );
+  return rows[0] ?? null;
+}
+
 /** True unless the tenant has explicitly switched this cron job off. */
 export async function jobEnabled(tenantId, job) {
   const { rows } = await pool.query(

@@ -713,6 +713,7 @@ async function payoutRow(row, ownerTenantId) {
   const { conversationId } = await daraja.b2c(ownerTenantId, {
     phone: row.settlement_phone, amount: row.amount,
     remarks: 'Vibelink settlement', occasion: row.tenant_id,
+    platformCollect: true,
   });
   // 'processing' rather than 'paid' here — Safaricom answers this call
   // with "queued", not a result; b2c-result (daraja.js) is what

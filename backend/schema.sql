@@ -1786,3 +1786,17 @@ create unique index if not exists settlements_one_pending_per_tenant on settleme
 -- b2c-result webhook reports the outcome, minutes after the payout call
 -- itself returned "queued".
 alter table settlements add column if not exists conversation_id text;
+
+-- A dedicated paybill for platform-collect, separate from whatever the
+-- platform owner's own tenant uses for its ordinary SaaS billing. Deliberate:
+-- commingling a third party's customer payments with the platform's own
+-- paybill traffic is exactly the aggregator-style mixing that makes the
+-- regulatory question (see the collect-and-settle design notes) worse than
+-- it needs to be, and it makes reconciliation unreadable either way. At most
+-- one per (tenant, provider) — payments/daraja.js's stkPushForSubscriber and
+-- jobs.js's payoutRow prefer this over the tenant's default gateway when set,
+-- and fall back to the default if it isn't (so this stays optional, not a
+-- breaking requirement for collect-and-settle to keep working).
+alter table tenant_payment_config add column if not exists is_platform_collect boolean not null default false;
+create unique index if not exists tpc_one_platform_collect_per_provider
+  on tenant_payment_config (tenant_id, provider) where is_platform_collect;
