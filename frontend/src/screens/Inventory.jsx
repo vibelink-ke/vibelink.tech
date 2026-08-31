@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 
-const CATEGORIES = ['Router', 'ONT', 'CPE', 'Switch', 'Cable', 'Antenna', 'Other'];
+const CATEGORIES = ['Router', 'ONT', 'CPE', 'Switch', 'Cable', 'Connector', 'Antenna', 'Other'];
 const STATUSES = [
   { value: 'in_stock', label: 'In stock' },
   { value: 'installed', label: 'Installed' },
@@ -12,36 +12,44 @@ const STATUSES = [
   { value: 'retired', label: 'Retired' },
 ];
 
-const blank = () => ({
-  name: '', category: 'Router', macAddress: '', serialNumber: '',
-  ownedByTenant: true, subscriberId: '', routerId: '', status: 'in_stock', notes: '',
+const blank = (tracking = 'serialized') => ({
+  tracking, name: '', category: tracking === 'bulk' ? 'Cable' : 'Router', macAddress: '', serialNumber: '',
+  ownedByTenant: true, subscriberId: '', routerId: '', status: 'in_stock', notes: '', quantity: '1', unit: '',
 });
 
 /**
  * Physical gadgets — routers, ONTs, CPEs — tracked whether they belong to
- * the ISP or to the client at whose premises they sit. The MAC address is
- * what actually survives a relabeling or a reassignment, which is the
- * point of tracking one at all: accountability that doesn't depend on
- * someone remembering which box is whose.
+ * the ISP or to the client at whose premises they sit, plus bulk stock
+ * (cable, connectors, spares) that has no individual identity, only a
+ * count. The MAC address is what actually survives a relabeling or a
+ * reassignment, which is the point of tracking a serialized gadget by one
+ * at all: accountability that doesn't depend on someone remembering which
+ * box is whose.
  */
 export default function Inventory() {
   const store = useStore();
   const items = store.inventory ?? [];
   const [form, setForm] = useState(null);   // null = closed, object = open (new or editing)
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState('all');   // all | ours | client | status:*
+  const [filter, setFilter] = useState('all');   // all | ours | client | bulk | status:*
+  const [adjustBusy, setAdjustBusy] = useState(null);   // id currently being adjusted
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target?.value ?? e }));
 
-  const openNew = () => setForm(blank());
+  const openNewGadget = () => setForm(blank('serialized'));
+  const openNewStock = () => setForm(blank('bulk'));
   const openEdit = (i) => setForm({
-    id: i.id, name: i.name, category: i.category || 'Other', macAddress: i.mac_address || '',
+    id: i.id, tracking: i.tracking, name: i.name, category: i.category || 'Other', macAddress: i.mac_address || '',
     serialNumber: i.serial_number || '', ownedByTenant: i.owned_by_tenant,
     subscriberId: i.subscriber_id || '', routerId: i.router_id || '', status: i.status, notes: i.notes || '',
+    quantity: String(i.quantity ?? 1), unit: i.unit || '',
   });
 
+  const isBulk = form?.tracking === 'bulk';
+
   const save = async () => {
-    if (!form.name.trim()) return store.toast('Give the gadget a name');
+    if (!form.name.trim()) return store.toast(isBulk ? 'Name this stock line' : 'Give the gadget a name');
+    if (isBulk && !(Number(form.quantity) >= 0)) return store.toast('Quantity must be zero or more');
     setBusy(true);
     try {
       if (form.id) {
@@ -49,7 +57,7 @@ export default function Inventory() {
         store.toast(`${form.name} updated`);
       } else {
         await api.createInventoryItem(form);
-        store.toast(`${form.name} added to inventory`);
+        store.toast(isBulk ? `${form.name} added to stock` : `${form.name} added to inventory`);
       }
       store.setCollection('inventory', await api.inventory());
       setForm(null);
@@ -71,34 +79,49 @@ export default function Inventory() {
     }
   };
 
+  const adjust = async (i, delta) => {
+    setAdjustBusy(i.id);
+    try {
+      const { quantity } = await api.adjustInventoryQuantity(i.id, delta);
+      store.setCollection('inventory', (xs) => xs.map((x) => (x.id === i.id ? { ...x, quantity } : x)));
+    } catch (e) {
+      store.toast(`Could not update: ${e.message}`);
+    } finally {
+      setAdjustBusy(null);
+    }
+  };
+
   const filtered = useMemo(() => {
     if (filter === 'all') return items;
     if (filter === 'ours') return items.filter((i) => i.owned_by_tenant);
     if (filter === 'client') return items.filter((i) => !i.owned_by_tenant);
+    if (filter === 'bulk') return items.filter((i) => i.tracking === 'bulk');
     return items.filter((i) => i.status === filter);
   }, [items, filter]);
 
   const oursCount = items.filter((i) => i.owned_by_tenant).length;
+  const bulkCount = items.filter((i) => i.tracking === 'bulk').length;
 
   return (
     <Screen
       title="Inventory"
-      subtitle="Gadgets at client premises and in the store — whose they are, and which device is which by MAC address."
+      subtitle="Gadgets at client premises and in the store, plus bulk stock — whose they are, and which device is which by MAC address."
       actions={
-        <Button variant="primary" onClick={openNew}>
-          + Add gadget
-        </Button>
+        <>
+          <Button onClick={openNewStock}>+ Add stock</Button>
+          <Button variant="primary" onClick={openNewGadget}>+ Add gadget</Button>
+        </>
       }
     >
       <Grid min={200} gap={14}>
-        <Stat label="Total gadgets" value={items.length} />
+        <Stat label="Total lines" value={items.length} />
         <Stat label="Ours" value={oursCount} hint="ours to recover if a client leaves" />
         <Stat label="Client-owned" value={items.length - oursCount} />
-        <Stat label="Installed" value={items.filter((i) => i.status === 'installed').length} />
+        <Stat label="Bulk stock lines" value={bulkCount} hint="cable, connectors, spares" />
       </Grid>
 
       <Card
-        title="Gadgets"
+        title="Gadgets & stock"
         actions={
           <Select
             value={filter}
@@ -107,6 +130,7 @@ export default function Inventory() {
               { value: 'all', label: 'All' },
               { value: 'ours', label: 'Ours' },
               { value: 'client', label: "Client-owned" },
+              { value: 'bulk', label: 'Bulk stock only' },
               ...STATUSES,
             ]}
           />
@@ -114,11 +138,11 @@ export default function Inventory() {
       >
         <Table
           rowKey={(i) => i.id}
-          empty="No gadgets tracked yet"
+          empty="Nothing tracked yet"
           rows={filtered}
           columns={[
             {
-              key: 'name', label: 'Gadget',
+              key: 'name', label: 'Gadget / stock',
               render: (i) => (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span style={{ fontWeight: 600 }}>{i.name}</span>
@@ -127,10 +151,18 @@ export default function Inventory() {
               ),
             },
             {
-              key: 'mac_address', label: 'MAC address',
-              render: (i) => i.mac_address
-                ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{i.mac_address}</span>
-                : <span style={{ color: color.muted }}>—</span>,
+              key: 'identity', label: 'MAC / quantity',
+              render: (i) => i.tracking === 'bulk' ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontFamily: font.mono, fontSize: 12.5 }}>
+                  <Button size="sm" onClick={() => adjust(i, -1)} disabled={adjustBusy === i.id || i.quantity <= 0}>−</Button>
+                  {i.quantity}{i.unit ? ` ${i.unit}` : ''}
+                  <Button size="sm" onClick={() => adjust(i, 1)} disabled={adjustBusy === i.id}>+</Button>
+                </span>
+              ) : i.mac_address ? (
+                <span style={{ fontFamily: font.mono, fontSize: 12 }}>{i.mac_address}</span>
+              ) : (
+                <span style={{ color: color.muted }}>—</span>
+              ),
             },
             {
               key: 'owned_by_tenant', label: 'Ownership',
@@ -138,9 +170,10 @@ export default function Inventory() {
             },
             {
               key: 'subscriber_name', label: 'At premises',
-              render: (i) => i.subscriber_name
-                ? <span>{i.subscriber_name}{i.subscriber_account_code ? ` · ${i.subscriber_account_code}` : ''}</span>
-                : <span style={{ color: color.muted }}>Unassigned</span>,
+              render: (i) => i.tracking === 'bulk' ? <span style={{ color: color.muted }}>In store</span>
+                : i.subscriber_name
+                  ? <span>{i.subscriber_name}{i.subscriber_account_code ? ` · ${i.subscriber_account_code}` : ''}</span>
+                  : <span style={{ color: color.muted }}>Unassigned</span>,
             },
             { key: 'router_name', label: 'Site / router', render: (i) => i.router_name ?? '—' },
             { key: 'status', label: 'Status', render: (i) => <Badge tone={i.status === 'faulty' ? 'suspended' : i.status === 'installed' ? 'active' : 'default'}>{i.status}</Badge> },
@@ -159,21 +192,21 @@ export default function Inventory() {
 
       <Modal
         open={!!form}
-        title={form?.id ? `Edit ${form.name}` : 'Add gadget'}
+        title={form?.id ? `Edit ${form.name}` : isBulk ? 'Add stock' : 'Add gadget'}
         onClose={() => setForm(null)}
         footer={
           <>
             <Button onClick={() => setForm(null)}>Cancel</Button>
             <Button variant="primary" onClick={save} disabled={busy}>
-              {busy ? 'Saving…' : form?.id ? 'Save changes' : 'Add gadget'}
+              {busy ? 'Saving…' : form?.id ? 'Save changes' : isBulk ? 'Add stock' : 'Add gadget'}
             </Button>
           </>
         }
       >
         {form && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Gadget name" span={2} hint="e.g. TP-Link CPE210, MikroTik hAP lite">
-              <Input value={form.name} onChange={set('name')} placeholder="TP-Link CPE210" />
+            <Field label={isBulk ? 'Stock name' : 'Gadget name'} span={2} hint={isBulk ? 'e.g. CAT6 cable, RJ45 connectors' : 'e.g. TP-Link CPE210, MikroTik hAP lite'}>
+              <Input value={form.name} onChange={set('name')} placeholder={isBulk ? 'CAT6 cable' : 'TP-Link CPE210'} />
             </Field>
             <Field label="Category">
               <Select value={form.category} onChange={set('category')} options={CATEGORIES} />
@@ -181,36 +214,56 @@ export default function Inventory() {
             <Field label="Status">
               <Select value={form.status} onChange={set('status')} options={STATUSES} />
             </Field>
-            <Field label="MAC address" hint="Survives a relabel or reassignment — the real identifier">
-              <Input value={form.macAddress} onChange={set('macAddress')} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} />
-            </Field>
-            <Field label="Serial number" hint="Optional">
-              <Input value={form.serialNumber} onChange={set('serialNumber')} />
-            </Field>
-            <Field label="Ownership" span={2} hint="Whose gadget is this — the ISP's, or the client's own?">
+
+            {isBulk ? (
+              <>
+                <Field label="Quantity">
+                  <Input type="number" value={form.quantity} onChange={set('quantity')} />
+                </Field>
+                <Field label="Unit" hint="Optional — meters, pcs, boxes">
+                  <Input value={form.unit} onChange={set('unit')} placeholder="meters" />
+                </Field>
+              </>
+            ) : (
+              <>
+                <Field label="MAC address" hint="Survives a relabel or reassignment — the real identifier">
+                  <Input value={form.macAddress} onChange={set('macAddress')} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} />
+                </Field>
+                <Field label="Serial number" hint="Optional">
+                  <Input value={form.serialNumber} onChange={set('serialNumber')} />
+                </Field>
+              </>
+            )}
+
+            <Field label="Ownership" span={2} hint="Whose is this — the ISP's, or the client's own?">
               <Select
                 value={form.ownedByTenant ? 'ours' : 'client'}
                 onChange={(e) => setForm((s) => ({ ...s, ownedByTenant: e.target.value === 'ours' }))}
                 options={[{ value: 'ours', label: 'Ours — recover it if the client leaves' }, { value: 'client', label: "Client's own — nothing to recover" }]}
               />
             </Field>
-            <Field label="Installed at (client)" span={2}>
-              <Select
-                value={form.subscriberId}
-                onChange={set('subscriberId')}
-                options={[
-                  { value: '', label: 'Unassigned' },
-                  ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
-                ]}
-              />
-            </Field>
-            <Field label="Site / router" span={2} hint="Optional — for gear tied to a site rather than one client">
-              <Select
-                value={form.routerId}
-                onChange={set('routerId')}
-                options={[{ value: '', label: 'None' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
-              />
-            </Field>
+
+            {!isBulk && (
+              <>
+                <Field label="Installed at (client)" span={2}>
+                  <Select
+                    value={form.subscriberId}
+                    onChange={set('subscriberId')}
+                    options={[
+                      { value: '', label: 'Unassigned' },
+                      ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
+                    ]}
+                  />
+                </Field>
+                <Field label="Site / router" span={2} hint="Optional — for gear tied to a site rather than one client">
+                  <Select
+                    value={form.routerId}
+                    onChange={set('routerId')}
+                    options={[{ value: '', label: 'None' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+                  />
+                </Field>
+              </>
+            )}
             <Field label="Notes" span={2}>
               <Textarea rows={3} value={form.notes} onChange={set('notes')} placeholder="Any other detail worth keeping" />
             </Field>

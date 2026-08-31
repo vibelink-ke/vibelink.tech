@@ -4781,15 +4781,23 @@ app.get('/api/inventory', requirePermission('inventory.view'), wrap(async (req, 
 }));
 
 app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (req, res) => {
-  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId, status, notes } = req.body;
+  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
+          status, notes, tracking, quantity, unit } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
 
-  if (subscriberId) {
+  // Bulk stock has no individual identity and isn't installed anywhere —
+  // any MAC/serial/premises/router the form still carried from a prior
+  // serialized entry is dropped rather than saved against a quantity line
+  // it can't actually mean anything for.
+  const isBulk = tracking === 'bulk';
+  if (isBulk && !(Number(quantity) >= 0)) return res.status(400).json({ error: 'Quantity must be zero or more' });
+
+  if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(
       'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such client' });
   }
-  if (routerId) {
+  if (!isBulk && routerId) {
     const { rowCount } = await pool.query(
       'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such router' });
@@ -4798,11 +4806,16 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
   try {
     const { rows: [item] } = await pool.query(
       `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
-         owned_by_tenant, subscriber_id, router_id, status, notes)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
-      [req.tenant.id, name.trim(), category || null, macAddress?.trim().toUpperCase() || null,
-       serialNumber?.trim() || null, ownedByTenant !== false, subscriberId || null, routerId || null,
-       status || 'in_stock', notes || null]);
+         owned_by_tenant, subscriber_id, router_id, status, notes, tracking, quantity, unit)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
+      [req.tenant.id, name.trim(), category || null,
+       isBulk ? null : macAddress?.trim().toUpperCase() || null,
+       isBulk ? null : serialNumber?.trim() || null,
+       ownedByTenant !== false,
+       isBulk ? null : subscriberId || null,
+       isBulk ? null : routerId || null,
+       status || 'in_stock', notes || null, isBulk ? 'bulk' : 'serialized',
+       isBulk ? Math.trunc(Number(quantity)) : 1, isBulk ? unit?.trim() || null : null]);
     res.json({ id: item.id, ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
@@ -4811,14 +4824,20 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
 }));
 
 app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (req, res) => {
-  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId, status, notes } = req.body;
+  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
+          status, notes, tracking, quantity, unit } = req.body;
 
-  if (subscriberId) {
+  const isBulk = tracking === 'bulk';
+  if (isBulk && quantity !== undefined && !(Number(quantity) >= 0)) {
+    return res.status(400).json({ error: 'Quantity must be zero or more' });
+  }
+
+  if (!isBulk && subscriberId) {
     const { rowCount } = await pool.query(
       'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such client' });
   }
-  if (routerId) {
+  if (!isBulk && routerId) {
     const { rowCount } = await pool.query(
       'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such router' });
@@ -4836,18 +4855,44 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
          router_id = $9,
          status = coalesce($10, status),
          notes = $11,
+         tracking = coalesce($12, tracking),
+         quantity = coalesce($13, quantity),
+         unit = $14,
          updated_at = now()
        where id=$1 and tenant_id=$2 returning id`,
       [req.params.id, req.tenant.id, name?.trim() || null, category || null,
-       macAddress?.trim().toUpperCase() || null, serialNumber?.trim() || null,
+       isBulk ? null : macAddress?.trim().toUpperCase() || null,
+       isBulk ? null : serialNumber?.trim() || null,
        typeof ownedByTenant === 'boolean' ? ownedByTenant : null,
-       subscriberId || null, routerId || null, status || null, notes || null]);
+       isBulk ? null : subscriberId || null,
+       isBulk ? null : routerId || null,
+       status || null, notes || null, tracking || null,
+       quantity !== undefined ? Math.trunc(Number(quantity)) : null,
+       isBulk ? unit?.trim() || null : null]);
     if (!item) return res.status(404).json({ error: 'not found' });
     res.json({ ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
     throw e;
   }
+}));
+
+/**
+ * Received more, or used some, without opening the full edit form — the
+ * common case for a consumable/spare that gets touched every few days.
+ * Clamped at zero rather than allowed negative: stock leaving faster than
+ * it was ever recorded coming in is a data-entry mistake worth surfacing,
+ * not a number worth storing.
+ */
+app.post('/api/inventory/:id/adjust-quantity', requirePermission('inventory.edit'), wrap(async (req, res) => {
+  const delta = Number(req.body?.delta);
+  if (!Number.isFinite(delta) || delta === 0) return res.status(400).json({ error: 'Provide a non-zero delta' });
+  const { rows: [item] } = await pool.query(
+    `update inventory_items set quantity = greatest(0, quantity + $3), updated_at = now()
+     where id=$1 and tenant_id=$2 returning quantity`,
+    [req.params.id, req.tenant.id, Math.trunc(delta)]);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true, quantity: item.quantity });
 }));
 
 app.delete('/api/inventory/:id', requirePermission('inventory.delete'), wrap(async (req, res) => {

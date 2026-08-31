@@ -1887,3 +1887,15 @@ create index if not exists inventory_items_subscriber_idx on inventory_items (su
 -- couple one tenant's data entry to another's.
 create unique index if not exists inventory_items_tenant_mac
   on inventory_items (tenant_id, mac_address) where mac_address is not null and mac_address <> '';
+
+-- Bulk stock — cable, connectors, spare CPEs still in their box — has no
+-- individual identity worth a MAC or a serial, only a count. 'serialized'
+-- keeps every existing row's meaning unchanged (quantity defaults to the
+-- obvious 1 per gadget); 'bulk' is a consumable/spare line with no MAC, no
+-- serial, and no premises or router link — it isn't installed anywhere,
+-- it's just on the shelf until it is.
+alter table inventory_items add column if not exists tracking text not null default 'serialized'
+  check (tracking in ('serialized', 'bulk'));
+alter table inventory_items add column if not exists quantity integer not null default 1
+  check (quantity >= 0);
+alter table inventory_items add column if not exists unit text;   -- e.g. "meters", "pcs", "boxes" — bulk only

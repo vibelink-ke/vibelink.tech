@@ -206,6 +206,7 @@ export const api = {
   createInventoryItem: (i) => post('/api/inventory', i),
   updateInventoryItem: (id, i) => put(`/api/inventory/${id}`, i),
   deleteInventoryItem: (id) => del(`/api/inventory/${id}`),
+  adjustInventoryQuantity: (id, delta) => post(`/api/inventory/${id}/adjust-quantity`, { delta }),
   platformUpdates: () => get('/api/platform/updates'),
   createPlatformUpdate: (u) => post('/api/platform/updates', u),
   deletePlatformUpdate: (id) => del(`/api/platform/updates/${id}`),
