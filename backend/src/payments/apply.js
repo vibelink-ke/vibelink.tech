@@ -3,6 +3,21 @@ import { activateSubscriber, issueVoucherAccess } from '../radius.js';
 import { send } from '../sms.js';
 
 /**
+ * PPPoE billing cycles land on a shared midnight rather than whatever minute
+ * the customer happened to pay at — every account's clock ends up on the
+ * same daily boundary, which is what lets jobs.js process a clean nightly
+ * batch instead of a trickle of expiries scattered across all 24 hours.
+ * Always rounds *up*: a customer never loses paid-for time to the rounding,
+ * only ever gains the remainder of the day they paid into.
+ */
+export function ceilToMidnight(d) {
+  const r = new Date(d);
+  if (r.getHours() === 0 && r.getMinutes() === 0 && r.getSeconds() === 0 && r.getMilliseconds() === 0) return r;
+  r.setHours(24, 0, 0, 0);
+  return r;
+}
+
+/**
  * A tenant's own money, held by the platform between collecting it (their
  * customers pay into the platform's paybill, for a tenant with none of
  * their own — see tenants.platform_collect_enabled) and settling it out to
@@ -190,6 +205,10 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId
     const minutes = periods * sub.duration_min;
     const base = new Date(Math.max(Date.now(), new Date(sub.expires_at ?? Date.now()).getTime()));
     expires = new Date(base.getTime() + minutes * 60000);
+    // Hotspot vouchers are short (minutes/hours) and are meant to expire at
+    // the literal moment paid for — only PPPoE's day-scale plans get pushed
+    // onto the shared midnight boundary.
+    if (sub.service === 'pppoe') expires = ceilToMidnight(expires);
   }
 
   await c.query(

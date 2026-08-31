@@ -7,6 +7,7 @@ import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
 import { dbBackup } from './backup.js';
+import { ceilToMidnight } from './payments/apply.js';
 
 /**
  * A job that throws must not take the process down with it — node-cron does not
@@ -128,8 +129,42 @@ async function lockNewPppoeMacs() {
 }
 
 
+/**
+ * A PPPoE subscriber whose access is about to lapse but who already has
+ * enough wallet credit — subscribers.credit, leftover from rounding on a
+ * past payment (payments/apply.js's settleSubscriber) — to cover another
+ * full period renews on the spot instead of sliding into grace/expired and
+ * waiting for a fresh payment. Runs first, every 5 minutes alongside
+ * expireAndSuspend, so a covered wallet balance means the midnight cutover
+ * (ceilToMidnight) never actually costs that customer their connection.
+ */
+async function renewFromWallet() {
+  const { rows } = await pool.query(
+    `select s.id, s.tenant_id, s.account_code, s.expires_at, s.credit, p.price, p.duration_min
+       from subscribers s join plans p on p.id = s.plan_id
+      where s.service='pppoe' and s.status in ('active','grace') and s.expires_at < now()
+        and p.price > 0 and s.credit >= p.price
+        and s.tenant_id in (${enabledTenants})`, ['expireAndSuspend']);
+  for (const s of rows) {
+    const periods = Math.floor(Number(s.credit) / Number(s.price));
+    if (periods < 1) continue;
+    const minutes = periods * s.duration_min;
+    const base = new Date(Math.max(Date.now(), new Date(s.expires_at).getTime()));
+    const expires = ceilToMidnight(new Date(base.getTime() + minutes * 60000));
+    const credit = Number(s.credit) - periods * Number(s.price);
+    await pool.query(
+      "update subscribers set expires_at=$2, credit=$3, status='active' where id=$1",
+      [s.id, expires, credit]);
+    await pool.query(
+      `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
+       values ($1,$2,$3,'system','Auto-renewed from wallet',$4)`,
+      [s.tenant_id, s.id, s.account_code, `KES ${periods * s.price} used from wallet balance — KES ${credit} remaining`]);
+  }
+}
+
 /** Grace -> walled garden -> suspended, with no human in the loop. */
-async function expireAndSuspend() {
+export async function expireAndSuspend() {
+  await renewFromWallet();
   const { rows } = await pool.query(
     `select id, tenant_id, expires_at from subscribers
      where status in ('active','grace') and expires_at < now()
