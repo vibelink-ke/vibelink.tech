@@ -70,6 +70,16 @@ export const DEFAULT_PERMISSIONS = {
 
   'settings.view':   { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'settings.edit':   all(),
+
+  // A technician is the one actually carrying/installing the gadget, so
+  // create/edit is theirs by default; deleting a record (as opposed to
+  // marking it retired/returned) is owner-only, same reasoning as
+  // clients.delete — a record vanishing outright is harder to notice went
+  // wrong than one that just changed status.
+  'inventory.view':   { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  'inventory.create': { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  'inventory.edit':   { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  'inventory.delete': all(),
 };
 
 export const PERMISSION_META = [
@@ -114,6 +124,10 @@ export const PERMISSION_META = [
   { key: 'staff.manage_permissions', page: 'Staff & roles', action: 'Change the permission matrix' },
   { key: 'settings.view', page: 'Settings', action: 'View' },
   { key: 'settings.edit', page: 'Settings', action: 'Edit' },
+  { key: 'inventory.view',   page: 'Inventory', action: 'View' },
+  { key: 'inventory.create', page: 'Inventory', action: 'Create' },
+  { key: 'inventory.edit',   page: 'Inventory', action: 'Edit' },
+  { key: 'inventory.delete', page: 'Inventory', action: 'Delete' },
 ];
 
 /** The full matrix for a tenant — defaults with any saved overrides applied on top. */

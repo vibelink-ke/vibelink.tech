@@ -87,6 +87,7 @@ const COLLECTIONS = {
   technicians: [{ id: 'tech1', name: 'John', phone: '0711111111' }],
   salesReps: [{ id: 'rep1', name: 'Grace', phone: '0722222222' }],
   ovpnClients: [{ id: 'ov1', username: 'router-2-2', assigned_ip: '10.50.2.2', connected_at: iso(0), created_at: iso(-1), connectedNow: true }],
+  inventory: [{ id: 'inv1', name: 'TP-Link CPE210', category: 'CPE', mac_address: 'AA:BB:CC:DD:EE:01', serial_number: null, owned_by_tenant: true, subscriber_id: 'c1', subscriber_name: 'John Kamau', subscriber_account_code: '44013', router_id: null, router_name: null, status: 'installed', notes: null, created_at: iso(-5) }],
   ipPools: [{ id: 'pool1', name: 'PPPoE', cidr: '172.16.0.0/24', service: 'pppoe', router_id: 'r1' }],
   liveQueue: [{ id: 'lc1', display_name: 'Guest', visitor_ref: 'v1', status: 'waiting', started_at: iso(-0.01) }],
   referrers: [
@@ -198,6 +199,7 @@ const COLLECTION_ROUTES = [
   [/\/api\/technicians$/, COLLECTIONS.technicians],
   [/\/api\/sales-reps$/, COLLECTIONS.salesReps],
   [/\/api\/ovpn-clients$/, COLLECTIONS.ovpnClients],
+  [/\/api\/inventory$/, COLLECTIONS.inventory],
   [/\/api\/ip-pools$/, COLLECTIONS.ipPools],
   [/\/api\/referrers$/, COLLECTIONS.referrers],
 ];

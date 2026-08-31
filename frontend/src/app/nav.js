@@ -13,6 +13,7 @@ export const NAV_SECTIONS = [
       { to: '/tariffs', label: 'Internet tariffs' },
       { to: '/fair-use', label: 'Fair use policy', count: (s) => s.fupPolicies.length },
       { to: '/routers', label: 'Routers', count: (s) => s.routers.length },
+      { to: '/inventory', label: 'Inventory', count: (s) => s.inventory.length },
       { to: '/map', label: 'Map' },
       { to: '/analytics', label: 'Analytics' },
     ],

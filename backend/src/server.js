@@ -4766,6 +4766,97 @@ app.delete('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
   res.json({ ok: true, freed: r.host, detached: count, revoked, kept });
 }));
 
+// ── inventory: physical gadgets, whether ours or a client's own ──
+app.get('/api/inventory', requirePermission('inventory.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select i.*, s.name as subscriber_name, s.account_code as subscriber_account_code,
+            r.name as router_name
+       from inventory_items i
+       left join subscribers s on s.id = i.subscriber_id
+       left join routers r on r.id = i.router_id
+      where i.tenant_id=$1
+      order by i.created_at desc`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (req, res) => {
+  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId, status, notes } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+
+  if (subscriberId) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+  }
+  if (routerId) {
+    const { rowCount } = await pool.query(
+      'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such router' });
+  }
+
+  try {
+    const { rows: [item] } = await pool.query(
+      `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
+         owned_by_tenant, subscriber_id, router_id, status, notes)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+      [req.tenant.id, name.trim(), category || null, macAddress?.trim().toUpperCase() || null,
+       serialNumber?.trim() || null, ownedByTenant !== false, subscriberId || null, routerId || null,
+       status || 'in_stock', notes || null]);
+    res.json({ id: item.id, ok: true });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
+    throw e;
+  }
+}));
+
+app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (req, res) => {
+  const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId, status, notes } = req.body;
+
+  if (subscriberId) {
+    const { rowCount } = await pool.query(
+      'select 1 from subscribers where id=$1 and tenant_id=$2', [subscriberId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such client' });
+  }
+  if (routerId) {
+    const { rowCount } = await pool.query(
+      'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such router' });
+  }
+
+  try {
+    const { rows: [item] } = await pool.query(
+      `update inventory_items set
+         name = coalesce($3, name),
+         category = $4,
+         mac_address = $5,
+         serial_number = $6,
+         owned_by_tenant = coalesce($7, owned_by_tenant),
+         subscriber_id = $8,
+         router_id = $9,
+         status = coalesce($10, status),
+         notes = $11,
+         updated_at = now()
+       where id=$1 and tenant_id=$2 returning id`,
+      [req.params.id, req.tenant.id, name?.trim() || null, category || null,
+       macAddress?.trim().toUpperCase() || null, serialNumber?.trim() || null,
+       typeof ownedByTenant === 'boolean' ? ownedByTenant : null,
+       subscriberId || null, routerId || null, status || null, notes || null]);
+    if (!item) return res.status(404).json({ error: 'not found' });
+    res.json({ ok: true });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
+    throw e;
+  }
+}));
+
+app.delete('/api/inventory/:id', requirePermission('inventory.delete'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    'delete from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
+}));
+
 // ── router onboarding via WireGuard ───────────────
 // Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
 // single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.

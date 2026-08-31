@@ -1853,3 +1853,37 @@ create table if not exists platform_updates (
 -- badge for their whole team, the same way a shared inbox works. Simpler
 -- than per-staff read receipts, and nobody asked for those.
 alter table tenants add column if not exists last_update_seen_at timestamptz;
+
+-- ─────────────── inventory ───────────────
+-- Physical gadgets — routers, ONTs, CPEs, switches — tracked per tenant.
+-- owned_by_tenant is the accountability question that matters most: a
+-- customer-owned router at their premises is nothing to chase if it breaks,
+-- ours is an asset to recover if they leave. mac_address is the other half
+-- of accountability — the one identifier that survives a relabeling or a
+-- reassignment to a different client.
+create table if not exists inventory_items (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid not null references tenants on delete cascade,
+  name            text not null,             -- e.g. "TP-Link CPE210", "MikroTik hAP lite"
+  category        text,                      -- router | ont | cpe | switch | cable | other — free text, not enforced
+  mac_address     text,
+  serial_number   text,
+  owned_by_tenant boolean not null default true,
+  -- Where it actually is: at a client's premises (subscriber_id), or tied to
+  -- a specific site/router (router_id) — a spare in the store has neither.
+  subscriber_id   uuid references subscribers on delete set null,
+  router_id       uuid references routers on delete set null,
+  status          text not null default 'in_stock'
+                    check (status in ('in_stock','installed','faulty','retired')),
+  notes           text,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+create index if not exists inventory_items_tenant_idx on inventory_items (tenant_id);
+create index if not exists inventory_items_subscriber_idx on inventory_items (subscriber_id) where subscriber_id is not null;
+-- A MAC only has to be unique within one tenant's own inventory — two
+-- different ISPs on this platform each cataloguing their own gear will
+-- legitimately see the same vendor MAC block, and there's no reason to
+-- couple one tenant's data entry to another's.
+create unique index if not exists inventory_items_tenant_mac
+  on inventory_items (tenant_id, mac_address) where mac_address is not null and mac_address <> '';

@@ -52,6 +52,7 @@ const Outages = lazy(() => import('./screens/Outages'));
 const Sla = lazy(() => import('./screens/Sla'));
 const KnowledgeBase = lazy(() => import('./screens/KnowledgeBase'));
 const SiteProfiles = lazy(() => import('./screens/SiteProfiles'));
+const Inventory = lazy(() => import('./screens/Inventory'));
 const Automation = lazy(() => import('./screens/Automation'));
 const Tenants = lazy(() => import('./screens/Tenants'));
 const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
@@ -241,6 +242,7 @@ export default function App() {
             <Route path="/tariffs" element={<Tariffs />} />
             <Route path="/fair-use" element={<Fup />} />
             <Route path="/routers" element={<Routers />} />
+            <Route path="/inventory" element={<Inventory />} />
             <Route path="/map" element={<MapScreen />} />
             <Route path="/platform" element={<PlatformMonitor />} />
             <Route path="/analytics" element={<Analytics />} />
