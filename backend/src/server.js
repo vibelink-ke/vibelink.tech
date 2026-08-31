@@ -6917,15 +6917,44 @@ app.get('/api/staff', wrap(async (req, res) => {
   res.json(rows);
 }));
 
+/**
+ * Invite a new staff member — a plain insert, never an update.
+ *
+ * This used to upsert on (tenant_id, phone): a phone number that collided
+ * with an *existing* staff member's — including, once, the tenant's own
+ * owner account — silently overwrote that person's name, email and role
+ * with whatever the new invite typed in, rather than creating a second
+ * row. There is no legitimate "re-invite to update someone" flow in the
+ * product that ever relied on that (createStaff is only ever called from
+ * the invite form, never as an edit) — it was pure risk with nothing to
+ * show for it. A collision on phone, email or username is now rejected
+ * outright, by name, before anything is written.
+ */
 app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) => {
   const { name, phone, email, role = 'support' } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
-  const { rows: [s] } = await pool.query(
-    `insert into staff (tenant_id, name, phone, email, role) values ($1,$2,$3,$4,$5)
-     on conflict (tenant_id, phone) do update set name=excluded.name, email=excluded.email, role=excluded.role
-     returning *`,
-    [req.tenant.id, name, phone, email ?? null, role]);
-  res.json(s);
+
+  const { rows: [phoneClash] } = await pool.query(
+    'select name from staff where tenant_id=$1 and phone=$2', [req.tenant.id, phone]);
+  if (phoneClash) return res.status(409).json({ error: `${phoneClash.name} already uses that phone number.` });
+
+  if (email) {
+    const { rows: [emailClash] } = await pool.query(
+      'select name from staff where lower(email)=lower($1)', [email]);
+    if (emailClash) return res.status(409).json({ error: `${emailClash.name} already uses that email address.` });
+  }
+
+  try {
+    const { rows: [s] } = await pool.query(
+      `insert into staff (tenant_id, name, phone, email, role) values ($1,$2,$3,$4,$5) returning *`,
+      [req.tenant.id, name, phone, email ?? null, role]);
+    res.json(s);
+  } catch (e) {
+    // The pre-checks above cover the common case; this is the race-condition
+    // backstop for two invites landing at the same instant.
+    if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });
+    throw e;
+  }
 }));
 
 /**
