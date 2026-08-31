@@ -1899,3 +1899,33 @@ alter table inventory_items add column if not exists tracking text not null defa
 alter table inventory_items add column if not exists quantity integer not null default 1
   check (quantity >= 0);
 alter table inventory_items add column if not exists unit text;   -- e.g. "meters", "pcs", "boxes" — bulk only
+
+-- Where a gadget actually is, distinct from its condition (status): the
+-- competing platforms researched for this (Splynx, Sonar, ISPBox) all treat
+-- location as its own axis — warehouse, a technician's van, a client's
+-- premises, or the repair bench — because "in stock" alone doesn't answer
+-- "which shelf, or whose van". premises still keys off subscriber_id, which
+-- already existed; van keys off assigned_staff_id, added here.
+alter table inventory_items add column if not exists location text not null default 'warehouse'
+  check (location in ('warehouse', 'van', 'premises', 'repair_bench'));
+alter table inventory_items add column if not exists assigned_staff_id uuid references staff on delete set null;
+create index if not exists inventory_items_staff_idx on inventory_items (assigned_staff_id) where assigned_staff_id is not null;
+
+-- Assignment history: every meaningful move a gadget makes, not just its
+-- current state. quantity matters for a bulk line issued a few units at a
+-- time; a serialized gadget's own movements are always quantity 1.
+create table if not exists inventory_movements (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  item_id       uuid not null references inventory_items on delete cascade,
+  action        text not null,   -- created | issued | returned | installed | repaired | adjusted | updated
+  from_location text,
+  to_location   text,
+  staff_id      uuid references staff on delete set null,
+  subscriber_id uuid references subscribers on delete set null,
+  quantity      integer not null default 1,
+  note          text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists inventory_movements_item_idx on inventory_movements (item_id, created_at desc);
+create index if not exists inventory_movements_tenant_idx on inventory_movements (tenant_id, created_at desc);

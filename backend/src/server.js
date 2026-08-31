@@ -4766,17 +4766,48 @@ app.delete('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
   res.json({ ok: true, freed: r.host, detached: count, revoked, kept });
 }));
 
+/**
+ * One row per meaningful move a gadget makes — issued to a tech, returned,
+ * installed, sent for repair, adjusted, or just edited. Best-effort: a
+ * failure here should never take down the actual inventory change it's
+ * describing.
+ */
+async function logInventoryMovement(tenantId, itemId, action, extra = {}) {
+  try {
+    await pool.query(
+      `insert into inventory_movements (tenant_id, item_id, action, from_location, to_location, staff_id, subscriber_id, quantity, note)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [tenantId, itemId, action, extra.fromLocation ?? null, extra.toLocation ?? null,
+       extra.staffId ?? null, extra.subscriberId ?? null, extra.quantity ?? 1, extra.note ?? null]);
+  } catch (e) { console.error('logInventoryMovement', e.message); }
+}
+
 // ── inventory: physical gadgets, whether ours or a client's own ──
 app.get('/api/inventory', requirePermission('inventory.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select i.*, s.name as subscriber_name, s.account_code as subscriber_account_code,
-            r.name as router_name
+            r.name as router_name, st.name as assigned_staff_name
        from inventory_items i
        left join subscribers s on s.id = i.subscriber_id
        left join routers r on r.id = i.router_id
+       left join staff st on st.id = i.assigned_staff_id
       where i.tenant_id=$1
       order by i.created_at desc`,
     [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.get('/api/inventory/:id/movements', requirePermission('inventory.view'), wrap(async (req, res) => {
+  const { rows: [item] } = await pool.query(
+    'select 1 from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  const { rows } = await pool.query(
+    `select m.*, st.name as staff_name, s.name as subscriber_name
+       from inventory_movements m
+       left join staff st on st.id = m.staff_id
+       left join subscribers s on s.id = m.subscriber_id
+      where m.item_id=$1 order by m.created_at desc limit 50`,
+    [req.params.id]);
   res.json(rows);
 }));
 
@@ -4806,8 +4837,9 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
   try {
     const { rows: [item] } = await pool.query(
       `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
-         owned_by_tenant, subscriber_id, router_id, status, notes, tracking, quantity, unit)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning id`,
+         owned_by_tenant, subscriber_id, router_id, status, notes, tracking, quantity, unit,
+         location)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
       [req.tenant.id, name.trim(), category || null,
        isBulk ? null : macAddress?.trim().toUpperCase() || null,
        isBulk ? null : serialNumber?.trim() || null,
@@ -4815,7 +4847,13 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
        isBulk ? null : subscriberId || null,
        isBulk ? null : routerId || null,
        status || 'in_stock', notes || null, isBulk ? 'bulk' : 'serialized',
-       isBulk ? Math.trunc(Number(quantity)) : 1, isBulk ? unit?.trim() || null : null]);
+       isBulk ? Math.trunc(Number(quantity)) : 1, isBulk ? unit?.trim() || null : null,
+       !isBulk && subscriberId ? 'premises' : 'warehouse']);
+    await logInventoryMovement(req.tenant.id, item.id, 'created', {
+      toLocation: !isBulk && subscriberId ? 'premises' : 'warehouse',
+      subscriberId: !isBulk ? subscriberId || null : null,
+      quantity: isBulk ? Math.trunc(Number(quantity)) : 1,
+    });
     res.json({ id: item.id, ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
@@ -4826,6 +4864,10 @@ app.post('/api/inventory', requirePermission('inventory.create'), wrap(async (re
 app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (req, res) => {
   const { name, category, macAddress, serialNumber, ownedByTenant, subscriberId, routerId,
           status, notes, tracking, quantity, unit } = req.body;
+
+  const { rows: [before] } = await pool.query(
+    'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!before) return res.status(404).json({ error: 'not found' });
 
   const isBulk = tracking === 'bulk';
   if (isBulk && quantity !== undefined && !(Number(quantity) >= 0)) {
@@ -4843,6 +4885,13 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
     if (!rowCount) return res.status(404).json({ error: 'No such router' });
   }
 
+  // Editing a client link by hand (as opposed to the dedicated issue/return
+  // actions below) still deserves a location that matches — assigning a
+  // client moves it to the client's premises, clearing one without picking
+  // a new location falls back to the warehouse.
+  const newSubscriberId = isBulk ? null : (subscriberId || null);
+  const newLocation = newSubscriberId ? 'premises' : (newSubscriberId !== (before.subscriber_id ?? null) ? 'warehouse' : before.location);
+
   try {
     const { rows: [item] } = await pool.query(
       `update inventory_items set
@@ -4858,18 +4907,27 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
          tracking = coalesce($12, tracking),
          quantity = coalesce($13, quantity),
          unit = $14,
+         location = $15,
          updated_at = now()
        where id=$1 and tenant_id=$2 returning id`,
       [req.params.id, req.tenant.id, name?.trim() || null, category || null,
        isBulk ? null : macAddress?.trim().toUpperCase() || null,
        isBulk ? null : serialNumber?.trim() || null,
        typeof ownedByTenant === 'boolean' ? ownedByTenant : null,
-       isBulk ? null : subscriberId || null,
+       newSubscriberId,
        isBulk ? null : routerId || null,
        status || null, notes || null, tracking || null,
        quantity !== undefined ? Math.trunc(Number(quantity)) : null,
-       isBulk ? unit?.trim() || null : null]);
+       isBulk ? unit?.trim() || null : null,
+       newLocation]);
     if (!item) return res.status(404).json({ error: 'not found' });
+    if (newSubscriberId && newSubscriberId !== (before.subscriber_id ?? null)) {
+      await logInventoryMovement(req.tenant.id, item.id, 'installed', {
+        fromLocation: before.location, toLocation: 'premises', subscriberId: newSubscriberId,
+      });
+    } else if (newLocation !== before.location) {
+      await logInventoryMovement(req.tenant.id, item.id, 'updated', { fromLocation: before.location, toLocation: newLocation });
+    }
     res.json({ ok: true });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That MAC address is already in inventory.' });
@@ -4892,7 +4950,83 @@ app.post('/api/inventory/:id/adjust-quantity', requirePermission('inventory.edit
      where id=$1 and tenant_id=$2 returning quantity`,
     [req.params.id, req.tenant.id, Math.trunc(delta)]);
   if (!item) return res.status(404).json({ error: 'not found' });
+  await logInventoryMovement(req.tenant.id, req.params.id, 'adjusted', { quantity: Math.abs(Math.trunc(delta)), note: delta > 0 ? 'received' : 'used' });
   res.json({ ok: true, quantity: item.quantity });
+}));
+
+/**
+ * Hand a gadget (or some units of a bulk stock line) to a technician's van.
+ *
+ * A bulk line is the interesting case: the units sitting in the warehouse
+ * are interchangeable until the moment one actually leaves, which is
+ * exactly when its real MAC/serial becomes worth recording — ISPBox's own
+ * model for this ("assign a serial to a service on install; it stays on
+ * the client's record for its whole life") is the same idea one step
+ * earlier, at issue rather than install. Only meaningful for a single unit:
+ * a MAC/serial issuing five identical cable drums makes no sense, so it's
+ * only accepted when quantity is exactly 1.
+ */
+app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(async (req, res) => {
+  const { staffId, quantity, macAddress, serialNumber, note } = req.body;
+  if (!staffId) return res.status(400).json({ error: 'Pick a technician' });
+  const { rowCount: staffOk } = await pool.query(
+    'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
+  if (!staffOk) return res.status(404).json({ error: 'No such staff member' });
+
+  const { rows: [item] } = await pool.query(
+    'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!item) return res.status(404).json({ error: 'not found' });
+
+  if (item.tracking === 'bulk') {
+    const qty = Math.trunc(Number(quantity)) || 1;
+    if (qty < 1) return res.status(400).json({ error: 'Issue at least 1' });
+    if (qty > item.quantity) return res.status(409).json({ error: `Only ${item.quantity} in stock.` });
+    if (qty > 1 && (macAddress || serialNumber)) {
+      return res.status(400).json({ error: 'A MAC or serial can only be recorded when issuing exactly 1 unit.' });
+    }
+
+    await pool.query('update inventory_items set quantity = quantity - $2, updated_at = now() where id=$1', [item.id, qty]);
+    await logInventoryMovement(req.tenant.id, item.id, 'issued', { toLocation: 'van', staffId, quantity: qty, note });
+
+    let createdId = null;
+    if (qty === 1 && (macAddress?.trim() || serialNumber?.trim())) {
+      try {
+        const { rows: [child] } = await pool.query(
+          `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
+             owned_by_tenant, status, tracking, quantity, location, assigned_staff_id)
+           values ($1,$2,$3,$4,$5,$6,'in_stock','serialized',1,'van',$7) returning id`,
+          [req.tenant.id, item.name, item.category, macAddress?.trim().toUpperCase() || null,
+           serialNumber?.trim() || null, item.owned_by_tenant, staffId]);
+        createdId = child.id;
+        await logInventoryMovement(req.tenant.id, child.id, 'created', { toLocation: 'van', staffId, note: `Issued from "${item.name}" stock` });
+      } catch (e) {
+        if (e.code !== '23505') throw e;
+        // MAC collision on the child row: the bulk deduction and movement
+        // log already succeeded and are correct regardless, so this is
+        // reported rather than rolled back — the unit did leave the shelf.
+        return res.json({ ok: true, quantity: item.quantity - qty, warning: 'Issued, but that MAC is already in inventory — the unit was not given its own record.' });
+      }
+    }
+    return res.json({ ok: true, quantity: item.quantity - qty, createdId });
+  }
+
+  await pool.query(
+    `update inventory_items set location='van', assigned_staff_id=$2, subscriber_id=null, updated_at=now() where id=$1`,
+    [item.id, staffId]);
+  await logInventoryMovement(req.tenant.id, item.id, 'issued', { fromLocation: item.location, toLocation: 'van', staffId, note });
+  res.json({ ok: true });
+}));
+
+/** Back from a technician's van (or the repair bench) to the warehouse shelf. */
+app.post('/api/inventory/:id/return', requirePermission('inventory.edit'), wrap(async (req, res) => {
+  const { rows: [item] } = await pool.query(
+    'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!item) return res.status(404).json({ error: 'not found' });
+  await pool.query(
+    `update inventory_items set location='warehouse', assigned_staff_id=null, subscriber_id=null, updated_at=now() where id=$1`,
+    [item.id]);
+  await logInventoryMovement(req.tenant.id, item.id, 'returned', { fromLocation: item.location, toLocation: 'warehouse', note: req.body?.note || null });
+  res.json({ ok: true });
 }));
 
 app.delete('/api/inventory/:id', requirePermission('inventory.delete'), wrap(async (req, res) => {

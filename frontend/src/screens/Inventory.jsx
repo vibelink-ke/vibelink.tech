@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
+import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 
 const CATEGORIES = ['Router', 'ONT', 'CPE', 'Switch', 'Cable', 'Connector', 'Antenna', 'Other'];
 const STATUSES = [
@@ -11,11 +11,19 @@ const STATUSES = [
   { value: 'faulty', label: 'Faulty' },
   { value: 'retired', label: 'Retired' },
 ];
+const LOCATION_LABEL = { warehouse: 'Warehouse', van: 'Van', premises: 'Premises', repair_bench: 'Repair bench' };
 
 const blank = (tracking = 'serialized') => ({
   tracking, name: '', category: tracking === 'bulk' ? 'Cable' : 'Router', macAddress: '', serialNumber: '',
   ownedByTenant: true, subscriberId: '', routerId: '', status: 'in_stock', notes: '', quantity: '1', unit: '',
 });
+
+function locationText(i) {
+  if (i.location === 'van') return `Van — ${i.assigned_staff_name ?? 'unassigned'}`;
+  if (i.location === 'premises') return i.subscriber_name ? `Premises — ${i.subscriber_name}` : 'Premises';
+  if (i.location === 'repair_bench') return 'Repair bench';
+  return i.router_name ? `Warehouse (${i.router_name})` : 'Warehouse';
+}
 
 /**
  * Physical gadgets — routers, ONTs, CPEs — tracked whether they belong to
@@ -24,15 +32,21 @@ const blank = (tracking = 'serialized') => ({
  * count. The MAC address is what actually survives a relabeling or a
  * reassignment, which is the point of tracking a serialized gadget by one
  * at all: accountability that doesn't depend on someone remembering which
- * box is whose.
+ * box is whose. location (warehouse / a technician's van / a client's
+ * premises / the repair bench) is tracked separately from status
+ * (condition/lifecycle), matching how Splynx, Sonar and ISPBox all model
+ * this — "in stock" alone never answers "which shelf, or whose van".
  */
 export default function Inventory() {
   const store = useStore();
   const items = store.inventory ?? [];
   const [form, setForm] = useState(null);   // null = closed, object = open (new or editing)
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState('all');   // all | ours | client | bulk | status:*
-  const [adjustBusy, setAdjustBusy] = useState(null);   // id currently being adjusted
+  const [filter, setFilter] = useState('all');
+  const [adjustBusy, setAdjustBusy] = useState(null);
+  const [issuing, setIssuing] = useState(null);   // { item, staffId, quantity, macAddress, serialNumber, note }
+  const [issueBusy, setIssueBusy] = useState(false);
+  const [history, setHistory] = useState(null);   // { item, rows, loading }
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target?.value ?? e }));
 
@@ -91,21 +105,67 @@ export default function Inventory() {
     }
   };
 
+  const openIssue = (i) => setIssuing({ item: i, staffId: '', quantity: '1', macAddress: '', serialNumber: '', note: '' });
+
+  const submitIssue = async () => {
+    if (!issuing.staffId) return store.toast('Pick a technician');
+    setIssueBusy(true);
+    try {
+      const r = await api.issueInventoryItem(issuing.item.id, {
+        staffId: issuing.staffId,
+        quantity: issuing.item.tracking === 'bulk' ? Number(issuing.quantity) || 1 : undefined,
+        macAddress: issuing.macAddress || undefined,
+        serialNumber: issuing.serialNumber || undefined,
+        note: issuing.note || undefined,
+      });
+      store.setCollection('inventory', await api.inventory());
+      store.toast(r.warning || `${issuing.item.name} issued`);
+      setIssuing(null);
+    } catch (e) {
+      store.toast(`Could not issue: ${e.message}`);
+    } finally {
+      setIssueBusy(false);
+    }
+  };
+
+  const returnItem = async (i) => {
+    try {
+      await api.returnInventoryItem(i.id);
+      store.setCollection('inventory', await api.inventory());
+      store.toast(`${i.name} returned to the warehouse`);
+    } catch (e) {
+      store.toast(`Could not return: ${e.message}`);
+    }
+  };
+
+  const openHistory = async (i) => {
+    setHistory({ item: i, rows: [], loading: true });
+    try {
+      const rows = await api.inventoryMovements(i.id);
+      setHistory({ item: i, rows, loading: false });
+    } catch (e) {
+      setHistory({ item: i, rows: [], loading: false });
+      store.toast(`Could not load history: ${e.message}`);
+    }
+  };
+
   const filtered = useMemo(() => {
     if (filter === 'all') return items;
     if (filter === 'ours') return items.filter((i) => i.owned_by_tenant);
     if (filter === 'client') return items.filter((i) => !i.owned_by_tenant);
     if (filter === 'bulk') return items.filter((i) => i.tracking === 'bulk');
+    if (filter.startsWith('loc:')) return items.filter((i) => i.location === filter.slice(4));
     return items.filter((i) => i.status === filter);
   }, [items, filter]);
 
   const oursCount = items.filter((i) => i.owned_by_tenant).length;
   const bulkCount = items.filter((i) => i.tracking === 'bulk').length;
+  const vanCount = items.filter((i) => i.location === 'van').length;
 
   return (
     <Screen
       title="Inventory"
-      subtitle="Gadgets at client premises and in the store, plus bulk stock — whose they are, and which device is which by MAC address."
+      subtitle="Gadgets at client premises, in the store, or in a technician's van — whose they are, and which device is which by MAC address."
       actions={
         <>
           <Button onClick={openNewStock}>+ Add stock</Button>
@@ -116,7 +176,7 @@ export default function Inventory() {
       <Grid min={200} gap={14}>
         <Stat label="Total lines" value={items.length} />
         <Stat label="Ours" value={oursCount} hint="ours to recover if a client leaves" />
-        <Stat label="Client-owned" value={items.length - oursCount} />
+        <Stat label="With technicians" value={vanCount} hint="issued, not yet installed or returned" />
         <Stat label="Bulk stock lines" value={bulkCount} hint="cable, connectors, spares" />
       </Grid>
 
@@ -131,6 +191,10 @@ export default function Inventory() {
               { value: 'ours', label: 'Ours' },
               { value: 'client', label: "Client-owned" },
               { value: 'bulk', label: 'Bulk stock only' },
+              { value: 'loc:warehouse', label: 'In warehouse' },
+              { value: 'loc:van', label: 'With a technician' },
+              { value: 'loc:premises', label: 'At a premises' },
+              { value: 'loc:repair_bench', label: 'At the repair bench' },
               ...STATUSES,
             ]}
           />
@@ -169,18 +233,28 @@ export default function Inventory() {
               render: (i) => <Badge tone={i.owned_by_tenant ? 'active' : 'default'}>{i.owned_by_tenant ? 'Ours' : "Client's own"}</Badge>,
             },
             {
-              key: 'subscriber_name', label: 'At premises',
-              render: (i) => i.tracking === 'bulk' ? <span style={{ color: color.muted }}>In store</span>
-                : i.subscriber_name
-                  ? <span>{i.subscriber_name}{i.subscriber_account_code ? ` · ${i.subscriber_account_code}` : ''}</span>
-                  : <span style={{ color: color.muted }}>Unassigned</span>,
+              key: 'location', label: 'Location',
+              render: (i) => i.tracking === 'bulk'
+                ? <span style={{ color: color.muted }}>In store</span>
+                : <Badge tone={i.location === 'van' ? 'pending' : i.location === 'repair_bench' ? 'suspended' : 'default'}>{locationText(i)}</Badge>,
             },
-            { key: 'router_name', label: 'Site / router', render: (i) => i.router_name ?? '—' },
             { key: 'status', label: 'Status', render: (i) => <Badge tone={i.status === 'faulty' ? 'suspended' : i.status === 'installed' ? 'active' : 'default'}>{i.status}</Badge> },
             {
               key: 'act', label: '', align: 'right',
               render: (i) => (
                 <span style={{ whiteSpace: 'nowrap' }}>
+                  {i.tracking === 'serialized' && i.location === 'warehouse' && (
+                    <span onClick={() => openIssue(i)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Issue</span>
+                  )}
+                  {i.tracking === 'bulk' && i.quantity > 0 && (
+                    <span onClick={() => openIssue(i)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Issue</span>
+                  )}
+                  {(i.location === 'van' || i.location === 'repair_bench') && (
+                    <span onClick={() => returnItem(i)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Return</span>
+                  )}
+                  {i.tracking === 'serialized' && (
+                    <span onClick={() => openHistory(i)} style={{ color: color.neutralInk, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>History</span>
+                  )}
                   <span onClick={() => openEdit(i)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Edit</span>
                   <span onClick={() => remove(i)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Delete</span>
                 </span>
@@ -270,6 +344,80 @@ export default function Inventory() {
           </div>
         )}
       </Modal>
+
+      <Modal
+        open={!!issuing}
+        title={`Issue ${issuing?.item?.name ?? ''}`}
+        onClose={() => setIssuing(null)}
+        footer={
+          <>
+            <Button onClick={() => setIssuing(null)}>Cancel</Button>
+            <Button variant="primary" onClick={submitIssue} disabled={issueBusy}>
+              {issueBusy ? 'Issuing…' : 'Issue'}
+            </Button>
+          </>
+        }
+      >
+        {issuing && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Technician">
+              <Select
+                value={issuing.staffId}
+                onChange={(e) => setIssuing((s) => ({ ...s, staffId: e.target.value }))}
+                options={[
+                  { value: '', label: (store.technicians ?? []).length ? 'Select…' : 'No technicians on staff yet' },
+                  ...(store.technicians ?? []).map((t) => ({ value: t.id, label: t.name })),
+                ]}
+              />
+            </Field>
+            {issuing.item.tracking === 'bulk' && (
+              <Field label="Quantity" hint={`${issuing.item.quantity} in stock`}>
+                <Input type="number" value={issuing.quantity} onChange={(e) => setIssuing((s) => ({ ...s, quantity: e.target.value }))} />
+              </Field>
+            )}
+            {issuing.item.tracking === 'bulk' && Number(issuing.quantity) === 1 && (
+              <>
+                <div style={{ fontSize: 12, color: color.muted }}>
+                  Issuing exactly one? Record its real MAC or serial — the unit becomes individually
+                  tracked in {issuing.staffId ? 'their' : 'the'} van from here on.
+                </div>
+                <Field label="MAC address" hint="Optional">
+                  <Input value={issuing.macAddress} onChange={(e) => setIssuing((s) => ({ ...s, macAddress: e.target.value }))} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} />
+                </Field>
+                <Field label="Serial number" hint="Optional">
+                  <Input value={issuing.serialNumber} onChange={(e) => setIssuing((s) => ({ ...s, serialNumber: e.target.value }))} />
+                </Field>
+              </>
+            )}
+            <Field label="Note" hint="Optional">
+              <Textarea rows={2} value={issuing.note} onChange={(e) => setIssuing((s) => ({ ...s, note: e.target.value }))} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Drawer open={!!history} title={`History — ${history?.item?.name ?? ''}`} onClose={() => setHistory(null)}>
+        {history?.loading ? (
+          <Empty>Loading…</Empty>
+        ) : !history?.rows?.length ? (
+          <Empty>No movements recorded yet.</Empty>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {history.rows.map((m) => (
+              <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 3, borderLeft: `2px solid ${color.line}`, paddingLeft: 12 }}>
+                <span style={{ fontWeight: 600, fontSize: 13.5, textTransform: 'capitalize' }}>{m.action}</span>
+                <span style={{ fontSize: 12, color: color.muted }}>
+                  {new Date(m.created_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })}
+                  {m.staff_name ? ` · ${m.staff_name}` : ''}
+                  {m.subscriber_name ? ` · ${m.subscriber_name}` : ''}
+                  {m.to_location ? ` · ${LOCATION_LABEL[m.to_location] ?? m.to_location}` : ''}
+                </span>
+                {m.note && <span style={{ fontSize: 12.5, color: color.inkSoft }}>{m.note}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </Drawer>
     </Screen>
   );
 }
