@@ -2,7 +2,7 @@ import axios from 'axios';
 import express from 'express';
 import crypto from 'node:crypto';
 import { config, tenantByShortcode } from '../db.js';
-import { applyPayment } from './apply.js';
+import { applyPayment, accrueSettlement } from './apply.js';
 
 const BASE = process.env.DARAJA_ENV === 'sandbox'
   ? 'https://sandbox.safaricom.co.ke' : 'https://api.safaricom.co.ke';
@@ -176,8 +176,33 @@ export const router = express.Router();
  */
 router.post('/b2c-result', express.json(), async (req, res) => {
   const r = req.body?.Result ?? {};
-  console.log('daraja b2c result', r.ResultCode, r.ResultDesc, r.OriginatorConversationID ?? '');
-  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+  console.log('daraja b2c result', r.ResultCode, r.ResultDesc, r.ConversationID ?? '');
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
+
+  // Matched by conversation_id, which settleTenants (jobs.js) records the
+  // moment it queues the payout — this is the only place that actually
+  // knows whether the money moved; the initiating call only ever gets
+  // "queued" back from Safaricom.
+  if (!r.ConversationID) return;
+  const { pool } = await import('../db.js');
+  const { rows: [row] } = await pool.query(
+    "select id from settlements where conversation_id=$1 and status='processing'", [r.ConversationID]);
+  if (!row) return;
+
+  if (Number(r.ResultCode) === 0) {
+    const items = Object.fromEntries(
+      (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
+    await pool.query(
+      "update settlements set status='paid', settled_at=now(), reference=$2 where id=$1",
+      [row.id, String(items.TransactionReceipt ?? r.ConversationID)]);
+  } else {
+    // Back to 'pending', not 'failed' — the next settleTenants run picks it
+    // straight back up rather than this needing a human to notice and
+    // re-trigger it. A payout that fails the same way every night is still
+    // visible in this log, which is the point of logging it either way.
+    console.error('daraja b2c failed', r.ResultCode, r.ResultDesc, 'settlement', row.id);
+    await pool.query("update settlements set status='pending', conversation_id=null where id=$1", [row.id]);
+  }
 });
 
 // A timeout is not a failure: the payout may still have gone through, and
@@ -193,6 +218,36 @@ router.post('/validate', verifyWebhook, (_req, res) => res.json({ ResultCode: 0,
 router.post('/confirm', verifyWebhook, async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
   const b = req.body;
+
+  /**
+   * A walk-in payment for a platform-collected tenant: BillRefNumber
+   * carries "subdomain-accountcode" (see stkPushForSubscriber in
+   * server.js), not a bare account code, since it landed on the platform
+   * owner's own shortcode rather than that tenant's. Checked by subdomain
+   * match rather than assuming BusinessShortCode is the owner's — a
+   * customer could in principle type the platform paybill's own account
+   * format into any paybill's menu, and only a real match should ever
+   * route money to a tenant that never actually received it.
+   */
+  const billRef = String(b.BillRefNumber ?? '');
+  const dash = billRef.indexOf('-');
+  if (dash > 0) {
+    const { pool } = await import('../db.js');
+    const { rows: [t] } = await pool.query(
+      'select id, platform_collect_enabled, settlement_commission_pct from tenants where subdomain=$1',
+      [billRef.slice(0, dash)]);
+    if (t?.platform_collect_enabled) {
+      await applyPayment(t.id, {
+        provider: 'daraja', ref: b.TransID, amount: Number(b.TransAmount), phone: normalise(b.MSISDN),
+        name: [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' '),
+        rawAccount: billRef.slice(dash + 1), payload: b,
+      }).catch(console.error);
+      await accrueSettlement(t.id, Number(b.TransAmount) * (1 - Number(t.settlement_commission_pct ?? 5) / 100))
+        .catch(console.error);
+      return;
+    }
+  }
+
   const tenantId = await tenantByShortcode('daraja', String(b.BusinessShortCode));
   if (!tenantId) return;
   await applyPayment(tenantId, {
@@ -260,6 +315,25 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      * settleSubscriber below, which only know how to credit a subscriber
      * or issue a voucher — neither applies to buying SMS credit.
      */
+    /**
+     * A tenant with no Daraja paybill of their own — the STK push actually
+     * went out on the platform owner's account (req.tenant_id), same as
+     * sms_credit above, but the money is this subscriber's payment, not a
+     * purchase of anything. Applied to the real tenant (p.tenant_id), then
+     * the net (minus the commission stkPushForSubscriber recorded) accrues
+     * to that tenant's settlement balance for the next payout run.
+     */
+    if (p.type === 'platform_collect') {
+      await applyPayment(p.tenant_id, {
+        provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
+        rawAccount: null, payload: { checkoutId },
+        target: { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null },
+      });
+      const commissionPct = Number(p.commissionPct ?? 5);
+      await accrueSettlement(p.tenant_id, Number(req.amount) * (1 - commissionPct / 100));
+      return;
+    }
+
     if (p.type === 'sms_credit') {
       const ins = await pool.query(
         `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, status, applied_at, payload)

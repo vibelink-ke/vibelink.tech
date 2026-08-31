@@ -145,6 +145,9 @@ export default function Tenants() {
         plan_amount: editing.plan_amount === '' ? null : Number(editing.plan_amount),
         revshare_pct: editing.revshare_pct === '' ? null : Number(editing.revshare_pct),
         support_phone: editing.support_phone || null,
+        platform_collect_enabled: !!editing.platform_collect_enabled,
+        settlement_phone: editing.settlement_phone || null,
+        settlement_commission_pct: editing.settlement_commission_pct === '' ? null : Number(editing.settlement_commission_pct),
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
       store.toast(`${updated.name} updated`);
@@ -345,6 +348,9 @@ export default function Tenants() {
                         plan_amount: t.plan_amount ?? '',
                         revshare_pct: t.revshare_pct ?? '',
                         support_phone: t.support_phone ?? '',
+                        platform_collect_enabled: t.platform_collect_enabled ?? false,
+                        settlement_phone: t.settlement_phone ?? '',
+                        settlement_commission_pct: t.settlement_commission_pct ?? 5,
                       })
                     }
                     style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
@@ -480,6 +486,23 @@ export default function Tenants() {
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
             </Field>
+            <Field label="Platform collects on their behalf" span={2} hint="For a tenant with no payment gateway of their own: customers pay into our own paybill, and we settle it out to them nightly">
+              <Select
+                value={editing.platform_collect_enabled ? 'yes' : 'no'}
+                onChange={(e) => setEditing((s) => ({ ...s, platform_collect_enabled: e.target.value === 'yes' }))}
+                options={['no', 'yes']}
+              />
+            </Field>
+            {editing.platform_collect_enabled && (
+              <>
+                <Field label="Settlement M-Pesa number" hint="Where nightly payouts are sent">
+                  <Input value={editing.settlement_phone} onChange={(e) => setEditing((s) => ({ ...s, settlement_phone: e.target.value }))} />
+                </Field>
+                <Field label="Commission (%)" hint="Kept by the platform from each payout">
+                  <Input type="number" step="0.1" value={editing.settlement_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, settlement_commission_pct: e.target.value }))} />
+                </Field>
+              </>
+            )}
           </div>
         )}
       </Modal>

@@ -1878,6 +1878,56 @@ app.get('/portal/usage', wrap(async (req, res) => {
  * hotspot-only by the same schema constraint that keeps it off every other
  * PPPoE path.
  */
+/**
+ * STK push for a subscriber, routed through the tenant's own Daraja paybill
+ * as normal — or, for a tenant with platform_collect_enabled (no gateway of
+ * their own), through the platform owner's own paybill instead, exactly
+ * the way the platform SMS-credit purchase already borrows the owner's
+ * Daraja config for a different tenant's request. The account reference
+ * carries the tenant's subdomain so a walk-in paybill payment (the /confirm
+ * webhook, not this push) can also find its way back to the right tenant.
+ *
+ * stk_requests.tenant_id is whichever tenant's credentials actually placed
+ * the call — required, since that is whose webhook this becomes — while
+ * purpose.tenant_id is who the money is actually for. handleStkResult
+ * reads purpose to decide which one applies.
+ */
+async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose }) {
+  const { rows: [t] } = await pool.query(
+    'select subdomain, platform_collect_enabled, settlement_commission_pct from tenants where id=$1', [tenantId]);
+
+  if (t?.platform_collect_enabled) {
+    const { rows: [owner] } = await pool.query(
+      "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+    if (!owner) throw Object.assign(new Error('Platform collection is not set up yet — ask the platform owner.'), { status: 503 });
+
+    const data = await mpesa.stkPush(owner.tenant_id, {
+      phone, amount, accountRef: `${t.subdomain}-${accountCode}`.slice(0, 20), description,
+    });
+    const checkoutId = data?.CheckoutRequestID ?? null;
+    if (checkoutId) {
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [owner.tenant_id, checkoutId, phone, amount,
+         { type: 'platform_collect', tenant_id: tenantId, commissionPct: Number(t.settlement_commission_pct ?? 5), ...purpose }]);
+    }
+    return { checkoutId };
+  }
+
+  const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description });
+  const checkoutId = data?.CheckoutRequestID ?? null;
+  if (checkoutId) {
+    await pool.query(
+      `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+       values ($1,'daraja',$2,$3,$4,$5)
+       on conflict (tenant_id, provider, checkout_id) do nothing`,
+      [tenantId, checkoutId, phone, amount, purpose]);
+  }
+  return { checkoutId };
+}
+
 app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
   const s = await portalSession(req);
   if (!s) return res.status(401).json({ error: 'not signed in' });
@@ -1905,27 +1955,19 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
   }
 
   try {
-    const data = await mpesa.stkPush(s.tenant_id, {
-      phone, amount, accountRef: sub.account_code,
-      description: `${sub.name} — ${sub.account_code}`,
-    });
-    const checkoutId = data?.CheckoutRequestID ?? null;
     // Daraja's STK result callback (handleStkResult) looks this row up by
     // checkout_id to know who to credit and how much — without it, a
     // customer's own renewal payment could only ever be applied by the
     // separate C2B confirmation matching their account number, and
     // /portal/status/:checkoutId (what the page polls) had nothing to read
     // back, sitting on "check your phone" even after Safaricom answered.
-    if (checkoutId) {
-      await pool.query(
-        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
-         values ($1,'daraja',$2,$3,$4,$5)
-         on conflict (tenant_id, provider, checkout_id) do nothing`,
-        [s.tenant_id, checkoutId, phone, amount, { subscriber_id: s.subscriber_id }]);
-    }
+    const { checkoutId } = await stkPushForSubscriber(s.tenant_id, {
+      phone, amount, accountCode: sub.account_code, description: `${sub.name} — ${sub.account_code}`,
+      purpose: { subscriber_id: s.subscriber_id },
+    });
     res.json({ phone, amount, checkoutId });
   } catch (e) {
-    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+    res.status(e.status ?? 502).json({ error: e.response?.data?.errorMessage ?? e.message });
   }
 }));
 
@@ -1961,23 +2003,15 @@ app.post('/portal/pay-invoice', stkLimiter, wrap(async (req, res) => {
   }
 
   try {
-    const data = await mpesa.stkPush(s.tenant_id, {
-      phone, amount, accountRef: s.account_code,
-      description: `Invoice ${inv.number}`,
+    // invoice_id: settleSubscriber applies to this exact invoice when
+    // present, rather than falling back to "earliest open".
+    const { checkoutId } = await stkPushForSubscriber(s.tenant_id, {
+      phone, amount, accountCode: s.account_code, description: `Invoice ${inv.number}`,
+      purpose: { subscriber_id: s.subscriber_id, invoice_id: inv.id },
     });
-    const checkoutId = data?.CheckoutRequestID ?? null;
-    if (checkoutId) {
-      await pool.query(
-        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
-         values ($1,'daraja',$2,$3,$4,$5)
-         on conflict (tenant_id, provider, checkout_id) do nothing`,
-        // invoice_id: settleSubscriber applies to this exact invoice when
-        // present, rather than falling back to "earliest open".
-        [s.tenant_id, checkoutId, phone, amount, { subscriber_id: s.subscriber_id, invoice_id: inv.id }]);
-    }
     res.json({ phone, amount, checkoutId });
   } catch (e) {
-    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+    res.status(e.status ?? 502).json({ error: e.response?.data?.errorMessage ?? e.message });
   }
 }));
 
@@ -6091,7 +6125,7 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
   res.json({ ok: true, shortcode: cfg.shortcode, missing: [], note: 'All required credentials present' });
 }));
 
-app.get('/api/settlements', wrap(async (req, res) => {
+app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select * from settlements where tenant_id=$1 order by created_at desc', [req.tenant.id]);
   res.json(rows);
@@ -7044,7 +7078,8 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
 }));
 
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
-  const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone'];
+  const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
+                   'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   const { rows: [t] } = await pool.query(
@@ -7601,6 +7636,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
+  { job: 'settleTenants', name: 'Platform settlement payout', cron: '0 2 * * *', detail: 'Pays out what has been collected on behalf of a platform-collect tenant to their registered M-Pesa number' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
   /**
    * Same gap this list's own comment above already describes, caught by

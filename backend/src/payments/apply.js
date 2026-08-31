@@ -3,6 +3,26 @@ import { activateSubscriber, issueVoucherAccess } from '../radius.js';
 import { send } from '../sms.js';
 
 /**
+ * A tenant's own money, held by the platform between collecting it (their
+ * customers pay into the platform's paybill, for a tenant with none of
+ * their own — see tenants.platform_collect_enabled) and settling it out to
+ * them (jobs.js's settleTenants, via daraja.js's b2c()). One open
+ * ('pending') row per tenant at a time — settlements_one_pending_per_tenant
+ * enforces that in the schema — accrued into as payments come in, and
+ * closed out (a fresh 'pending' row starts from zero) once the payout job
+ * pays it and Safaricom's b2c-result webhook confirms it.
+ */
+export async function accrueSettlement(tenantId, amount) {
+  if (!(amount > 0)) return;
+  await pool.query(
+    `insert into settlements (tenant_id, amount, status)
+     values ($1, $2, 'pending')
+     on conflict (tenant_id) where status='pending'
+     do update set amount = settlements.amount + excluded.amount`,
+    [tenantId, amount]);
+}
+
+/**
  * The single funnel every channel goes through.
  * Idempotent: unique (tenant_id, provider, provider_ref) makes a replayed webhook a no-op.
  *

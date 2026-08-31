@@ -1765,3 +1765,24 @@ create table if not exists activity_log (
   created_at    timestamptz not null default now()
 );
 create index if not exists activity_log_subscriber_idx on activity_log (subscriber_id, created_at desc);
+
+-- ─────────────── platform collect-and-settle ───────────────
+-- For a tenant with no payment gateway of their own: customers pay into
+-- the platform owner's own Daraja paybill instead (account reference
+-- carries which tenant/subscriber it's for), and the platform settles the
+-- collected money out to the tenant on a schedule — jobs.js's
+-- settleTenants(), via daraja.js's b2c(). Opt-in per tenant, off by
+-- default: a tenant already collecting on their own paybill is untouched.
+alter table tenants add column if not exists platform_collect_enabled boolean not null default false;
+alter table tenants add column if not exists settlement_phone text;
+alter table tenants add column if not exists settlement_commission_pct numeric(5,2) not null default 5;
+
+-- settlements existed already (a read-only GET /api/settlements, nothing
+-- ever wrote to it) — this is what actually makes it real. One open
+-- 'pending' row per tenant, accrued into by accrueSettlement()
+-- (payments/apply.js) as payments come in, closed out once paid.
+create unique index if not exists settlements_one_pending_per_tenant on settlements (tenant_id) where status = 'pending';
+-- Matches a payout back to its settlements row when Safaricom's
+-- b2c-result webhook reports the outcome, minutes after the payout call
+-- itself returned "queued".
+alter table settlements add column if not exists conversation_id text;

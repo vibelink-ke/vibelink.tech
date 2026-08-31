@@ -50,6 +50,7 @@ export function startJobs() {
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
+  cron.schedule('0 2 * * *', safely('settleTenants', settleTenants));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   // Tenant billing is WHMCS's job now. Vibelink used to raise its own SaaS
@@ -673,6 +674,60 @@ export async function autoProvisionNewRouters() {
       console.error('autoProvisionNewRouters:', r.name, host, e.message);
     } finally {
       if (conn) ros.close(conn);
+    }
+  }
+}
+
+/**
+ * Pay out what's been collected on a tenant's behalf — the automatic half
+ * of platform collect-and-settle (see payments/apply.js's accrueSettlement,
+ * and daraja.js's /confirm and handleStkResult, which are what actually
+ * fill a pending settlements row as a platform-collected tenant's
+ * customers pay). Runs nightly; KES 100 minimum so a payout isn't attempted
+ * (and its M-Pesa fee paid) for a few shillings.
+ *
+ * The payout itself goes out on the platform owner's own Daraja paybill —
+ * same "whoever's tenant_id owns is_super_admin" resolution the SMS-credit
+ * purchase and platform_collect STK push already use — since that is
+ * whose account is actually holding the money to pay out. Left 'pending'
+ * on any failure (a stkPush-shaped error, a missing settlement_phone) so
+ * the next run retries automatically; nothing here ever marks a payout
+ * permanently failed on its own.
+ */
+const SETTLEMENT_MIN_KES = 100;
+
+export async function settleTenants() {
+  const { rows } = await pool.query(
+    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name
+       from settlements s join tenants t on t.id = s.tenant_id
+      where s.status='pending' and s.amount >= $1
+        and t.platform_collect_enabled and t.settlement_phone is not null`,
+    [SETTLEMENT_MIN_KES]);
+  if (!rows.length) return;
+
+  const { rows: [owner] } = await pool.query(
+    "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+  if (!owner) {
+    console.warn('settleTenants: no platform-owner tenant found — nothing paid out');
+    return;
+  }
+
+  const daraja = await import('./payments/daraja.js');
+  for (const r of rows) {
+    try {
+      const { conversationId } = await daraja.b2c(owner.tenant_id, {
+        phone: r.settlement_phone, amount: r.amount,
+        remarks: 'Vibelink settlement', occasion: r.tenant_id,
+      });
+      // 'processing' rather than 'paid' here — Safaricom answers this call
+      // with "queued", not a result; b2c-result (daraja.js) is what
+      // actually confirms it, matched back to this row by conversation_id.
+      await pool.query(
+        "update settlements set status='processing', conversation_id=$2 where id=$1",
+        [r.settlement_id, conversationId]);
+      console.log('settleTenants: queued payout', r.name, `KES ${r.amount}`, conversationId);
+    } catch (e) {
+      console.error('settleTenants:', r.name, e.message);
     }
   }
 }
