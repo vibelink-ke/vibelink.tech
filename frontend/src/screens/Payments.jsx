@@ -13,6 +13,7 @@ const TABS = [
   { id: 'invoices', label: 'Invoices' },
   { id: 'reports', label: 'M-Pesa report' },
   { id: 'sites', label: 'By site' },
+  { id: 'settlements', label: 'Settlements' },
 ];
 
 const card = {
@@ -54,6 +55,10 @@ export default function Payments() {
   const unmatched = store.unmatched ?? [];
   const all = store.mpesaTx ?? [];
   const invoices = store.invoices ?? [];
+  const settlements = store.settlements ?? [];
+  const pendingSettlement = settlements
+    .filter((s) => s.status === 'pending' || s.status === 'processing')
+    .reduce((a, s) => a + Number(s.amount ?? 0), 0);
 
   const collected = all.filter((p) => p.status === 'applied').reduce((a, p) => a + Number(p.amount ?? 0), 0);
   const openInvoices = invoices.filter((i) => i.status === 'open' || i.status === 'partial');
@@ -287,6 +292,13 @@ export default function Payments() {
         <Tile label="OUTSTANDING" value={money(outstanding)} dim hint={`${openInvoices.length} open invoices`} />
         <Tile label="ORG BALANCE (M-PESA)" value="KES 0" hint="utility acct · not synced" />
         <Tile label="AUTO-MATCH RATE" value={matchRate === null ? '—' : `${matchRate}%`} hint={`${unmatched.length} need a human`} />
+        {settlements.length > 0 && (
+          <Tile
+            label="PENDING SETTLEMENT"
+            value={money(pendingSettlement)}
+            hint={pendingSettlement ? 'collected on your behalf, paid out nightly' : 'nothing outstanding'}
+          />
+        )}
       </div>
 
       <div style={{ ...card, padding: '18px 20px', gap: 18 }}>
@@ -322,7 +334,8 @@ export default function Payments() {
         <div style={{ display: 'flex', borderBottom: `1px solid ${color.line}`, overflowX: 'auto' }}>
           {TABS.map((t) => {
             const on = t.id === tab;
-            const n = t.id === 'unmatched' ? unmatched.length : t.id === 'invoices' ? openInvoices.length : null;
+            const n = t.id === 'unmatched' ? unmatched.length : t.id === 'invoices' ? openInvoices.length
+              : t.id === 'settlements' ? settlements.filter((s) => s.status !== 'paid').length || null : null;
             return (
               <div
                 key={t.id}
@@ -514,6 +527,22 @@ export default function Payments() {
                 ]}
               />
             )
+          )}
+
+          {tab === 'settlements' && (
+            <Table
+              rowKey={(r) => r.id}
+              empty="No settlements yet — this fills in once platform collection is switched on and customers start paying"
+              rows={settlements}
+              columns={[
+                { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
+                { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+                { key: 'method', label: 'Method', render: (r) => r.method ?? '—' },
+                { key: 'reference', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.reference ?? '—'}</span> },
+                { key: 'created_at', label: 'Accrued since', render: (r) => when(r.created_at) },
+                { key: 'settled_at', label: 'Paid out', render: (r) => when(r.settled_at) },
+              ]}
+            />
           )}
         </div>
       </div>
