@@ -148,6 +148,7 @@ export default function Tenants() {
         platform_collect_enabled: !!editing.platform_collect_enabled,
         settlement_phone: editing.settlement_phone || null,
         settlement_commission_pct: editing.settlement_commission_pct === '' ? null : Number(editing.settlement_commission_pct),
+        settlement_fee_mode: editing.settlement_fee_mode,
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
       store.toast(`${updated.name} updated`);
@@ -351,6 +352,7 @@ export default function Tenants() {
                         platform_collect_enabled: t.platform_collect_enabled ?? false,
                         settlement_phone: t.settlement_phone ?? '',
                         settlement_commission_pct: t.settlement_commission_pct ?? 5,
+                        settlement_fee_mode: t.settlement_fee_mode ?? 'commission_only',
                       })
                     }
                     style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
@@ -500,6 +502,20 @@ export default function Tenants() {
                 </Field>
                 <Field label="Commission (%)" hint="Kept by the platform from each payout">
                   <Input type="number" step="0.1" value={editing.settlement_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, settlement_commission_pct: e.target.value }))} />
+                </Field>
+                <Field
+                  label="Safaricom's B2C fee"
+                  span={2}
+                  hint="Safaricom charges us to send a payout, separately from our commission — who covers that cost?"
+                >
+                  <Select
+                    value={editing.settlement_fee_mode}
+                    onChange={(e) => setEditing((s) => ({ ...s, settlement_fee_mode: e.target.value }))}
+                    options={[
+                      { value: 'commission_only', label: 'Platform absorbs it (commission only)' },
+                      { value: 'tiered', label: "Deduct from the tenant's payout (Safaricom's tariff)" },
+                    ]}
+                  />
                 </Field>
               </>
             )}

@@ -558,7 +558,15 @@ export default function Payments() {
               empty="No settlements yet — this fills in once platform collection is switched on and customers start paying"
               rows={settlements}
               columns={[
-                { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
+                { key: 'amount', label: 'Accrued', align: 'right', render: (r) => money(r.amount) },
+                {
+                  key: 'fee', label: 'B2C fee', align: 'right',
+                  render: (r) => (Number(r.fee) > 0 ? <span style={{ color: color.amberInk }}>−{money(r.fee)}</span> : '—'),
+                },
+                {
+                  key: 'net', label: 'Net paid', align: 'right',
+                  render: (r) => <strong>{money(Number(r.amount) - Number(r.fee ?? 0))}</strong>,
+                },
                 { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
                 { key: 'method', label: 'Method', render: (r) => r.method ?? '—' },
                 { key: 'reference', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.reference ?? '—'}</span> },

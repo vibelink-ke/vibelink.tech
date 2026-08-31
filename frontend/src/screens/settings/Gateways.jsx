@@ -3,7 +3,7 @@ import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { useAction, ActionResult } from '../../ui/action';
 import { api } from '../../api/client';
-import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
+import { Badge, Button, Card, Empty, Field, Input, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
 /**
  * Payment gateway manager.
@@ -81,6 +81,38 @@ export default function Gateways() {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  /**
+   * Safaricom's B2C tariff — what a 'tiered'-mode tenant's payout is docked,
+   * on top of settlement_commission_pct (Tenants.jsx). Platform-owner only:
+   * editable here rather than hardcoded, since Safaricom updates this
+   * periodically and a stale number moves real money incorrectly.
+   */
+  const [feeTiers, setFeeTiers] = useState(null);
+  const [feeTiersLoading, setFeeTiersLoading] = useState(false);
+  const [feeTiersBusy, setFeeTiersBusy] = useState(false);
+  const loadFeeTiers = async () => {
+    setFeeTiersLoading(true);
+    try {
+      const rows = await api.getB2cFeeTiers();
+      setFeeTiers(rows.map((r) => ({ minAmount: String(r.min_amount), maxAmount: r.max_amount == null ? '' : String(r.max_amount), fee: String(r.fee) })));
+    } catch (e) {
+      store.toast(`Could not load fee tiers: ${e.message}`);
+    } finally {
+      setFeeTiersLoading(false);
+    }
+  };
+  const saveFeeTiers = async () => {
+    setFeeTiersBusy(true);
+    try {
+      await api.saveB2cFeeTiers(feeTiers);
+      store.toast('B2C fee tiers saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setFeeTiersBusy(false);
+    }
+  };
+
   const load = async () => {
     try {
       setGateways(await api.paymentGateways());
@@ -93,6 +125,7 @@ export default function Gateways() {
 
   useEffect(() => {
     load();
+    if (store.isPlatformOwner) loadFeeTiers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -229,6 +262,11 @@ export default function Gateways() {
   const setCred = (key) => (e) =>
     setForm((s) => ({ ...s, credentials: { ...s.credentials, [key]: e.target.value } }));
 
+  const setTierField = (i, key) => (e) =>
+    setFeeTiers((rows) => rows.map((r, j) => (i === j ? { ...r, [key]: e.target.value } : r)));
+  const addTier = () => setFeeTiers((rows) => [...rows, { minAmount: '', maxAmount: '', fee: '' }]);
+  const removeTier = (i) => setFeeTiers((rows) => rows.filter((_, j) => j !== i));
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       <div
@@ -244,6 +282,36 @@ export default function Gateways() {
         Credentials are stored against this tenant and used to charge real customers.
         Secrets are write-only — once saved they are never sent back to the browser.
       </div>
+
+      {store.isPlatformOwner && (
+        <Card
+          title="Safaricom B2C fee tiers"
+          subtitle="What a payout costs to send, by amount — deducted from a 'tiered'-mode tenant's settlement (Tenants → edit). Safaricom updates this tariff periodically; keep it matched to your current Daraja tariff sheet."
+        >
+          {feeTiersLoading || !feeTiers ? (
+            <Empty>{feeTiersLoading ? 'Loading…' : 'Could not load'}</Empty>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 8 }}>
+                {feeTiers.map((t, i) => (
+                  <React.Fragment key={i}>
+                    <Input type="number" placeholder="Min (KES)" value={t.minAmount} onChange={setTierField(i, 'minAmount')} />
+                    <Input type="number" placeholder="Max (blank = no limit)" value={t.maxAmount} onChange={setTierField(i, 'maxAmount')} />
+                    <Input type="number" placeholder="Fee (KES)" value={t.fee} onChange={setTierField(i, 'fee')} />
+                    <Button onClick={() => removeTier(i)}>Remove</Button>
+                  </React.Fragment>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button onClick={addTier}>+ Add tier</Button>
+                <Button variant="primary" onClick={saveFeeTiers} disabled={feeTiersBusy}>
+                  {feeTiersBusy ? 'Saving…' : 'Save tiers'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
 
       {Object.entries(CHANNELS).map(([provider, ch]) => {
         const rows = gateways.filter((g) => g.provider === provider);

@@ -79,6 +79,23 @@ export async function platformCollectConfig(tenantId, provider) {
   return rows[0] ?? null;
 }
 
+/**
+ * What Safaricom actually charges for a B2C payout of this size — used only
+ * when a tenant's settlement_fee_mode is 'tiered' (jobs.js's payoutRow), to
+ * pass that cost on to them rather than have the platform absorb it. Table
+ * is editable (Settings → B2C fee tiers, platform-owner only) since Safaricom
+ * updates this tariff periodically.
+ */
+export async function b2cFee(amount) {
+  const { rows: [tier] } = await pool.query(
+    `select fee from b2c_fee_tiers
+     where min_amount <= $1 and (max_amount is null or $1 <= max_amount)
+     order by min_amount desc limit 1`,
+    [amount]
+  );
+  return Number(tier?.fee ?? 0);
+}
+
 /** True unless the tenant has explicitly switched this cron job off. */
 export async function jobEnabled(tenantId, job) {
   const { rows } = await pool.query(

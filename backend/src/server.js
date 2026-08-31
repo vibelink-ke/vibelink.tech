@@ -6151,6 +6151,45 @@ app.post('/api/settlements/payout', requirePermission('payments.request_payout')
   }
 }));
 
+/**
+ * Safaricom's B2C tariff, editable rather than hardcoded — see schema.sql's
+ * seed comment on b2c_fee_tiers. Platform-owner only: this is what
+ * jobs.js's payoutRow charges a 'tiered'-mode tenant, so a wrong number here
+ * has the same blast radius as a wrong number in the code, just correctable
+ * without a deploy.
+ */
+app.get('/api/platform/b2c-fee-tiers', superAdminOnly, wrap(async (_req, res) => {
+  const { rows } = await pool.query('select * from b2c_fee_tiers order by min_amount');
+  res.json(rows);
+}));
+
+app.put('/api/platform/b2c-fee-tiers', superAdminOnly, wrap(async (req, res) => {
+  const tiers = Array.isArray(req.body?.tiers) ? req.body.tiers : null;
+  if (!tiers || !tiers.length) return res.status(400).json({ error: 'Provide at least one tier' });
+  for (const t of tiers) {
+    if (!(Number(t.minAmount) >= 0) || !(Number(t.fee) >= 0))
+      return res.status(400).json({ error: 'Each tier needs a non-negative minAmount and fee' });
+  }
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query('delete from b2c_fee_tiers');
+    for (const t of tiers) {
+      await c.query(
+        'insert into b2c_fee_tiers (min_amount, max_amount, fee) values ($1,$2,$3)',
+        [Number(t.minAmount), t.maxAmount === '' || t.maxAmount == null ? null : Number(t.maxAmount), Number(t.fee)]);
+    }
+    await c.query('commit');
+    res.json({ ok: true });
+  } catch (e) {
+    await c.query('rollback');
+    if (e.code === '23505') return res.status(409).json({ error: 'Two tiers share the same minimum amount.' });
+    throw e;
+  } finally {
+    c.release();
+  }
+}));
+
 // ── catalogue: plans and tariffs ──────────────────
 app.get('/api/plans', wrap(async (req, res) => {
   const { service } = req.query;
@@ -7099,7 +7138,7 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
 
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
-                   'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct'];
+                   'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   const { rows: [t] } = await pool.query(

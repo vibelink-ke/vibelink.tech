@@ -1800,3 +1800,40 @@ alter table settlements add column if not exists conversation_id text;
 alter table tenant_payment_config add column if not exists is_platform_collect boolean not null default false;
 create unique index if not exists tpc_one_platform_collect_per_provider
   on tenant_payment_config (tenant_id, provider) where is_platform_collect;
+
+-- Safaricom charges the *sending* paybill a B2C transaction fee, tiered by
+-- amount, on every payout — separate from settlement_commission_pct, which is
+-- Vibelink's own cut. Per tenant, whether that Safaricom-side cost is passed
+-- on to them (deducted from their payout, on top of the commission) or just
+-- absorbed into the platform's margin.
+alter table tenants add column if not exists settlement_fee_mode text not null default 'commission_only'
+  check (settlement_fee_mode in ('commission_only', 'tiered'));
+
+-- Editable rather than hardcoded: Safaricom updates this tariff periodically,
+-- and a stale number baked into code either shortchanges a tenant or eats
+-- into the platform's own margin without anyone noticing. Seeded below with
+-- Safaricom's last-published B2C tariff as a starting point — the platform
+-- owner should verify/correct it against their current Daraja tariff sheet
+-- before relying on it for real payouts.
+create table if not exists b2c_fee_tiers (
+  id         uuid primary key default gen_random_uuid(),
+  min_amount numeric(12,2) not null,
+  max_amount numeric(12,2),              -- null = no upper bound
+  fee        numeric(12,2) not null,
+  unique (min_amount)
+);
+insert into b2c_fee_tiers (min_amount, max_amount, fee) values
+  (1,      499,    0),
+  (500,    2500,   11),
+  (2501,   5000,   22),
+  (5001,   7500,   32),
+  (7501,   10000,  42),
+  (10001,  15000,  57),
+  (15001,  20000,  67),
+  (20001,  null,   76)
+on conflict (min_amount) do nothing;
+
+-- What a payout actually cost the tenant beyond commission — recorded at
+-- send time (jobs.js's payoutRow) so the Settlements tab can show the real
+-- deduction, not just infer it after the fact from a changed tariff table.
+alter table settlements add column if not exists fee numeric(12,2) not null default 0;

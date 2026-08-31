@@ -707,11 +707,26 @@ async function platformOwnerTenantId() {
  * "Request payout" route (POST /api/settlements/payout, server.js) so a
  * tenant-triggered payout goes through the exact same accounting as the
  * automatic one.
+ *
+ * When the tenant's settlement_fee_mode is 'tiered', Safaricom's own B2C
+ * transaction charge (db.js's b2cFee — separate from settlement_commission_pct,
+ * which is Vibelink's own cut) comes out of the payout itself rather than
+ * being absorbed by the platform: sent amount = accrued amount − fee. The
+ * accrued amount on the settlements row is left as-is; `fee` records what was
+ * actually deducted, so the Settlements tab can show it rather than someone
+ * having to infer it later from a tariff table that may since have changed.
  */
 async function payoutRow(row, ownerTenantId) {
+  const { b2cFee } = await import('./db.js');
+  const fee = row.settlement_fee_mode === 'tiered' ? await b2cFee(row.amount) : 0;
+  const net = Number(row.amount) - fee;
+  if (!(net > 0)) {
+    throw new Error(`B2C fee (KES ${fee}) would leave nothing to pay out on KES ${row.amount} — check b2c_fee_tiers.`);
+  }
+
   const daraja = await import('./payments/daraja.js');
   const { conversationId } = await daraja.b2c(ownerTenantId, {
-    phone: row.settlement_phone, amount: row.amount,
+    phone: row.settlement_phone, amount: net,
     remarks: 'Vibelink settlement', occasion: row.tenant_id,
     platformCollect: true,
   });
@@ -719,14 +734,14 @@ async function payoutRow(row, ownerTenantId) {
   // with "queued", not a result; b2c-result (daraja.js) is what
   // actually confirms it, matched back to this row by conversation_id.
   await pool.query(
-    "update settlements set status='processing', conversation_id=$2 where id=$1",
-    [row.settlement_id, conversationId]);
-  return conversationId;
+    "update settlements set status='processing', conversation_id=$2, fee=$3 where id=$1",
+    [row.settlement_id, conversationId, fee]);
+  return { conversationId, fee, net };
 }
 
 export async function settleTenants() {
   const { rows } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name
+    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.status='pending' and s.amount >= $1
         and t.platform_collect_enabled and t.settlement_phone is not null`,
@@ -741,8 +756,8 @@ export async function settleTenants() {
 
   for (const r of rows) {
     try {
-      const conversationId = await payoutRow(r, ownerTenantId);
-      console.log('settleTenants: queued payout', r.name, `KES ${r.amount}`, conversationId);
+      const { conversationId, fee, net } = await payoutRow(r, ownerTenantId);
+      console.log('settleTenants: queued payout', r.name, `KES ${net} (fee KES ${fee})`, conversationId);
     } catch (e) {
       console.error('settleTenants:', r.name, e.message);
     }
@@ -758,7 +773,7 @@ export async function settleTenants() {
  */
 export async function payoutTenantNow(tenantId) {
   const { rows: [row] } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name
+    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.tenant_id=$1 and s.status='pending'`,
     [tenantId]);
@@ -771,8 +786,8 @@ export async function payoutTenantNow(tenantId) {
   const ownerTenantId = await platformOwnerTenantId();
   if (!ownerTenantId) throw Object.assign(new Error('Platform payout account is not set up yet.'), { status: 503 });
 
-  const conversationId = await payoutRow(row, ownerTenantId);
-  return { amount: Number(row.amount), conversationId };
+  const { conversationId, fee, net } = await payoutRow(row, ownerTenantId);
+  return { amount: Number(row.amount), fee, net, conversationId };
 }
 
 /**
