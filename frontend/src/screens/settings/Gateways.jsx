@@ -69,6 +69,7 @@ export const CHANNELS = {
     codeLabel: 'Till number',
     fields: [],
     services: { pppoe: false, hotspot: true },
+    comingSoon: true,
   },
 };
 
@@ -362,7 +363,14 @@ export default function Gateways() {
         return (
           <Card
             key={provider}
-            title={ch.name}
+            title={
+              ch.comingSoon ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {ch.name}
+                  <Badge tone="pending">coming soon</Badge>
+                </span>
+              ) : ch.name
+            }
             subtitle={ch.blurb}
             actions={
               <Button size="sm" variant="primary" onClick={() => openNew(provider)}>
