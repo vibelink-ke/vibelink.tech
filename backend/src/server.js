@@ -4485,7 +4485,7 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
     // a hotspot login commonly does not have.
     for (const s of hotspotImportable) {
       try {
-        const account = await allocateAccountCode(req.tenant.id);
+        const account = await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
         if (!account) throw new Error('Could not find a free account number.');
         await pool.query(
           `insert into subscribers (tenant_id, account_code, name, phone, service,
@@ -6018,12 +6018,37 @@ const digits = (n) => {
  * and the shape of the number are never duplicated — or skipped — anywhere
  * else that needs one.
  */
-async function allocateAccountCode(tenantId) {
+/**
+ * Whether `code` is already taken — scoped to just this tenant normally, but
+ * widened to every platform-collect-enabled tenant when `crossTenant` is set.
+ *
+ * Only a platform-collected tenant needs the wider check: those are the only
+ * ones sharing the platform owner's own paybill, where a customer dialing it
+ * directly types a bare, unprefixed account number — /webhooks/daraja/confirm
+ * disambiguates that by searching for a unique match across every
+ * platform-collected tenant, and two tenants issuing the same account code
+ * to different customers is exactly the collision that search cannot resolve
+ * (it lands unmatched instead of being applied to either customer). A tenant
+ * that never turns platform-collect on has no such paybill to share and
+ * keeps the narrower, per-tenant-only check it always had.
+ */
+async function accountCodeTaken(tenantId, code, crossTenant) {
+  if (crossTenant) {
+    const { rowCount } = await pool.query(
+      `select 1 from subscribers s join tenants t on t.id = s.tenant_id
+        where t.platform_collect_enabled and s.account_code = $1`,
+      [code]);
+    return rowCount > 0;
+  }
+  const { rowCount } = await pool.query(
+    'select 1 from subscribers where tenant_id=$1 and account_code=$2', [tenantId, code]);
+  return rowCount > 0;
+}
+
+async function allocateAccountCode(tenantId, crossTenant = false) {
   for (let attempt = 0; attempt < 40; attempt++) {
     const candidate = digits(5);
-    const { rowCount } = await pool.query(
-      'select 1 from subscribers where tenant_id=$1 and account_code=$2', [tenantId, candidate]);
-    if (!rowCount) return candidate;
+    if (!(await accountCodeTaken(tenantId, candidate, crossTenant))) return candidate;
   }
   // 90,000 possibilities: only a tenant with most of them already in use gets
   // here, and returning a duplicate would fail on insert anyway.
@@ -6031,7 +6056,7 @@ async function allocateAccountCode(tenantId) {
 }
 
 app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
-  const account = await allocateAccountCode(req.tenant.id);
+  const account = await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
   if (!account) return res.status(409).json({ error: 'Could not find a free 5-digit account number.' });
   res.json({ account, password: digits(7) });
 }));
@@ -6102,8 +6127,32 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
    * value at all, gets a real allocated code instead of the raw phone number.
    */
   const submitted = String(accountCode ?? '').trim();
-  const account = /^\d{4,6}$/.test(submitted) ? submitted : await allocateAccountCode(req.tenant.id);
+  const account = /^\d{4,6}$/.test(submitted) ? submitted
+    : await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
   if (!account) return res.status(409).json({ error: 'Could not find a free account number.' });
+
+  /**
+   * A hand-picked code is trusted for shape, not for collisions — a
+   * platform-collected tenant sharing the platform's own paybill with other
+   * such tenants needs this checked against ALL of them, not just itself,
+   * or two tenants' customers end up with the identical bare account number
+   * on the one paybill every direct-dial payment there is disambiguated by
+   * (see /webhooks/daraja/confirm). The narrower per-tenant check still
+   * happens later via the same-account "add a line" flow below and the
+   * table's own unique constraint; this only adds the wider one.
+   */
+  if (req.tenant.platform_collect_enabled && /^\d{4,6}$/.test(submitted)) {
+    const { rows: elsewhere } = await pool.query(
+      `select t.name from subscribers s join tenants t on t.id = s.tenant_id
+        where t.platform_collect_enabled and s.tenant_id <> $1 and s.account_code = $2`,
+      [req.tenant.id, account]);
+    if (elsewhere.length) {
+      return res.status(409).json({
+        error: `Account ${account} is already used by a customer at ${elsewhere[0].name}, another platform-collect `
+          + 'tenant on the same shared paybill. Pick a different number so a direct-dial payment can tell you apart.',
+      });
+    }
+  }
 
   /**
    * Several lines under one account.
