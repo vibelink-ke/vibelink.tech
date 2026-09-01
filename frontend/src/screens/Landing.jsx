@@ -19,6 +19,21 @@ import { color, font, radius } from '../theme/tokens';
 const SALES_EMAIL = 'sales@vibelink.co.ke';
 const SUPPORT_EMAIL = 'support@vibelink.co.ke';
 
+/**
+ * One accent per category, reused where there are more categories than
+ * brand hues — a colour here means something (which group a card belongs
+ * to), so repeating a hue on two categories is fine; inventing a fifth or
+ * sixth off-brand colour just to keep every one distinct would not be.
+ */
+const CATEGORY_COLOR = {
+  PAYMENTS: color.green,
+  NETWORK: color.mint,
+  HOTSPOT: color.amber,
+  OPERATIONS: color.rust,
+  SUPPORT: color.mint,
+  GROWTH: color.amber,
+};
+
 const FEATURES = [
   ['PAYMENTS', 'M-Pesa that reconciles itself',
    'Paybill, till and STK push. Payments match to the account number the customer typed, and the ones that do not are put in front of you rather than lost.'],
@@ -96,11 +111,12 @@ export default function Landing({ onRegister }) {
       {/* Scoped to this page. Restrained on purpose: a border-colour change on
           hover, nothing that moves on its own or asks to be noticed. */}
       <style>{`
-        .vl-card { transition: border-color .15s ease, background .15s ease; }
-        .vl-card:hover { border-color: ${color.green}; background: ${color.subtleBg}; }
+        .vl-card { transition: background .15s ease; }
+        .vl-card:hover { background: ${color.subtleBg}; }
         .vl-btn { transition: background .15s ease, border-color .15s ease, opacity .15s ease; }
         .vl-solid:hover { background: ${color.greenDark}; }
         .vl-ghost:hover { border-color: ${color.green}; color: ${color.green}; }
+        .vl-cta-btn:hover { background: #eef2ef; }
       `}</style>
 
       <header style={{ borderBottom: `1px solid ${color.line}`, background: color.cardBg }}>
@@ -128,7 +144,20 @@ export default function Landing({ onRegister }) {
         </Section>
       </header>
 
-      <Section style={{ padding: '58px 22px 50px' }}>
+      <div style={{
+        position: 'relative',
+        backgroundImage: `radial-gradient(${color.line} 1.1px, transparent 1.1px)`,
+        backgroundSize: '22px 22px',
+        backgroundPosition: '-11px -11px',
+      }}>
+        {/* Fades the dot texture out toward the bottom of the hero so it reads
+            as ground beneath the content, not a tiled pattern stopping at a
+            hard edge. */}
+        <div aria-hidden style={{
+          position: 'absolute', inset: 0,
+          background: `linear-gradient(180deg, ${color.pageBg}00 0%, ${color.pageBg} 92%)`,
+        }} />
+      <Section style={{ position: 'relative', padding: '58px 22px 50px' }}>
         <div style={{
           display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,.9fr)',
           gap: 48, alignItems: 'center',
@@ -189,6 +218,7 @@ export default function Landing({ onRegister }) {
           </div>
         </div>
       </Section>
+      </div>
 
       <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
         <Section style={{ padding: '40px 22px' }}>
@@ -198,11 +228,11 @@ export default function Landing({ onRegister }) {
           }}>
             {FEATURES.map(([tag, title, body]) => (
               <div key={title} className="vl-card" style={{
-                background: color.cardBg, border: `1px solid transparent`,
+                background: color.cardBg, borderTop: `2.5px solid ${CATEGORY_COLOR[tag]}`,
                 padding: '20px 20px 22px',
               }}>
                 <div style={{
-                  fontFamily: font.mono, fontSize: 11, fontWeight: 600, color: color.mutedSoft,
+                  fontFamily: font.mono, fontSize: 11, fontWeight: 700, color: CATEGORY_COLOR[tag],
                   letterSpacing: '.06em', marginBottom: 10,
                 }}>
                   {tag}
@@ -216,7 +246,8 @@ export default function Landing({ onRegister }) {
       </div>
 
       <Section style={{ padding: '52px 22px' }}>
-        <h2 style={{ fontSize: 22, margin: '0 0 6px' }}>
+        <h2 style={{ fontSize: 22, margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: color.amber, display: 'inline-block' }} />
           Capacity, not just software
         </h2>
         <p style={{ color: color.inkSoft, maxWidth: 620, margin: '0 0 24px', fontSize: 15 }}>
@@ -241,7 +272,10 @@ export default function Landing({ onRegister }) {
 
       <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}`, background: color.subtleBg }}>
         <Section style={{ padding: '48px 22px' }}>
-          <h2 style={{ fontSize: 22, margin: '0 0 24px' }}>Getting started</h2>
+          <h2 style={{ fontSize: 22, margin: '0 0 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: color.green, display: 'inline-block' }} />
+            Getting started
+          </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
             {STEPS.map(([title, body], i) => (
               <div key={title}>
@@ -260,16 +294,22 @@ export default function Landing({ onRegister }) {
 
       <Section style={{ padding: '54px 22px 64px' }}>
         <div style={{
-          border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '36px 32px',
+          background: color.greenDark, borderRadius: radius.md, padding: '38px 34px',
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 18,
+          backgroundImage: `radial-gradient(rgba(255,255,255,.05) 1.1px, transparent 1.1px)`,
+          backgroundSize: '18px 18px',
         }}>
           <div>
-            <h2 style={{ fontSize: 22, margin: '0 0 6px' }}>Ready when you are</h2>
-            <p style={{ color: color.inkSoft, margin: 0, maxWidth: 420 }}>
+            <h2 style={{ fontSize: 23, margin: '0 0 6px', color: '#fff' }}>Ready when you are</h2>
+            <p style={{ color: 'rgba(255,255,255,.78)', margin: 0, maxWidth: 420 }}>
               Register, add one router, and see your own customers on your own portal.
             </p>
           </div>
-          <button type="button" onClick={onRegister} className="vl-btn vl-solid" style={{ ...solid, padding: '12px 24px', fontSize: 15 }}>
+          <button
+            type="button" onClick={onRegister} className="vl-btn vl-cta-btn"
+            style={{ background: '#fff', color: color.greenDark, border: 0, borderRadius: radius.sm,
+                     padding: '12px 24px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
+          >
             Create your account
           </button>
         </div>
