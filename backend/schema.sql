@@ -1938,3 +1938,16 @@ create index if not exists inventory_movements_tenant_idx on inventory_movements
 -- actually requires) and email (if one was given).
 alter table login_tokens drop constraint if exists login_tokens_purpose_check;
 alter table login_tokens add constraint login_tokens_purpose_check check (purpose in ('reset', 'magic', 'invite'));
+
+-- 'piggyback': a hotspot tenant registers only a Buy Goods till number
+-- (tenant_payment_config provider 'piggyback_till', no credentials of
+-- their own) and the platform's own Daraja app dispatches the STK push
+-- with PartyB overridden to that till, per the platform's Safaricom
+-- aggregator agreement — money lands directly on the tenant's till, never
+-- in the platform's own balance, so unlike 'piggyback_collect' there is no
+-- settlement/commission step at all. Distinct from the existing 'till'
+-- value, which means "no API, guest pays manually, we match the SMS" —
+-- this one still gives the guest the same one-tap STK push experience.
+alter table hotspot_settings drop constraint if exists payment_method_valid;
+alter table hotspot_settings add constraint payment_method_valid
+  check (payment_method in ('kopokopo','paybill','bankstk','till','piggyback'));

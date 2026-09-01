@@ -825,20 +825,31 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     'select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const method = hs?.payment_method ?? 'kopokopo';
 
-  let kk = null, daraja = null;
+  let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
-  else {
+  else if (method === 'piggyback') {
+    const { rows: [pb] } = await pool.query(
+      "select shortcode from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
+      [tenant.id]);
+    piggyback = pb ?? null;
+  } else {
     return res.status(503).json({
       error: `Hotspot payment method "${method}" does not support in-page STK push. `
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
     });
   }
+  if (method === 'piggyback' && !piggyback) {
+    return res.status(503).json({
+      error: 'Hotspot is set to take payments via your own till, but no till number has been registered yet. '
+        + 'Add it under Hotspot → Settings → Payment gateways.',
+    });
+  }
   // No gateway of the tenant's own — same fallback PPPoE already gets via
   // stkPushForSubscriber: route through the platform owner's paybill instead
   // of leaving the guest with a hard failure, when the tenant opted into it.
-  const usePlatformCollect = !kk && !daraja && !!tenant.platform_collect_enabled;
-  if (!kk && !daraja && !usePlatformCollect) {
+  const usePlatformCollect = !kk && !daraja && !piggyback && !!tenant.platform_collect_enabled;
+  if (!kk && !daraja && !piggyback && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
         + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
@@ -852,6 +863,30 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac: null, routerId, service: 'hotspot',
       });
+    } else if (piggyback) {
+      const { rows: [owner] } = await pool.query(
+        "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+      if (!owner) return res.status(503).json({ error: 'The platform Daraja app is not set up yet — ask the platform owner.' });
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(owner.tenant_id, {
+        phone, amount: Number(plan.price),
+        accountRef: 'HOTSPOT', description: plan.title,
+        till: piggyback.shortcode,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      // Scoped to the real tenant, not the owner: the money never touches the
+      // platform's own balance (PartyB was this tenant's till), so this is an
+      // ordinary hotspot purpose — no `type`, no settlement/commission — same
+      // shape as the plain daraja branch below, just dispatched through a
+      // different app's credentials.
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, router_id: routerId }]);
     } else if (usePlatformCollect) {
       const { rows: [owner] } = await pool.query(
         "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
@@ -1181,18 +1216,29 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const method = hs?.payment_method ?? 'kopokopo';
 
-  let kk = null, daraja = null;
+  let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
-  else {
+  else if (method === 'piggyback') {
+    const { rows: [pb] } = await pool.query(
+      "select shortcode from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
+      [tenant.id]);
+    piggyback = pb ?? null;
+  } else {
     return res.status(503).json({
       error: `Hotspot payment method "${method}" does not support in-page STK push. `
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
     });
   }
+  if (method === 'piggyback' && !piggyback) {
+    return res.status(503).json({
+      error: 'Hotspot is set to take payments via your own till, but no till number has been registered yet. '
+        + 'Add it under Hotspot → Settings → Payment gateways.',
+    });
+  }
   // Same platform-paybill fallback as /hotspot/buy above.
-  const usePlatformCollect = !kk && !daraja && !!tenant.platform_collect_enabled;
-  if (!kk && !daraja && !usePlatformCollect) {
+  const usePlatformCollect = !kk && !daraja && !piggyback && !!tenant.platform_collect_enabled;
+  if (!kk && !daraja && !piggyback && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
         + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
@@ -1206,6 +1252,25 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, label, service: 'hotspot',
       });
+    } else if (piggyback) {
+      const { rows: [owner] } = await pool.query(
+        "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+      if (!owner) return res.status(503).json({ error: 'The platform Daraja app is not set up yet — ask the platform owner.' });
+      const gw = await import('./payments/daraja.js');
+      const r = await gw.stkPush(owner.tenant_id, {
+        phone, amount: Number(plan.price),
+        accountRef: 'HOTSPOT', description: plan.title,
+        till: piggyback.shortcode,
+      });
+      checkoutId = r.CheckoutRequestID;
+      if (!checkoutId) {
+        return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+      }
+      await pool.query(
+        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+         values ($1,'daraja',$2,$3,$4,$5)
+         on conflict (tenant_id, provider, checkout_id) do nothing`,
+        [tenant.id, checkoutId, phone, Number(plan.price), { plan_id: plan.id, mac, router_id: router.id, label }]);
     } else if (usePlatformCollect) {
       const { rows: [owner] } = await pool.query(
         "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");

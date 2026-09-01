@@ -83,18 +83,30 @@ async function resolveConfig(tenantId, provider, platformCollect) {
   return (await platformCollectConfig(tenantId, provider)) ?? config(tenantId, provider);
 }
 
-/** STK push on a paybill — used for PPPoE auto-charge and portal payments. */
-export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false }) {
+/**
+ * STK push on a paybill — used for PPPoE auto-charge and portal payments.
+ *
+ * `till`, when given, dispatches as CustomerBuyGoodsOnline with PartyB set to
+ * that till instead of cfg.shortcode — the "piggyback" model: tenantId's own
+ * Daraja app (usually the platform owner's) initiates the push, but the money
+ * settles directly onto a *different* business's till. Safaricom only honours
+ * that PartyB override for an app with aggregator/API-partner approval; it is
+ * on the caller (server.js's piggyback branch) to only ever use this for a
+ * tenant that has actually registered their own till, never as a general
+ * "send money elsewhere" primitive.
+ */
+export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false, till = null }) {
   const cfg = await resolveConfig(tenantId, 'daraja', platformCollect);
   if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
   const ts = stamp();
   const password = Buffer.from(cfg.shortcode + cfg.credentials.passkey + ts).toString('base64');
+  const partyB = till || cfg.shortcode;
   const { data } = await axios.post(`${BASE}/mpesa/stkpush/v1/processrequest`, {
     BusinessShortCode: cfg.shortcode,
     Password: password, Timestamp: ts,
-    TransactionType: 'CustomerPayBillOnline',
+    TransactionType: till ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline',
     Amount: Math.round(amount),
-    PartyA: phone, PartyB: cfg.shortcode, PhoneNumber: phone,
+    PartyA: phone, PartyB: partyB, PhoneNumber: phone,
     CallBackURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/stk`),
     AccountReference: accountRef, TransactionDesc: description ?? 'Internet'
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });

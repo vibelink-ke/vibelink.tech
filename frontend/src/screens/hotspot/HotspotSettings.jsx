@@ -10,6 +10,7 @@ const PAYMENT_METHODS = [
   { value: 'paybill', label: 'M-Pesa Paybill' },
   { value: 'bankstk', label: 'Bank STK push' },
   { value: 'till', label: 'Till / paybill without API' },
+  { value: 'piggyback', label: 'Buy Goods till (via platform, no API needed)' },
 ];
 const EXPIRY = [
   { value: 'login', label: 'Expire after first login' },
@@ -203,6 +204,14 @@ export default function HotspotSettings() {
         <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 13px' }}>
           KopoKopo is hotspot-only. The database rejects it for PPPoE
           (constraint <code>kopokopo_hotspot_only</code>), and so does the payment adapter.
+        </div>
+      )}
+
+      {f.payment_method === 'piggyback' && (
+        <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 13px' }}>
+          Register your till number under Hotspot → Settings → Payment gateways ("Buy Goods till (via platform)")
+          before guests can pay — no Safaricom API app of your own is needed, but the platform owner has to
+          have this enabled on their end first.
         </div>
       )}
     </Screen>
