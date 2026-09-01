@@ -312,18 +312,28 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
   const { rows: [owner] } = await pool.query(
     'select tenant_id from staff where is_super_admin and tenant_id is not null limit 1');
   if (owner && tenantId === owner.tenant_id) {
+    // Distinct tenants, not distinct subscriber rows: one account can carry
+    // several lines (a house and a shop, tagged by line_label — see
+    // server.js's create-client route), which is a single, unambiguous
+    // tenant with more than one subscriber row sharing that account code.
+    // Picking one of those rows here instead of leaving it to match() below
+    // broke every multi-line platform-collected account outright.
     const { rows: candidates } = await pool.query(
-      `select s.id, s.tenant_id, t.settlement_commission_pct
+      `select distinct s.tenant_id, t.settlement_commission_pct
          from subscribers s join tenants t on t.id = s.tenant_id
         where t.platform_collect_enabled and s.account_code = $1`,
       [billRef]);
     if (candidates.length === 1) {
       const [c] = candidates;
+      // No explicit target: applyPayment's own match() already knows how to
+      // pick the right line when an account carries several (whichever
+      // expires soonest) — exactly what it already does for an ordinary,
+      // non-platform-collect direct-dial payment on that tenant's own
+      // paybill. Only which TENANT this belongs to was ever ambiguous here.
       await applyPayment(c.tenant_id, {
         provider: 'daraja', ref: b.TransID, amount: Number(b.TransAmount), phone: normalise(b.MSISDN),
         name: [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' '),
         rawAccount: billRef, payload: b,
-        target: { type: 'subscriber', id: c.id },
       }).catch(console.error);
       await accrueSettlement(c.tenant_id, Number(b.TransAmount) * (1 - Number(c.settlement_commission_pct ?? 5) / 100))
         .catch(console.error);
