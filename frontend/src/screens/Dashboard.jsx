@@ -8,8 +8,8 @@ import { Button } from '../ui/primitives';
 const RANGES = ['Today', 'Yesterday', 'Last 7 days', 'Last 30 days', 'This month'];
 
 const CHANNELS = [
-  { label: 'Paybill C2B — PPPoE', swatch: '#0f7a5f', providers: ['daraja'] },
-  { label: 'KopoKopo STK — hotspot', swatch: '#54c2a1', providers: ['kopokopo'] },
+  { label: 'Paybill C2B — PPPoE', swatch: '#1652d9', providers: ['daraja'] },
+  { label: 'KopoKopo STK — hotspot', swatch: '#4c8dff', providers: ['kopokopo'] },
   { label: 'Bank STK push', swatch: '#c9a227', providers: ['bankstk'] },
   { label: 'Till / paybill (no API)', swatch: '#c3ccc6', providers: ['manual_till'] },
 ];

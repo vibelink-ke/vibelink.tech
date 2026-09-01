@@ -19,10 +19,12 @@ export const color = {
   muted: '#8a9186',
   mutedSoft: '#9aa39c',
 
-  // brand
-  green: '#0f7a5f',
-  greenDark: '#0b5c47',
-  mint: '#2fbf8f',
+  // brand — rebranded from green to blue; the keys keep their old names
+  // (`green`/`greenDark`/`mint`) rather than being renamed across every
+  // screen that imports them, so this is the one place the actual hue lives.
+  green: '#1652d9',
+  greenDark: '#0e3c9e',
+  mint: '#4c8dff',
 
   // status
   amber: '#c9a227',
@@ -38,8 +40,8 @@ export const color = {
   sideFg: '#3a443d',
   sideHeading: '#8a938b',
   sideMuted: '#7c857d',
-  sideActive: '#e2ebe5',
-  sideHover: '#eaefe9',
+  sideActive: '#e3ebfa',
+  sideHover: '#eaf0fb',
   sideFooterName: '#161d19',
 
   // dark-root page colour (see darkMode note in global.css)

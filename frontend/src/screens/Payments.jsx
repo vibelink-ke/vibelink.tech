@@ -320,7 +320,7 @@ export default function Payments() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Collections tracking · last 4 months</span>
           <div style={{ display: 'flex', gap: 16 }}>
-            {[['PPPoE', '#0f7a5f'], ['Hotspot', '#54c2a1'], ['Target', '#c9a227']].map(([l, c]) => (
+            {[['PPPoE', '#1652d9'], ['Hotspot', '#4c8dff'], ['Target', '#c9a227']].map(([l, c]) => (
               <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#4a524c' }}>
                 <span style={{ width: 9, height: 9, borderRadius: 2, background: c }} />
                 {l}
@@ -333,8 +333,8 @@ export default function Payments() {
             <div key={m.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', gap: 6 }}>
               <span style={{ fontFamily: font.mono, fontSize: 11.5, color: '#4a524c', textAlign: 'center' }}>{kes(m.total)}</span>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: '100%' }}>
-                <div style={{ flex: 1, height: `${m.pct}%`, background: '#0f7a5f', borderRadius: '4px 4px 0 0' }} />
-                <div style={{ flex: 1, height: `${m.pct * 0.4}%`, background: '#54c2a1', borderRadius: '4px 4px 0 0' }} />
+                <div style={{ flex: 1, height: `${m.pct}%`, background: '#1652d9', borderRadius: '4px 4px 0 0' }} />
+                <div style={{ flex: 1, height: `${m.pct * 0.4}%`, background: '#4c8dff', borderRadius: '4px 4px 0 0' }} />
                 <div style={{ flex: 1, height: `${Math.min(100, m.pct * 1.2)}%`, background: '#c9a227', borderRadius: '4px 4px 0 0', opacity: 0.55 }} />
               </div>
               <span style={{ fontSize: 11.5, color: color.muted, textAlign: 'center', borderTop: '1px solid #eef0ec', paddingTop: 6 }}>
