@@ -14,6 +14,7 @@ RUN npm ci --omit=dev
 COPY src ./src
 COPY scripts ./scripts
 COPY schema.sql ./schema.sql
+COPY certs ./certs
 
 # Don't run the API as root. Nothing here needs to write to the image.
 USER node
