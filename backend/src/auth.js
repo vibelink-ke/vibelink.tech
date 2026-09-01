@@ -51,7 +51,8 @@ export async function readSession(token) {
   const { rows: [row] } = await pool.query(
     `select s.token, s.tenant_id, st.id as staff_id, st.name, st.email, st.username,
             st.role, st.is_super_admin,
-            t.name as company, t.subdomain, t.status as tenant_status
+            t.name as company, t.subdomain, t.status as tenant_status,
+            t.platform_collect_enabled, t.settlement_phone
      from admin_sessions s
      join staff st on st.id = s.staff_id
      join tenants t on t.id = s.tenant_id
@@ -193,4 +194,6 @@ export const publicSession = (s) => ({
   company: s.company,
   subdomain: s.subdomain,
   superAdmin: s.is_super_admin,
+  platformCollectEnabled: s.platform_collect_enabled,
+  settlementPhone: s.settlement_phone,
 });

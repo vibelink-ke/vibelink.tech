@@ -199,6 +199,7 @@ export const api = {
   updateGateway: (id, g) => put(`/api/payment-gateways/${id}`, g),
   makeGatewayDefault: (id) => post(`/api/payment-gateways/${id}/default`, {}),
   setGatewayPlatformCollect: (id, on) => post(`/api/payment-gateways/${id}/platform-collect`, { on }),
+  updateSettlementPhone: (phone) => patch('/api/settings/settlement-phone', { phone }),
   getB2cFeeTiers: () => get('/api/platform/b2c-fee-tiers'),
   saveB2cFeeTiers: (tiers) => put('/api/platform/b2c-fee-tiers', { tiers }),
   gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),

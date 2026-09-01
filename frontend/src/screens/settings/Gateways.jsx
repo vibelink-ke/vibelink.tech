@@ -262,6 +262,21 @@ export default function Gateways() {
   const setCred = (key) => (e) =>
     setForm((s) => ({ ...s, credentials: { ...s.credentials, [key]: e.target.value } }));
 
+  const [settlementPhone, setSettlementPhone] = useState(store.session?.settlementPhone ?? '');
+  const [settlementBusy, setSettlementBusy] = useState(false);
+  const saveSettlementPhone = async () => {
+    setSettlementBusy(true);
+    try {
+      const { settlementPhone: saved } = await api.updateSettlementPhone(settlementPhone);
+      store.signIn({ ...store.session, settlementPhone: saved });
+      store.toast('Settlement number saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setSettlementBusy(false);
+    }
+  };
+
   const setTierField = (i, key) => (e) =>
     setFeeTiers((rows) => rows.map((r, j) => (i === j ? { ...r, [key]: e.target.value } : r)));
   const addTier = () => setFeeTiers((rows) => [...rows, { minAmount: '', maxAmount: '', fee: '' }]);
@@ -310,6 +325,28 @@ export default function Gateways() {
               </div>
             </div>
           )}
+        </Card>
+      )}
+
+      {store.session?.platformCollectEnabled && (
+        <Card
+          title="Settlement M-Pesa number"
+          subtitle="We collect your customers' payments on our own paybill and pay you out nightly, net of commission. This is where those payouts land — set it yourself; we never enter it for you."
+        >
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+            <div style={{ flex: 1 }}>
+              <Field label="M-Pesa number">
+                <Input
+                  value={settlementPhone}
+                  onChange={(e) => setSettlementPhone(e.target.value)}
+                  placeholder="e.g. 0712345678"
+                />
+              </Field>
+            </div>
+            <Button variant="primary" onClick={saveSettlementPhone} disabled={settlementBusy}>
+              {settlementBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
         </Card>
       )}
 

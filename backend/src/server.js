@@ -8389,6 +8389,25 @@ app.post('/api/payment-gateways/:id/default', wrap(async (req, res) => {
 }));
 
 /**
+ * A platform-collected tenant's own settlement number — self-service, not
+ * something the platform owner types in on their behalf (Tenants.jsx still
+ * carries commission/fee-mode, which stay platform-controlled). Only
+ * meaningful once platform_collect_enabled is set, but not gated on it: a
+ * tenant expecting to be switched on shortly may as well have the right
+ * number waiting.
+ */
+app.patch('/api/settings/settlement-phone', requirePermission('payments.edit'), wrap(async (req, res) => {
+  let phone = String(req.body?.phone ?? '').trim();
+  if (!phone) return res.status(400).json({ error: 'Enter an M-Pesa number.' });
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+  }
+  await pool.query('update tenants set settlement_phone=$2 where id=$1', [req.tenant.id, phone]);
+  res.json({ settlementPhone: phone });
+}));
+
+/**
  * Only meaningful on the platform-owner's own tenant — daraja.js's
  * resolveConfig() only ever looks this up against whichever tenant the
  * is_super_admin staff row belongs to, so flipping it on any other tenant's
