@@ -6857,11 +6857,12 @@ app.post('/api/subscribers/:id/stk', wrap(async (req, res) => {
   if (!(amount > 0)) return res.status(400).json({ error: 'Enter an amount, or set a plan for this customer first.' });
 
   try {
-    const data = await mpesa.stkPush(req.tenant.id, {
-      phone: s.phone, amount, accountRef: s.account_code,
+    const { checkoutId } = await stkPushForSubscriber(req.tenant.id, {
+      phone: mpesa.normalise(s.phone), amount, accountCode: s.account_code,
       description: `${s.name} — ${s.account_code}`,
+      purpose: { subscriber_id: req.params.id },
     });
-    res.json({ ok: true, phone: s.phone, amount, checkoutId: data?.CheckoutRequestID ?? null });
+    res.json({ ok: true, phone: s.phone, amount, checkoutId });
   } catch (e) {
     res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
   }
