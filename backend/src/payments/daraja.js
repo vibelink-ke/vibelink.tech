@@ -285,6 +285,52 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
 
   const tenantId = await tenantByShortcode('daraja', String(b.BusinessShortCode));
   if (!tenantId) return;
+
+  /**
+   * A shared platform-collect paybill only has ONE tenant_payment_config row
+   * for that shortcode — the platform owner's own — so tenantByShortcode
+   * above always resolves a bare BillRefNumber to the owner, never to
+   * whichever platform-collected tenant the customer actually meant.
+   *
+   * The dash-prefixed "subdomain-account" format above is what the app's own
+   * STK push button constructs automatically, but a customer who dials the
+   * paybill directly (Lipa na M-Pesa -> Pay Bill, typed by hand) only ever
+   * types the bare account number they were given — nobody manually prefixes
+   * it with their ISP's subdomain. That payment landed here, under the
+   * owner's tenant, and every platform-collected tenant sharing that paybill
+   * silently lost (or misattributed) every direct-dial payment their
+   * customers made this way.
+   *
+   * Search every platform-collected tenant for a subscriber whose account
+   * code matches the bare reference. Applied only when the match is unique —
+   * two tenants happening to share the same account code is exactly the
+   * ambiguity a bare, unprefixed number cannot resolve, and guessing wrong
+   * here means real money credited to a stranger's account. Ambiguous or
+   * no match falls through to the ordinary path below, same as before.
+   */
+  const { pool } = await import('../db.js');
+  const { rows: [owner] } = await pool.query(
+    'select tenant_id from staff where is_super_admin and tenant_id is not null limit 1');
+  if (owner && tenantId === owner.tenant_id) {
+    const { rows: candidates } = await pool.query(
+      `select s.id, s.tenant_id, t.settlement_commission_pct
+         from subscribers s join tenants t on t.id = s.tenant_id
+        where t.platform_collect_enabled and s.account_code = $1`,
+      [billRef]);
+    if (candidates.length === 1) {
+      const [c] = candidates;
+      await applyPayment(c.tenant_id, {
+        provider: 'daraja', ref: b.TransID, amount: Number(b.TransAmount), phone: normalise(b.MSISDN),
+        name: [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' '),
+        rawAccount: billRef, payload: b,
+        target: { type: 'subscriber', id: c.id },
+      }).catch(console.error);
+      await accrueSettlement(c.tenant_id, Number(b.TransAmount) * (1 - Number(c.settlement_commission_pct ?? 5) / 100))
+        .catch(console.error);
+      return;
+    }
+  }
+
   await applyPayment(tenantId, {
     provider: 'daraja',
     ref: b.TransID,
