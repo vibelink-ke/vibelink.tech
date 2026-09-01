@@ -2084,7 +2084,17 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
   const { rows: [t] } = await pool.query(
     'select subdomain, platform_collect_enabled, settlement_commission_pct from tenants where id=$1', [tenantId]);
 
-  if (t?.platform_collect_enabled) {
+  /**
+   * Platform-collect used to take over unconditionally the moment it was
+   * enabled, even for a tenant who also had their own working Daraja paybill
+   * — the platform paid itself first on every PPPoE payment regardless.
+   * Matches hotspot's behaviour now: only a fallback for a tenant with no
+   * gateway of their own, same as /hotspot/buy already does.
+   */
+  const { config } = await import('./db.js');
+  const ownDaraja = await config(tenantId, 'daraja');
+
+  if (!ownDaraja && t?.platform_collect_enabled) {
     const { rows: [owner] } = await pool.query(
       "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
     if (!owner) throw Object.assign(new Error('Platform collection is not set up yet — ask the platform owner.'), { status: 503 });
