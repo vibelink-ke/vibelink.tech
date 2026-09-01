@@ -839,6 +839,21 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
     });
   }
+  /**
+   * PartyB-override STK push only works against Safaricom for an app with
+   * aggregator/API-partner approval — without it, every one of these pushes
+   * would be dispatched, then rejected or misrouted by Safaricom, which
+   * looks to a guest exactly like "the popup never came" for money that may
+   * still have moved. Fails closed until that approval is confirmed and this
+   * is flipped on, rather than letting a tenant configure a till that quietly
+   * does not work the moment a real guest tries to pay it.
+   */
+  if (method === 'piggyback' && process.env.PIGGYBACK_TILL_ENABLED !== 'true') {
+    return res.status(503).json({
+      error: 'Buy Goods till (via platform) is not live yet — pending Safaricom aggregator approval. '
+        + 'Pick another payment method in Hotspot → Settings for now.',
+    });
+  }
   if (method === 'piggyback' && !piggyback) {
     return res.status(503).json({
       error: 'Hotspot is set to take payments via your own till, but no till number has been registered yet. '
@@ -1228,6 +1243,21 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
     return res.status(503).json({
       error: `Hotspot payment method "${method}" does not support in-page STK push. `
         + 'Pick KopoKopo or M-Pesa Paybill in Hotspot → Settings.',
+    });
+  }
+  /**
+   * PartyB-override STK push only works against Safaricom for an app with
+   * aggregator/API-partner approval — without it, every one of these pushes
+   * would be dispatched, then rejected or misrouted by Safaricom, which
+   * looks to a guest exactly like "the popup never came" for money that may
+   * still have moved. Fails closed until that approval is confirmed and this
+   * is flipped on, rather than letting a tenant configure a till that quietly
+   * does not work the moment a real guest tries to pay it.
+   */
+  if (method === 'piggyback' && process.env.PIGGYBACK_TILL_ENABLED !== 'true') {
+    return res.status(503).json({
+      error: 'Buy Goods till (via platform) is not live yet — pending Safaricom aggregator approval. '
+        + 'Pick another payment method in Hotspot → Settings for now.',
     });
   }
   if (method === 'piggyback' && !piggyback) {

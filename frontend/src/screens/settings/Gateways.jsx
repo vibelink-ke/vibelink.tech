@@ -65,7 +65,7 @@ export const CHANNELS = {
   },
   piggyback_till: {
     name: 'Buy Goods till (via platform)',
-    blurb: 'No Safaricom API app of your own needed — the platform’s own app dispatches the STK push, but the money settles directly on your till, never through the platform. Ask the platform owner to enable this first.',
+    blurb: 'Not live yet, pending the platform’s Safaricom aggregator approval. Once enabled: no Safaricom API app of your own needed — the platform’s own app dispatches the STK push, but the money settles directly on your till, never through the platform.',
     codeLabel: 'Till number',
     fields: [],
     services: { pppoe: false, hotspot: true },

@@ -208,10 +208,10 @@ export default function HotspotSettings() {
       )}
 
       {f.payment_method === 'piggyback' && (
-        <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 13px' }}>
-          Register your till number under Hotspot → Settings → Payment gateways ("Buy Goods till (via platform)")
-          before guests can pay — no Safaricom API app of your own is needed, but the platform owner has to
-          have this enabled on their end first.
+        <div style={{ fontSize: 12.5, color: color.rust, background: '#fdf1ec', border: '1px solid #f0d8ce', borderRadius: 8, padding: '10px 13px' }}>
+          Not live yet — this is pending the platform's Safaricom aggregator approval, without which
+          Safaricom rejects the STK push outright. You can register your till under Payment gateways now
+          so it's ready, but purchases will fail with a clear error until the platform owner turns this on.
         </div>
       )}
     </Screen>
