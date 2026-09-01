@@ -31,6 +31,10 @@ const FEATURES = [
    'Set the cap and the throttle. It applies quietly and lifts when the window rolls over.'],
   ['Answers when something breaks',
    'Which tower is down, who is online, what each port is carrying, and where every customer lives on a map.'],
+  ['No paybill yet? We collect for you',
+   'Turn on collection and your customers pay into our paybill from day one, PPPoE or hotspot — we pay you out nightly, net of a small commission, straight to your own M-Pesa number.'],
+  ['Every router accounted for',
+   'Track gadgets by MAC and serial, issue one to a technician and it comes off the shelf automatically, mark a faulty unit and swap it in one step, and know at a glance whether the customer paid for it or it is still yours.'],
 ];
 
 /**
