@@ -191,7 +191,10 @@ export default function Dashboard() {
     return clients.filter((c) => c.expires_at && new Date(c.expires_at).getTime() <= limit && c.status !== 'suspended');
   }, [clients]);
 
-  const atRisk = expiring.reduce((a, c) => a + Number(c.credit ?? 0), 0);
+  // wallet_balance is pooled per account_code — two expiring lines on the
+  // same account would otherwise count that one shared balance twice.
+  const atRisk = [...new Map(expiring.map((c) => [c.account_code, c])).values()]
+    .reduce((a, c) => a + Number(c.wallet_balance ?? 0), 0);
   const openTickets = (store.tickets ?? []).filter((t) => t.status !== 'resolved').length;
   // A customer's own report (source='portal' — "report a problem", a plan
   // change request) getting lost inside the general open-ticket count is

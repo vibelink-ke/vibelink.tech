@@ -370,7 +370,15 @@ export default function ClientDetail() {
     };
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
-      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
+      // Wallet is pooled per account_code — every sibling line sharing this
+      // account needs its cached wallet_balance refreshed too, not just the
+      // one row just edited, or the others keep showing a stale number until
+      // the next full reload.
+      store.setCollection('clients', (cs) => cs.map((c) => {
+        if (c.id === updated.id) return updated;
+        if (c.account_code === updated.account_code) return { ...c, wallet_balance: updated.wallet_balance };
+        return c;
+      }));
       store.toast(`${updated.name} updated`);
       setEditing(null);
     } catch (e) {
@@ -418,14 +426,15 @@ export default function ClientDetail() {
         <span>Location {client.location ?? router?.name ?? '—'}</span>
         <span>Phone {client.phone ?? '—'}{client.phone_alt ? ` · ${client.phone_alt}` : ''}</span>
         <span>
-          {/* credit is money actually sitting on the account — an
-              overpayment carried forward, spendable against the next
-              invoice — which is what "wallet" means. net_balance (credit
-              minus what's owed) is the different question of whether they're
-              paid up, and stays on Billing rather than the header. */}
+          {/* wallet_balance is money actually sitting on the whole account —
+              pooled across every line under this account_code, not just this
+              one — an overpayment carried forward, spendable against any of
+              them. net_balance (wallet minus what this line owes) is the
+              different question of whether they're paid up, and stays on
+              Billing rather than the header. */}
           Wallet{' '}
           <span style={{ fontWeight: 700, color: color.ink }}>
-            KES {kes(client.credit)}
+            KES {kes(client.wallet_balance)}
           </span>
         </span>
       </div>
@@ -513,7 +522,7 @@ export default function ClientDetail() {
                         {line.service === 'pppoe' && line.locked_mac && (
                           <RowAction onClick={() => clearMacLock(line)}>Clear MAC lock</RowAction>
                         )}
-                        <RowAction tone={color.green} onClick={() => setEditing({ ...line })}>Edit</RowAction>
+                        <RowAction tone={color.green} onClick={() => setEditing({ ...line, credit: line.wallet_balance ?? 0 })}>Edit</RowAction>
                         <RowAction
                           tone={color.rust}
                           onClick={() => {
@@ -703,7 +712,11 @@ export default function ClientDetail() {
                 <div style={{ display: 'grid', gap: 8 }}>
                   {[...byAccount.entries()].map(([code, lines]) => {
                     const primary = lines.find((l) => !l.line_label) ?? lines[0];
-                    const wallet = lines.reduce((a, l) => a + Number(l.credit ?? 0), 0);
+                    // Pooled per account_code — every line under this other
+                    // account already reports the same wallet_balance, so
+                    // summing them would count the one shared balance once
+                    // per line instead of once.
+                    const wallet = Number(primary.wallet_balance ?? 0);
                     return (
                       <div
                         key={code}
@@ -1003,7 +1016,7 @@ export default function ClientDetail() {
             <Field label="Status">
               <Select value={editing.status ?? 'active'} onChange={(e) => setEditing((s) => ({ ...s, status: e.target.value }))} options={['active', 'grace', 'expired', 'suspended']} />
             </Field>
-            <Field label="Balance (KES)" hint="Positive credits the account; negative is what they still owe">
+            <Field label="Wallet balance (KES)" hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
               <Input type="number" value={editing.credit ?? 0} onChange={(e) => setEditing((s) => ({ ...s, credit: e.target.value }))} />
             </Field>
             <Field label="Expires" span={2} hint="When this line stops working without a payment">

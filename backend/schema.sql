@@ -1951,3 +1951,33 @@ alter table login_tokens add constraint login_tokens_purpose_check check (purpos
 alter table hotspot_settings drop constraint if exists payment_method_valid;
 alter table hotspot_settings add constraint payment_method_valid
   check (payment_method in ('kopokopo','paybill','bankstk','till','piggyback'));
+
+/**
+ * Wallet credit used to live on subscribers.credit — one balance per line.
+ * A customer with several lines under one account_code (a house and a shop,
+ * tagged by line_label) had a separate, siloed wallet on each one: paying
+ * off one line's overage could sit there as spare credit while a second,
+ * expired line under the very same account got suspended anyway, credit or
+ * not, because that credit was on the wrong row to help it. Pooled by
+ * account instead — one balance any of that account's lines can draw from,
+ * and any of them can leave leftover credit into, via settleSubscriber in
+ * payments/apply.js and jobs.js's renewFromWallet.
+ */
+create table if not exists account_wallets (
+  tenant_id    uuid not null references tenants on delete cascade,
+  account_code text not null,
+  balance      numeric(12,2) not null default 0,
+  updated_at   timestamptz not null default now(),
+  primary key (tenant_id, account_code)
+);
+
+-- One-time backfill: whatever was scattered across subscribers.credit before
+-- pooling existed, pulled into the new shared balance. Safe to re-run — once
+-- credit is zeroed below, a second pass sums to nothing and touches no rows.
+insert into account_wallets (tenant_id, account_code, balance)
+select tenant_id, account_code, sum(credit) from subscribers
+group by tenant_id, account_code
+having sum(credit) <> 0
+on conflict (tenant_id, account_code) do update set balance = account_wallets.balance + excluded.balance;
+
+update subscribers set credit = 0 where credit <> 0;

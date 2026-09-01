@@ -164,7 +164,7 @@ export async function applyPayment(tenantId, tx) {
  * payment regardless of size: a partial payment does not yet entitle
  * anyone to service, only to a bigger balance.
  */
-async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId = null) {
+export async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId = null) {
   /**
    * `for update` on the subscriber row — without it, two payments landing
    * close together (a portal STK and an operator keying in the same
@@ -194,7 +194,21 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId
       : "select * from invoices where subscriber_id=$1 and status in ('open','partial') order by due_date limit 1",
     invoiceId ? [subId, invoiceId] : [subId]
   );
-  const available = Number(amount) + Number(sub.credit);
+  /**
+   * Pooled by account_code, not this row alone — a customer with several
+   * lines (a house and a shop, tagged by line_label) shares one wallet
+   * across all of them. The upsert's UPDATE branch takes the same row lock
+   * `for update` would, so two settlements racing on the same account still
+   * serialize correctly.
+   */
+  const { rows: [wallet] } = await c.query(
+    `insert into account_wallets (tenant_id, account_code, balance)
+     values ($1,$2,0)
+     on conflict (tenant_id, account_code) do update set balance = account_wallets.balance
+     returning balance`,
+    [tenantId, sub.account_code]);
+
+  const available = Number(amount) + Number(wallet.balance);
   const price = Number(inv?.amount ?? sub.price);
   const periods = Math.floor(available / price);
   const full = periods >= 1;
@@ -212,8 +226,11 @@ async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId
   }
 
   await c.query(
-    `update subscribers set expires_at=$2, credit=$3${full ? ", status='active'" : ''} where id=$1`,
-    [subId, expires, credit]);
+    `update subscribers set expires_at=$2${full ? ", status='active'" : ''} where id=$1`,
+    [subId, expires]);
+  await c.query(
+    `update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2`,
+    [tenantId, sub.account_code, credit]);
   if (inv) {
     await c.query(
       "update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1",

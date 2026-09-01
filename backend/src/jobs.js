@@ -7,7 +7,9 @@ import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
 import { dbBackup } from './backup.js';
-import { ceilToMidnight } from './payments/apply.js';
+import { ceilToMidnight, settleSubscriber } from './payments/apply.js';
+import { activateSubscriber } from './radius.js';
+import { withTenant } from './db.js';
 
 /**
  * A job that throws must not take the process down with it — node-cron does not
@@ -138,27 +140,50 @@ async function lockNewPppoeMacs() {
  * expireAndSuspend, so a covered wallet balance means the midnight cutover
  * (ceilToMidnight) never actually costs that customer their connection.
  */
+/**
+ * A customer with several lines (a house and a shop, tagged by line_label)
+ * shares one pooled wallet across all of them (account_wallets) — a line
+ * expiring here can be funded by credit that a *different* line on the same
+ * account left behind, not only its own. Any due service, not only PPPoE:
+ * the old version's hand-rolled extend logic only ever understood PPPoE
+ * (it hardcoded ceilToMidnight and never re-enabled RADIUS on the router),
+ * so this now goes through settleSubscriber — the same, already-correct
+ * per-service logic every ordinary payment uses — plus activateSubscriber,
+ * which the old version never called at all.
+ */
 async function renewFromWallet() {
-  const { rows } = await pool.query(
-    `select s.id, s.tenant_id, s.account_code, s.expires_at, s.credit, p.price, p.duration_min
-       from subscribers s join plans p on p.id = s.plan_id
-      where s.service='pppoe' and s.status in ('active','grace') and s.expires_at < now()
-        and p.price > 0 and s.credit >= p.price
+  const { rows: accounts } = await pool.query(
+    `select distinct s.tenant_id, s.account_code
+       from subscribers s
+       join account_wallets w on w.tenant_id = s.tenant_id and w.account_code = s.account_code
+       join plans p on p.id = s.plan_id
+      where s.status in ('active','grace','expired') and s.expires_at < now()
+        and p.price > 0 and w.balance > 0
         and s.tenant_id in (${enabledTenants})`, ['expireAndSuspend']);
-  for (const s of rows) {
-    const periods = Math.floor(Number(s.credit) / Number(s.price));
-    if (periods < 1) continue;
-    const minutes = periods * s.duration_min;
-    const base = new Date(Math.max(Date.now(), new Date(s.expires_at).getTime()));
-    const expires = ceilToMidnight(new Date(base.getTime() + minutes * 60000));
-    const credit = Number(s.credit) - periods * Number(s.price);
-    await pool.query(
-      "update subscribers set expires_at=$2, credit=$3, status='active' where id=$1",
-      [s.id, expires, credit]);
-    await pool.query(
-      `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
-       values ($1,$2,$3,'system','Auto-renewed from wallet',$4)`,
-      [s.tenant_id, s.id, s.account_code, `KES ${periods * s.price} used from wallet balance — KES ${credit} remaining`]);
+
+  for (const { tenant_id, account_code } of accounts) {
+    await withTenant(tenant_id, async (c) => {
+      // Loops because funding one line changes what the pool can still
+      // afford for the next — soonest-overdue first, stopping the moment a
+      // line's settlement comes back partial (not enough left to fund it).
+      for (;;) {
+        const { rows: [due] } = await c.query(
+          `select s.id from subscribers s join plans p on p.id=s.plan_id
+             where s.tenant_id=$1 and s.account_code=$2
+               and s.status in ('active','grace','expired') and s.expires_at < now()
+               and p.price > 0
+             order by s.expires_at asc limit 1`,
+          [tenant_id, account_code]);
+        if (!due) break;
+        const r = await settleSubscriber(c, tenant_id, due.id, 0, null, null);
+        if (r.partial) break;
+        await activateSubscriber(c, tenant_id, due.id);
+        await c.query(
+          `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
+           values ($1,$2,$3,'system','Auto-renewed from wallet',$4)`,
+          [tenant_id, due.id, account_code, `Renewed to ${new Date(r.expires).toLocaleString('en-KE')} using the account's pooled wallet — KES ${r.balance} remaining`]);
+      }
+    });
   }
 }
 

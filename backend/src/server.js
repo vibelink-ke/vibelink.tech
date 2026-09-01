@@ -1811,7 +1811,7 @@ async function portalSession(req) {
   if (!token) return null;
   const { rows: [row] } = await pool.query(
     `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
-            sub.status, sub.expires_at, sub.credit, sub.service, sub.router_id,
+            sub.status, sub.expires_at, sub.service, sub.router_id,
             sub.portal_password_hash,
             p.title as plan_title, p.price as plan_price, p.rate_down, p.rate_up
        from portal_sessions s
@@ -1998,6 +1998,10 @@ app.get('/portal/me', wrap(async (req, res) => {
     `select coalesce(sum(amount - paid), 0) as amount from invoices
       where tenant_id=$1 and subscriber_id=$2 and status in ('open','partial')`,
     [s.tenant_id, s.subscriber_id]);
+  // Pooled per account_code, not this line alone — see account_wallets.
+  const { rows: [wallet] } = await pool.query(
+    'select balance from account_wallets where tenant_id=$1 and account_code=$2',
+    [s.tenant_id, s.account_code]);
 
   // Same source FUP enforcement sums from — sessions mirrors radacct via a
   // trigger, so this is real traffic, not a stored counter that only some
@@ -2018,7 +2022,7 @@ app.get('/portal/me', wrap(async (req, res) => {
     service: s.service,
     expiresAt: s.expires_at,
     daysLeft: days == null ? null : Math.max(0, days),
-    balance: Number(s.credit ?? 0) - Number(owed.amount ?? 0),
+    balance: Number(wallet?.balance ?? 0) - Number(owed.amount ?? 0),
     usageMb: Math.round(Number(usage.bytes) / (1024 * 1024)),
     plan: s.plan_title ? {
       title: s.plan_title,
@@ -2356,14 +2360,15 @@ app.get('/api/subscribers', async (req, res) => {
            -- client-side from the tenant default alone, showing the wrong
            -- paybill for anyone not on the site that default belongs to.
            coalesce(sp.shortcode, tpc.shortcode) as paybill,
-           -- credit is only ever overpayment carried forward — it resets to
-           -- 0 on any partial payment (settleSubscriber in apply.js) and was
-           -- never meant to represent money owed. What a customer actually
-           -- owes lives on their open/partial invoices, which nothing here
-           -- surfaced, so "balance" looked static or wrong regardless of
-           -- what they actually owed. net_balance is credit minus that.
-           s.credit - coalesce(owed.amount, 0) as net_balance
+           -- Wallet credit is pooled per account_code (account_wallets), not
+           -- per subscriber row — a customer with several lines shares one
+           -- balance across all of them (settleSubscriber in apply.js).
+           -- What a customer actually owes lives on their open/partial
+           -- invoices; net_balance is the pooled wallet minus that.
+           coalesce(w.balance, 0) as wallet_balance,
+           coalesce(w.balance, 0) - coalesce(owed.amount, 0) as net_balance
       from subscribers s
+      left join account_wallets w on w.tenant_id = s.tenant_id and w.account_code = s.account_code
       left join site_profiles sp on sp.router_id = s.router_id and sp.tenant_id = s.tenant_id
       left join lateral (
         -- /api/subscribers is PPPoE-only (see the comment on this route above),
@@ -6267,18 +6272,40 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'credit', 'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
-  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  const settingCredit = 'credit' in req.body;
+  if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
 
   if (req.body.autopay === 'kopokopo') {
     return res.status(400).json({ error: 'KopoKopo cannot be used for autopay — it is hotspot-only.' });
   }
 
-  if ('credit' in req.body) {
+  /**
+   * Wallet balance is pooled per account_code (account_wallets), not a
+   * column on this subscriber row — every line under the same account
+   * shares it. Setting it here means "set the whole account's wallet to
+   * this", same as editing used to look like it did per-line.
+   */
+  let walletBalance = null;
+  if (settingCredit) {
     const c = Number(req.body.credit);
     if (!Number.isFinite(c)) return res.status(400).json({ error: 'Balance must be a number' });
-    req.body.credit = c;
+    const { rows: [target] } = await pool.query(
+      'select account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    if (!target) return res.status(404).json({ error: 'not found' });
+    const { rows: [w] } = await pool.query(
+      `insert into account_wallets (tenant_id, account_code, balance, updated_at)
+       values ($1,$2,$3,now())
+       on conflict (tenant_id, account_code) do update set balance=$3, updated_at=now()
+       returning balance`,
+      [req.tenant.id, target.account_code, c]);
+    walletBalance = Number(w.balance);
+  }
+  if (!sets.length) {
+    const { rows: [s] } = await pool.query('select * from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    await logActivity(req, s.id, s.account_code, 'Edited', 'credit');
+    return res.json({ ...s, wallet_balance: walletBalance });
   }
 
   // Same rule as on create: an unusable coordinate becomes null rather than a
@@ -6327,9 +6354,9 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   // Which fields, not their values — a credential or balance change belongs
   // in the log as the fact that it happened, not as a second place a
   // password or a customer's new balance sits in plain text.
-  await logActivity(req, s.id, s.account_code, 'Edited', sets.join(', '));
+  await logActivity(req, s.id, s.account_code, 'Edited', [...sets, ...(settingCredit ? ['credit'] : [])].join(', '));
 
-  res.json(s);
+  res.json({ ...s, ...(settingCredit ? { wallet_balance: walletBalance } : {}) });
 }));
 
 /**

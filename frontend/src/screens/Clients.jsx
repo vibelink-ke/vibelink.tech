@@ -311,7 +311,13 @@ export default function Clients() {
     };
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
-      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
+      // Wallet is pooled per account_code — refresh every sibling line's
+      // cached wallet_balance too, not just the row just edited.
+      store.setCollection('clients', (cs) => cs.map((c) => {
+        if (c.id === updated.id) return updated;
+        if (c.account_code === updated.account_code) return { ...c, wallet_balance: updated.wallet_balance };
+        return c;
+      }));
       store.toast(`${updated.name} updated`);
       setEditing(null);
     } catch (e) {
@@ -579,11 +585,12 @@ export default function Clients() {
                       )}
                     </td>
                     <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
-                      {/* Money actually sitting on the account — an
-                          overpayment carried forward, spendable against the
-                          next invoice — summed across every line for a
-                          multi-service account rather than just the primary. */}
-                      KES {kes(lines.reduce((a, l) => a + Number(l.credit ?? 0), 0))}
+                      {/* Money actually sitting on the account — pooled per
+                          account_code (account_wallets), so every line
+                          under a multi-service account already reports the
+                          same number; take it from any one of them rather
+                          than summing, which would count it once per line. */}
+                      KES {kes(lines[0]?.wallet_balance ?? 0)}
                     </td>
                     <td style={td}>
                       <span
@@ -643,7 +650,7 @@ export default function Clients() {
                               Suspend
                             </RowAction>
                           )}
-                          <RowAction tone={color.green} onClick={() => setEditing({ ...c })}>Edit</RowAction>
+                          <RowAction tone={color.green} onClick={() => setEditing({ ...c, credit: c.wallet_balance ?? 0 })}>Edit</RowAction>
                           <RowAction tone={color.rust} onClick={() => removeClient(c)}>
                             Delete
                           </RowAction>
@@ -768,7 +775,7 @@ export default function Clients() {
                 options={['active', 'grace', 'expired', 'suspended']}
               />
             </Field>
-            <Field label="Balance (KES)" hint="Positive credits the account; negative is what they still owe">
+            <Field label="Wallet balance (KES)" hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
               <Input
                 type="number"
                 value={editing.credit ?? 0}
