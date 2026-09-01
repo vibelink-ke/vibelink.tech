@@ -6945,6 +6945,14 @@ app.post('/api/settlements/payout', requirePermission('payments.request_payout')
     const result = await payoutTenantNow(req.tenant.id);
     res.json(result);
   } catch (e) {
+    // This catch previously swallowed everything silently — a failed payout
+    // showed up only in the browser's response body, nowhere in server logs,
+    // which is exactly the gap that made a real Safaricom rejection here
+    // indistinguishable from a session/auth problem without opening
+    // DevTools. e.response?.data carries Safaricom's own error body when
+    // this came from an axios call (b2c()), which e.message alone does not.
+    console.error('POST /api/settlements/payout →', req.tenant.id, e.status ?? 500, e.message,
+      e.response?.data ? JSON.stringify(e.response.data) : '');
     res.status(e.status ?? 500).json({ error: e.message });
   }
 }));
