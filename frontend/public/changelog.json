@@ -1,0 +1,13 @@
+[
+  {
+    "date": "2026-09-02",
+    "title": "Settlement payouts, STK fixes, and clearer client status",
+    "items": [
+      "Settlement payout method: choose phone number, till/paybill, or bank (dropdown, paybill, account number) — not phone-only.",
+      "Fixed staff-initiated STK push failing with \"invalid phone number\" or \"gateway not configured\" for platform-collected tenants.",
+      "SMS broadcasts, bulk messages, and outage alerts now send once per customer, not once per PPPoE line.",
+      "Clients list: Plan/Router/Expiry moved under each account's Services tab; Status now shows Online, last seen, or Blocked.",
+      "Payout failures are now logged server-side instead of only showing in the browser."
+    ]
+  }
+]
