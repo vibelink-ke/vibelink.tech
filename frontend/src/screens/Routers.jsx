@@ -1533,10 +1533,27 @@ Revoke anyway?`
               </span>
             )}
             {!!importing.preview.hotspotImportable.length && (
-              <span style={{ color: color.green }}>
-                <strong>{importing.preview.hotspotImportable.length}</strong> active hotspot
-                device(s), matched by MAC, will also be imported as clients.
-              </span>
+              <>
+                <span style={{ color: color.green }}>
+                  <strong>{importing.preview.hotspotImportable.length}</strong> active hotspot
+                  device(s), matched by MAC, will be issued a voucher on Hotspot → Vouchers —
+                  not added here as clients — carrying over whatever session time each one
+                  has left, rounded up to the closest plan that covers it.
+                </span>
+                <div style={{ maxHeight: 160, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
+                  {importing.preview.hotspotImportable.slice(0, 100).map((h) => (
+                    <div key={h.mac}>
+                      {h.username || h.mac}{h.mac && h.username ? ` (${h.mac})` : ''}
+                      {' — '}
+                      {h.remainingMinutes == null
+                        ? 'remaining time unknown'
+                        : h.suggestedPlan
+                          ? `${h.remainingMinutes}m left → ${h.suggestedPlan.title} (${h.suggestedPlan.durationMin}m)`
+                          : `${h.remainingMinutes}m left — no plan long enough, will be skipped`}
+                    </div>
+                  ))}
+                </div>
+              </>
             )}
             {!!importing.preview.importable.length && (
               <div style={{ maxHeight: 180, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
@@ -1550,17 +1567,18 @@ Revoke anyway?`
 
         {importing?.result && (
           <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
-            <span><strong>{importing.result.imported}</strong> client(s) created.</span>
+            <span><strong>{importing.result.imported}</strong> imported.</span>
             {!!importing.result.needPhone && (
               <span style={{ color: color.amberInk }}>
-                None have a phone number — the router does not store one. Payments are matched on
-                the phone number, so add them before these customers pay.
+                {importing.result.needPhone} PPPoE client(s) have no phone number — the router
+                does not store one. Payments are matched on the phone number, so add them before
+                these customers pay.
               </span>
             )}
-            {!!importing.result.needPlan && (
-              <span style={{ color: color.amberInk }}>
-                {importing.result.needPlan} imported hotspot client(s) have no plan assigned yet —
-                the router's active-session list does not carry one.
+            {!!importing.result.hotspotCreated?.length && (
+              <span style={{ color: color.green }}>
+                {importing.result.hotspotCreated.length} hotspot guest(s) issued a voucher with
+                their remaining time carried over — see Hotspot → Vouchers.
               </span>
             )}
             {!!importing.result.failed?.length && (

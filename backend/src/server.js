@@ -4397,6 +4397,21 @@ function categorizeImport(found, sessions, knownPppoe, knownMac) {
   return { importable, already, noPassword, noPasswordActive, orphanActive, hotspotImportable, activeByUser };
 }
 
+/**
+ * The active hotspot plan whose duration comes closest to covering
+ * `remainingMinutes` without falling short of it — rounding up to the next
+ * real plan rather than shortchanging a migrated guest a single minute of
+ * time they already had. Falls back to the longest plan available when even
+ * that isn't enough, and to null when there is no hotspot plan at all
+ * (nothing sane to hand out) — the caller skips the voucher and imports the
+ * guest with no time carried over rather than guessing.
+ */
+function closestHotspotPlan(plans, remainingMinutes) {
+  const hotspot = plans.filter((p) => p.service === 'hotspot').sort((a, b) => a.duration_min - b.duration_min);
+  if (!hotspot.length) return null;
+  return hotspot.find((p) => p.duration_min >= remainingMinutes) ?? hotspot[hotspot.length - 1];
+}
+
 app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -4417,6 +4432,12 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
       ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
     const found = await step('read /ppp/secret', () => ros.pppSecrets(conn), 30000);
     const sessions = await step('read active sessions', () => ros.activeSessions(conn), 30000);
+    // Best-effort and only ever consulted for hotspot guests — a router with
+    // no hotspot server, or one whose profile has no session-timeout set at
+    // all (untimed access), simply yields an empty map, and every hotspot
+    // import below imports with no remaining time carried over rather than
+    // failing the whole run over it.
+    const remaining = await step('read hotspot session time', () => ros.hotspotSessionRemaining(conn), 15000);
     ros.close(conn);
     conn = null;
 
@@ -4427,6 +4448,9 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
 
     const { importable, already, noPassword, noPasswordActive, orphanActive, hotspotImportable, activeByUser } =
       categorizeImport(found, sessions, knownPppoe, knownMac);
+
+    const { rows: plans } = await pool.query(
+      "select id, title, duration_min, service from plans where tenant_id=$1 and active", [req.tenant.id]);
 
     if (!apply) {
       return res.json({
@@ -4439,7 +4463,19 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
           ...noPasswordActive.map((f) => ({ name: f.name, address: activeByUser.get(f.name)?.address ?? null })),
           ...orphanActive.map((s) => ({ name: s.username, address: s.address })),
         ],
-        hotspotImportable: hotspotImportable.map((s) => ({ mac: s.mac, address: s.address, username: s.username })),
+        // Each guest's own remaining time, plus which real plan they'd be
+        // handed a voucher for on apply — shown up front so an operator sees
+        // exactly what each import will grant before committing to it, not
+        // just after.
+        hotspotImportable: hotspotImportable.map((s) => {
+          const remainingMinutes = remaining.get(s.mac) ?? null;
+          const plan = remainingMinutes != null ? closestHotspotPlan(plans, remainingMinutes) : null;
+          return {
+            mac: s.mac, address: s.address, username: s.username,
+            remainingMinutes,
+            suggestedPlan: plan ? { id: plan.id, title: plan.title, durationMin: plan.duration_min } : null,
+          };
+        }),
       });
     }
 
@@ -4487,32 +4523,47 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
     }
 
     // Active hotspot sessions, matched by device MAC rather than a username
-    // a hotspot login commonly does not have.
+    // a hotspot login commonly does not have. These are pay-as-you-go
+    // hotspot guests, not PPPoE lines — they belong on Hotspot → Vouchers,
+    // not the Clients screen, so this issues each one a real voucher
+    // (issueVoucherAccess, the same path a paid purchase goes through)
+    // instead of a subscribers row Clients would never show and that would
+    // have no plan, no expiry, and no way to actually authenticate again.
+    //
+    // The voucher's duration comes from closestHotspotPlan against however
+    // much of their current session they had left — the point of reading
+    // that at all — so migrating a router into billing does not reset a
+    // guest who paid for (say) 20 more minutes back to zero. Best-effort
+    // per guest: one row failing to bind on the router must not undo every
+    // other guest imported in the same run.
     for (const s of hotspotImportable) {
       try {
-        const account = await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
-        if (!account) throw new Error('Could not find a free account number.');
+        const remainingMinutes = remaining.get(s.mac) ?? null;
+        const plan = remainingMinutes != null ? closestHotspotPlan(plans, remainingMinutes) : null;
+        if (!plan) throw new Error('No active hotspot plan long enough to carry this guest\'s remaining time.');
+
+        const v = await radius.issueVoucherAccess(pool, req.tenant.id, plan.id, null, s.mac);
+        await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);
+        const apply2 = await import('./payments/apply.js');
+        await apply2.bindDeviceOnRouter(r.id, s.mac, plan.id, `${v.code} — migrated`);
         await pool.query(
-          `insert into subscribers (tenant_id, account_code, name, phone, service,
-             router_id, locked_mac, static_ip)
-           values ($1,$2,$3,$4,'hotspot',$5,$6,$7)`,
-          [req.tenant.id, account, s.username || s.mac, '', r.id, s.mac, s.address || null]);
+          `insert into voucher_devices (voucher_id, mac, router_id, label) values ($1,$2,$3,$4)
+           on conflict (voucher_id, mac) do nothing`,
+          [v.id, s.mac, r.id, s.username || null]);
         hotspotCreated.push(s.mac);
       } catch (e) {
         failed.push({ name: s.mac, error: e.message });
       }
     }
 
-    // Every imported client has an empty phone, and every imported hotspot
-    // client has no plan assigned — /ppp/secret and /ip/hotspot/active hold
-    // neither. Said plainly, because payments are matched on the phone number
-    // and an import that looks complete but silently breaks matching is worse
-    // than one that admits what it left undone.
+    // Every imported PPPoE client has an empty phone — /ppp/secret holds
+    // none. Said plainly, because payments are matched on the phone number
+    // and an import that looks complete but silently breaks matching is
+    // worse than one that admits what it left undone.
     res.json({
       imported: created.length + hotspotCreated.length,
       created, hotspotCreated, already, noPassword, failed,
-      needPhone: created.length + hotspotCreated.length,
-      needPlan: hotspotCreated.length,
+      needPhone: created.length,
     });
   } catch (e) {
     res.status(502).json({

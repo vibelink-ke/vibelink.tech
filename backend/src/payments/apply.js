@@ -320,7 +320,7 @@ async function match(c, tenantId, tx) {
  * than from the route that took the payment because a webhook callback and
  * a route handler both need it and neither should duplicate it.
  */
-async function bindDeviceOnRouter(routerId, mac, planId, comment) {
+export async function bindDeviceOnRouter(routerId, mac, planId, comment) {
   const { rows: [r] } = await pool.query(
     'select host, api_port, service_user, service_password_enc from routers where id=$1',
     [routerId]);

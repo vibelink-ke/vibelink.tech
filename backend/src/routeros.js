@@ -1884,6 +1884,10 @@ export async function activeSessions(conn) {
         // MAC-locked subscriber rather than by username, which a hotspot
         // login commonly does not have at all.
         mac: String(row['caller-id'] ?? row['mac-address'] ?? '').trim().toUpperCase() || null,
+        // How long this session has already run — import-secrets uses it,
+        // against the hotspot server's own profile session-timeout, to work
+        // out how much of that session's time a migrated guest has left.
+        uptime: String(row.uptime ?? '').trim() || null,
       })).filter((r) => r.username);
     } catch {
       return [];
@@ -1893,6 +1897,81 @@ export async function activeSessions(conn) {
   out.push(...await read('/ppp/active/print', 'pppoe'));
   out.push(...await read('/ip/hotspot/active/print', 'hotspot'));
   return out;
+}
+
+/**
+ * RouterOS duration string -> seconds. Two shapes seen in the wild:
+ * "1d02:03:04" (uptime, always this style once a session has run a full day)
+ * and "2h3m4s" / "3m4s" / "45s" (uptime under a day, and how a configured
+ * value like a profile's session-timeout reads back). Returns null rather
+ * than throwing on anything unrecognised — a format this hasn't seen before
+ * should make the import skip that one session's time calculation, not fail
+ * the whole import.
+ */
+function parseRouterOSDuration(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+
+  const withDay = /^(\d+)d(\d{2}):(\d{2}):(\d{2})$/.exec(str);
+  if (withDay) {
+    const [, d, h, m, sec] = withDay.map(Number);
+    return d * 86400 + h * 3600 + m * 60 + sec;
+  }
+  const clock = /^(\d{2}):(\d{2}):(\d{2})$/.exec(str);
+  if (clock) {
+    const [, h, m, sec] = clock.map(Number);
+    return h * 3600 + m * 60 + sec;
+  }
+  const units = /^(?:(\d+)w)?(?:(\d+)d)?(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/.exec(str);
+  if (units && str !== '') {
+    const [, w, d, h, m, sec] = units.map((x) => Number(x) || 0);
+    return w * 604800 + d * 86400 + h * 3600 + m * 60 + sec;
+  }
+  return null;
+}
+
+/**
+ * How much session time each currently-active hotspot guest has left,
+ * against the hotspot server's own profile session-timeout — the shape this
+ * project's hotspot deployments actually use: one shared limit for everyone
+ * on the server, not a per-user allowance. Used only by import-secrets, to
+ * carry a migrated guest's remaining time into a real voucher instead of
+ * quietly discarding it the moment the router comes under billing control.
+ *
+ * Returns a Map from MAC to remaining minutes (floored, never negative — a
+ * session already past its nominal timeout that the router simply hasn't
+ * gotten around to dropping yet reads as 0 remaining, not a negative
+ * number). A server with no profile, no session-timeout configured on it
+ * (untimed access), or an unparseable duration anywhere yields an empty
+ * map — the caller falls back to no remaining-time guess rather than a
+ * wrong one.
+ */
+export async function hotspotSessionRemaining(conn) {
+  try {
+    const [servers, active] = await Promise.all([
+      conn.write('/ip/hotspot/print', []),
+      conn.write('/ip/hotspot/active/print', []),
+    ]);
+    const server = servers[0];
+    if (!server?.profile) return new Map();
+
+    const profiles = await conn.write('/ip/hotspot/user/profile/print', []);
+    const profile = profiles.find((p) => p.name === server.profile);
+    const limitSeconds = parseRouterOSDuration(profile?.['session-timeout']);
+    if (!limitSeconds) return new Map();
+
+    const out = new Map();
+    for (const row of active) {
+      const mac = String(row['mac-address'] ?? '').trim().toUpperCase();
+      if (!mac) continue;
+      const usedSeconds = parseRouterOSDuration(row.uptime) ?? 0;
+      const remainingMinutes = Math.max(0, Math.floor((limitSeconds - usedSeconds) / 60));
+      out.set(mac, remainingMinutes);
+    }
+    return out;
+  } catch {
+    return new Map();
+  }
 }
 
 /**
