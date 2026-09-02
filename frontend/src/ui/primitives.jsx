@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { color, font, radius, toneFor } from '../theme/tokens';
 
 /* ── layout ───────────────────────────────────────────────── */
@@ -607,3 +608,117 @@ export const RowAction = ({ tone, onClick, title, children }) => (
     {children}
   </button>
 );
+
+/**
+ * A per-row "Actions ▾" dropdown, for a row with more actions than fit as
+ * inline buttons without the table fighting for width. Originally built for
+ * Routers.jsx's seven-action row menu; extracted here once Clients.jsx
+ * needed the identical shape rather than a second copy of it.
+ *
+ * Rendered through a portal into document.body, positioned in `position:
+ * fixed` from the toggle button's own getBoundingClientRect() — not as a
+ * child of the button. A table wrapped in its own horizontally-scrolling
+ * container (`overflow-x: auto`) makes CSS treat the unset overflow-y as
+ * auto too, the instant its sibling axis is anything but visible; a menu
+ * living inside that container gets clipped by it the moment it opens near
+ * the table's bottom or right edge — it exists, it just has nowhere visible
+ * to draw itself. A portal escapes that ancestor entirely.
+ *
+ * Pair with useActionMenu() for the open/anchorRect/outside-click state
+ * this needs, rather than wiring that up again per screen.
+ */
+export function ActionMenu({ open, anchorRect, menuRef, onToggle, children }) {
+  const menuWidth = 184;
+  // Clamping `top` to the viewport bottom stops the menu starting past the
+  // edge, but does nothing about it still opening *downward* from there — a
+  // row with little room below it gets a menu whose items render mostly
+  // below the fold. Flip upward instead whenever there is more room above
+  // the button than below it; either way, maxHeight + its own scroll is the
+  // backstop for a viewport too short for the full list regardless of which
+  // side it opens on.
+  const spaceBelow = open && anchorRect ? window.innerHeight - anchorRect.bottom : 0;
+  const spaceAbove = open && anchorRect ? anchorRect.top : 0;
+  const openUpward = open && anchorRect && spaceBelow < 260 && spaceAbove > spaceBelow;
+  return (
+    <div style={{ display: 'inline-block' }}>
+      <Button onClick={onToggle}>Actions ▾</Button>
+      {open && anchorRect && createPortal(
+        <div
+          ref={menuRef}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'fixed',
+            left: Math.max(8, Math.min(anchorRect.right - menuWidth, window.innerWidth - menuWidth - 8)),
+            ...(openUpward
+              ? { bottom: window.innerHeight - anchorRect.top + 4, maxHeight: anchorRect.top - 12 }
+              : { top: anchorRect.bottom + 4, maxHeight: window.innerHeight - anchorRect.bottom - 12 }),
+            overflowY: 'auto',
+            zIndex: 1000,
+            background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.md,
+            boxShadow: '0 10px 28px rgba(20,26,23,.16)', width: menuWidth, padding: 6,
+            display: 'grid', gap: 1,
+          }}
+        >
+          {children}
+        </div>,
+        document.body,
+      )}
+    </div>
+  );
+}
+
+export function MenuItem({ onClick, title, tone, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        display: 'block', width: '100%', textAlign: 'left', background: 'none', border: 0,
+        borderRadius: radius.sm ?? 6, padding: '8px 10px', fontSize: 13, color: tone ?? color.ink ?? '#161a17',
+        cursor: 'pointer', font: 'inherit',
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f6f3'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * The open/anchorRect/outside-click wiring ActionMenu needs, shared so a
+ * screen with several menu-holding rows (only one open at a time, tracked
+ * by whatever id each row uses) doesn't reimplement it per screen.
+ */
+export function useActionMenu() {
+  const [openId, setOpenId] = useState(null);
+  const [rect, setRect] = useState(null);
+  const nodeRef = useRef(null);
+
+  // Registered a tick late, on purpose: the very click that opens the menu
+  // would otherwise be caught by this same listener before that click
+  // finishes dispatching, closing the menu in the same gesture that opened
+  // it. setTimeout(…, 0) pushes the addEventListener call to the next
+  // macrotask, after the opening click has fully finished bubbling.
+  useEffect(() => {
+    if (!openId) return undefined;
+    const close = (e) => {
+      if (nodeRef.current?.contains(e.target)) return;
+      setOpenId(null);
+    };
+    const id = setTimeout(() => document.addEventListener('click', close), 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('click', close);
+    };
+  }, [openId]);
+
+  const toggle = (id) => (e) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setOpenId((cur) => (cur === id ? null : id));
+    setRect(r);
+  };
+
+  return { openId, rect, nodeRef, toggle, close: () => setOpenId(null) };
+}

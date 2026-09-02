@@ -365,11 +365,15 @@ export default function Gateways() {
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <Field label="Payout method">
-              <Select value={settlementMethod} onChange={(e) => setSettlementMethod(e.target.value)}>
-                <option value="phone">Phone number (M-Pesa)</option>
-                <option value="till">Till / paybill without API</option>
-                <option value="bank">Bank</option>
-              </Select>
+              <Select
+                value={settlementMethod}
+                onChange={(e) => setSettlementMethod(e.target.value)}
+                options={[
+                  { value: 'phone', label: 'Phone number (M-Pesa)' },
+                  { value: 'till', label: 'Till / paybill without API' },
+                  { value: 'bank', label: 'Bank' },
+                ]}
+              />
             </Field>
 
             {settlementMethod === 'phone' && (
@@ -395,10 +399,11 @@ export default function Gateways() {
             {settlementMethod === 'bank' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
                 <Field label="Bank">
-                  <Select value={settlementBankName} onChange={(e) => setSettlementBankName(e.target.value)}>
-                    <option value="">Choose a bank…</option>
-                    {KENYA_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </Select>
+                  <Select
+                    value={settlementBankName}
+                    onChange={(e) => setSettlementBankName(e.target.value)}
+                    options={[{ value: '', label: 'Choose a bank…' }, ...KENYA_BANKS.map((b) => ({ value: b, label: b }))]}
+                  />
                 </Field>
                 <Field label="Bank's paybill number">
                   <Input

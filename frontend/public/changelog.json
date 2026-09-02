@@ -9,5 +9,12 @@
       "Clients list: Plan/Router/Expiry moved under each account's Services tab; Status now shows Online, last seen, or Blocked.",
       "Payout failures are now logged server-side instead of only showing in the browser."
     ]
+  },
+  {
+    "date": "2026-09-02",
+    "title": "Fixed the settlement payout method dropdown showing blank",
+    "items": [
+      "Settings → Payment gateways: the payout method and bank dropdowns now actually list their options."
+    ]
   }
 ]
