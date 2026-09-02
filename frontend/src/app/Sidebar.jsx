@@ -4,6 +4,7 @@ import { color, font, radius, SIDEBAR_W } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { NAV_SECTIONS } from './nav';
 import { useMediaQuery } from './useMediaQuery';
+import WhatsNew from './WhatsNew';
 
 const heading = {
   padding: '16px 8px 6px',
@@ -113,6 +114,8 @@ export default function Sidebar() {
   // casing imaginable and the sidebar is the one place it is always on screen.
   const brandName = (s?.company || 'Vibelink').toUpperCase();
 
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
+
   const name = s?.name || 'Set up your profile';
   // Just the role. The subdomain used to hang off it, which told the operator
   // nothing they needed and put their hostname on screen for anyone behind them.
@@ -198,7 +201,11 @@ export default function Sidebar() {
           >
             {brandName}
           </span>
-          <span style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted }}>
+          <span
+            onClick={() => setShowWhatsNew(true)}
+            title="What's new"
+            style={{ fontSize: 11, fontFamily: font.mono, color: color.sideMuted, cursor: 'pointer', textDecoration: 'underline dotted', width: 'fit-content' }}
+          >
             v2.4
           </span>
         </div>
@@ -254,6 +261,7 @@ export default function Sidebar() {
         </button>
       </div>
     </aside>
+    {showWhatsNew && <WhatsNew onClose={() => setShowWhatsNew(false)} />}
     </>
   );
 }
