@@ -6,7 +6,7 @@ import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
-import { Button, Empty, Field, Input, Modal, RowAction, RowActions, Screen, Select } from '../ui/primitives';
+import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 
 // KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
 // it can't actually charge a PPPoE customer, so it's not offered here.
@@ -120,6 +120,7 @@ export default function Clients() {
   const [view, setView] = useState('list');
   const [selected, setSelected] = useState(() => new Set());
   const [editing, setEditing] = useState(null);
+  const actionMenu = useActionMenu();
 
   const clients = store.clients ?? [];
 
@@ -306,24 +307,6 @@ export default function Clients() {
     }
   };
 
-  /**
-   * Pause, suspend and resume are three different things.
-   *
-   * Pause is an admin stopping the service on purpose — automation leaves those
-   * alone. Suspend is a block, normally for non-payment, which a payment clears.
-   * They used to be one button writing the same status, so nobody could tell the
-   * two situations apart afterwards. Both are admin-only.
-   */
-  const setAccess = async (c, action) => {
-    try {
-      const updated = await api.setSubscriberAccess(c.id, action);
-      store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? updated : x)));
-      store.toast(`${c.name} ${{ pause: 'paused', suspend: 'suspended', resume: 'resumed' }[action]}`);
-    } catch (e) {
-      store.toast(`Could not update: ${e.message}`);
-    }
-  };
-
   const removeClient = async (c) => {
     try {
       await api.deleteSubscriber(c.id);
@@ -471,10 +454,13 @@ export default function Clients() {
                 <th style={{ padding: '14px 10px 10px 0', width: 26 }}>
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all" style={{ cursor: 'pointer' }} />
                 </th>
-                <th style={th}>ACCOUNT</th>
-                <th style={th}>SERVICES</th>
+                <th style={th}>A/C NO</th>
+                <th style={th}>CLIENT NAME</th>
                 <th style={th}>WALLET</th>
-                <th style={th}>AUTO-PAY</th>
+                <th style={th}>EMAIL</th>
+                <th style={th}>SERVICE</th>
+                <th style={th}>PHONE</th>
+                <th style={th}>REGISTERED</th>
                 <th style={th}>STATUS</th>
                 <th style={{ padding: '14px 0 10px' }} />
               </tr>
@@ -493,15 +479,24 @@ export default function Clients() {
                         style={{ cursor: 'pointer' }}
                       />
                     </td>
+                    <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5, color: color.muted }}>
+                      {c.account_code}
+                    </td>
                     <td style={td}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <span onClick={() => navigate(`/clients/${c.id}`)} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
-                          {c.name}
-                        </span>
-                        <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>
-                          {c.account_code}{' · '}{c.phone}
-                        </span>
-                      </div>
+                      <span onClick={() => navigate(`/clients/${c.id}`)} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
+                        {c.name}
+                      </span>
+                    </td>
+                    <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
+                      {/* Money actually sitting on the account — pooled per
+                          account_code (account_wallets), so every line
+                          under a multi-service account already reports the
+                          same number; take it from any one of them rather
+                          than summing, which would count it once per line. */}
+                      KES {kes(lines[0]?.wallet_balance ?? 0)}
+                    </td>
+                    <td style={{ ...td, fontSize: 12.5, color: color.muted }}>
+                      {c.email || '—'}
                     </td>
                     <td style={{ ...td, fontSize: 13.5 }}>
                       {/* Plan, router/IP and expiry are per-line facts — a
@@ -522,28 +517,11 @@ export default function Clients() {
                         {lines.length} service{lines.length === 1 ? '' : 's'}
                       </span>
                     </td>
-                    <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
-                      {/* Money actually sitting on the account — pooled per
-                          account_code (account_wallets), so every line
-                          under a multi-service account already reports the
-                          same number; take it from any one of them rather
-                          than summing, which would count it once per line. */}
-                      KES {kes(lines[0]?.wallet_balance ?? 0)}
+                    <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5, color: '#4a524c' }}>
+                      {c.phone}
                     </td>
-                    <td style={td}>
-                      <span
-                        style={{
-                          display: 'inline-flex',
-                          padding: '3px 9px',
-                          borderRadius: radius.pill,
-                          fontSize: 11.5,
-                          fontWeight: 600,
-                          background: c.autopay ? '#e2ebe5' : color.tileBg,
-                          color: c.autopay ? color.green : color.neutralInk,
-                        }}
-                      >
-                        {c.autopay ?? 'Off'}
-                      </span>
+                    <td style={{ ...td, fontSize: 12.5, color: color.muted }}>
+                      {c.created_at ? new Date(c.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                     </td>
                     <td style={td}>
                       {multi ? (() => {
@@ -573,34 +551,21 @@ export default function Clients() {
                       })()}
                     </td>
                     <td style={{ padding: '13px 0', borderTop: '1px solid #f1f3ef', textAlign: 'right' }}>
-                      <RowActions>
-                      <RowAction onClick={() => navigate(`/clients/${c.id}`)}>View</RowAction>
-                      {/* PPPoE: Pause/Suspend/Send STK/Edit/Delete now live under
-                          that account's own Services tab on its own page — each
-                          line's own row there, not duplicated here too. Hotspot
-                          has no such tab, so a single-line hotspot row keeps
-                          them here. */}
-                      {c.service !== 'pppoe' && !multi && (
-                        <>
-                          <RowAction tone={color.amberInk} onClick={() => setAccess(c, c.status === 'active' ? 'pause' : 'resume')}>
-                            {c.status === 'active' ? 'Pause' : 'Resume'}
-                          </RowAction>
-                          {store.isAdmin && c.status !== 'suspended' && (
-                            <RowAction
-                              tone={color.rust}
-                              onClick={() => setAccess(c, 'suspend')}
-                              title="Block this customer — a payment clears it"
-                            >
-                              Suspend
-                            </RowAction>
-                          )}
-                          <RowAction tone={color.green} onClick={() => setEditing({ ...c, credit: c.wallet_balance ?? 0 })}>Edit</RowAction>
-                          <RowAction tone={color.rust} onClick={() => removeClient(c)}>
-                            Delete
-                          </RowAction>
-                        </>
-                      )}
-                      </RowActions>
+                      <ActionMenu
+                        open={actionMenu.openId === c.id}
+                        anchorRect={actionMenu.openId === c.id ? actionMenu.rect : null}
+                        menuRef={actionMenu.nodeRef}
+                        onToggle={actionMenu.toggle(c.id)}
+                      >
+                        <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}`); }}>View</MenuItem>
+                        <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}?tab=services`); }}>Services</MenuItem>
+                        <MenuItem onClick={() => { actionMenu.close(); setEditing({ ...c, credit: c.wallet_balance ?? 0 }); }}>
+                          Edit client
+                        </MenuItem>
+                        <MenuItem tone={color.rust} onClick={() => { actionMenu.close(); removeClient(c); }}>
+                          Delete client
+                        </MenuItem>
+                      </ActionMenu>
                     </td>
                   </tr>
                 );

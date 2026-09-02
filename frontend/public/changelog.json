@@ -16,5 +16,13 @@
     "items": [
       "Settings → Payment gateways: the payout method and bank dropdowns now actually list their options."
     ]
+  },
+  {
+    "date": "2026-09-02",
+    "title": "Clients list rearranged: A/C no, name, wallet, email, service, phone, registered, status",
+    "items": [
+      "Columns reordered to A/C No, Client name, Wallet, Email, Service, Phone, Registered, Status.",
+      "Row actions are now a single \"Actions ▾\" dropdown: View, Services, Edit client, Delete client."
+    ]
   }
 ]
