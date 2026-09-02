@@ -214,13 +214,18 @@ export default function Clients() {
   const bulkSms = async () => {
     const picked = selectedClients();
     if (!picked.length) return store.toast('Select at least one client first');
-    const body = window.prompt(`Message to send to ${picked.length} client(s):`);
+    // A customer with several PPPoE lines (house + shop, say) shares one
+    // phone — selecting both lines must still reach them once, not twice.
+    const byPhone = new Map();
+    for (const c of picked) if (c.phone && !byPhone.has(c.phone)) byPhone.set(c.phone, c);
+    const unique = [...byPhone.values()];
+    const body = window.prompt(`Message to send to ${unique.length} client(s):`);
     if (!body?.trim()) return;
     const results = await Promise.allSettled(
-      picked.map((c) => api.sendMessage({ subscriberId: c.id, body, channel: 'sms' }))
+      unique.map((c) => api.sendMessage({ subscriberId: c.id, body, channel: 'sms' }))
     );
     const sent = results.filter((r) => r.status === 'fulfilled').length;
-    store.toast(sent === picked.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${picked.length}`);
+    store.toast(sent === unique.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${unique.length}`);
   };
 
   const bulkCompensate = async () => {

@@ -7529,7 +7529,7 @@ app.post('/api/outages', wrap(async (req, res) => {
   if (routerId) {
     const { send } = await import('./sms.js');
     const { rows: affected } = await pool.query(
-      "select phone from subscribers where tenant_id=$1 and router_id=$2 and status in ('active','grace')",
+      "select distinct phone from subscribers where tenant_id=$1 and router_id=$2 and status in ('active','grace') and phone is not null",
       [req.tenant.id, routerId]);
     for (const s of affected) {
       await send(req.tenant.id, s.phone, 'outage', { site, eta: eta ?? 'shortly' }).catch(() => {});
@@ -7752,11 +7752,16 @@ app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (
       where s.tenant_id=$1 ${clause.replace(/\b(router_id|plan_id|status|expires_at)\b/g, 's.$1')}`,
     [req.tenant.id, ...extra]);
 
-  res.json({ queued: rows.length });
+  // A customer with several PPPoE lines sharing one phone (house + shop,
+  // say) must get this broadcast once, not once per matching line.
+  const seen = new Set();
+  const recipients = rows.filter((s) => s.phone && !seen.has(s.phone) && seen.add(s.phone));
+
+  res.json({ queued: recipients.length });
 
   // One lookup for the whole run rather than per recipient.
   const org = await sms.orgVars(req.tenant.id);
-  for (const s of rows) {
+  for (const s of recipients) {
     // Expanded per recipient — the whole point of the tags is that each person
     // gets their own name, account and expiry rather than a form letter.
     const vars = sms.subscriberVars(s, org);
