@@ -72,26 +72,19 @@ const STATUS_DOT = {
 };
 
 /**
- * What this customer is, in the terms an operator acts on.
+ * What this line is doing right now, not what it owes.
  *
- * Billing status alone could not tell these apart, and they need different
- * things done:
- *
- *   online          paid and connected — nothing to do
- *   active, offline paid but not connected — a fault, or they are simply out
- *   expired         not paid and not connected — a collection call
- *   expired, online not paid and still connected — the line should have been
- *                   cut and was not, which is money going out of the door
+ * STATUS is router/service state — online, or how long since it was last
+ * seen — with one override: suspended and paused both mean the operator
+ * has blocked the line from connecting at all, which matters more than
+ * whatever its connectivity happens to read at that instant.
  */
 function presence(c) {
-  const paidUp = !['expired', 'suspended', 'paused'].includes(c.status);
-  if (c.online && !paidUp) {
-    return { label: `${c.status} · online`, colour: color.rust, weight: 700,
-             note: 'still connected — not paid' };
+  if (c.status === 'suspended' || c.status === 'paused') {
+    return { label: 'Blocked', colour: color.rust, weight: 700, note: c.status };
   }
-  if (c.online) return { label: 'online', colour: color.green, weight: 600, note: 'connected now' };
-  if (!paidUp) return { label: c.status, colour: STATUS_DOT[c.status] ?? color.muted, weight: 600, note: 'offline' };
-  return { label: c.status, colour: color.muted, weight: 500, note: 'offline' };
+  if (c.online) return { label: 'Online', colour: color.green, weight: 600, note: 'connected now' };
+  return { label: seenAgo(c.last_seen), colour: color.muted, weight: 500, note: null };
 }
 
 /** "3m ago", "2d ago" — a duration reads faster than a timestamp in a table. */
@@ -117,14 +110,6 @@ const th = {
 const td = { padding: '12px 12px 12px 0', borderTop: '1px solid #f1f3ef', verticalAlign: 'top' };
 const action = { fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 };
 
-const expiryLabel = (c) => {
-  if (!c.expires_at) return ['—', ''];
-  const d = new Date(c.expires_at);
-  const days = Math.round((d - Date.now()) / 86400000);
-  const note = days < 0 ? `${Math.abs(days)}d overdue` : days === 0 ? 'today' : `in ${days}d`;
-  return [d.toLocaleDateString('en-KE', { day: '2-digit', month: 'short' }), note];
-};
-
 export default function Clients() {
   const store = useStore();
   const navigate = useNavigate();
@@ -137,15 +122,6 @@ export default function Clients() {
   const [editing, setEditing] = useState(null);
 
   const clients = store.clients ?? [];
-  // subscribers.plan_id references plans, not tariffs.
-  const planById = useMemo(
-    () => Object.fromEntries((store.plans ?? []).map((p) => [p.id, p])),
-    [store.plans]
-  );
-  const routerById = useMemo(
-    () => Object.fromEntries((store.routers ?? []).map((r) => [r.id, r])),
-    [store.routers]
-  );
 
   const counts = useMemo(
     () =>
@@ -496,9 +472,7 @@ export default function Clients() {
                   <input type="checkbox" checked={allSelected} onChange={toggleAll} aria-label="Select all" style={{ cursor: 'pointer' }} />
                 </th>
                 <th style={th}>ACCOUNT</th>
-                <th style={th}>PLAN</th>
-                <th style={th}>ROUTER / IP</th>
-                <th style={th}>EXPIRY</th>
+                <th style={th}>SERVICES</th>
                 <th style={th}>WALLET</th>
                 <th style={th}>AUTO-PAY</th>
                 <th style={th}>STATUS</th>
@@ -508,9 +482,6 @@ export default function Clients() {
             <tbody>
               {visibleAccounts.map(({ primary: c, lines }) => {
                 const multi = lines.length > 1;
-                const plan = planById[c.plan_id];
-                const rtr = routerById[c.router_id];
-                const [exp, note] = expiryLabel(c);
                 return (
                   <tr key={c.account_code}>
                     <td style={{ padding: '13px 10px 13px 0', borderTop: '1px solid #f1f3ef' }}>
@@ -533,61 +504,23 @@ export default function Clients() {
                       </div>
                     </td>
                     <td style={{ ...td, fontSize: 13.5 }}>
-                      {/* An account with several connections collapses to a
-                          count here — the per-line plan/price/status/MAC each
-                          has is what the Services tab on its own page is for,
-                          not something this list can show N of at once. */}
-                      {multi ? (
-                        <span
-                          onClick={() => navigate(`/clients/${c.id}?tab=services`)}
-                          style={{
-                            display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
-                            fontSize: 11.5, fontWeight: 600, background: color.tileBg, color: color.green, cursor: 'pointer',
-                          }}
-                        >
-                          {lines.length} services
-                        </span>
-                      ) : (
-                        <>
-                          {plan?.title ?? '—'}
-                          <br />
-                          <span style={{ fontSize: 11.5, color: color.muted }}>KES {kes(plan?.price)} / mo</span>
-                        </>
-                      )}
-                    </td>
-                    <td style={{ ...td, fontFamily: font.mono, fontSize: 12, color: '#4a524c' }}>
-                      {multi ? <span style={{ color: color.muted }}>—</span> : (
-                        <>
-                          {rtr?.name ?? '—'}
-                          <br />
-                          {/* The address the router actually gave them, falling back
-                              to the one assigned here. Showing only the assigned one
-                              hid the case that matters: a customer connected on a
-                              different address from the one on file. */}
-                          {c.current_ip ? (
-                            <span title="Address on the live session">{c.current_ip}</span>
-                          ) : c.static_ip ? (
-                            <span style={{ color: color.muted }} title="Assigned here; not connected">
-                              {c.static_ip}
-                            </span>
-                          ) : '—'}
-                          {c.current_ip && c.static_ip && c.current_ip !== String(c.static_ip).split('/')[0] && (
-                            <span style={{ display: 'block', color: color.amberInk, fontSize: 11 }}
-                                  title={`Assigned ${c.static_ip}`}>
-                              not the assigned IP
-                            </span>
-                          )}
-                        </>
-                      )}
-                    </td>
-                    <td style={{ ...td, fontSize: 13.5 }}>
-                      {multi ? <span style={{ color: color.muted }}>—</span> : (
-                        <>
-                          {exp}
-                          <br />
-                          <span style={{ fontSize: 11.5, color: color.muted }}>{note}</span>
-                        </>
-                      )}
+                      {/* Plan, router/IP and expiry are per-line facts — a
+                          multi-service account already can't show N of each
+                          here, and a single-service one showing them inline
+                          while a second line on the same account doesn't is
+                          an inconsistency, not a convenience. Both now point
+                          at the same place: that account's own Services tab,
+                          where each line's plan/router/expiry/status lives
+                          on its own row. */}
+                      <span
+                        onClick={() => navigate(`/clients/${c.id}?tab=services`)}
+                        style={{
+                          display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
+                          fontSize: 11.5, fontWeight: 600, background: color.tileBg, color: color.green, cursor: 'pointer',
+                        }}
+                      >
+                        {lines.length} service{lines.length === 1 ? '' : 's'}
+                      </span>
                     </td>
                     <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
                       {/* Money actually sitting on the account — pooled per
@@ -613,11 +546,15 @@ export default function Clients() {
                       </span>
                     </td>
                     <td style={td}>
-                      {multi ? (
-                        <span style={{ fontSize: 12.5, color: color.muted }}>
-                          {lines.filter((l) => l.online).length} online
-                        </span>
-                      ) : (() => {
+                      {multi ? (() => {
+                        const blocked = lines.filter((l) => l.status === 'suspended' || l.status === 'paused').length;
+                        const online = lines.filter((l) => l.online).length;
+                        return (
+                          <span style={{ fontSize: 12.5, color: color.muted }}>
+                            {online} online{blocked ? `, ${blocked} blocked` : ''}
+                          </span>
+                        );
+                      })() : (() => {
                         const p = presence(c);
                         return (
                           <>
@@ -626,9 +563,11 @@ export default function Clients() {
                               <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: p.colour }} />
                               {p.label}
                             </span>
-                            <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 2 }}>
-                              {c.online ? p.note : seenAgo(c.last_seen)}
-                            </span>
+                            {p.note && (
+                              <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 2 }}>
+                                {p.note}
+                              </span>
+                            )}
                           </>
                         );
                       })()}
