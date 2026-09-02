@@ -1981,3 +1981,18 @@ having sum(credit) <> 0
 on conflict (tenant_id, account_code) do update set balance = account_wallets.balance + excluded.balance;
 
 update subscribers set credit = 0 where credit <> 0;
+
+-- A platform-collected tenant's payout used to have exactly one destination
+-- shape: a phone number, paid via B2C. Two more now exist — a till/paybill
+-- with no account reference, and a bank reached through its own paybill plus
+-- the tenant's account number there — each needing Safaricom's B2B API
+-- (payments/daraja.js's b2b()) instead of B2C, since B2C can only ever pay a
+-- phone number. settlement_method picks which of the three settlement_* sets
+-- of columns jobs.js's payoutRow actually reads; the unused ones for a given
+-- method are simply left null.
+alter table tenants add column if not exists settlement_method text not null default 'phone'
+  check (settlement_method in ('phone', 'till', 'bank'));
+alter table tenants add column if not exists settlement_till text;
+alter table tenants add column if not exists settlement_bank_name text;
+alter table tenants add column if not exists settlement_bank_paybill text;
+alter table tenants add column if not exists settlement_account_number text;

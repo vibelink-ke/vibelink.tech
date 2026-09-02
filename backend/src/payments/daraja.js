@@ -199,6 +199,60 @@ export async function b2c(tenantId, { phone, amount, remarks = 'Settlement', occ
   return { conversationId: data.ConversationID, originatorId: data.OriginatorConversationID, raw: data };
 }
 
+/**
+ * Pay out to another business — a till or paybill, never a phone. B2C
+ * (above) cannot do this at all: its PartyB is always an MSISDN. This is a
+ * separate Safaricom product (B2B) with its own approval, same as B2C
+ * needed its own; a tenant's settlement paying by till/paybill or bank may
+ * well hit the same "product not actually enabled" rejection B2C did until
+ * Safaricom confirms it, and that surfaces as a normal thrown error here,
+ * same as everywhere else in this file — never a silent misdirected payment,
+ * since Safaricom itself rejects a CommandID that doesn't match what the
+ * target shortcode actually is (a paybill sent BusinessBuyGoods, or a till
+ * sent BusinessPayBill, fails outright rather than landing anywhere).
+ *
+ * `till`, no `accountReference`: BusinessBuyGoods, since a bare "till/paybill
+ * with no API" destination is what that shape of business normally is.
+ * `accountReference` given (the bank case: paybill + the tenant's own
+ * account number there): BusinessPayBill instead.
+ */
+export async function b2b(tenantId, { amount, partyB, accountReference = '', remarks = 'Settlement', platformCollect = false }) {
+  const cfg = await resolveConfig(tenantId, 'daraja', platformCollect);
+  if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
+
+  const { initiator_name: initiator, initiator_password: initiatorPassword } = cfg.credentials ?? {};
+  if (!initiator || !initiatorPassword) {
+    throw new Error('Payouts need an initiator name and password from the M-Pesa portal. '
+      + 'Add them under Settings → Payment gateways.');
+  }
+
+  const { securityCredential } = await import('./daraja-credential.js');
+  const value = Math.floor(Number(amount));
+  if (!(value > 0)) throw new Error('A payout must be for a positive whole number of shillings.');
+  if (!partyB) throw new Error('No destination till/paybill is set for this account.');
+
+  const { data } = await axios.post(`${BASE}/mpesa/b2b/v1/paymentrequest`, {
+    Initiator: initiator,
+    SecurityCredential: securityCredential(initiatorPassword),
+    CommandID: accountReference ? 'BusinessPayBill' : 'BusinessBuyGoods',
+    SenderIdentifierType: '4',
+    RecieverIdentifierType: accountReference ? '4' : '2',
+    Amount: value,
+    PartyA: cfg.shortcode,
+    PartyB: String(partyB),
+    AccountReference: String(accountReference).slice(0, 20),
+    Requester: '',
+    Remarks: String(remarks).slice(0, 100),
+    QueueTimeOutURL: `${process.env.BASE_URL}/webhooks/daraja/b2c-timeout`,
+    ResultURL: `${process.env.BASE_URL}/webhooks/daraja/b2c-result`,
+  }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
+
+  if (data.ResponseCode && data.ResponseCode !== '0') {
+    throw new Error(data.ResponseDescription ?? data.errorMessage ?? 'M-Pesa refused the payout.');
+  }
+  return { conversationId: data.ConversationID, originatorId: data.OriginatorConversationID, raw: data };
+}
+
 export const router = express.Router();
 
 /**

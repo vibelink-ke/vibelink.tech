@@ -73,6 +73,16 @@ export const CHANNELS = {
   },
 };
 
+// For the dropdown label only — the paybill number itself is always typed in
+// by the tenant, never looked up from this list, since a wrong paybill here
+// would misdirect a real payout and this app has no way to verify one.
+const KENYA_BANKS = [
+  'KCB Bank', 'Equity Bank', 'Co-operative Bank', 'Absa Bank Kenya', 'Standard Chartered',
+  'NCBA Bank', 'Diamond Trust Bank', 'I&M Bank', 'Family Bank', 'National Bank of Kenya',
+  'Stanbic Bank', 'Housing Finance', 'Sidian Bank', 'Prime Bank', 'Bank of Africa',
+  'Gulf African Bank', 'Credit Bank', 'Consolidated Bank', 'Guaranty Trust Bank', 'Ecobank',
+];
+
 const blankFor = (provider) => ({
   provider,
   label: '',
@@ -270,14 +280,26 @@ export default function Gateways() {
   const setCred = (key) => (e) =>
     setForm((s) => ({ ...s, credentials: { ...s.credentials, [key]: e.target.value } }));
 
+  const [settlementMethod, setSettlementMethod] = useState(store.session?.settlementMethod ?? 'phone');
   const [settlementPhone, setSettlementPhone] = useState(store.session?.settlementPhone ?? '');
+  const [settlementTill, setSettlementTill] = useState(store.session?.settlementTill ?? '');
+  const [settlementBankName, setSettlementBankName] = useState(store.session?.settlementBankName ?? '');
+  const [settlementBankPaybill, setSettlementBankPaybill] = useState(store.session?.settlementBankPaybill ?? '');
+  const [settlementAccountNumber, setSettlementAccountNumber] = useState(store.session?.settlementAccountNumber ?? '');
   const [settlementBusy, setSettlementBusy] = useState(false);
-  const saveSettlementPhone = async () => {
+  const saveSettlementMethod = async () => {
     setSettlementBusy(true);
     try {
-      const { settlementPhone: saved } = await api.updateSettlementPhone(settlementPhone);
-      store.signIn({ ...store.session, settlementPhone: saved });
-      store.toast('Settlement number saved');
+      const body = settlementMethod === 'phone' ? { method: 'phone', phone: settlementPhone }
+        : settlementMethod === 'till' ? { method: 'till', till: settlementTill }
+        : { method: 'bank', bankName: settlementBankName, bankPaybill: settlementBankPaybill, accountNumber: settlementAccountNumber };
+      await api.updateSettlementMethod(body);
+      store.signIn({
+        ...store.session,
+        settlementMethod, settlementPhone, settlementTill,
+        settlementBankName, settlementBankPaybill, settlementAccountNumber,
+      });
+      store.toast('Settlement details saved');
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
@@ -338,11 +360,19 @@ export default function Gateways() {
 
       {store.session?.platformCollectEnabled && (
         <Card
-          title="Settlement M-Pesa number"
-          subtitle="We collect your customers' payments on our own paybill and pay you out nightly, net of commission. This is where those payouts land — set it yourself; we never enter it for you."
+          title="Settlement payout method"
+          subtitle="We collect your customers' payments on our own paybill and pay you out nightly, net of commission. Choose where those payouts land — set it yourself; we never enter it for you."
         >
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-            <div style={{ flex: 1 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Payout method">
+              <Select value={settlementMethod} onChange={(e) => setSettlementMethod(e.target.value)}>
+                <option value="phone">Phone number (M-Pesa)</option>
+                <option value="till">Till / paybill without API</option>
+                <option value="bank">Bank</option>
+              </Select>
+            </Field>
+
+            {settlementMethod === 'phone' && (
               <Field label="M-Pesa number">
                 <Input
                   value={settlementPhone}
@@ -350,10 +380,48 @@ export default function Gateways() {
                   placeholder="e.g. 0712345678"
                 />
               </Field>
+            )}
+
+            {settlementMethod === 'till' && (
+              <Field label="Till / paybill number">
+                <Input
+                  value={settlementTill}
+                  onChange={(e) => setSettlementTill(e.target.value)}
+                  placeholder="e.g. 123456"
+                />
+              </Field>
+            )}
+
+            {settlementMethod === 'bank' && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
+                <Field label="Bank">
+                  <Select value={settlementBankName} onChange={(e) => setSettlementBankName(e.target.value)}>
+                    <option value="">Choose a bank…</option>
+                    {KENYA_BANKS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Bank's paybill number">
+                  <Input
+                    value={settlementBankPaybill}
+                    onChange={(e) => setSettlementBankPaybill(e.target.value)}
+                    placeholder="e.g. 247247"
+                  />
+                </Field>
+                <Field label="Your account number">
+                  <Input
+                    value={settlementAccountNumber}
+                    onChange={(e) => setSettlementAccountNumber(e.target.value)}
+                    placeholder="Account number at that bank"
+                  />
+                </Field>
+              </div>
+            )}
+
+            <div>
+              <Button variant="primary" onClick={saveSettlementMethod} disabled={settlementBusy}>
+                {settlementBusy ? 'Saving…' : 'Save'}
+              </Button>
             </div>
-            <Button variant="primary" onClick={saveSettlementPhone} disabled={settlementBusy}>
-              {settlementBusy ? 'Saving…' : 'Save'}
-            </Button>
           </div>
         </Card>
       )}

@@ -52,7 +52,8 @@ export async function readSession(token) {
     `select s.token, s.tenant_id, st.id as staff_id, st.name, st.email, st.username,
             st.role, st.is_super_admin,
             t.name as company, t.subdomain, t.status as tenant_status,
-            t.platform_collect_enabled, t.settlement_phone
+            t.platform_collect_enabled, t.settlement_method, t.settlement_phone,
+            t.settlement_till, t.settlement_bank_name, t.settlement_bank_paybill, t.settlement_account_number
      from admin_sessions s
      join staff st on st.id = s.staff_id
      join tenants t on t.id = s.tenant_id
@@ -195,5 +196,10 @@ export const publicSession = (s) => ({
   subdomain: s.subdomain,
   superAdmin: s.is_super_admin,
   platformCollectEnabled: s.platform_collect_enabled,
+  settlementMethod: s.settlement_method,
   settlementPhone: s.settlement_phone,
+  settlementTill: s.settlement_till,
+  settlementBankName: s.settlement_bank_name,
+  settlementBankPaybill: s.settlement_bank_paybill,
+  settlementAccountNumber: s.settlement_account_number,
 });

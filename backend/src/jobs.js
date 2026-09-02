@@ -776,6 +776,20 @@ async function platformOwnerTenantId() {
  * actually deducted, so the Settlements tab can show it rather than someone
  * having to infer it later from a tariff table that may since have changed.
  */
+/**
+ * Whichever destination fields settlement_method actually needs are the only
+ * ones read here — a 'phone' tenant's stale settlement_till from an earlier
+ * method change, say, is simply never looked at.
+ */
+const SETTLEMENT_COLUMNS = `t.settlement_method, t.settlement_phone, t.settlement_till,
+       t.settlement_bank_name, t.settlement_bank_paybill, t.settlement_account_number`;
+
+const SETTLEMENT_READY_SQL = `(
+  (t.settlement_method='phone' and t.settlement_phone is not null) or
+  (t.settlement_method='till' and t.settlement_till is not null) or
+  (t.settlement_method='bank' and t.settlement_bank_paybill is not null and t.settlement_account_number is not null)
+)`;
+
 async function payoutRow(row, ownerTenantId) {
   const { b2cFee } = await import('./db.js');
   const fee = row.settlement_fee_mode === 'tiered' ? await b2cFee(row.amount) : 0;
@@ -785,11 +799,18 @@ async function payoutRow(row, ownerTenantId) {
   }
 
   const daraja = await import('./payments/daraja.js');
-  const { conversationId } = await daraja.b2c(ownerTenantId, {
-    phone: row.settlement_phone, amount: net,
-    remarks: 'Vibelink settlement', occasion: row.tenant_id,
-    platformCollect: true,
-  });
+  const method = row.settlement_method ?? 'phone';
+  const { conversationId } = method === 'phone'
+    ? await daraja.b2c(ownerTenantId, {
+        phone: row.settlement_phone, amount: net,
+        remarks: 'Vibelink settlement', occasion: row.tenant_id,
+        platformCollect: true,
+      })
+    : await daraja.b2b(ownerTenantId, {
+        amount: net, platformCollect: true, remarks: 'Vibelink settlement',
+        partyB: method === 'till' ? row.settlement_till : row.settlement_bank_paybill,
+        accountReference: method === 'bank' ? row.settlement_account_number : '',
+      });
   // 'processing' rather than 'paid' here — Safaricom answers this call
   // with "queued", not a result; b2c-result (daraja.js) is what
   // actually confirms it, matched back to this row by conversation_id.
@@ -801,10 +822,10 @@ async function payoutRow(row, ownerTenantId) {
 
 export async function settleTenants() {
   const { rows } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name, t.settlement_fee_mode
+    `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.status='pending' and s.amount >= $1
-        and t.platform_collect_enabled and t.settlement_phone is not null`,
+        and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}`,
     [SETTLEMENT_MIN_KES]);
   if (!rows.length) return;
 
@@ -833,7 +854,7 @@ export async function settleTenants() {
  */
 export async function payoutTenantNow(tenantId) {
   const { rows: [row] } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, t.settlement_phone, t.name, t.settlement_fee_mode
+    `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.tenant_id=$1 and s.status='pending'`,
     [tenantId]);
@@ -841,7 +862,13 @@ export async function payoutTenantNow(tenantId) {
   if (Number(row.amount) < SETTLEMENT_MIN_KES) {
     throw Object.assign(new Error(`Minimum payout is KES ${SETTLEMENT_MIN_KES} — keep collecting until then.`), { status: 400 });
   }
-  if (!row.settlement_phone) throw Object.assign(new Error('Set a settlement M-Pesa number first.'), { status: 400 });
+  const missing = {
+    phone: !row.settlement_phone && 'Set a settlement M-Pesa number first.',
+    till: !row.settlement_till && 'Set a settlement till/paybill number first.',
+    bank: (!row.settlement_bank_paybill || !row.settlement_account_number)
+      && 'Set your settlement bank\'s paybill and your account number first.',
+  }[row.settlement_method ?? 'phone'];
+  if (missing) throw Object.assign(new Error(missing), { status: 400 });
 
   const ownerTenantId = await platformOwnerTenantId();
   if (!ownerTenantId) throw Object.assign(new Error('Platform payout account is not set up yet.'), { status: 503 });

@@ -8584,22 +8584,55 @@ app.post('/api/payment-gateways/:id/default', wrap(async (req, res) => {
 }));
 
 /**
- * A platform-collected tenant's own settlement number — self-service, not
- * something the platform owner types in on their behalf (Tenants.jsx still
- * carries commission/fee-mode, which stay platform-controlled). Only
+ * A platform-collected tenant's own settlement destination — self-service,
+ * not something the platform owner types in on their behalf (Tenants.jsx
+ * still carries commission/fee-mode, which stay platform-controlled). Only
  * meaningful once platform_collect_enabled is set, but not gated on it: a
- * tenant expecting to be switched on shortly may as well have the right
- * number waiting.
+ * tenant expecting to be switched on shortly may as well have it waiting.
+ *
+ * Three shapes, one at a time — jobs.js's payoutRow reads only the columns
+ * for whichever settlement_method is current, so switching method here and
+ * only filling in the new one's fields is enough; the old method's columns
+ * are left as-is rather than blanked; they simply stop being read.
  */
-app.patch('/api/settings/settlement-phone', requirePermission('payments.edit'), wrap(async (req, res) => {
-  let phone = String(req.body?.phone ?? '').trim();
-  if (!phone) return res.status(400).json({ error: 'Enter an M-Pesa number.' });
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+app.patch('/api/settings/settlement-method', requirePermission('payments.edit'), wrap(async (req, res) => {
+  const method = req.body?.method;
+
+  if (method === 'phone') {
+    let phone = String(req.body?.phone ?? '').trim();
+    if (!phone) return res.status(400).json({ error: 'Enter an M-Pesa number.' });
+    phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+    if (!/^254[17]\d{8}$/.test(phone)) {
+      return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+    }
+    await pool.query("update tenants set settlement_method='phone', settlement_phone=$2 where id=$1",
+      [req.tenant.id, phone]);
+    return res.json({ settlementMethod: 'phone', settlementPhone: phone });
   }
-  await pool.query('update tenants set settlement_phone=$2 where id=$1', [req.tenant.id, phone]);
-  res.json({ settlementPhone: phone });
+
+  if (method === 'till') {
+    const till = String(req.body?.till ?? '').trim();
+    if (!/^\d{5,7}$/.test(till)) return res.status(400).json({ error: 'Enter a valid till/paybill number.' });
+    await pool.query("update tenants set settlement_method='till', settlement_till=$2 where id=$1",
+      [req.tenant.id, till]);
+    return res.json({ settlementMethod: 'till', settlementTill: till });
+  }
+
+  if (method === 'bank') {
+    const bankName = String(req.body?.bankName ?? '').trim();
+    const bankPaybill = String(req.body?.bankPaybill ?? '').trim();
+    const accountNumber = String(req.body?.accountNumber ?? '').trim();
+    if (!bankName) return res.status(400).json({ error: 'Choose a bank.' });
+    if (!/^\d{5,7}$/.test(bankPaybill)) return res.status(400).json({ error: "Enter the bank's paybill number." });
+    if (!accountNumber) return res.status(400).json({ error: 'Enter your account number at that bank.' });
+    await pool.query(
+      `update tenants set settlement_method='bank', settlement_bank_name=$2,
+         settlement_bank_paybill=$3, settlement_account_number=$4 where id=$1`,
+      [req.tenant.id, bankName, bankPaybill, accountNumber]);
+    return res.json({ settlementMethod: 'bank', settlementBankName: bankName, settlementBankPaybill: bankPaybill, settlementAccountNumber: accountNumber });
+  }
+
+  res.status(400).json({ error: 'Unknown settlement method.' });
 }));
 
 /**
