@@ -153,8 +153,16 @@ const stkLimiter = rateLimit({
 // The guest's own page polls this every few seconds while waiting on M-Pesa,
 // so the ceiling is generous — this exists to stop someone using the poll
 // endpoint to brute-force checkoutId values, not to slow down a real wait.
+//
+// Keyed by IP like every rate limiter here, which is the wrong key for this
+// specific family of routes: every guest at a hotspot site shares the one
+// public IP their router's own NAT presents to us, so this ceiling is really
+// a per-site budget, not a per-guest one. 4000/minute is sized for a busy
+// site's worth of guests polling every few seconds at once, not for one
+// person's wait — raise it further, not the window, if a bigger site still
+// hits it.
 const pollLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  windowMs: 60 * 1000, max: 4000, standardHeaders: true, legacyHeaders: false,
   message: { error: 'Too many status checks. Try again shortly.' },
 });
 
