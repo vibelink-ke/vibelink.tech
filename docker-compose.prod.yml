@@ -19,10 +19,15 @@ services:
   # one of them was restarted in the right order. A container that never changes
   # holds it instead, so any of the three can be rebuilt on its own.
   net:
-    image: alpine:3.20
+    build: ./infra/net
     container_name: billing-net
     restart: unless-stopped
-    command: ['sleep', 'infinity']
+    # Lets the watchdog script (below) restore its own default route if
+    # openvpn or wireguard ever tear it out from under the namespace they
+    # share with it — see infra/net/watchdog.sh for why this is needed.
+    cap_add:
+      - NET_ADMIN
+    command: ['sh', '/watchdog.sh']
     # ip_forward and src_valid_mark belong to the namespace, so they have to be
     # set by whoever owns it — wireguard needs src_valid_mark itself (reverse
     # path filtering rejects a WireGuard reply otherwise), but it cannot set a
