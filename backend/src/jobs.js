@@ -198,7 +198,29 @@ export async function expireAndSuspend() {
     const hours = (Date.now() - new Date(s.expires_at)) / 36e5;
     const next = hours < 24 ? 'grace' : 'expired';
     await pool.query('update subscribers set status=$2 where id=$1', [s.id, next]);
-    if (next === 'expired') await pool.query('begin').then(() => walledGarden(pool, s.tenant_id, s.id)).catch(() => {});
+    if (next === 'expired') {
+      await walledGarden(pool, s.tenant_id, s.id)
+        .catch((e) => console.error('expireAndSuspend: walledGarden failed for', s.id, '—', e.message));
+    }
+  }
+  /**
+   * Re-applied to every subscriber already sitting at status='expired', not
+   * only the ones that just transitioned above — a walledGarden call that
+   * silently failed the one time it ran (the swallowed .catch this used to
+   * have) left an account permanently stuck showing 'expired' in the app
+   * while RADIUS kept handing out its full plan rate, because the query
+   * above only ever catches a transition into 'expired', never one already
+   * sitting there. walledGarden's own writes are idempotent upserts, so
+   * redoing them here every run is cheap and makes that state self-heal on
+   * the next tick instead of staying wrong until someone notices a customer
+   * who should be cut off is still online at full speed.
+   */
+  const { rows: stillExpired } = await pool.query(
+    `select id, tenant_id from subscribers
+      where status='expired' and tenant_id in (${enabledTenants})`, ['expireAndSuspend']);
+  for (const s of stillExpired) {
+    await walledGarden(pool, s.tenant_id, s.id)
+      .catch((e) => console.error('expireAndSuspend: walledGarden retry failed for', s.id, '—', e.message));
   }
   // Before the flip, not after: 'in_use' is what the join below is looking
   // for, and unbindDeviceByMac is best-effort by design (the DB status

@@ -13,11 +13,29 @@ const pad2 = (n) => String(n).padStart(2, '0');
  * wrong password. Every account with an Expiration attribute hit this — not
  * one router or one tenant, any voucher or PPPoE login checked against an
  * expiry date written this way.
+ *
+ * The "GMT" label is a lie rlm_expiration believes anyway: it never actually
+ * applies it as a UTC offset, it just reads the numbers and treats them as a
+ * bare local time on whatever host freeradius runs on — this deployment's
+ * Africa/Nairobi (docker-compose's TZ default for the freeradius service),
+ * UTC+3. Handing it a real UTC clock reading here (getUTCHours() etc.) made
+ * every voucher and PPPoE account expire three hours early, every time — the
+ * exact size of that offset. What has to go here instead is this instant's
+ * Nairobi wall-clock reading, so that freeradius's local (mis)interpretation
+ * of it lines up with the real deadline.
  */
 function radiusDate(date) {
-  const d = new Date(date);
-  return `${MONTHS[d.getUTCMonth()]} ${pad2(d.getUTCDate())} ${d.getUTCFullYear()} `
-    + `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}:${pad2(d.getUTCSeconds())} GMT`;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(new Date(date));
+  const get = (type) => parts.find((p) => p.type === type).value;
+  // en-US + hour12:false reports midnight as "24", not "00" — a long-standing
+  // ICU/V8 quirk, not a Nairobi-specific thing. FreeRADIUS's parser has no
+  // reason to accept an hour of 24, so a voucher timed to expire exactly at
+  // midnight would fail to parse the same way the wrong date format used to.
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  return `${get('month')} ${get('day')} ${get('year')} ${hour}:${get('minute')}:${get('second')} GMT`;
 }
 
 /**
