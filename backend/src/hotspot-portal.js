@@ -57,7 +57,7 @@ const TEMPLATES = {
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
-  redirectUrl = null, prefillCode = null, routerId = null,
+  redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   // Where the page should send its purchase requests. Empty on the preview,
@@ -432,6 +432,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   // a browser, or one cached from before this existed; /hotspot/buy treats
   // it as optional either way.
   var ROUTER_ID = ${JSON.stringify(routerId)};
+  // The router's own hotspot DNS name — see submitHotspotLogin below. Not
+  // the tenant's real domain: this only resolves on the guest's own LAN,
+  // straight to RouterOS's own login handler, in plain HTTP.
+  var HOTSPOT_DNS = ${JSON.stringify(hotspotDns)};
 
   /**
    * A quiet inline note next to the pay button was easy to miss — a guest
@@ -461,6 +465,62 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   }
 
   /**
+   * $(link-login-only) only ever becomes a real URL when RouterOS itself
+   * serves this exact markup — it substitutes the token as it hands the page
+   * to a guest. The "Buttons not responding?" link above fetches this same
+   * markup straight from us instead, specifically to escape a broken
+   * WebView, and we are not RouterOS: the token reaches the browser
+   * untouched, so form.submit() posts to the literal string
+   * "$(link-login-only)", resolved as a relative URL against this page —
+   * "buys but does not auto-connect" was this, not the payment.
+   *
+   * The fallback goes straight to HOTSPOT_DNS — the router's own hotspot DNS
+   * name (applyHotspotServer in routeros.js, "\${subdomain}.spot") — a real
+   * plain-HTTP server RouterOS runs itself, reachable directly on the
+   * guest's own LAN with no interception needed. A third-party host relying
+   * on the walled-garden NAT rules to transparently redirect unauthenticated
+   * traffic was tried first and abandoned: modern browsers opportunistically
+   * retry plain HTTP as HTTPS, and RouterOS's HTTPS interception terminates
+   * that with its own self-signed certificate, which throws a security
+   * interstitial instead of ever reaching a login handler. Going directly to
+   * the router's real HTTP server sidesteps that entirely.
+   */
+  function submitHotspotLogin(code) {
+    try {
+      var form = document.getElementById('loginForm');
+      if (String(form.getAttribute('action') || '').indexOf('\$(') === 0) {
+        // RouterOS's own login handler only ever parses this from a POST
+        // body — login-by is http-pap, not http-chap (routeros.js pins it,
+        // so no challenge/hash dance is needed), but a GET with the same
+        // fields in the query string still isn't a POST, and got no further
+        // than window.location.href='http://...&username=...' did on its
+        // own. A second, real <form> built and submitted here performs a
+        // genuine top-level POST navigation to the router's own server,
+        // exactly as if the guest had typed the code into a form whose
+        // action already pointed there — no fetch/XHR involved, so no CORS
+        // question ever comes up either.
+        var dst = document.querySelector('input[name="dst"]').value;
+        var f = document.createElement('form');
+        f.method = 'post';
+        f.action = 'http://' + HOTSPOT_DNS + '/login';
+        [['username', code], ['password', code], ['dst', dst]].forEach(function (pair) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = pair[0];
+          input.value = pair[1];
+          f.appendChild(input);
+        });
+        document.body.appendChild(f);
+        f.submit();
+        return;
+      }
+      document.getElementById('username').value = code;
+      document.getElementById('password').value = code;
+      form.submit();
+    } catch (e) { /* nothing left to try but leave the code visible on screen */ }
+  }
+
+  /**
    * Recognise a device that already paid, without depending on the router's
    * own add-mac-cookie table — that one lives in RAM and is exactly what a
    * power outage wipes, which is the whole reason a customer who is still
@@ -479,17 +539,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     // up first.
     var prefillCode = ${JSON.stringify(prefillCode ?? '')};
     if (prefillCode && !hadError) {
-      document.getElementById('username').value = prefillCode;
-      document.getElementById('password').value = prefillCode;
-      document.getElementById('loginForm').submit();
+      submitHotspotLogin(prefillCode);
     } else if (mac && mac.indexOf('\$') !== 0 && !hadError) {
       fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.code) return;
-          document.getElementById('username').value = d.code;
-          document.getElementById('password').value = d.code;
-          document.getElementById('loginForm').submit();
+          submitHotspotLogin(d.code);
         })
         .catch(function () { /* stay on the manual form — nothing to recover from here */ });
     }
@@ -580,10 +636,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
             // way a wrong password would. Doing that copy here, the same as
             // onsubmit does, before calling submit() avoids depending on an
             // event .submit() never dispatches.
-            setTimeout(function () {
-              document.getElementById('password').value = d.code;
-              document.getElementById('loginForm').submit();
-            }, 1200);
+            setTimeout(function () { submitHotspotLogin(d.code); }, 1200);
             /**
              * A successful hotspot login navigates the guest away from this
              * page entirely — RouterOS redirects to dst the instant it
@@ -826,12 +879,6 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   <script>
   (function () {
     var API = ${JSON.stringify(apiBase)};
-  // Which physical router served this page — set at Configure time (see
-  // server.js's ?router= on the pushed login URL) so a sale can be
-  // attributed to a site for reporting. Null for a page opened directly in
-  // a browser, or one cached from before this existed; /hotspot/buy treats
-  // it as optional either way.
-  var ROUTER_ID = ${JSON.stringify(routerId)};
     var devices = [], plans = [];
     var pickedDevice = null, pickedPlan = null;
 

@@ -672,6 +672,14 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
     prefillCode: /^[A-Za-z0-9-]{1,20}$/.test(String(req.query.code ?? '')) ? req.query.code : null,
+    // Where the login form falls back to when this copy was fetched directly
+    // from us rather than proxied by RouterOS (see submitHotspotLogin in
+    // hotspot-portal.js) — the router's own hotspot DNS name, always
+    // reachable in plain HTTP directly on the LAN with no interception
+    // trickery needed. Must match the dnsName applyHotspotServer actually
+    // pushed (routeros.js, `${subdomain}.spot`, falling back to the same
+    // 'billing.spot' default when a tenant has no subdomain yet).
+    hotspotDns: tenant.subdomain ? `${tenant.subdomain}.spot` : 'billing.spot',
   }));
 }));
 
@@ -4063,6 +4071,14 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
     const built = await tryStep('hotspot server, DHCP and pool', () =>
       ros.applyHotspotServer(conn, {
         bridge: bridge.bridge,
+        // Every tenant's routers got the identical 'billing.spot' default
+        // otherwise — harmless on a single isolated LAN, but it meant the
+        // captive-portal page's own JS could never reliably name "the
+        // router's real hotspot host" for anything tenant-specific, and an
+        // operator managing several networks saw the same name on all of
+        // them. Kept as the literal fallback only for a tenant with no
+        // subdomain yet, matching what has always been pushed until now.
+        dnsName: t?.subdomain ? `${t.subdomain}.spot` : 'billing.spot',
         network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
         // The profile a voucher will name, built with the same hotspot.
         sharedUsers: hs?.multi_device ? 3 : 1,
