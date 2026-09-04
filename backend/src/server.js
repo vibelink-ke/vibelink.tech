@@ -675,7 +675,12 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // id — passed straight through unvalidated; /hotspot/buy is where an id
     // that doesn't belong to this tenant actually gets rejected.
     forRouter: !!req.query.router,
-    routerId: req.query.router && req.query.router !== '1' ? String(req.query.router) : null,
+    // siteRouter carries the same id through the meta-refresh redirect below
+    // (loginPage's routerRedirect) without ever setting forRouter — that
+    // redirect target is fetched by a guest's own browser, not RouterOS, so
+    // it must never re-trigger the very redirect that sent it here.
+    routerId: req.query.router && req.query.router !== '1' ? String(req.query.router)
+      : req.query.siteRouter ? String(req.query.siteRouter) : null,
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.

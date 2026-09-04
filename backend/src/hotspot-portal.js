@@ -166,12 +166,37 @@ export function loginPage({
     ? `<p class="hint">Need help? Call <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a></p>`
     : '';
 
+  /**
+   * RouterOS serves this copy inside the OS's own "Sign in to Wi-Fi" pop-up
+   * — a restricted WebView that, on enough phones, either blocks JavaScript
+   * outright or kills the pop-up mid-script the moment the OS's own
+   * connectivity probe succeeds. Buy is a JS click handler, so on that class
+   * of device it looked like the button "did nothing" — the guest already
+   * had a working escape hatch (the link below, plain navigation, no JS
+   * needed), they just had no reason to notice or use it before trying Buy
+   * first. A meta-refresh needs no JavaScript at all to fire, so it reaches
+   * every guest regardless of what their WebView allows, and bounces them
+   * straight to a real browser tab of the exact same page before they ever
+   * see a Buy button that might not work. router is preserved so the sale
+   * still attributes to this site.
+   */
+  //
+  // siteRouter, deliberately not router=: that param is what server.js reads
+  // as "RouterOS itself fetched this," which is exactly the thing that must
+  // stay false on the page this redirects to — router=<id> here would send
+  // guests bouncing between the two copies forever. siteRouter only ever
+  // carries the attribution id through.
+  const routerRedirect = forRouter && apiBase
+    ? `<meta http-equiv="refresh" content="0;url=${esc(apiBase)}/hotspot/login.html${routerId ? `?siteRouter=${encodeURIComponent(routerId)}` : ''}">`
+    : '';
+
   return `<!DOCTYPE html>
 <!-- ${MARKER} -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+${routerRedirect}
 <title>${esc(company)} WiFi</title>
 ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 <style>
@@ -266,8 +291,20 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
            padding:26px 22px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.25); }
   .popup .icon { width:52px; height:52px; margin:0 auto 12px; border-radius:50%;
                  display:flex; align-items:center; justify-content:center; font-size:26px; }
-  .popup.success .icon { background:#e8f3ee; color:var(--green); }
+  .popup.success .icon { background:#e8f3ee; color:var(--green);
+                          animation:pop-in .35s cubic-bezier(.2,1.4,.4,1); }
   .popup.notice .icon { background:#fdf3dc; color:#a9790f; }
+  /* Waiting on M-Pesa: a spinning ring instead of a static glyph, so "we are
+     doing something" reads at a glance rather than needing the words below
+     it to be read first — the same reason a spinner beats a bare "Loading". */
+  .popup.pending .icon { background:#eef1ed; padding:0; }
+  .popup.pending .icon::after {
+    content:''; width:26px; height:26px; border-radius:50%;
+    border:3px solid var(--line); border-top-color:var(--green);
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes pop-in { 0% { transform:scale(0); } 70% { transform:scale(1.15); } 100% { transform:scale(1); } }
   .popup h3 { margin:0 0 6px; font-size:18px; }
   .popup p { margin:0; color:var(--muted); font-size:14.5px; }
   .popup button { margin-top:16px; }
@@ -443,23 +480,29 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
    * text that already changed, nothing drawing the eye to it. This covers
    * the screen instead, for a moment, the way a real "payment successful"
    * confirmation should. kind picks the icon/color: "success" (green check)
-   * or "notice" (amber, session-ended). Auto-hides after ms unless ms is 0,
-   * in which case it waits for the tap anywhere to dismiss — used for
-   * success, where the guest is about to be connected and dismissing early
-   * would just hide useful status text. Shared by both sections below, but
-   * defined at the top level and defensive on its own: a popup that fails
-   * to show is not worth taking either section down over.
+   * "notice" (amber, session-ended), or "pending" (a spinner, no glyph —
+   * dismissing on tap is disabled for it below, since it is describing work
+   * still in flight, not something to wave away). Auto-hides after ms unless
+   * ms is 0, in which case it waits for the tap anywhere to dismiss — used
+   * for success, where the guest is about to be connected and dismissing
+   * early would just hide useful status text. Shared by both sections below,
+   * but defined at the top level and defensive on its own: a popup that
+   * fails to show is not worth taking either section down over.
    */
   function popup(kind, title, body, ms) {
     try {
       var overlay = document.getElementById('popupOverlay');
       var box = document.getElementById('popup');
       box.className = 'popup ' + kind;
-      document.getElementById('popupIcon').textContent = kind === 'success' ? '✓' : '!';
+      document.getElementById('popupIcon').textContent = kind === 'success' ? '✓' : kind === 'pending' ? '' : '!';
       document.getElementById('popupTitle').textContent = title;
       document.getElementById('popupBody').textContent = body;
       overlay.style.display = 'flex';
-      overlay.onclick = function () { overlay.style.display = 'none'; };
+      // A guest tapping away mid-payment to check something reads as "close
+      // this, it is done" the same as it does for the other two kinds — for
+      // pending specifically that would hide the only sign anything is
+      // still happening, so this is the one kind that stays up regardless.
+      overlay.onclick = kind === 'pending' ? null : function () { overlay.style.display = 'none'; };
       if (ms) setTimeout(function () { overlay.style.display = 'none'; }, ms);
     } catch (e) { /* a missing popup is not worth breaking whatever called it */ }
   }
@@ -662,7 +705,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           if (d.status === 'failed' || d.status === 'cancelled' || d.status === 'timeout') {
             clearInterval(payPollTimer);
             payGo.disabled = false;
-            payNote.textContent = d.detail || 'The payment did not go through.';
+            var failMsg = d.detail || 'The payment did not go through.';
+            payNote.textContent = failMsg;
+            // The pending spinner was the only thing on screen while this was
+            // in flight — leaving it up after a failure reads as still
+            // waiting on a payment that has already died.
+            document.getElementById('popupOverlay').style.display = 'none';
+            popup('notice', 'Payment did not go through', failMsg, 4000);
           }
         })
         .catch(function () { /* keep polling; a dropped request is not a failure */ });
@@ -672,6 +721,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       if (!pickedPlanId) return;
       payGo.disabled = true;
       payNote.textContent = 'Sending…';
+      popup('pending', 'Sending request…', 'Asking Safaricom to prompt your phone.', 0);
       fetch(API + '/hotspot/buy', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -680,8 +730,15 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           payGo.disabled = false;
-          if (!res.ok) { payNote.textContent = res.d.error || 'Could not start the payment.'; return; }
+          if (!res.ok) {
+            var msg = res.d.error || 'Could not start the payment.';
+            payNote.textContent = msg;
+            document.getElementById('popupOverlay').style.display = 'none';
+            popup('notice', 'Could not start payment', msg, 4000);
+            return;
+          }
           payNote.textContent = 'Check your phone and enter your M-Pesa PIN.';
+          popup('pending', 'Check your phone', 'Enter your M-Pesa PIN to finish paying.', 0);
           clearInterval(payPollTimer);
           payPollTimer = setInterval(function () { pollPayment(res.d.checkoutId); }, 3000);
         })
