@@ -1017,10 +1017,19 @@ app.get('/hotspot/buy/:checkoutId', pollLimiter, wrap(async (req, res) => {
 
   // The voucher is reached through the payment the callback applied, so a code
   // only ever appears once the money actually arrived.
+  //
+  // payload->>'checkoutId', not provider_ref: applyPayment stores the
+  // gateway's own transaction reference there (an M-Pesa receipt number for
+  // Daraja, KopoKopo's own reference) — a real, useful value, just never the
+  // checkout id this page is polling with. handleStkResult always tucks the
+  // checkout id into payload specifically so it could be found again, but
+  // nothing here was ever reading it from there — every hotspot purchase's
+  // payment row existed, correctly linked to its voucher, and this query
+  // still came up empty every time, on a plain string mismatch.
   const { rows: [v] } = await pool.query(
     `select v.code, v.expires_at
        from payments p join vouchers v on v.id = p.voucher_id
-      where p.tenant_id=$1 and p.provider_ref=$2`, [tenant.id, req.params.checkoutId]);
+      where p.tenant_id=$1 and p.payload->>'checkoutId'=$2`, [tenant.id, req.params.checkoutId]);
 
   res.json({ status: r.status, detail: r.result_desc ?? null, code: v?.code ?? null });
 }));
