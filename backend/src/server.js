@@ -1001,9 +1001,18 @@ app.get('/hotspot/buy/:checkoutId', pollLimiter, wrap(async (req, res) => {
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
 
+  // Platform-collect dispatches through the platform owner's own Daraja app
+  // (see the piggyback/platform-collect branches of POST /hotspot/buy), so
+  // the row this inserted lives under owner.tenant_id, not this tenant's —
+  // only purpose.tenant_id says who it was actually for. Scoping strictly to
+  // tenant_id here meant this guest's own poll could never find their own
+  // row: the payment succeeded and a voucher was issued, but this always
+  // returned 'unknown' before ever reaching the query that would have found
+  // it, so the page never learned its own payment had gone through.
   const { rows: [r] } = await pool.query(
     `select checkout_id, status, result_desc from stk_requests
-      where tenant_id=$1 and checkout_id=$2`, [tenant.id, req.params.checkoutId]);
+      where checkout_id=$2 and (tenant_id=$1 or purpose->>'tenant_id'=$1::text)`,
+    [tenant.id, req.params.checkoutId]);
   if (!r) return res.json({ status: 'unknown' });
 
   // The voucher is reached through the payment the callback applied, so a code
@@ -2338,8 +2347,14 @@ app.post('/portal/buy', stkLimiter, async (req, res) => {
 });
 
 app.get('/portal/status/:checkoutId', pollLimiter, async (req, res) => {
+  // Same fix as /hotspot/buy/:checkoutId above: stkPushForSubscriber's
+  // platform-collect path inserts this row under the platform owner's own
+  // tenant_id, not this customer's — only purpose.tenant_id says who it was
+  // actually for. Scoping strictly to tenant_id meant a platform-collect
+  // customer's own portal could never find their own payment.
   const { rows: [r] } = await pool.query(
-    'select status, result_desc from stk_requests where tenant_id=$1 and checkout_id=$2',
+    `select status, result_desc from stk_requests
+      where checkout_id=$2 and (tenant_id=$1 or purpose->>'tenant_id'=$1::text)`,
     [req.tenant.id, req.params.checkoutId]);
   res.json(r ?? { status: 'unknown' });
 });
