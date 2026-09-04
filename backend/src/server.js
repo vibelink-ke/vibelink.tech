@@ -6867,33 +6867,32 @@ app.post('/api/payments/stk', wrap(async (req, res) => {
   if (!msisdn) return res.status(400).json({ error: 'No phone number to push to' });
   msisdn = String(msisdn).replace(/^\+?(?:254)?0?/, '254');
 
-  const cfg = await import('./db.js').then((m) => m.config(req.tenant.id, provider));
-  if (!cfg) return res.status(400).json({ error: `No ${provider} gateway configured. Add one under Settings → Payment gateways.` });
-
   const base = process.env.BASE_URL ?? '';
   const callbackReachable = /^https?:\/\//.test(base) && !/localhost|127\.0\.0\.1/.test(base);
 
   try {
     let checkoutId;
     if (provider === 'kopokopo') {
+      const cfg = await import('./db.js').then((m) => m.config(req.tenant.id, 'kopokopo'));
+      if (!cfg) return res.status(400).json({ error: 'No kopokopo gateway configured. Add one under Settings → Payment gateways.' });
       if (!planId) return res.status(400).json({ error: 'KopoKopo is hotspot-only — pick a hotspot bundle' });
       const kk = await import('./payments/kopokopo.js');
       checkoutId = await kk.stkPush(req.tenant.id, { phone: msisdn, amount: Number(amount), planId, mac: null, service: 'hotspot' });
     } else {
-      const mpesa = await import('./payments/daraja.js');
-      const r = await mpesa.stkPush(req.tenant.id, {
-        phone: msisdn, amount: Number(amount),
-        accountRef: accountRef || 'TOPUP', description: 'Account top-up',
+      // stkPushForSubscriber, not a direct mpesa.stkPush call — this route
+      // used to require a Daraja gateway of this tenant's own even when
+      // platform-collect was enabled and set up, the same fallback every
+      // other charge on the platform (PPPoE renewal, the customer portal)
+      // already gets. A tenant like this one, relying entirely on
+      // platform-collect, could never charge a subscriber from here at all —
+      // "No daraja gateway configured" on an account that was never meant to
+      // need one.
+      const r = await stkPushForSubscriber(req.tenant.id, {
+        phone: msisdn, amount: Number(amount), accountCode: accountRef || 'TOPUP',
+        description: 'Account top-up', purpose: { subscriber_id: subscriberId ?? null },
       });
-      checkoutId = r.CheckoutRequestID;
-      if (!checkoutId) return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'Gateway did not return a checkout id' });
-      // Daraja only writes stk_requests from the portal path; record it here too so
-      // the callback can find the row and status polling works.
-      await pool.query(
-        `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
-         values ($1,'daraja',$2,$3,$4,$5)
-         on conflict (tenant_id, provider, checkout_id) do nothing`,
-        [req.tenant.id, checkoutId, msisdn, Number(amount), { subscriber_id: subscriberId ?? null }]);
+      checkoutId = r.checkoutId;
+      if (!checkoutId) return res.status(502).json({ error: 'Gateway did not return a checkout id' });
     }
     res.json({
       checkoutId,
