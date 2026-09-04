@@ -656,7 +656,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
               btn.addEventListener('click', function () {
                 window.location.href = API + '/hotspot/login.html?code=' + encodeURIComponent(d.code);
               });
-            }, 5000);
+            }, 2500);
             return;
           }
           if (d.status === 'failed' || d.status === 'cancelled' || d.status === 'timeout') {
