@@ -319,27 +319,6 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     <h1>${esc(headline || company)}</h1>
     <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
     ${previewNote}
-    <!--
-      Only on the copy RouterOS actually serves — a person already viewing
-      this over a normal https connection has no restricted popup to escape
-      and no stale router-cached copy to get past; the link would just
-      reload the same page they're already on.
-
-      Two different failure modes look identical to a guest: a phone/TV's
-      own "join this network" mini-browser (Apple's Captive Network
-      Assistant, Android's equivalent) runs a stripped-down WebView that can
-      silently fail to run scripts or close itself early, and separately,
-      RouterOS fetches this page once and keeps serving that same cached
-      copy until the next Configure push — so a fix shipped after that push
-      never reaches a guest still being served the old copy. Both read as
-      "the buttons don't do anything" with nothing on screen to explain why.
-      A plain link tap is native browser navigation, not a script — it works
-      in the restricted popup, and because it points at this address
-      directly rather than the router's local one, it always fetches the
-      live page from here, bypassing any stale cached copy at the same time.
-    -->
-    ${forRouter && apiBase ? `<p class="hint"><a href="${esc(apiBase)}/hotspot/login.html" target="_blank" rel="noopener">Buttons not responding? Tap here to open this page in your browser</a></p>` : ''}
-
     ${errorBlock}
 
     <!--
@@ -510,10 +489,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   /**
    * $(link-login-only) only ever becomes a real URL when RouterOS itself
    * serves this exact markup — it substitutes the token as it hands the page
-   * to a guest. The "Buttons not responding?" link above fetches this same
-   * markup straight from us instead, specifically to escape a broken
-   * WebView, and we are not RouterOS: the token reaches the browser
-   * untouched, so form.submit() posts to the literal string
+   * to a guest. The meta-refresh at the top of this page (routerRedirect)
+   * fetches this same markup straight from us instead, specifically to
+   * escape a broken WebView, and we are not RouterOS: the token reaches the
+   * browser untouched, so form.submit() posts to the literal string
    * "$(link-login-only)", resolved as a relative URL against this page —
    * "buys but does not auto-connect" was this, not the payment.
    *
