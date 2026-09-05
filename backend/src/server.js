@@ -2390,7 +2390,7 @@ app.post('/portal/verify-code', loginLimiter, async (req, res) => {
  * that field is what we asked for, this is what the router actually gave them,
  * and when they differ the second one is the one that matters.
  */
-app.get('/api/subscribers', async (req, res) => {
+app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) => {
   const { rows } = await pool.query(`
     select s.*,
            (a.framedipaddress is not null or live.username is not null) as online,
@@ -2619,7 +2619,7 @@ app.get('/api/payments/unmatched', async (req, res) => {
 });
 
 /** Cashier resolves an unmatched payment; we remember the phone for next time. */
-app.post('/api/payments/:id/match', async (req, res) => {
+app.post('/api/payments/:id/match', requirePermission('payments.apply'), async (req, res) => {
   const { subscriberId } = req.body;
   const { applyMatched } = await import('./payments/apply.js');
   res.json(await applyMatched?.(req.tenant.id, req.params.id, subscriberId) ?? { ok: true });
@@ -2741,7 +2741,7 @@ app.get('/api/email/gateway', wrap(async (req, res) => {
   res.json({ config: c ?? null, fields: mail.FIELDS });
 }));
 
-app.put('/api/email/gateway', wrap(async (req, res) => {
+app.put('/api/email/gateway', requirePermission('settings.edit'), wrap(async (req, res) => {
   const secrets = await import('./secrets.js');
   const mail = await import('./email.js');
   const f = req.body ?? {};
@@ -2776,7 +2776,7 @@ app.put('/api/email/gateway', wrap(async (req, res) => {
   res.json(c);
 }));
 
-app.delete('/api/email/gateway', wrap(async (req, res) => {
+app.delete('/api/email/gateway', requirePermission('settings.edit'), wrap(async (req, res) => {
   await pool.query('delete from tenant_email_config where tenant_id=$1', [req.tenant.id]);
   res.json({ ok: true });
 }));
@@ -2933,7 +2933,7 @@ app.post('/api/push/unsubscribe', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.put('/api/sms/gateways/:provider', wrap(async (req, res) => {
+app.put('/api/sms/gateways/:provider', requirePermission('settings.edit'), wrap(async (req, res) => {
   const { credentials = {}, priority = 1, enabled = true, templates = {} } = req.body;
   const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
   if (!PROVIDER_FIELDS[req.params.provider])
@@ -2961,7 +2961,7 @@ app.put('/api/sms/gateways/:provider', wrap(async (req, res) => {
   res.json({ ok: true, complete: missing.length === 0, missing });
 }));
 
-app.delete('/api/sms/gateways/:provider', wrap(async (req, res) => {
+app.delete('/api/sms/gateways/:provider', requirePermission('settings.edit'), wrap(async (req, res) => {
   await pool.query('delete from tenant_sms_config where tenant_id=$1 and provider=$2',
     [req.tenant.id, req.params.provider]);
   res.json({ ok: true });
@@ -2983,7 +2983,7 @@ app.post('/api/sms/test', async (req, res) => {
 // ── tickets, leads, messaging, live support, tariffs, IP pools ──
 // All scoped by req.tenant.id — the tenant resolver above 404s unknown hosts and
 // every query below runs with RLS active (see withTenant in db.js for writes).
-app.get('/api/tickets', async (req, res) => {
+app.get('/api/tickets', requirePermission('tickets.view'), async (req, res) => {
   const { rows } = await pool.query(
     `select t.*, sp.name as sla_policy_name
        from tickets t
@@ -3071,7 +3071,7 @@ async function referrerForStaff(tenantId, staffId) {
   return created.id;
 }
 
-app.get('/api/leads', async (req, res) => {
+app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   const { rows } = await pool.query(
     `select l.*, r.name as referrer_name, st.name as assignee_name
        from leads l
@@ -3095,7 +3095,7 @@ app.get('/api/leads', async (req, res) => {
  * closing a lead and referring a customer are, as far as this system
  * already tracks compensation, the same kind of event.
  */
-app.get('/api/leads/sales-performance', wrap(async (req, res) => {
+app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select st.id, st.name,
             count(l.id) filter (where l.assigned_to = st.id) as leads_assigned,
@@ -3146,7 +3146,7 @@ app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
   res.json(l);
 });
 
-app.get('/api/leads/:id/notes', wrap(async (req, res) => {
+app.get('/api/leads/:id/notes', requirePermission('leads.view'), wrap(async (req, res) => {
   const { rowCount } = await pool.query(
     'select 1 from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!rowCount) return res.status(404).json({ error: 'not found' });
@@ -3285,12 +3285,12 @@ app.post('/api/referral-commissions/:id/mark-paid', wrap(async (req, res) => {
   res.json(c);
 }));
 
-app.get('/api/messages/:subscriberId', async (req, res) => {
+app.get('/api/messages/:subscriberId', requirePermission('messaging.view'), async (req, res) => {
   const { rows } = await pool.query(
     'select * from messages where tenant_id=$1 and subscriber_id=$2 order by sent_at', [req.tenant.id, req.params.subscriberId]);
   res.json(rows);
 });
-app.post('/api/messages', async (req, res) => {
+app.post('/api/messages', requirePermission('messaging.send'), async (req, res) => {
   const { subscriberId, body, channel = 'sms' } = req.body;
 
   /**
@@ -3385,7 +3385,7 @@ app.post('/api/live-chats/:id/close', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/tariffs', async (req, res) => {
+app.get('/api/tariffs', requirePermission('tariffs.view'), async (req, res) => {
   const { rows } = await pool.query('select * from tariffs where tenant_id=$1 and active order by price', [req.tenant.id]);
   res.json(rows);
 });
@@ -5001,7 +5001,7 @@ function describeRouterError(e, host, port) {
 }
 
 /** Rename a router, correct its NAS address, secret, API port or role. */
-app.put('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
+app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
   const { name, host, secret, apiPort, role, nasIdentifier } = req.body ?? {};
   const { rows: [r] } = await pool.query(
     `update routers set
@@ -5027,7 +5027,7 @@ app.put('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
  * would silently stop enforcement for those customers rather than fail loudly.
  * Their tunnel credentials go too, so a deleted router cannot dial back in.
  */
-app.delete('/api/routers/:id', requireRole('owner'), wrap(async (req, res) => {
+app.delete('/api/routers/:id', requirePermission('routers.delete'), wrap(async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!r) return res.status(404).json({ error: 'No such router' });
@@ -6204,7 +6204,7 @@ async function allocateAccountCode(tenantId, crossTenant = false) {
   return null;
 }
 
-app.get('/api/subscribers/new-credentials', wrap(async (req, res) => {
+app.get('/api/subscribers/new-credentials', requirePermission('clients.view'), wrap(async (req, res) => {
   const account = await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
   if (!account) return res.status(409).json({ error: 'Could not find a free 5-digit account number.' });
   res.json({ account, password: digits(7) });
@@ -6613,7 +6613,7 @@ app.get('/api/subscribers/:id/credentials', requireRole('owner'), wrap(async (re
  * facing counterpart to /portal/usage above, scoped by tenant/session
  * rather than a customer's own portal cookie.
  */
-app.get('/api/subscribers/:id/usage', wrap(async (req, res) => {
+app.get('/api/subscribers/:id/usage', requirePermission('clients.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select date(started_at) as day,
             sum(coalesce(bytes_in,0) + coalesce(bytes_out,0)) as bytes
@@ -6631,7 +6631,7 @@ app.get('/api/subscribers/:id/usage', wrap(async (req, res) => {
  * subscriber_id: a deleted line's own log rows have subscriber_id cleared
  * (see the delete route) but stay filed under the account they belonged to.
  */
-app.get('/api/subscribers/:id/activity', wrap(async (req, res) => {
+app.get('/api/subscribers/:id/activity', requirePermission('clients.view'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     'select account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
@@ -6911,7 +6911,7 @@ app.delete('/api/invoices/:id', wrap(async (req, res) => {
  * Goes through the same applyPayment funnel as the webhooks, so matching,
  * receipting and idempotency all behave identically.
  */
-app.post('/api/payments/manual', wrap(async (req, res) => {
+app.post('/api/payments/manual', requirePermission('payments.apply'), wrap(async (req, res) => {
   const { code, amount, phone, name, account } = req.body;
   if (!code || !amount) return res.status(400).json({ error: 'M-Pesa code and amount are required' });
   const { applyPayment } = await import('./payments/apply.js');
@@ -7001,7 +7001,7 @@ app.get('/api/payments/stk/:checkoutId', wrap(async (req, res) => {
 }));
 
 /** Paste a block of forwarded M-Pesa SMS; each parseable line is applied. */
-app.post('/api/payments/reconcile', wrap(async (req, res) => {
+app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(async (req, res) => {
   const { text } = req.body;
   if (!text?.trim()) return res.status(400).json({ error: 'Paste the statement text first' });
   const { parseMpesaSms } = await import('./payments/manual.js');
@@ -7147,7 +7147,7 @@ app.post('/api/settlements/payout', requirePermission('payments.request_payout')
 }));
 
 // ── catalogue: plans and tariffs ──────────────────
-app.get('/api/plans', wrap(async (req, res) => {
+app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) => {
   const { service } = req.query;
   const { rows } = await pool.query(
     `select * from plans where tenant_id=$1 and active ${service ? 'and service=$2' : ''} order by price`,
@@ -7240,7 +7240,7 @@ app.delete('/api/plans/:id', requirePermission('tariffs.delete'), wrap(async (re
   res.json({ ok: true, deleted: 1 });
 }));
 
-app.put('/api/tariffs/:id', wrap(async (req, res) => {
+app.put('/api/tariffs/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
   const { title, price: p, speedDown, speedUp, fairUse } = req.body;
   const { rows: [t] } = await pool.query(
     `update tariffs set title=coalesce($3,title), price=coalesce($4,price),
@@ -7761,13 +7761,13 @@ app.delete('/api/sla-policies/:id', wrap(async (req, res) => {
 }));
 
 // ── knowledge base ────────────────────────────────
-app.get('/api/kb-articles', wrap(async (req, res) => {
+app.get('/api/kb-articles', requirePermission('kb.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select * from kb_articles where tenant_id=$1 order by updated_at desc', [req.tenant.id]);
   res.json(rows);
 }));
 
-app.post('/api/kb-articles', wrap(async (req, res) => {
+app.post('/api/kb-articles', requirePermission('kb.edit'), wrap(async (req, res) => {
   const { title, category, body = '', published = true } = req.body;
   if (!title) return res.status(400).json({ error: 'title is required' });
   const { rows: [a] } = await pool.query(
@@ -7784,7 +7784,7 @@ app.post('/api/kb-articles', wrap(async (req, res) => {
  * meant deleting the article and writing it again — losing its id, and with it
  * any link a customer or the support bot had to it.
  */
-app.put('/api/kb-articles/:id', wrap(async (req, res) => {
+app.put('/api/kb-articles/:id', requirePermission('kb.edit'), wrap(async (req, res) => {
   const { title, category, body, published } = req.body ?? {};
   const { rows: [a] } = await pool.query(
     `update kb_articles set
@@ -7832,7 +7832,7 @@ app.delete('/api/site-profiles/:id', wrap(async (req, res) => {
 }));
 
 // ── payment credentials (Payment methods screen) ──
-app.put('/api/payment-methods/:provider', requireRole('owner'), wrap(async (req, res) => {
+app.put('/api/payment-methods/:provider', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
   if (req.params.provider === 'kopokopo' && enabledPppoe)
     return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
@@ -7881,14 +7881,14 @@ app.get('/api/ovpn-clients', wrap(async (req, res) => {
 }));
 
 // ── SMS history and bulk send (Messaging screen) ──
-app.get('/api/sms/history', wrap(async (req, res) => {
+app.get('/api/sms/history', requirePermission('messaging.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select * from sms_log where tenant_id=$1 order by at desc limit 500', [req.tenant.id]);
   res.json(rows);
 }));
 
 /** Send one SMS to an arbitrary number — voucher resends, one-off notices. */
-app.post('/api/sms/send', wrap(async (req, res) => {
+app.post('/api/sms/send', requirePermission('messaging.send'), wrap(async (req, res) => {
   const { phone, body } = req.body;
   if (!phone || !body?.trim()) return res.status(400).json({ error: 'phone and body are required' });
   const sms = await import('./sms.js');
@@ -7981,7 +7981,7 @@ app.get('/api/sms/templates', wrap(async (req, res) => {
   });
 }));
 
-app.put('/api/sms/templates', wrap(async (req, res) => {
+app.put('/api/sms/templates', requirePermission('settings.edit'), wrap(async (req, res) => {
   const templates = req.body?.templates;
   if (!templates || typeof templates !== 'object') {
     return res.status(400).json({ error: 'Nothing to save' });
@@ -8563,7 +8563,7 @@ app.put('/api/sla-policies/:id', wrap(async (req, res) => {
 }));
 
 // ── ticket detail and notes ───────────────────────
-app.get('/api/tickets/:id', wrap(async (req, res) => {
+app.get('/api/tickets/:id', requirePermission('tickets.view'), wrap(async (req, res) => {
   const { rows: [t] } = await pool.query(
     `select tk.*, s.name as subscriber_name, s.phone as subscriber_phone, st.name as assignee_name,
             sp.name as sla_policy_name, rp.title as requested_plan_title
@@ -8629,7 +8629,7 @@ app.get('/api/payment-gateways', wrap(async (req, res) => {
   })));
 }));
 
-app.post('/api/payment-gateways', wrap(async (req, res) => {
+app.post('/api/payment-gateways', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { provider, label, shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false, isDefault } = req.body;
   if (!provider || !shortcode) return res.status(400).json({ error: 'Channel and shortcode are required' });
   if (provider === 'kopokopo' && enabledPppoe)
@@ -8669,7 +8669,7 @@ app.post('/api/payment-gateways', wrap(async (req, res) => {
  * returning secrets on every page load, this is a deliberate action — the same
  * shape as the router's RADIUS secret.
  */
-app.get('/api/payment-gateways/:id/credentials', wrap(async (req, res) => {
+app.get('/api/payment-gateways/:id/credentials', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select credentials from tenant_payment_config where id=$1 and tenant_id=$2',
     [req.params.id, req.tenant.id]);
@@ -8684,7 +8684,7 @@ app.get('/api/payment-gateways/:id/credentials', wrap(async (req, res) => {
  * posts to whatever URL was registered, which for a new shortcode is nothing at
  * all. registerC2B existed since the import and had no way to be called.
  */
-app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/register-urls', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select * from tenant_payment_config where id=$1 and tenant_id=$2',
     [req.params.id, req.tenant.id]);
@@ -8721,7 +8721,7 @@ app.post('/api/payment-gateways/:id/register-urls', wrap(async (req, res) => {
   }
 }));
 
-app.put('/api/payment-gateways/:id', wrap(async (req, res) => {
+app.put('/api/payment-gateways/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { label, shortcode, credentials, enabledPppoe, enabledHotspot } = req.body;
 
   // Checked before the update runs, not after: the CHECK constraint would
@@ -8751,7 +8751,7 @@ app.put('/api/payment-gateways/:id', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.post('/api/payment-gateways/:id/default', wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/default', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!g) return res.status(404).json({ error: 'not found' });
@@ -8832,7 +8832,7 @@ app.patch('/api/settings/settlement-method', requirePermission('payments.edit'),
  * tenant that isn't the owner — it would just be a no-op, and this avoids
  * the confusion of a toggle that appears to work but silently does nothing.
  */
-app.post('/api/payment-gateways/:id/platform-collect', wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/platform-collect', requirePermission('payments.edit'), wrap(async (req, res) => {
   if (!req.session.is_super_admin)
     return res.status(403).json({ error: 'Only the platform owner can designate a platform-collect paybill.' });
   const { rows: [g] } = await pool.query(
@@ -8859,7 +8859,7 @@ app.post('/api/payment-gateways/:id/platform-collect', wrap(async (req, res) => 
   }
 }));
 
-app.delete('/api/payment-gateways/:id', wrap(async (req, res) => {
+app.delete('/api/payment-gateways/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'delete from tenant_payment_config where tenant_id=$1 and id=$2 returning provider, is_default',
     [req.tenant.id, req.params.id]);
@@ -8971,7 +8971,7 @@ app.get('/api/automation', wrap(async (req, res) => {
   })));
 }));
 
-app.put('/api/automation/:job', wrap(async (req, res) => {
+app.put('/api/automation/:job', requirePermission('settings.edit'), wrap(async (req, res) => {
   const known = AUTOMATION_JOBS.find((j) => j.job === req.params.job);
   if (!known) return res.status(404).json({ error: 'unknown job' });
   // A platform-wide job cannot be switched off by one tenant. Refusing is
@@ -9085,7 +9085,7 @@ app.post('/api/updates/seen', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.get('/api/settings', wrap(async (req, res) => {
+app.get('/api/settings', requirePermission('settings.view'), wrap(async (req, res) => {
   const { rows: [extra] } = await pool.query('select * from app_settings where tenant_id=$1', [req.tenant.id]);
   const { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status } = req.tenant;
   res.json({
@@ -9096,7 +9096,7 @@ app.get('/api/settings', wrap(async (req, res) => {
   });
 }));
 
-app.put('/api/settings', wrap(async (req, res) => {
+app.put('/api/settings', requirePermission('settings.edit'), wrap(async (req, res) => {
   const { org, smtp, prefs, alertPhone } = req.body;
 
   // Where router alerts go. Stored on app_settings rather than staff, because
