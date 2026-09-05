@@ -117,6 +117,11 @@ services:
       # above — the app installs and works fully without it.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # Checked on incoming POST /api/platform-sms/relay — a sibling Vibelink
+      # deployment (vibelink-co-ke) sends its tenants' SMS through this
+      # platform's own gateway account. Unset = the endpoint refuses every
+      # request rather than trusting an unsigned caller.
+      PLATFORM_SMS_RELAY_KEY: ${PLATFORM_SMS_RELAY_KEY:-}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
     volumes:
