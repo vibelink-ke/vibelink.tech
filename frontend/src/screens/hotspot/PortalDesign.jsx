@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { color, font, radius, kes } from '../../theme/tokens';
 import { useStore } from '../../state/store';
+import { api } from '../../api/client';
 import { Button, Card, Field, Input, Screen } from '../../ui/primitives';
 import { BASE_TEMPLATES } from './templates';
 
@@ -135,6 +136,7 @@ export default function PortalDesign() {
   const store = useStore();
   const [applied, setApplied] = useState(store.hotspotSettings?.template ?? 'kadogo');
   const [preview, setPreview] = useState(applied);
+  const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState({
     headline: store.hotspotSettings?.banner_headline ?? '',
     subtext: store.hotspotSettings?.banner_subtext ?? '',
@@ -142,17 +144,37 @@ export default function PortalDesign() {
 
   const t = BASE_TEMPLATES.find((x) => x.id === preview) ?? BASE_TEMPLATES[0];
 
+  // This used to only flip local state and toast — nothing was ever sent to
+  // the server, so the captive portal guests actually see kept whatever
+  // template was last saved from the plain Settings screen, and a refresh
+  // of this page silently reverted the "LIVE" badge back to that. Saving
+  // through the same PUT /api/hotspot/settings the Settings screen uses
+  // both persists it and (via the server's own repush-on-save) re-fetches
+  // the login page onto every already-Configured router right away.
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const saved = await api.saveHotspotSettings({
+        ...store.hotspotSettings,
+        template: preview,
+        banner_headline: banner.headline,
+        banner_subtext: banner.subtext,
+      });
+      store.setHotspotSettings(saved ?? { ...store.hotspotSettings, template: preview, banner_headline: banner.headline, banner_subtext: banner.subtext });
+      setApplied(preview);
+      store.toast(`${t.name} applied to the captive portal`);
+    } catch (e) {
+      store.toast(`Could not apply: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Screen
       actions={
-        <Button
-          variant="primary"
-          onClick={() => {
-            setApplied(preview);
-            store.toast(`${t.name} applied to the captive portal`);
-          }}
-        >
-          Apply {t.name}
+        <Button variant="primary" onClick={apply} disabled={busy}>
+          {busy ? 'Applying…' : `Apply ${t.name}`}
         </Button>
       }
     >

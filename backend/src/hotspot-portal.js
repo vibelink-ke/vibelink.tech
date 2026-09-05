@@ -41,17 +41,37 @@ function duration(min) {
 }
 
 /**
- * Look, chosen in Hotspot -> Settings.
+ * Look, chosen in Hotspot -> Settings or the newer Portal design screen.
  *
- * Only colour and weight change — the layout is the same everywhere because it
- * has to work on a cracked phone screen in daylight, and that constrains it far
- * more than taste does.
+ * Only colour and weight change here — the layout (a list of bundle cards,
+ * one "Buy" button per bundle) is the same for every template, because it
+ * has to work on a cracked phone screen in daylight, and that constrains it
+ * far more than taste does.
+ *
+ * kadogo..bingwa are the eight palettes from
+ * frontend/src/screens/hotspot/templates.js's BASE_TEMPLATES, transcribed by
+ * hand — the frontend and this backend render engine are separate
+ * deployments with no shared import path, so there is no single source of
+ * truth to import from. Their structural differences over there (a grid
+ * layout, one big call-to-action instead of a button per bundle, a
+ * voucher-code box above the fold, a banner slot) are not implemented here
+ * yet: picking one of the eight changes colour only, not layout. bg and
+ * card are equal for all eight because templates.js authored them as one
+ * flat surface, not the page-behind-a-card look sleek/dark/bold/plain use.
  */
 const TEMPLATES = {
   sleek:  { bg: '#f5f6f3', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
   dark:   { bg: '#12171a', card: '#1b2227', ink: '#eef2f0', accent: '#2fbf8f', radius: '14px' },
   bold:   { bg: '#0f7a5f', card: '#ffffff', ink: '#161a17', accent: '#0b5c47', radius: '18px' },
   plain:  { bg: '#ffffff', card: '#ffffff', ink: '#111111', accent: '#1b6fd6', radius: '6px' },
+  kadogo:    { bg: '#12211d', card: '#12211d', ink: '#eaf3ef', accent: '#2fbf8f', radius: '14px' },
+  duka:      { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
+  soko:      { bg: '#f7f8f5', card: '#f7f8f5', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
+  sponsored: { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#c9a227', radius: '14px' },
+  mwanga:    { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#a5451f', radius: '14px' },
+  rahisi:    { bg: '#f4f4f2', card: '#f4f4f2', ink: '#161a17', accent: '#12211d', radius: '14px' },
+  kijani:    { bg: '#eef4f1', card: '#eef4f1', ink: '#12211d', accent: '#0f7a5f', radius: '14px' },
+  bingwa:    { bg: '#1b2430', card: '#1b2430', ink: '#eef2f6', accent: '#c9a227', radius: '14px' },
 };
 
 export function loginPage({
