@@ -6719,15 +6719,31 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
     referrerId = referredBy;
   }
 
+  /**
+   * A brand-new PPPoE line gets a welcome window until midnight tonight —
+   * not the open-ended free access an unset expires_at actually meant until
+   * now (nothing here ever expires a null; jobs.js's expireAndSuspend only
+   * ever matches expires_at < now()). The operator's own agreed policy: a
+   * customer gets today free as a welcome/grace gesture, not forever, and a
+   * real payment before or after midnight extends it normally from there —
+   * settleSubscriber (apply.js) already bases the new expiry on
+   * max(now, expires_at), so paying today simply adds their plan's period on
+   * top of this same midnight rather than needing any special-casing here.
+   * Hotspot accounts are untouched: they are governed by voucher expiry, not
+   * this column.
+   */
+  const { ceilToMidnight } = await import('./payments/apply.js');
+  const welcomeExpiry = service === 'pppoe' ? ceilToMidnight(new Date()) : null;
+
   const { rows: [s] } = await pool.query(
     `insert into subscribers (tenant_id, account_code, name, phone, phone_alt, service, plan_id,
        router_id, pppoe_user, pppoe_pass, static_ip, autopay, location, lat, lng, line_label, referred_by,
-       email, category, identification, billing_type)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) returning *`,
+       email, category, identification, billing_type, expires_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) returning *`,
     [req.tenant.id, account, name, phone, phoneAlt || null, service, planId ?? null,
      routerId ?? null, pppoeUser ?? null, pppoePass ?? null, staticIp ?? null, autopay ?? null,
      location || null, coord(lat, 90), coord(lng, 180), label, referrerId,
-     email || null, category || null, identification || null, billingType || null]);
+     email || null, category || null, identification || null, billingType || null, welcomeExpiry]);
   await logActivity(req, s.id, s.account_code, sameAccount.length ? 'Service added' : 'Account created',
     label ? `Line "${label}"` : null);
 
