@@ -2838,6 +2838,41 @@ async function repushHotspotLoginPage(tenantId) {
   }
 }
 
+/**
+ * The full hotspot push (runHotspotPush, defined further down — bridge,
+ * RADIUS, hotspot server/DHCP/pool, NAT, DNS proxy, walled garden, login
+ * page, anti-sharing), automatically, to every already-Configured hotspot
+ * router — for hotspot_settings fields runHotspotPush actually reads
+ * (multi_device, idle_timeout_sec, bind_mac, hotspot_network, walled_garden,
+ * template, banner text), not just the login page repushHotspotLoginPage
+ * above covers. Supersedes that call for this one trigger: every step here
+ * is documented as idempotent and safe to re-run (the same property that
+ * already makes pressing "Configure hotspot" twice safe), and includes
+ * pushing the login page itself as one of its own steps.
+ *
+ * A router with no stored service account (never Configured — nothing to
+ * push to yet) is silently skipped, same reasoning as everywhere else this
+ * pattern is used; a genuine failure is logged but never surfaces to
+ * whichever request triggered the save, which must never wait on or fail
+ * because of this.
+ */
+async function repushHotspotConfigToAllRouters(tenantId) {
+  try {
+    const { rows: routers } = await pool.query(
+      `select id, name from routers
+        where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
+      [tenantId]);
+    for (const r of routers) {
+      const result = await runHotspotPush(tenantId, r.id, {});
+      if (result.needsAdmin) continue; // never Configured — nothing to do unattended
+      if (!result.ok) console.error('auto-repush hotspot config', r.name, r.id, '→ failed:', result.error);
+      else console.log('auto-repush hotspot config', r.name, r.id, '→ ok:', result.applied.join('; '));
+    }
+  } catch (e) {
+    console.error('repushHotspotConfigToAllRouters', tenantId, '→', e.message);
+  }
+}
+
 app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, res) => {
   const f = req.body;
   const warnings = Array.isArray(f.walled_garden) ? walledGardenWarnings(f.walled_garden) : [];
@@ -2874,7 +2909,7 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
      f.hotspot_network ?? null, defaultWalledGarden]);
-  repushHotspotLoginPage(req.tenant.id);
+  repushHotspotConfigToAllRouters(req.tenant.id);
   res.json({ ...s, warnings });
 });
 
@@ -4197,31 +4232,45 @@ function atStep(e, message) {
  * Everything here is idempotent, so the answer to "did that work?" is always to
  * press it again and read the result.
  */
-app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wrap(async (req, res) => {
+/**
+ * Push the whole hotspot to one router — the shared logic behind both the
+ * manual "Configure hotspot" button and the automatic re-push whenever a
+ * hotspot_settings field this reads from gets saved. Returns a plain result
+ * object rather than writing an HTTP response, so both callers can shape
+ * their own behavior (an HTTP status vs. a background log line) around the
+ * same push.
+ *
+ * result.needsAdmin is the one outcome an automatic caller must treat as
+ * "nothing to do yet," not a failure — a router that has never been
+ * Configured has no stored credentials for this to use unattended, and
+ * unlike everything else here, minting one requires a human typing the
+ * router's real admin password in once.
+ */
+async function runHotspotPush(tenantId, routerId, opts = {}) {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const { SERVER_IP } = await import('./tunnel.js');
 
   const { rows: [r] } = await pool.query(
-    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-  if (!r) return res.status(404).json({ error: 'No such router' });
+    'select * from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
+  if (!r) return { ok: false, status: 404, error: 'No such router' };
 
   const { rows: [hs] } = await pool.query(
-    'select * from hotspot_settings where tenant_id=$1', [req.tenant.id]);
+    'select * from hotspot_settings where tenant_id=$1', [tenantId]);
   const { rows: [t] } = await pool.query(
-    'select subdomain from tenants where id=$1', [req.tenant.id]);
+    'select subdomain from tenants where id=$1', [tenantId]);
 
   const host = String(r.host).split('/')[0];
-  const login = await routerLogin(r, req.body, secrets);
-  if (!login) return res.status(428).json({
+  const login = await routerLogin(r, opts, secrets);
+  if (!login) return {
+    ok: false, status: 428, needsAdmin: true,
     error: 'Enter the router’s admin username and password once. A dedicated account is created from it and used for every push after that.',
-    needsAdmin: true,
-  });
+  };
 
   // The bridge to build on. Ports are only needed the first time; afterwards the
   // bridge already exists and we attach to it by name.
-  const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : [];
-  const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+  const lanPorts = Array.isArray(opts?.lanPorts) ? opts.lanPorts : [];
+  const bridgeName = String(opts?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
 
   const done = [];
   let conn;
@@ -4280,7 +4329,7 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
         // them. Kept as the literal fallback only for a tenant with no
         // subdomain yet, matching what has always been pushed until now.
         dnsName: t?.subdomain ? `${t.subdomain}.spot` : 'billing.spot',
-        network: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+        network: opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
         // The profile a voucher will name, built with the same hotspot.
         sharedUsers: hs?.multi_device ? 3 : 1,
         idleSeconds: hs?.idle_timeout_sec ?? 30,
@@ -4300,7 +4349,7 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
     // having internet, and when it is missing nobody can tell from the result
     // that it was ever meant to happen.
     const nat = await tryStep('NAT', () => ros.applyNat(conn, {
-      subnet: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+      subnet: opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
     }));
     done.push(nat.wan
       ? `masquerading guests out ${nat.wan}`
@@ -4317,7 +4366,7 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
     // the standard way a captive portal gets bypassed for free (DNS
     // tunneling, the same trick every "VPN injector" app relies on).
     const dnsProxy = await tryStep('DNS proxy', () => ros.applyDnsProxy(conn, {
-      hotspotSubnet: req.body?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
+      hotspotSubnet: opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
     }), 40000);
     done.push(dnsProxy.protected
       ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}, guest DNS rate-limited against tunneling`
@@ -4362,11 +4411,11 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
               autoconfig_last_error=null, status='up', last_seen=now() where id=$1`, [r.id]);
 
     console.log('hotspot push', r.name, host, '→ ok:', done.join('; '));
-    res.json({ ok: true, applied: done, gateway: built.gateway });
+    return { ok: true, applied: done, gateway: built.gateway };
   } catch (e) {
     let message = atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728));
     if (!conn) {
-      const why = await explainUnreachable(req.tenant.id, host);
+      const why = await explainUnreachable(tenantId, host);
       // Replace the guess rather than append to it. The stock text asks whether
       // the tunnel is up and whether the address is the right one; when both can
       // be answered, asking as well only buries the answer.
@@ -4375,18 +4424,27 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
     await pool.query(
       'update routers set autoconfig_last_at=now(), autoconfig_last_ok=false, autoconfig_last_error=$2 where id=$1',
       [r.id, message.slice(0, 300)]).catch(() => {});
-    // Logged as well as returned. This route answers its own errors instead of
-    // going through the wrap() handler, so nothing reached the container log --
-    // a failed push left `docker compose logs api` showing only the startup
-    // line, which reads as "nothing happened" rather than "it failed".
+    // Logged as well as returned. An automatic caller has no response to
+    // answer errors through at all, and the manual route below no longer
+    // goes through the wrap() handler for this either — a failed push left
+    // `docker compose logs api` showing only the startup line otherwise,
+    // which reads as "nothing happened" rather than "it failed".
     console.error('hotspot push', r.name, host, '→', message,
       done.length ? `(after: ${done.join('; ')})` : '(nothing applied)');
     // The steps that did land are worth reporting: "it failed" is far less
     // useful than "it failed after the hotspot came up, at the firewall".
-    res.status(502).json({ error: message, applied: done });
+    return { ok: false, status: 502, error: message, applied: done };
   } finally {
     if (conn) ros.close(conn);
   }
+}
+
+app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const result = await runHotspotPush(req.tenant.id, req.params.id, req.body);
+  if (!result.ok) return res.status(result.status ?? 502).json({
+    error: result.error, applied: result.applied, needsAdmin: result.needsAdmin,
+  });
+  res.json({ ok: true, applied: result.applied, gateway: result.gateway });
 }));
 
 /**
@@ -5165,6 +5223,44 @@ function describeRouterError(e, host, port) {
 }
 
 /** Rename a router, correct its NAS address, secret, API port or role. */
+/**
+ * Just the RADIUS step — used when a router's own shared secret changes, so
+ * the router and this server agree on it again immediately rather than only
+ * at the next manual Configure/autoconfig (which a secret change alone
+ * gives no other reason to run). Works for any role: unlike the hotspot-only
+ * push above, RADIUS itself is not hotspot-specific, so this is safe to
+ * call for a PPPoE-only router too. Skips a router with no stored service
+ * account — nothing to push to yet — the same as every other auto-push here.
+ */
+async function repushRadiusSecret(tenantId, routerId) {
+  let conn;
+  try {
+    const { rows: [r] } = await pool.query(
+      `select id, name, host, api_port, secret, role, service_user, service_password_enc from routers
+        where id=$1 and tenant_id=$2 and service_user is not null`, [routerId, tenantId]);
+    if (!r) return;
+
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const { SERVER_IP } = await import('./tunnel.js');
+    const password = secrets.decrypt(r.service_password_enc);
+    conn = await ros.connect({
+      host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+      user: r.service_user, password, timeoutSec: 15,
+    });
+    await ros.applyRadius(conn, {
+      serverIp: SERVER_IP, secret: r.secret,
+      coaPort: Number(process.env.RADIUS_COA_PORT ?? 3799),
+      services: r.role === 'pppoe' ? 'ppp' : r.role === 'both' ? 'ppp,hotspot' : 'hotspot',
+    });
+    console.log('auto-repush RADIUS secret', r.name, routerId, '→ ok');
+  } catch (e) {
+    console.error('auto-repush RADIUS secret', routerId, '→ failed:', e.message);
+  } finally {
+    if (conn) { const ros = await import('./routeros.js'); try { ros.close(conn); } catch { /* already gone */ } }
+  }
+}
+
 app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
   const { name, host, secret, apiPort, role, nasIdentifier } = req.body ?? {};
   const { rows: [r] } = await pool.query(
@@ -5180,6 +5276,7 @@ app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, 
     [req.params.id, req.tenant.id, name ?? '', host ?? '', secret ?? '',
      apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '']);
   if (!r) return res.status(404).json({ error: 'No such router' });
+  if (secret) repushRadiusSecret(req.tenant.id, r.id);
   res.json(r);
 }));
 
