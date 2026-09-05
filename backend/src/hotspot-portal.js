@@ -43,35 +43,37 @@ function duration(min) {
 /**
  * Look, chosen in Hotspot -> Settings or the newer Portal design screen.
  *
- * Only colour and weight change here — the layout (a list of bundle cards,
- * one "Buy" button per bundle) is the same for every template, because it
- * has to work on a cracked phone screen in daylight, and that constrains it
- * far more than taste does.
+ * sleek/dark/bold/plain are colour-only — always the same list of bundle
+ * cards, one "Buy" button per bundle. kadogo..bingwa carry the structural
+ * flags from frontend/src/screens/hotspot/templates.js's BASE_TEMPLATES too
+ * (grid/bigCta/codeBox/banner below, transcribed by hand — the frontend and
+ * this backend render engine are separate deployments with no shared import
+ * path, so there is no single source of truth to import from):
  *
- * kadogo..bingwa are the eight palettes from
- * frontend/src/screens/hotspot/templates.js's BASE_TEMPLATES, transcribed by
- * hand — the frontend and this backend render engine are separate
- * deployments with no shared import path, so there is no single source of
- * truth to import from. Their structural differences over there (a grid
- * layout, one big call-to-action instead of a button per bundle, a
- * voucher-code box above the fold, a banner slot) are not implemented here
- * yet: picking one of the eight changes colour only, not layout. bg and
- * card are equal for all eight because templates.js authored them as one
- * flat surface, not the page-behind-a-card look sleek/dark/bold/plain use.
+ *   grid    bundles as a two-column grid of self-contained tiles, not rows
+ *   bigCta  the whole bundle row is the tap target (no separate Buy button) —
+ *           "one tap" and "oversized tap targets" in their descriptions
+ *   codeBox the voucher-code sign-in form gets a highlighted box, not a bare form
+ *   banner  a small trust/contact strip under the headline
+ *
+ * bg and card are equal for the eight because templates.js authored them as
+ * one flat surface, not the page-behind-a-card look sleek/dark/bold/plain use.
  */
 const TEMPLATES = {
   sleek:  { bg: '#f5f6f3', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
   dark:   { bg: '#12171a', card: '#1b2227', ink: '#eef2f0', accent: '#2fbf8f', radius: '14px' },
   bold:   { bg: '#0f7a5f', card: '#ffffff', ink: '#161a17', accent: '#0b5c47', radius: '18px' },
   plain:  { bg: '#ffffff', card: '#ffffff', ink: '#111111', accent: '#1b6fd6', radius: '6px' },
-  kadogo:    { bg: '#12211d', card: '#12211d', ink: '#eaf3ef', accent: '#2fbf8f', radius: '14px' },
-  duka:      { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
-  soko:      { bg: '#f7f8f5', card: '#f7f8f5', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
-  sponsored: { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#c9a227', radius: '14px' },
-  mwanga:    { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#a5451f', radius: '14px' },
+  kadogo:    { bg: '#12211d', card: '#12211d', ink: '#eaf3ef', accent: '#2fbf8f', radius: '14px', bigCta: true },
+  duka:      { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px', codeBox: true, banner: true },
+  soko:      { bg: '#f7f8f5', card: '#f7f8f5', ink: '#161a17', accent: '#0f7a5f', radius: '14px', grid: true, bigCta: true },
+  sponsored: { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#c9a227', radius: '14px', banner: true },
+  mwanga:    { bg: '#ffffff', card: '#ffffff', ink: '#161a17', accent: '#a5451f', radius: '14px', bigCta: true },
   rahisi:    { bg: '#f4f4f2', card: '#f4f4f2', ink: '#161a17', accent: '#12211d', radius: '14px' },
-  kijani:    { bg: '#eef4f1', card: '#eef4f1', ink: '#12211d', accent: '#0f7a5f', radius: '14px' },
-  bingwa:    { bg: '#1b2430', card: '#1b2430', ink: '#eef2f6', accent: '#c9a227', radius: '14px' },
+  kijani:    { bg: '#eef4f1', card: '#eef4f1', ink: '#12211d', accent: '#0f7a5f', radius: '14px', grid: true, banner: true },
+  // Monthly (longest-duration) plans front and center, matching "monthly
+  // plans up front" — the one template where order isn't just cheapest first.
+  bingwa:    { bg: '#1b2430', card: '#1b2430', ink: '#eef2f6', accent: '#c9a227', radius: '14px', bigCta: true, monthlyFirst: true },
 };
 
 export function loginPage({
@@ -80,6 +82,11 @@ export function loginPage({
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
+  // bingwa fronts its longest-duration (monthly) plans; every other template
+  // keeps whatever order the caller already sorted by (price ascending).
+  const orderedPlans = t.monthlyFirst
+    ? [...plans].sort((a, b) => (b.duration_min ?? 0) - (a.duration_min ?? 0))
+    : plans;
   // Where the page should send its purchase requests. Empty on the preview,
   // where the page is already being served by the billing system itself.
   const apiBase = portalUrl ?? '';
@@ -161,20 +168,62 @@ export function loginPage({
   // a tappable "buy this now," which reads as more decisive than "how much
   // is this" is meant to be. Price sits still now; Buy is its own explicit
   // action next to it.
-  const planCards = plans.length
-    ? plans.map((p) => `
+  const planCards = orderedPlans.length
+    ? orderedPlans.map((p) => {
+        const planId = esc(p.id ?? '');
+        const title = esc(p.title);
+        const meta = `${esc(duration(p.duration_min))} · ${esc(String(p.rate_down / 1000))} Mbps`;
+        const price = esc(money(p.price));
+        // bigCta: the whole row is the tap target (class="buy" straight on
+        // the <li>, same data-plan/data-title the click handler below already
+        // reads off whatever element was actually clicked) — no separate
+        // button squeezed onto the row, which is the entire point of "one
+        // tap" and "oversized tap targets" in these templates' descriptions.
+        if (t.bigCta) {
+          return `
+      <li class="plan bigcta buy" data-plan="${planId}" data-title="${title}">
+        <div class="plan-name">
+          <strong>${title}</strong>
+          <span class="meta">${meta}</span>
+        </div>
+        <span class="price">${price}</span>
+        <span class="chev" aria-hidden="true">&rsaquo;</span>
+      </li>`;
+        }
+        return `
       <li class="plan">
         <div class="plan-name">
-          <strong>${esc(p.title)}</strong>
-          <span class="meta">${esc(duration(p.duration_min))} · ${esc(String(p.rate_down / 1000))} Mbps</span>
+          <strong>${title}</strong>
+          <span class="meta">${meta}</span>
         </div>
-        <span class="price">${esc(money(p.price))}</span>
-        <button type="button" class="buy" data-plan="${esc(p.id ?? '')}"
-                data-title="${esc(p.title)}">Buy</button>
-      </li>`).join('')
+        <span class="price">${price}</span>
+        <button type="button" class="buy" data-plan="${planId}"
+                data-title="${title}">Buy</button>
+      </li>`;
+      }).join('')
     : '<li class="plan"><span class="meta">No bundles are on sale right now.</span></li>';
 
-  // No separate buy block: every bundle above is its own button now.
+  // grid: bundles as a two-column grid of self-contained tiles instead of a
+  // vertical list of rows — soko and kijani's "6+ plans"/"brand-led" look.
+  const plansClass = t.grid ? 'plans grid' : 'plans';
+
+  // codeBox: the voucher sign-in form gets a highlighted box instead of
+  // sitting as a bare form — duka's "voucher-code box above the fold". The
+  // form itself does not move; it was already the first thing after the
+  // headline for every template.
+  const codeBoxOpen = t.codeBox ? '<div class="codebox">' : '';
+  const codeBoxClose = t.codeBox ? '</div>' : '';
+
+  // banner: a small trust/contact strip under the headline — sponsored,
+  // duka and kijani's "banner/promo slot". There is no separate ad-content
+  // field on the tenant yet, so this surfaces the one thing already true of
+  // every hotspot (M-Pesa checkout) plus the support number when one is set,
+  // rather than inventing content that isn't there.
+  const bannerBlock = t.banner
+    ? `<div class="banner">${supportPhone
+        ? `Need help? <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a> · Secure M-Pesa checkout`
+        : 'Secure M-Pesa checkout &middot; instant activation'}</div>`
+    : '';
 
   // No banner on the preview. The page is shown to operators to judge how it
   // looks, and a notice explaining itself is the first thing they asked to have
@@ -275,6 +324,29 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          white-space:nowrap; color:#fff; background:var(--green); border:0;
          border-radius:8px; cursor:pointer; min-width:96px; }
   .buy:hover { background:var(--greenDark); }
+  /* bigCta templates: the row itself is the button (no separate .buy button
+     rendered inside it), so it needs its own tap affordance and a bigger
+     hit area than a plain list row. */
+  li.plan.bigcta { cursor:pointer; padding:16px 4px; }
+  li.plan.bigcta:active { background:rgba(127,127,127,.08); }
+  .plan .chev { color:var(--muted); font-size:22px; flex:0 0 auto; line-height:1; }
+  /* grid: bundles as self-contained tiles, two per row, instead of full-width
+     rows separated by a bottom border. */
+  .plans.grid { display:grid; grid-template-columns:1fr 1fr; gap:10px;
+                border-top:0; padding-top:0; }
+  .plans.grid .plan { flex-direction:column; align-items:flex-start; gap:6px;
+                       border:1px solid var(--line); border-radius:10px;
+                       padding:12px; }
+  .plans.grid .plan-name { width:100%; }
+  .plans.grid .price { align-self:flex-start; }
+  /* A whole tappable tile doesn't need the ">" affordance the list layout uses. */
+  .plans.grid .chev { display:none; }
+  .codebox { margin:0 0 4px; padding:14px 14px 4px; border-radius:12px;
+             background:var(--card); border:2px solid var(--green); }
+  .banner { margin:0 0 16px; padding:10px 12px; border-radius:10px; font-size:13.5px;
+            text-align:center; background:var(--card); border:1px dashed var(--line);
+            color:var(--muted); }
+  .banner a { font-weight:600; }
   .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
          background:var(--bg); display:none; }
   .pay.on { display:block; }
@@ -338,6 +410,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          still gets a sensible page. -->
     <h1>${esc(headline || company)}</h1>
     <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
+    ${bannerBlock}
     ${previewNote}
     ${errorBlock}
 
@@ -355,6 +428,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       the page is served by the router to a guest who cannot reach anything
       else; an external file would simply not load.
     -->
+    ${codeBoxOpen}
     <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
       <!--
         Where the guest lands once connected. An operator's configured
@@ -371,9 +445,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
+    ${codeBoxClose}
 
     <p class="plans-title">Buy a bundle</p>
-    <ul class="plans">${planCards}</ul>
+    <ul class="${plansClass}">${planCards}</ul>
 
     <!-- Buying happens here rather than on another page. A guest on the walled
          garden can reach this router and their own bank's USSD, and not much
