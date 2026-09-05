@@ -270,6 +270,63 @@ app.post('/api/platform-sms/relay', wrap(async (req, res) => {
   res.status(result.ok ? 200 : 502).json(result);
 }));
 
+/**
+ * Cross-platform SMS *purchase* — the payment half of the relay above. A
+ * sibling deployment's tenant now pays into this platform's own paybill
+ * (its own Daraja app), not its own, on the operator's explicit call that
+ * the money should always land here rather than staying local to the
+ * sibling. Same auth as the relay above; same "no session, no tenant
+ * resolution" mounting.
+ *
+ * This platform's own /api/sms/buy-credits (below, once the tenant resolver
+ * has run) is the same idea for one of *our* tenants — this is that same
+ * flow, just paid for by someone else's customer and reported back to them
+ * instead of credited here.
+ */
+app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
+  const key = req.get('x-platform-api-key');
+  if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const sourceTenantId = String(req.body?.sourceTenantId ?? '').trim();
+  const quantity = Math.round(Number(req.body?.quantity));
+  if (!sourceTenantId || !(quantity > 0)) {
+    return res.status(400).json({ error: 'sourceTenantId and a positive quantity are required' });
+  }
+  let phone = String(req.body?.phone ?? '').trim();
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  const price = Number(cfg?.price_per_credit ?? 2);
+  const amount = Math.round(quantity * price);
+
+  const { rows: [owner] } = await pool.query(
+    "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+  if (!owner) return res.status(503).json({ error: 'Platform billing is not set up yet on this platform.' });
+
+  try {
+    const r = await mpesa.stkPush(owner.tenant_id, {
+      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits (${req.body?.source ?? 'relay'})`,
+    });
+    const checkoutId = r.CheckoutRequestID;
+    if (!checkoutId) {
+      return res.status(502).json({ error: r.errorMessage ?? r.ResponseDescription ?? 'The payment gateway did not respond' });
+    }
+    await pool.query(
+      `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+       values ($1,'daraja',$2,$3,$4,$5)
+       on conflict (tenant_id, provider, checkout_id) do nothing`,
+      [owner.tenant_id, checkoutId, phone, amount,
+       { type: 'sms_credit_relay', source: 'co.ke', source_tenant_id: sourceTenantId, quantity }]);
+    res.json({ checkoutId, amount, quantity });
+  } catch (e) {
+    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
 // ── authentication ────────────────────────────────
 // Mounted before tenant resolution: signing in is how you find out which tenant
 // you belong to, so these routes cannot require one.

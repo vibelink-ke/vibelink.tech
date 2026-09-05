@@ -117,11 +117,17 @@ services:
       # above — the app installs and works fully without it.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
-      # Checked on incoming POST /api/platform-sms/relay — a sibling Vibelink
-      # deployment (vibelink-co-ke) sends its tenants' SMS through this
-      # platform's own gateway account. Unset = the endpoint refuses every
-      # request rather than trusting an unsigned caller.
+      # Checked on incoming POST /api/platform-sms/relay and
+      # /api/platform-sms/buy-credits — a sibling Vibelink deployment
+      # (vibelink-co-ke) sends its tenants' SMS through this platform's own
+      # gateway account and pays for it through this platform's own Daraja
+      # app. Unset = both endpoints refuse every request.
       PLATFORM_SMS_RELAY_KEY: ${PLATFORM_SMS_RELAY_KEY:-}
+      # Where this platform calls back once Safaricom confirms a relayed
+      # SMS-credit purchase — the sibling's own credit-callback route, since
+      # the tenant to credit lives in its database. Money-critical: unset
+      # means a paid tenant over there never gets told they can be credited.
+      SMS_CREDIT_CALLBACK_URL: ${SMS_CREDIT_CALLBACK_URL:-}
       # Deliberately unset: DEV_TENANT would let any unresolved hostname fall
       # through to one tenant's data.
     volumes:

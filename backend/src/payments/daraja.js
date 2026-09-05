@@ -499,6 +499,46 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
     }
 
     /**
+     * The same purchase as sms_credit above, except the tenant to credit
+     * lives in a sibling deployment's own database (vibelink-co-ke today),
+     * not this one — so there is no local tenants row for
+     * platform_sms_balance to land on here. Money still stays on this
+     * platform's own paybill (that is the whole point of this branch
+     * existing rather than the sibling collecting its own); the credit
+     * itself is handed back over the same relay channel, to the sibling's
+     * own /api/platform-sms/credit-callback, authenticated the same way its
+     * own calls to us are.
+     *
+     * Money-critical and best-effort in the same breath: Safaricom has been
+     * paid by the time this runs, so a failed callback here must not be
+     * silent — logged loudly so it can be reconciled by hand — but it also
+     * must not throw and flip this row to 'failed' after a real payment
+     * succeeded, which would be a worse lie than a late credit.
+     */
+    if (p.type === 'sms_credit_relay') {
+      const callbackUrl = process.env.SMS_CREDIT_CALLBACK_URL;
+      if (!callbackUrl || !process.env.PLATFORM_SMS_RELAY_KEY) {
+        console.error('sms_credit_relay: SMS_CREDIT_CALLBACK_URL/PLATFORM_SMS_RELAY_KEY not set — '
+          + `cannot credit ${p.source ?? 'sibling'} tenant ${p.source_tenant_id} for checkout ${checkoutId} `
+          + `(${p.quantity} credits, already paid)`);
+        return;
+      }
+      try {
+        const res = await axios.post(callbackUrl,
+          { sourceTenantId: p.source_tenant_id, quantity: p.quantity, checkoutId, resultDesc: desc },
+          { headers: { 'x-platform-api-key': process.env.PLATFORM_SMS_RELAY_KEY }, timeout: 15000 });
+        if (!res.data?.ok) {
+          console.error('sms_credit_relay: callback to', callbackUrl, 'did not confirm — ',
+            JSON.stringify(res.data ?? '').slice(0, 300), '— checkout', checkoutId, 'already paid');
+        }
+      } catch (e) {
+        console.error('sms_credit_relay: callback to', callbackUrl, 'failed —', e.message,
+          '— checkout', checkoutId, 'already paid, tenant', p.source_tenant_id, 'not yet confirmed credited');
+      }
+      return;
+    }
+
+    /**
      * The amount credited is what we asked the gateway to charge, recorded
      * in stk_requests when the push went out — never tx.amount, whatever
      * the callback claims. bankstk.js's webhook had no signature at all
