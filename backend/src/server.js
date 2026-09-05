@@ -283,6 +283,22 @@ app.post('/api/platform-sms/relay', wrap(async (req, res) => {
  * flow, just paid for by someone else's customer and reported back to them
  * instead of credited here.
  */
+/**
+ * Live price lookup so a sibling deployment can quote the SAME per-credit
+ * price to its own users before they buy, instead of trusting a local copy
+ * of platform_sms_config that can drift out of sync with this platform's
+ * actual price (which is what /api/platform-sms/buy-credits above actually
+ * charges).
+ */
+app.get('/api/platform-sms/price', wrap(async (req, res) => {
+  const key = req.get('x-platform-api-key');
+  if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  res.json({ pricePerCredit: Number(cfg?.price_per_credit ?? 2) });
+}));
+
 app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
   const key = req.get('x-platform-api-key');
   if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {

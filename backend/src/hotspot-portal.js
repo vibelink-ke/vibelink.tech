@@ -354,7 +354,15 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
      rendered inside it), so it needs its own tap affordance and a bigger
      hit area than a plain list row. */
   li.plan.bigcta { cursor:pointer; padding:16px 4px; }
-  li.plan.bigcta:active { background:rgba(127,127,127,.08); }
+  /* bigCta rows carry class="buy" too (see planCards above) purely so the
+     click handler's existing 'was this a buy tap' check keeps working —
+     .buy's solid accent background/text-color rules are NOT wanted here:
+     applied to the whole row they turned every bigCta bundle into a block
+     of solid accent color, and --muted's subtext (tuned for sitting on
+     --card/--bg) read at a barely-legible ~2:1 contrast on top of it. */
+  li.plan.bigcta.buy { background:none; color:var(--ink); border-radius:0; }
+  li.plan.bigcta.buy:hover, li.plan.bigcta.buy:active { background:rgba(127,127,127,.08); }
+  li.plan.bigcta .price { color:var(--green); }
   .plan .chev { color:var(--muted); font-size:22px; flex:0 0 auto; line-height:1; }
   /* grid: bundles as self-contained tiles, two per row, instead of full-width
      rows separated by a bottom border. */
