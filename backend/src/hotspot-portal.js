@@ -76,12 +76,38 @@ const TEMPLATES = {
   bingwa:    { bg: '#1b2430', card: '#1b2430', ink: '#eef2f6', accent: '#c9a227', radius: '14px', bigCta: true, monthlyFirst: true },
 };
 
+/**
+ * White button text on kadogo's mint and sponsored/bingwa's gold measured
+ * under 2.5:1 contrast — well below WCAG's 4.5:1 floor for body text, and
+ * still short even of the 3:1 floor that applies to large/bold UI text —
+ * on the two buttons (Connect, Send M-Pesa request) that matter most on
+ * this entire page. Hardcoding a fixed white next to a per-template accent
+ * was never going to hold for every accent that gets added later, so this
+ * computes it instead: relative luminance (WCAG's own formula) against
+ * both black and white ink, and picks whichever actually contrasts more —
+ * correct for the two failing accents above without needing to also predict
+ * which way any future accent will lean.
+ */
+function bestInkOn(hex) {
+  const n = parseInt(hex.replace('#', ''), 16);
+  const chan = (c) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const r = chan((n >> 16) & 255), g = chan((n >> 8) & 255), b = chan(n & 255);
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const onWhite = 1.05 / (lum + 0.05);
+  const onBlack = (lum + 0.05) / 0.05;
+  return onWhite >= onBlack ? '#ffffff' : '#161a17';
+}
+
 export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
+  const btnInk = bestInkOn(t.accent);
   // bingwa fronts its longest-duration (monthly) plans; every other template
   // keeps whatever order the caller already sorted by (price ascending).
   const orderedPlans = t.monthlyFirst
@@ -271,7 +297,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 <style>
   :root { --ink:${t.ink}; --muted:#8a9186; --line:rgba(128,128,128,.25);
           --green:${t.accent}; --greenDark:${t.accent}; --bg:${t.bg};
-          --card:${t.card}; --rad:${t.radius}; }
+          --card:${t.card}; --rad:${t.radius}; --btnInk:${btnInk}; }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
@@ -303,7 +329,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
      focus, which shoves the form off screen on the phones most guests use. */
   button { width:100%; margin-top:18px; padding:13px; font-size:16px; font-weight:600;
-           color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
+           color:var(--btnInk); background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
   .plans-title { font-size:14px; color:var(--muted); margin:0 0 10px; }
   /* Three parts now, not two: name (grows to fill the row), then price and
@@ -321,7 +347,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
      for Connect. Without them every price button stretched to the full width of
      the card and squeezed the bundle name into a two-line column. */
   .buy { width:auto; margin-top:0; padding:9px 15px; font-size:15px; font-weight:600;
-         white-space:nowrap; color:#fff; background:var(--green); border:0;
+         white-space:nowrap; color:var(--btnInk); background:var(--green); border:0;
          border-radius:8px; cursor:pointer; min-width:96px; }
   .buy:hover { background:var(--greenDark); }
   /* bigCta templates: the row itself is the button (no separate .buy button
@@ -363,7 +389,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          margin:0 0 10px; }
   .msg { padding:7px 10px; border-radius:9px; font-size:14.5px; max-width:85%; }
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
-  .msg.me { background:var(--green); color:#fff; align-self:flex-end; }
+  .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
   .hint { margin:10px 0 0; font-size:14px; color:var(--muted); text-align:center; }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:14px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
