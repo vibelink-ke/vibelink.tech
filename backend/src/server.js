@@ -2599,7 +2599,7 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
  * the RADIUS username for a hotspot session, so it is the join key back to
  * who actually bought it.
  */
-app.get('/api/hotspot/online', wrap(async (req, res) => {
+app.get('/api/hotspot/online', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select l.username as code, l.address, l.router_id, r.name as router_name, l.seen_at,
             v.phone, v.status as voucher_status, p.title as plan_title
@@ -2626,7 +2626,7 @@ app.post('/api/payments/:id/match', async (req, res) => {
 });
 
 // ── hotspot settings (Hotspot -> Settings) ─────────
-app.get('/api/hotspot/settings', async (req, res) => {
+app.get('/api/hotspot/settings', requirePermission('hotspot.view'), async (req, res) => {
   const { rows: [s] } = await pool.query('select * from hotspot_settings where tenant_id=$1', [req.tenant.id]);
   res.json(s ?? {});
 });
@@ -2675,7 +2675,7 @@ function walledGardenWarnings(hosts) {
   return warnings;
 }
 
-app.put('/api/hotspot/settings', async (req, res) => {
+app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, res) => {
   const f = req.body;
   const warnings = Array.isArray(f.walled_garden) ? walledGardenWarnings(f.walled_garden) : [];
   // The only host a guest's browser ever needs pre-auth is this tenant's own
@@ -2720,7 +2720,7 @@ app.put('/api/hotspot/settings', async (req, res) => {
  * settings form back to. Vouchers has never had that form and should not
  * need to fetch and resend fifteen unrelated fields to flip one switch.
  */
-app.patch('/api/hotspot/settings/auto-purge', wrap(async (req, res) => {
+app.patch('/api/hotspot/settings/auto-purge', requirePermission('hotspot.edit'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     `insert into hotspot_settings (tenant_id, auto_purge_vouchers) values ($1,$2)
      on conflict (tenant_id) do update set auto_purge_vouchers=excluded.auto_purge_vouchers
@@ -7127,7 +7127,7 @@ app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res
   res.json(row);
 }));
 
-app.put('/api/plans/:id', wrap(async (req, res) => {
+app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
   const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
@@ -7236,7 +7236,7 @@ app.delete('/api/tariffs/:id', requirePermission('tariffs.delete'), wrap(async (
  * way: radacct for an open, recently-updated session, live_sessions for
  * what a router answered when last asked.
  */
-app.get('/api/vouchers', wrap(async (req, res) => {
+app.get('/api/vouchers', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select v.*,
            /**
@@ -7328,7 +7328,7 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
   res.json({ deleted: rowCount, revoked });
 }));
 
-app.post('/api/vouchers/purge-expired', wrap(async (req, res) => {
+app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { rows: doomed } = await pool.query(
     "select code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
   const { rowCount } = await pool.query(
