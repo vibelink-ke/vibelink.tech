@@ -379,6 +379,38 @@ async function sendViaPlatform(tenantId, to, body) {
   }
 }
 
+/**
+ * The bare platform-gateway send, with no tenant or balance involved — the
+ * dispatch half of sendViaPlatform above, pulled out so /api/platform-sms/relay
+ * (server.js) can reuse it for a sibling deployment's tenants too.
+ *
+ * vibelink-co-ke tenants buy SMS credit through their own local Daraja app
+ * (their own money, their own STK push, their own platform_sms_balance
+ * column) but the message itself now sends through this platform's own
+ * gateway account — one shared bill instead of every deployment needing its
+ * own gateway configured. Balance-checking and decrementing stay entirely on
+ * the caller's side; this function only ever dispatches.
+ */
+export async function sendViaPlatformGateway(to, body, source = 'local') {
+  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
+    console.warn('platform sms gateway not configured — relay request from', source, 'dropped');
+    return { ok: false, error: 'platform gateway not configured' };
+  }
+  try {
+    const res = await PROVIDERS[cfg.provider](cfg.credentials, to, body);
+    if (!accepted(cfg.provider, res)) {
+      console.warn('platform sms gateway rejected relay send from', source, JSON.stringify(res?.data ?? '').slice(0, 200));
+      return { ok: false, error: 'gateway rejected the message' };
+    }
+    console.log('platform sms relay sent for', source, '→', to);
+    return { ok: true, provider: `platform:${cfg.provider}` };
+  } catch (e) {
+    console.error('platform sms relay failed for', source, '—', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
 /** Its own row (provider='twilio_whatsapp'), read directly rather than through the failover list above. */
 async function sendWhatsApp(tenantId, to, template, vars) {
   const { rows: [g] } = await pool.query(

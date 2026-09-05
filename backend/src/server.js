@@ -242,6 +242,34 @@ const wrap = (fn) => (req, res) =>
     if (!res.headersSent) res.status(500).json({ error: msg });
   });
 
+/**
+ * Cross-platform SMS relay for a sibling Vibelink deployment (vibelink-co-ke
+ * today, any future one the same way). That deployment's tenants buy SMS
+ * credit through their own local Daraja app — their own money, their own
+ * STK push, tracked in their own database — but the message itself sends
+ * through this platform's own gateway account instead of needing a second
+ * gateway configured over there, one shared bill either way.
+ *
+ * No session, no tenant resolution — mounted here, above both, the same as
+ * /webhooks/* above it: a machine-to-machine call from a server we trust,
+ * authenticated by a shared secret instead of a login. PLATFORM_SMS_RELAY_KEY
+ * unset means this endpoint refuses every request, not "trust nobody checks."
+ */
+app.post('/api/platform-sms/relay', wrap(async (req, res) => {
+  const key = req.get('x-platform-api-key');
+  if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  const to = String(req.body?.to ?? '').trim();
+  const body = String(req.body?.body ?? '').trim();
+  const source = String(req.body?.source ?? 'unknown').slice(0, 100);
+  if (!to || !body) return res.status(400).json({ error: 'to and body are required' });
+
+  const sms = await import('./sms.js');
+  const result = await sms.sendViaPlatformGateway(to, body, source);
+  res.status(result.ok ? 200 : 502).json(result);
+}));
+
 // ── authentication ────────────────────────────────
 // Mounted before tenant resolution: signing in is how you find out which tenant
 // you belong to, so these routes cannot require one.
