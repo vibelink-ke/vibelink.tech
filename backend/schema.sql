@@ -1996,3 +1996,13 @@ alter table tenants add column if not exists settlement_till text;
 alter table tenants add column if not exists settlement_bank_name text;
 alter table tenants add column if not exists settlement_bank_paybill text;
 alter table tenants add column if not exists settlement_account_number text;
+
+-- A plan belongs to every site by default (router_id null) — the owner's
+-- call to restrict a PPPoE tariff or hotspot bundle to one physical router,
+-- or leave it shared across all of them, same knob either way. visible is
+-- hotspot-only in the UI: a bundle the operator isn't ready to sell yet, or
+-- one kept for internal use, stays off the guest-facing captive portal
+-- without deleting it (PPPoE has no public listing to hide from, so it is
+-- simply never surfaced there).
+alter table plans add column if not exists router_id uuid references routers on delete set null;
+alter table plans add column if not exists visible boolean not null default true;

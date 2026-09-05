@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { color, font, kes } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
-import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table } from '../../ui/primitives';
+import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
-const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited' };
+const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited', siteRouterId: '', visible: true };
 const UNITS = ['Minutes', 'Hours', 'Days', 'Weeks', 'Months'];
 const CAPS = ['Unlimited', '250 MB', '500 MB', '1 GB', '2 GB', '5 GB'];
 
@@ -50,6 +50,12 @@ export default function HotspotPlans() {
   const [viewing, setViewing] = useState(null);
   const [editing, setEditing] = useState(null);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const setRaw = (k) => (val) => setF((s) => ({ ...s, [k]: val }));
+
+  const routerById = useMemo(
+    () => Object.fromEntries((store.routers ?? []).map((r) => [r.id, r])),
+    [store.routers]
+  );
 
   const payload = (v) => ({
     title: v.title,
@@ -59,6 +65,8 @@ export default function HotspotPlans() {
     rateDown: (Number(v.speed) || 0) * 1000,
     rateUp: (Number(v.speed) || 0) * 1000,
     dataCapMb: CAP_MB[v.dataCap] ?? null,
+    routerId: v.siteRouterId || null,
+    visible: !!v.visible,
   });
 
   const create = async () => {
@@ -109,10 +117,14 @@ export default function HotspotPlans() {
     devices: p.devices ?? 1,
     speed: p.rate_down ? p.rate_down / 1000 : '',
     dataCap: mbToCapLabel(p.data_cap_mb),
+    siteRouterId: p.router_id ?? '',
+    visible: p.visible ?? true,
     ...minutesToCountUnit(p.duration_min),
   });
 
-  const fields = (v, update) => (
+  const siteLabel = (p) => (p.router_id ? (routerById[p.router_id]?.name ?? 'Unknown site') : 'All sites');
+
+  const fields = (v, update, updateRaw) => (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
       <Field label="Title" span={2}>
         <Input value={v.title} onChange={update('title')} placeholder="3 hours unlimited" />
@@ -135,6 +147,21 @@ export default function HotspotPlans() {
       <Field label="Data cap">
         <Select value={v.dataCap} onChange={update('dataCap')} options={CAPS} />
       </Field>
+      <Field label="Site" span={2}>
+        <Select
+          value={v.siteRouterId}
+          onChange={update('siteRouterId')}
+          options={[{ value: '', label: 'All sites (shared)' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+        />
+      </Field>
+      <div style={{ gridColumn: '1 / -1' }}>
+        <Toggle
+          checked={v.visible}
+          onChange={updateRaw('visible')}
+          label="Visible to guests"
+          detail="Shown on the captive portal's price list. Turn off to keep a bundle on hold without deleting it."
+        />
+      </div>
     </div>
   );
 
@@ -161,6 +188,14 @@ export default function HotspotPlans() {
               key: 'data_cap_mb',
               label: 'Data cap',
               render: (p) => (p.data_cap_mb ? `${p.data_cap_mb} MB` : <span style={{ color: color.muted }}>Unlimited</span>),
+            },
+            { key: 'site', label: 'Site', render: (p) => <span style={{ color: p.router_id ? color.ink : color.muted }}>{siteLabel(p)}</span> },
+            {
+              key: 'visible',
+              label: 'Visible',
+              render: (p) => (p.visible === false
+                ? <span style={{ color: color.muted }}>Hidden</span>
+                : <span style={{ color: color.green }}>Public</span>),
             },
             {
               key: 'act',
@@ -191,7 +226,7 @@ export default function HotspotPlans() {
           </>
         }
       >
-        {fields(f, set)}
+        {fields(f, set, setRaw)}
       </Modal>
 
       <Drawer open={!!viewing} title={viewing?.title} onClose={() => setViewing(null)}>
@@ -202,6 +237,8 @@ export default function HotspotPlans() {
             <KV k="Devices" v={viewing.devices ?? 1} />
             <KV k="Speed" v={viewing.rate_down ? `${Math.round(viewing.rate_down / 1000)} Mbps` : '—'} />
             <KV k="Data cap" v={viewing.data_cap_mb ? `${viewing.data_cap_mb} MB` : 'Unlimited'} />
+            <KV k="Site" v={siteLabel(viewing)} />
+            <KV k="Visible to guests" v={viewing.visible === false ? 'No — hidden from the portal' : 'Yes'} />
             <KV k="Active" v={viewing.active ? 'Yes' : 'No'} />
             <KV k="Rate limit sent to RADIUS" v={`${viewing.rate_up ?? 0}k/${viewing.rate_down ?? 0}k`} />
           </>
@@ -219,7 +256,11 @@ export default function HotspotPlans() {
           </>
         }
       >
-        {editing && fields(editing, (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value })))}
+        {editing && fields(
+          editing,
+          (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value })),
+          (k) => (val) => setEditing((s) => ({ ...s, [k]: val }))
+        )}
       </Modal>
     </Screen>
   );

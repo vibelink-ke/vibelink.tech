@@ -641,10 +641,20 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     }));
   }
 
+  // Parsed ahead of the plans query below so a site-restricted bundle can be
+  // filtered in — see the routerId field further down for what these two
+  // query params (?router= from a router-fetched copy, ?siteRouter= from the
+  // meta-refresh redirect) each mean and why forRouter must not fire on a
+  // guest's own browser.
+  const loginRouterId = req.query.router && req.query.router !== '1' ? String(req.query.router)
+    : req.query.siteRouter ? String(req.query.siteRouter) : null;
+
   const { rows: plans } = await pool.query(
     `select id, title, price, duration_min, rate_down from plans
-      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
-    [tenant.id]);
+      where tenant_id=$1 and service='hotspot' and active and visible
+        and (router_id is null or router_id=$2)
+      order by price limit 6`,
+    [tenant.id, loginRouterId]);
 
   // Branding and behaviour the operator controls from Hotspot -> Settings.
   // redirect_url was configurable there but never read here — set, saved,
@@ -679,8 +689,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // (loginPage's routerRedirect) without ever setting forRouter — that
     // redirect target is fetched by a guest's own browser, not RouterOS, so
     // it must never re-trigger the very redirect that sent it here.
-    routerId: req.query.router && req.query.router !== '1' ? String(req.query.router)
-      : req.query.siteRouter ? String(req.query.siteRouter) : null,
+    routerId: loginRouterId,
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
@@ -1154,9 +1163,14 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
 
+  // No single site is known yet at this point — a device can be seen through
+  // any of the tenant's hotspot routers below — so only bundles shared across
+  // every site are safe to offer here; one restricted to a specific site
+  // would be offering the wrong site's pricing to a guest we can't place yet.
   const { rows: plans } = await pool.query(
     `select id, title, price, duration_min, rate_down from plans
-      where tenant_id=$1 and service='hotspot' and active order by price limit 6`,
+      where tenant_id=$1 and service='hotspot' and active and visible and router_id is null
+      order by price limit 6`,
     [tenant.id]);
 
   const { rows: routers } = await pool.query(
@@ -2291,7 +2305,8 @@ app.get('/portal/plans-pppoe', wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, title, price, rate_down, rate_up from plans
       where tenant_id=$1 and service='pppoe' and active
-      order by price`, [s.tenant_id]);
+        and (router_id is null or router_id=$2)
+      order by price`, [s.tenant_id, s.router_id]);
   res.json(rows);
 }));
 
@@ -2332,9 +2347,15 @@ app.post('/portal/request-plan-change', wrap(async (req, res) => {
 
 // ── captive portal ────────────────────────────────
 app.get('/portal/plans', async (req, res) => {
+  // ?router optional and best-effort, same as /hotspot/login's — a caller
+  // that doesn't know its site only ever sees bundles shared across all of them.
+  const routerId = req.query.router && req.query.router !== '1' ? String(req.query.router) : null;
   const { rows } = await pool.query(
-    "select id, title, price, duration_min, devices, rate_down, data_cap_mb from plans where tenant_id=$1 and service='hotspot' and active order by price",
-    [req.tenant.id]);
+    `select id, title, price, duration_min, devices, rate_down, data_cap_mb from plans
+      where tenant_id=$1 and service='hotspot' and active and visible
+        and (router_id is null or router_id=$2)
+      order by price`,
+    [req.tenant.id, routerId]);
   res.json(rows);
 });
 
@@ -7157,18 +7178,19 @@ app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) =
 
 app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
-          rateDown, rateUp, dataCapMb, radiusProfile } = req.body;
+          rateDown, rateUp, dataCapMb, radiusProfile, routerId, visible } = req.body;
   const { rows: [row] } = await pool.query(
     `insert into plans (tenant_id, service, title, price, duration_min, devices,
-       rate_down, rate_up, data_cap_mb, radius_profile)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+       rate_down, rate_up, data_cap_mb, radius_profile, router_id, visible)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
-     rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`]);
+     rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`,
+     routerId || null, visible ?? true]);
   res.json(row);
 }));
 
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
-  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb } = req.body ?? {};
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerId, visible } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
        title        = coalesce(nullif($3,''), title),
@@ -7179,11 +7201,17 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
        rate_up      = coalesce($8, rate_up),
        -- Explicit null clears the cap, so distinguish "not sent" from "cleared".
        data_cap_mb  = case when $9::text = 'keep' then data_cap_mb else $10::bigint end,
+       -- Same "keep" trick for router_id: an explicit null here means "make
+       -- this shared across every site again," not "field wasn't sent."
+       router_id    = case when $11::text = 'keep' then router_id else $12::uuid end,
+       visible      = coalesce($13, visible),
        updated_at   = now()
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
      devices ?? null, rateDown ?? null, rateUp ?? null,
-     dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null]);
+     dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
+     routerId === undefined ? 'keep' : 'set', routerId || null,
+     visible ?? null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
   res.json(row);
 }));

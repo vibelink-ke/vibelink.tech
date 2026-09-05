@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { color, font, kes, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Table } from '../ui/primitives';
+import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table } from '../ui/primitives';
 
 /**
  * PPPoE tariffs — which are rows in `plans`, not the old `tariffs` table.
@@ -25,7 +25,7 @@ const PERIODS = [
   { value: 1440, label: 'Daily' },
 ];
 
-const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200 };
+const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterId: '' };
 
 const mbps = (kbps) => (kbps ? Math.round(kbps / 1000) : 0);
 const speed = (p) => (p.rate_down ? `${mbps(p.rate_down)}/${mbps(p.rate_up)} Mbps` : '—');
@@ -58,6 +58,11 @@ export default function Tariffs() {
     return out;
   }, [store.clients]);
 
+  const routerById = useMemo(
+    () => Object.fromEntries((store.routers ?? []).map((r) => [r.id, r])),
+    [store.routers]
+  );
+
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const payload = (v) => ({
@@ -67,6 +72,7 @@ export default function Tariffs() {
     rateDown: Number(v.speedDown) * 1000 || 0,
     rateUp: Number(v.speedUp) * 1000 || 0,
     dataCapMb: v.capGb === '' || v.capGb == null ? null : Math.round(Number(v.capGb) * 1024),
+    routerId: v.siteRouterId || null,
   });
 
   const create = async () => {
@@ -126,7 +132,10 @@ export default function Tariffs() {
     speedUp: p.rate_up ? p.rate_up / 1000 : '',
     capGb: p.data_cap_mb ? Math.round(p.data_cap_mb / 1024) : '',
     durationMin: p.duration_min ?? 43200,
+    siteRouterId: p.router_id ?? '',
   });
+
+  const siteLabel = (p) => (p.router_id ? (routerById[p.router_id]?.name ?? 'Unknown site') : 'All sites');
 
   const fields = (v, update) => (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -147,12 +156,20 @@ export default function Tariffs() {
       <Field label="Upload (Mbps)">
         <Input value={v.speedUp} onChange={update('speedUp')} type="number" />
       </Field>
-      <Field label="Data cap (GB)" span={2}>
+      <Field label="Data cap (GB)">
         <Input value={v.capGb} onChange={update('capGb')} type="number" placeholder="leave blank for uncapped" />
+      </Field>
+      <Field label="Site" span={2}>
+        <Select
+          value={v.siteRouterId}
+          onChange={update('siteRouterId')}
+          options={[{ value: '', label: 'All sites (shared)' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+        />
       </Field>
       <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
         Speeds become the Mikrotik-Rate-Limit sent to the router when a payment activates the
-        subscriber. The cap is what Fair use policy measures against.
+        subscriber. The cap is what Fair use policy measures against. Site restricts this tariff to
+        one router's clients — leave it on "All sites" to offer it everywhere.
       </span>
     </div>
   );
@@ -179,6 +196,7 @@ export default function Tariffs() {
               { key: 'period', label: 'Period', render: (p) => periodLabel(p.duration_min) },
               { key: 'speed', label: 'Speed', render: speed },
               { key: 'cap', label: 'Data cap', render: (p) => <span style={{ color: color.neutralInk }}>{capLabel(p)}</span> },
+              { key: 'site', label: 'Site', render: (p) => <span style={{ color: p.router_id ? color.ink : color.muted }}>{siteLabel(p)}</span> },
               { key: 'subs', label: 'Subscribers', render: (p) => <span style={{ fontFamily: font.mono }}>{subsPerPlan[p.id] ?? 0}</span> },
               {
                 key: 'act',
@@ -221,6 +239,7 @@ export default function Tariffs() {
             <KV k="Download" v={viewing.rate_down ? `${mbps(viewing.rate_down)} Mbps` : '—'} />
             <KV k="Upload" v={viewing.rate_up ? `${mbps(viewing.rate_up)} Mbps` : '—'} />
             <KV k="Data cap" v={capLabel(viewing)} />
+            <KV k="Site" v={siteLabel(viewing)} />
             <KV k="Subscribers" v={subsPerPlan[viewing.id] ?? 0} />
             <KV k="Active" v={viewing.active ? 'Yes' : 'No'} />
             <KV k="Rate limit sent to RADIUS" v={`${viewing.rate_up ?? 0}k/${viewing.rate_down ?? 0}k`} />
