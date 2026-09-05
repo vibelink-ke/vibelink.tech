@@ -61,6 +61,7 @@ export const api = {
   subscribers: () => get('/api/subscribers'),
   createSubscriber: (s) => post('/api/subscribers', s),
   updateSubscriber: (id, patchBody) => patch(`/api/subscribers/${id}`, patchBody),
+  adjustWallet: (id, body) => post(`/api/subscribers/${id}/wallet-adjustment`, body),
   deleteSubscriber: (id) => del(`/api/subscribers/${id}`),
   setSubscriberAccess: (id, action) => post(`/api/subscribers/${id}/access`, { action }),
   clearMacLock: (id) => post(`/api/subscribers/${id}/clear-mac-lock`, {}),

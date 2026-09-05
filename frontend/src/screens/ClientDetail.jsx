@@ -136,6 +136,41 @@ export default function ClientDetail() {
   const [tagDraft, setTagDraft] = useState('');
   const [portalPassword, setPortalPassword] = useState(undefined);   // undefined = not fetched yet
 
+  // Separate from the Edit-client modal's plain "Wallet balance" field
+  // (which overwrites the number outright) — this adds or subtracts a
+  // deliberate amount with a reason attached, for the cases that actually
+  // need an audit trail: a refund, a correction, a deduction.
+  const [walletAdjust, setWalletAdjust] = useState(null);   // { amount: '', reason: '' } while the modal is open
+  const [walletBusy, setWalletBusy] = useState(false);
+  const [walletError, setWalletError] = useState('');
+
+  async function submitWalletAdjust() {
+    const amount = Number(walletAdjust.amount);
+    if (!Number.isFinite(amount) || amount === 0) {
+      setWalletError('Enter a non-zero amount to add or subtract.');
+      return;
+    }
+    if (!walletAdjust.reason.trim()) {
+      setWalletError('A reason is required.');
+      return;
+    }
+    setWalletBusy(true);
+    setWalletError('');
+    try {
+      const { wallet_balance } = await api.adjustWallet(client.id, { amount, reason: walletAdjust.reason.trim() });
+      // Same sibling-refresh every line on this account_code needs after any
+      // wallet change — mirrors saveEdit's own refresh elsewhere in this file.
+      store.setCollection('clients', (cs) => cs.map((c) => (
+        c.account_code === client.account_code ? { ...c, wallet_balance } : c)));
+      store.toast(`Wallet ${amount > 0 ? 'credited' : 'debited'} KES ${Math.abs(amount).toLocaleString('en-KE')}`);
+      setWalletAdjust(null);
+    } catch (e) {
+      setWalletError(e.message || 'Could not adjust the wallet.');
+    } finally {
+      setWalletBusy(false);
+    }
+  }
+
   useEffect(() => {
     if (!client) { setInfoForm(null); return; }
     const [firstName = '', ...rest] = (client.name ?? '').trim().split(/\s+/);
@@ -435,7 +470,13 @@ export default function ClientDetail() {
           Wallet{' '}
           <span style={{ fontWeight: 700, color: color.ink }}>
             KES {kes(client.wallet_balance)}
-          </span>
+          </span>{' '}
+          <a
+            onClick={() => { setWalletAdjust({ amount: '', reason: '' }); setWalletError(''); }}
+            style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}
+          >
+            Adjust
+          </a>
         </span>
       </div>
 
@@ -1034,6 +1075,42 @@ export default function ClientDetail() {
                 ))}
               </div>
             </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!walletAdjust}
+        title="Adjust wallet"
+        onClose={() => { if (!walletBusy) setWalletAdjust(null); }}
+        footer={
+          <>
+            <Button onClick={() => setWalletAdjust(null)} disabled={walletBusy}>Cancel</Button>
+            <Button variant="primary" onClick={submitWalletAdjust} disabled={walletBusy}>
+              {walletBusy ? 'Saving…' : 'Save adjustment'}
+            </Button>
+          </>
+        }
+      >
+        {walletAdjust && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <Field label="Amount (KES)" hint="Positive to credit, negative to debit — shared across every line on this account">
+              <Input
+                type="number"
+                value={walletAdjust.amount}
+                onChange={(e) => setWalletAdjust((w) => ({ ...w, amount: e.target.value }))}
+                placeholder="e.g. 500 or -200"
+                autoFocus
+              />
+            </Field>
+            <Field label="Reason" hint="Recorded on the account's activity log">
+              <Input
+                value={walletAdjust.reason}
+                onChange={(e) => setWalletAdjust((w) => ({ ...w, reason: e.target.value }))}
+                placeholder="e.g. Goodwill refund for outage on 3 Sep"
+              />
+            </Field>
+            {walletError && <div style={{ fontSize: 12.5, color: color.rust }}>{walletError}</div>}
           </div>
         )}
       </Modal>

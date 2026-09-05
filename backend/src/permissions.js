@@ -18,6 +18,9 @@ export const DEFAULT_PERMISSIONS = {
   'clients.edit':    { owner: true, cashier: false, technician: false, support: false, sales: false },
   'clients.suspend': { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'clients.delete':  { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // Real money moving with no payment behind it — same trust level as
+  // payments.apply, not clients.edit (which a cashier can't touch either).
+  'clients.wallet_adjust': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
   'routers.view':      { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'routers.edit':      { owner: true, cashier: false, technician: true,  support: false, sales: false },
@@ -88,6 +91,7 @@ export const PERMISSION_META = [
   { key: 'clients.edit',    page: 'Clients',          action: 'Edit' },
   { key: 'clients.suspend', page: 'Clients',          action: 'Pause / suspend / resume' },
   { key: 'clients.delete',  page: 'Clients',          action: 'Delete' },
+  { key: 'clients.wallet_adjust', page: 'Clients',    action: 'Adjust wallet balance' },
   { key: 'routers.view',      page: 'Routers',         action: 'View' },
   { key: 'routers.edit',      page: 'Routers',         action: 'Edit' },
   { key: 'routers.configure', page: 'Routers',         action: 'Push config to a router' },

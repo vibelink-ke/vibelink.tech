@@ -6373,6 +6373,51 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
   for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});
 }
 
+/**
+ * Add or subtract from a wallet, with a reason — not the same thing as the
+ * plain "Wallet balance" field on the Edit-client modal (PATCH /:id below,
+ * `credit`), which overwrites the number outright with no before/after and
+ * no lock against a payment landing on the same account mid-edit. This is
+ * for the case that actually needs care: a goodwill refund, correcting an
+ * operator's mistake, deducting for damaged equipment — anywhere "what
+ * changed and why" matters as much as the new number.
+ */
+app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wallet_adjust'), wrap(async (req, res) => {
+  const amount = Number(req.body?.amount);
+  const reason = String(req.body?.reason ?? '').trim();
+  if (!Number.isFinite(amount) || amount === 0) {
+    return res.status(400).json({ error: 'Enter a non-zero amount to add or subtract.' });
+  }
+  if (!reason) return res.status(400).json({ error: 'A reason is required for a manual wallet adjustment.' });
+
+  const { rows: [sub] } = await pool.query(
+    'select id, account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!sub) return res.status(404).json({ error: 'not found' });
+
+  const { before, after } = await withTenant(req.tenant.id, async (c) => {
+    // Same lock-via-upsert idiom settleSubscriber uses in apply.js: the
+    // UPDATE branch takes the same row lock `for update` would, so this can
+    // never race a payment landing on the same account mid-adjustment.
+    const { rows: [wallet] } = await c.query(
+      `insert into account_wallets (tenant_id, account_code, balance)
+       values ($1,$2,0)
+       on conflict (tenant_id, account_code) do update set balance = account_wallets.balance
+       returning balance`,
+      [req.tenant.id, sub.account_code]);
+    const before = Number(wallet.balance);
+    const after = before + amount;
+    await c.query(
+      'update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2',
+      [req.tenant.id, sub.account_code, after]);
+    return { before, after };
+  });
+
+  await logActivity(req, sub.id, sub.account_code, 'Wallet adjusted',
+    `${amount > 0 ? '+' : ''}KES ${amount.toFixed(2)} (${before.toFixed(2)} → ${after.toFixed(2)}) — ${reason}`);
+
+  res.json({ wallet_balance: after });
+}));
+
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
