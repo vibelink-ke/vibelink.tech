@@ -6080,7 +6080,7 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
   }
 
   const { rows: [existing] } = await pool.query(
-    'select locked, router_id from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    'select locked, router_id, service from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!existing) return res.status(404).json({ error: 'No such pool' });
   // Unassigning a locked pool's router is how the "can't be deleted" guard
   // gets sidestepped — set it, unset it, then delete an unlocked orphan. The
@@ -6100,6 +6100,20 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, name ?? '', cidr ?? '',
      routerIdInput === undefined ? null : String(routerIdInput), service ?? '', purpose ?? '']);
+
+  // Either end of a changed assignment needs the router it now applies (or
+  // no longer applies) to told, not just the pool's own new router_id.
+  if (existing.service === 'pppoe' || p.service === 'pppoe') {
+    const targets = new Set();
+    if (p.service === 'pppoe') { if (p.router_id) targets.add(p.router_id); else targets.add(null); }
+    if (existing.service === 'pppoe' && existing.router_id !== p.router_id) {
+      if (existing.router_id) targets.add(existing.router_id); else targets.add(null);
+    }
+    for (const routerId of targets) {
+      if (routerId) repushPppoePool(req.tenant.id, routerId);
+      else repushPppoePoolToFallbackRouters(req.tenant.id);
+    }
+  }
   res.json(p);
 }));
 
@@ -6260,6 +6274,95 @@ function tunnelConflict(cidr, tunnelSubnet, serverIp) {
   return null;
 }
 
+/** Same cidr->{gateway,range} arithmetic the full Configure push uses (server.js's autoconfig route). */
+function poolFromCidr(cidr) {
+  if (!cidr) return null;
+  const [base, bits] = String(cidr).split('/');
+  const o = base.split('.').map(Number);
+  const toInt = (a) => ((a[0] << 24) | (a[1] << 16) | (a[2] << 8) | a[3]) >>> 0;
+  const toStr = (n) => [24, 16, 8, 0].map((sh) => (n >>> sh) & 255).join('.');
+  const mask = (0xffffffff << (32 - Number(bits))) >>> 0;
+  const net = (toInt(o) & mask) >>> 0;
+  const broadcast = (net | (~mask >>> 0)) >>> 0;
+  if (broadcast - net < 3) return null;
+  return { gateway: toStr(net + 1), range: `${toStr(net + 2)}-${toStr(broadcast - 1)}` };
+}
+
+/**
+ * Re-apply just the PPPoE pool/gateway/NAT to a router when the Networks IP
+ * Pool feeding it changes — so a corrected range takes effect immediately
+ * instead of only at the next manual Configure, and a subscriber's address
+ * (framedAddress in radius.js, which trusts routers.pppoe_pool) stops being
+ * silently rejected and reassigned against a range the router was never
+ * actually told about.
+ *
+ * Only the addressing steps, not a full Configure (bridge, RADIUS, hotspot,
+ * DNS proxy, walled garden, login page) — those have nothing to do with a
+ * pool range changing. Skips a router with no stored service account
+ * (never Configured — nothing to push to yet) or one whose PPPoE server was
+ * never set up, rather than starting one from scratch unattended.
+ */
+async function repushPppoePool(tenantId, routerId) {
+  let conn;
+  try {
+    const { rows: [r] } = await pool.query(
+      `select id, host, api_port, service_user, service_password_enc from routers
+        where id=$1 and tenant_id=$2 and service_user is not null`, [routerId, tenantId]);
+    if (!r) return;
+
+    const { rows: [confPool] } = await pool.query(
+      `select cidr from ip_pools where tenant_id=$1 and router_id=$2 and service='pppoe' limit 1`,
+      [tenantId, routerId]);
+
+    const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
+    const { SERVER_IP } = await import('./tunnel.js');
+    const unsafe = tunnelConflict(confPool?.cidr, t?.tunnel_subnet, SERVER_IP);
+    if (unsafe) { console.error('auto-repush pppoe pool', routerId, '→ refused:', unsafe); return; }
+
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const password = secrets.decrypt(r.service_password_enc);
+    conn = await ros.connect({
+      host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+      user: r.service_user, password, timeoutSec: 15,
+    });
+
+    // No PPPoE server on this router yet means it has never been through the
+    // full Configure — same "nothing to push to yet" reasoning as the
+    // missing-service-account check above, just discovered a step later.
+    const existing = (await conn.write('/interface/pppoe-server/server/print', []))[0];
+    if (!existing) { console.warn('auto-repush pppoe pool', routerId, '→ skipped: no PPPoE server configured yet'); return; }
+
+    const chosen = poolFromCidr(confPool?.cidr);
+    await ros.applyPppoeServer(conn, {
+      bridge: existing.interface, gateway: chosen?.gateway ?? null, natSubnet: confPool?.cidr ?? null,
+    });
+    await pool.query('update routers set pppoe_pool=$2 where id=$1', [routerId, confPool?.cidr ?? null]);
+    console.log('auto-repush pppoe pool', routerId, '→ ok:', confPool?.cidr ?? '(cleared)');
+  } catch (e) {
+    console.error('auto-repush pppoe pool', routerId, '→ failed:', e.message);
+  } finally {
+    if (conn) { const ros = await import('./routeros.js'); try { ros.close(conn); } catch { /* already gone */ } }
+  }
+}
+
+/**
+ * Every PPPoE-capable, already-Configured router that has no pool of its
+ * own for this service — the same "or router_id is null" fallback the
+ * Configure push itself uses (see poolFor in radius.js and the query this
+ * mirrors above) — so a change to the tenant-wide default pool reaches
+ * every router actually relying on it, not just one.
+ */
+async function repushPppoePoolToFallbackRouters(tenantId) {
+  const { rows: routers } = await pool.query(
+    `select r.id from routers r
+      where r.tenant_id=$1 and r.role in ('pppoe','both') and r.service_user is not null
+        and not exists (
+          select 1 from ip_pools p where p.tenant_id=$1 and p.router_id=r.id and p.service='pppoe')`,
+    [tenantId]);
+  for (const r of routers) await repushPppoePool(tenantId, r.id);
+}
+
 app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe', purpose = 'normal' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
@@ -6301,6 +6404,11 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
   const { rows: [p] } = await pool.query(
     'insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose) values ($1,$2,$3,$4,$5,$6) returning *',
     [req.tenant.id, name, cidr, routerId ?? null, service, purpose]);
+
+  if (service === 'pppoe') {
+    if (routerId) repushPppoePool(req.tenant.id, routerId);
+    else repushPppoePoolToFallbackRouters(req.tenant.id);
+  }
   res.json(p);
 }));
 
