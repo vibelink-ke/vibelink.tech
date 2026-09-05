@@ -489,7 +489,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       only once the guest already has a working code, which the page itself
       asks for, so nothing here needs to know it in advance.
     -->
-    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices">Adding a TV or console?</a></p>
+    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}">Adding a TV or console?</a></p>
     <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
     <div class="chat" id="chat">
       <div class="log" id="chatLog"></div>
@@ -916,7 +916,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
  * and cached by the router the way the login page is, so none of RouterOS's
  * $(...) substitution applies here.
  */
-export function devicesPage({ company = 'WiFi', apiBase = '' }) {
+export function devicesPage({ company = 'WiFi', apiBase = '', routerId = null }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1010,6 +1010,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   <script>
   (function () {
     var API = ${JSON.stringify(apiBase)};
+    // Carried straight through to /hotspot/tv-options and /hotspot/tv-buy —
+    // see that route's own comment for why this is what keeps a guest at one
+    // site from ever seeing another site's devices.
+    var ROUTER_ID = ${JSON.stringify(routerId)};
     var devices = [], plans = [];
     var pickedDevice = null, pickedPlan = null;
 
@@ -1034,7 +1038,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       });
     }
 
-    fetch(API + '/hotspot/tv-options')
+    fetch(API + '/hotspot/tv-options' + (ROUTER_ID ? '?router=' + encodeURIComponent(ROUTER_ID) : ''))
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
       .then(function (res) {
         document.getElementById('loading').style.display = 'none';

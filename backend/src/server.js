@@ -841,6 +841,10 @@ app.get('/hotspot/devices', wrap(async (req, res) => {
   res.type('html').send(devicesPage({
     company: tenant?.name ?? 'WiFi',
     apiBase: tenant?.subdomain ? `https://${tenant.subdomain}.${root}` : '',
+    // Carried from the login page's own "Adding a TV or console?" link —
+    // see /hotspot/tv-options for why this scopes the device list and the
+    // bundles offered to just this one site.
+    routerId: req.query.router && req.query.router !== '1' ? String(req.query.router) : null,
   }));
 }));
 
@@ -1232,38 +1236,52 @@ async function voucherAndRouter(tenantId, code) {
 /**
  * Everything the "Adding a TV or console?" page needs to sell a bundle
  * straight to a device that was never going to type a code in — every
- * device currently seen on any of this tenant's hotspot routers, and every
- * bundle on sale, in one call, before any payment has happened at all.
+ * device seen at the guest's own site, and every bundle on sale there, in
+ * one call, before any payment has happened at all.
  *
- * Every one of the tenant's hotspot-capable routers is queried and merged
- * rather than picking "the" router, because nothing about this request says
- * which physical site the guest is standing at. In practice a MAC only ever
- * shows up on the one router it is actually near — hotspot sites are
- * separate physical locations, not bridged together — so merging is safe;
- * router_id travels with each device so the purchase below knows which box
- * to bind it on once it is chosen. One unreachable router logs and is
- * skipped rather than blanking the whole list for every other site.
+ * ?router (carried from the login page's own ?router=/?siteRouter=, same as
+ * /hotspot/login) scopes both halves to that one site when known: a
+ * customer standing at Site A adding a TV must not see Site B's other
+ * devices as candidates, and pricing has to match the plans that site
+ * actually sells, not just whatever happens to be shared everywhere.
+ * Absent (a copy opened with no site context — a stale link, a direct
+ * visit), this falls back to the old behaviour: every one of the tenant's
+ * hotspot-capable routers queried and merged, and only bundles shared
+ * across every site offered, since nothing says which one this guest is
+ * actually at. One unreachable router logs and is skipped rather than
+ * blanking the whole list for every other site.
  */
 app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
 
-  // No single site is known yet at this point — a device can be seen through
-  // any of the tenant's hotspot routers below — so only bundles shared across
-  // every site are safe to offer here; one restricted to a specific site
-  // would be offering the wrong site's pricing to a guest we can't place yet.
-  const { rows: plans } = await pool.query(
-    `select id, title, price, duration_min, rate_down from plans p
-      where tenant_id=$1 and service='hotspot' and active and visible
-        and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
-      order by price limit 6`,
-    [tenant.id]);
+  const siteRouterId = req.query.router && req.query.router !== '1' ? String(req.query.router) : null;
 
-  const { rows: routers } = await pool.query(
-    `select id, host, api_port, service_user, service_password_enc from routers
-      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
-    [tenant.id]);
+  const { rows: plans } = siteRouterId
+    ? await pool.query(
+        `select id, title, price, duration_min, rate_down from plans p
+          where tenant_id=$1 and service='hotspot' and active and visible
+            and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+                 or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
+          order by price limit 6`,
+        [tenant.id, siteRouterId])
+    : await pool.query(
+        `select id, title, price, duration_min, rate_down from plans p
+          where tenant_id=$1 and service='hotspot' and active and visible
+            and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+          order by price limit 6`,
+        [tenant.id]);
+
+  const { rows: routers } = siteRouterId
+    ? await pool.query(
+        `select id, host, api_port, service_user, service_password_enc from routers
+          where tenant_id=$1 and id=$2 and role in ('hotspot','both') and service_user is not null`,
+        [tenant.id, siteRouterId])
+    : await pool.query(
+        `select id, host, api_port, service_user, service_password_enc from routers
+          where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
+        [tenant.id]);
 
   // Whatever name this device was given last time it was bought for — a
   // returning TV should not read back as "Unknown device" or a bare MAC
