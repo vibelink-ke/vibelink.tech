@@ -4270,6 +4270,46 @@ app.post('/api/routers/:id/hotspot-check', wrap(async (req, res) => {
  * sockets on the router whenever a tab is closed or a laptop is shut, and
  * RouterOS has a small connection limit that is unpleasant to exhaust.
  */
+/**
+ * Two different latencies, deliberately told apart rather than folded into
+ * one number: how fast *we* can reach the router (the API connect itself,
+ * timed — the same round trip every push/read this router does already
+ * makes, over whichever tunnel it's on) versus how the router's own uplink
+ * to the real internet is doing (RouterOS pinging out itself, not through
+ * us at all). A site can have a perfectly healthy tunnel and a miserable
+ * uplink, or the reverse — an operator troubleshooting "this site feels
+ * slow" needs to know which one it is before they know who to call.
+ */
+app.post('/api/routers/:id/ping', requirePermission('routers.view'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    const connectStarted = Date.now();
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const serverToRouterMs = Date.now() - connectStarted;
+    // 8.8.8.8, not this server's own address — the point is the router's
+    // uplink to the wider internet, which pinging back through the same
+    // tunnel it's asking about would not actually test.
+    const routerToInternet = await step('ping 8.8.8.8', () => ros.pingHost(conn, '8.8.8.8', 4), 15000);
+    res.json({ serverToRouterMs, routerToInternet, at: new Date().toISOString() });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/api/routers/:id/traffic', wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');

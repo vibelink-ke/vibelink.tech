@@ -551,6 +551,23 @@ export default function Routers() {
   }, [traffic?.router?.id]);
 
   /**
+   * A one-off check, not a live poll like Traffic above — "is this site
+   * slow right now" is answered by a single reading, and re-pinging every
+   * few seconds would just be extra load on a router that may already be on
+   * a rural link for no real benefit.
+   */
+  const [ping, setPing] = useState(null);   // { router, result, error } while the modal is open
+  async function runPing(r) {
+    setPing({ router: r, result: null, error: null });
+    try {
+      const result = await api.routerPing(r.id);
+      setPing((p) => (p?.router?.id === r.id ? { ...p, result } : p));
+    } catch (e) {
+      setPing((p) => (p?.router?.id === r.id ? { ...p, error: e.message } : p));
+    }
+  }
+
+  /**
    * Lock a device (a TV, a printer — anything with no browser to log into a
    * hotspot page with) to a fixed IP by its MAC address. bindDeviceByMac/
    * unbindDeviceByMac on the server already existed and worked, driving the
@@ -1130,6 +1147,12 @@ Revoke anyway?`
                       Traffic
                     </MenuItem>
                     <MenuItem
+                      onClick={() => { setMenuFor(null); runPing(r); }}
+                      title="How fast we can reach this router, and how its own uplink to the internet is doing"
+                    >
+                      Ping
+                    </MenuItem>
+                    <MenuItem
                       onClick={() => { setMenuFor(null); openDevices(r); }}
                       title="Lock a device (a TV, anything without a browser) to a fixed IP by its MAC address"
                     >
@@ -1337,6 +1360,54 @@ Revoke anyway?`
               view: down is what it received on that port.
             </div>
           </>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!ping}
+        title={`Ping — ${ping?.router?.name ?? ''}`}
+        onClose={() => setPing(null)}
+        footer={
+          <>
+            <Button onClick={() => runPing(ping.router)} disabled={!ping?.result && !ping?.error}>Ping again</Button>
+            <Button variant="primary" onClick={() => setPing(null)}>Close</Button>
+          </>
+        }
+      >
+        {ping?.error && (
+          <div style={{ fontSize: 13, color: color.rust, marginBottom: 10 }}>{ping.error}</div>
+        )}
+        {!ping?.result && !ping?.error && (
+          <div style={{ fontSize: 13, color: color.muted }}>Connecting and pinging…</div>
+        )}
+        {ping?.result && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div>
+              <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>SERVER ↔ ROUTER</div>
+              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: font.mono }}>
+                {ping.result.serverToRouterMs} ms
+              </div>
+              <div style={{ fontSize: 12, color: color.muted }}>How long it took us to connect over the tunnel</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>ROUTER → INTERNET (8.8.8.8)</div>
+              {ping.result.routerToInternet.avgMs == null ? (
+                <div style={{ fontSize: 15, color: color.rust }}>
+                  No replies — {ping.result.routerToInternet.lossPct}% loss. The router's own uplink may be down.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 22, fontWeight: 700, fontFamily: font.mono }}>
+                    {ping.result.routerToInternet.avgMs} ms avg
+                  </div>
+                  <div style={{ fontSize: 12, color: color.muted }}>
+                    min {ping.result.routerToInternet.minMs} · max {ping.result.routerToInternet.maxMs} · {ping.result.routerToInternet.lossPct}% loss
+                    {' '}({ping.result.routerToInternet.received}/{ping.result.routerToInternet.sent} replies)
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
         )}
       </Modal>
 

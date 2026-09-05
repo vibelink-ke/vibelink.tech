@@ -2194,4 +2194,50 @@ export async function identify(conn) {
   };
 }
 
+/**
+ * RouterOS returns each ping reply's round-trip time as a raw duration
+ * string ("1ms200us", "500us", "2s100ms") — parseRouterOSDuration above only
+ * handles second-granularity durations (hotspot/PPPoE session lengths), not
+ * the sub-second units a ping actually needs, so this is a separate, small
+ * parser rather than trying to stretch that one to cover both.
+ */
+function parsePingTime(s) {
+  if (!s) return null;
+  const str = String(s).trim();
+  const m = /^(?:(\d+)s)?(?:(\d+)ms)?(?:(\d+)us)?$/.exec(str);
+  if (!m || str === '') return null;
+  const [, sec, ms, us] = m.map((x) => Number(x) || 0);
+  return sec * 1000 + ms + us / 1000;
+}
+
+/**
+ * The router's own view of its uplink — RouterOS pinging a real internet
+ * host itself, not through our tunnel — separate from how fast *we* can
+ * reach the router (see the caller in server.js, which times its own round
+ * trip over the same connection this runs on). A rural site can have a
+ * perfectly healthy tunnel to us and still be miserable to actually use if
+ * its own uplink to the internet is slow or dropping packets; a low
+ * server-to-router number with a bad router-to-internet number is exactly
+ * that shape, and worth telling apart from a tunnel problem.
+ */
+export async function pingHost(conn, address, count = 4) {
+  const rows = await conn.write('/ping', [`=address=${address}`, `=count=${String(count)}`]);
+  const times = [];
+  let received = 0;
+  for (const r of rows) {
+    if (r.time == null) continue;
+    received++;
+    const t = parsePingTime(r.time);
+    if (t != null) times.push(t);
+  }
+  const sent = rows.length || count;
+  return {
+    address, sent, received,
+    lossPct: sent ? Math.round(((sent - received) / sent) * 100) : 100,
+    avgMs: times.length ? Math.round((times.reduce((a, b) => a + b, 0) / times.length) * 10) / 10 : null,
+    minMs: times.length ? Math.min(...times) : null,
+    maxMs: times.length ? Math.max(...times) : null,
+  };
+}
+
 export const close = (conn) => { try { conn.close(); } catch { /* already gone */ } };

@@ -252,6 +252,7 @@ export const api = {
   pushHotspot: (id, opts = {}) => post(`/api/routers/${id}/hotspot`, opts),
   routerTunnels: () => get('/api/routers/tunnels'),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),
+  routerPing: (id) => post(`/api/routers/${id}/ping`, {}),
   routerDevices: (id) => get(`/api/routers/${id}/devices`),
   lockRouterDevice: (id, body) => post(`/api/routers/${id}/devices/lock`, body),
   unlockRouterDevice: (id, mac) => post(`/api/routers/${id}/devices/unlock`, { mac }),
