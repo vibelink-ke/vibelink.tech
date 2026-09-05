@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { color, font, kes, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table } from '../ui/primitives';
+import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Table } from '../ui/primitives';
 
 /**
  * PPPoE tariffs — which are rows in `plans`, not the old `tariffs` table.
@@ -25,7 +25,7 @@ const PERIODS = [
   { value: 1440, label: 'Daily' },
 ];
 
-const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterId: '' };
+const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterIds: [] };
 
 const mbps = (kbps) => (kbps ? Math.round(kbps / 1000) : 0);
 const speed = (p) => (p.rate_down ? `${mbps(p.rate_down)}/${mbps(p.rate_up)} Mbps` : '—');
@@ -64,6 +64,7 @@ export default function Tariffs() {
   );
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
+  const setRaw = (k) => (val) => setF((s) => ({ ...s, [k]: val }));
 
   const payload = (v) => ({
     title: v.title,
@@ -72,7 +73,7 @@ export default function Tariffs() {
     rateDown: Number(v.speedDown) * 1000 || 0,
     rateUp: Number(v.speedUp) * 1000 || 0,
     dataCapMb: v.capGb === '' || v.capGb == null ? null : Math.round(Number(v.capGb) * 1024),
-    routerId: v.siteRouterId || null,
+    routerIds: v.siteRouterIds ?? [],
   });
 
   const create = async () => {
@@ -132,47 +133,61 @@ export default function Tariffs() {
     speedUp: p.rate_up ? p.rate_up / 1000 : '',
     capGb: p.data_cap_mb ? Math.round(p.data_cap_mb / 1024) : '',
     durationMin: p.duration_min ?? 43200,
-    siteRouterId: p.router_id ?? '',
+    siteRouterIds: p.site_ids ?? [],
   });
 
-  const siteLabel = (p) => (p.router_id ? (routerById[p.router_id]?.name ?? 'Unknown site') : 'All sites');
+  const siteLabel = (p) => {
+    const ids = p.site_ids ?? [];
+    if (!ids.length) return 'All sites';
+    return ids.map((id) => routerById[id]?.name ?? 'Unknown site').join(', ');
+  };
 
-  const fields = (v, update) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-      <Field label="Title" span={2}>
-        <Input value={v.title} onChange={update('title')} placeholder="Home 10 Mbps" />
-      </Field>
-      <Field label="Price (KES)">
-        <Input value={v.price} onChange={update('price')} type="number" />
-      </Field>
-      <Field label="Billing period">
-        <select value={v.durationMin} onChange={update('durationMin')} style={selectStyle}>
-          {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-        </select>
-      </Field>
-      <Field label="Download (Mbps)">
-        <Input value={v.speedDown} onChange={update('speedDown')} type="number" />
-      </Field>
-      <Field label="Upload (Mbps)">
-        <Input value={v.speedUp} onChange={update('speedUp')} type="number" />
-      </Field>
-      <Field label="Data cap (GB)">
-        <Input value={v.capGb} onChange={update('capGb')} type="number" placeholder="leave blank for uncapped" />
-      </Field>
-      <Field label="Site" span={2}>
-        <Select
-          value={v.siteRouterId}
-          onChange={update('siteRouterId')}
-          options={[{ value: '', label: 'All sites (shared)' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
-        />
-      </Field>
-      <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
-        Speeds become the Mikrotik-Rate-Limit sent to the router when a payment activates the
-        subscriber. The cap is what Fair use policy measures against. Site restricts this tariff to
-        one router's clients — leave it on "All sites" to offer it everywhere.
-      </span>
-    </div>
-  );
+  const fields = (v, update, updateRaw) => {
+    const siteIds = v.siteRouterIds ?? [];
+    const toggleSite = (id) => {
+      updateRaw('siteRouterIds')(siteIds.includes(id) ? siteIds.filter((x) => x !== id) : [...siteIds, id]);
+    };
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Title" span={2}>
+          <Input value={v.title} onChange={update('title')} placeholder="Home 10 Mbps" />
+        </Field>
+        <Field label="Price (KES)">
+          <Input value={v.price} onChange={update('price')} type="number" />
+        </Field>
+        <Field label="Billing period">
+          <select value={v.durationMin} onChange={update('durationMin')} style={selectStyle}>
+            {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Download (Mbps)">
+          <Input value={v.speedDown} onChange={update('speedDown')} type="number" />
+        </Field>
+        <Field label="Upload (Mbps)">
+          <Input value={v.speedUp} onChange={update('speedUp')} type="number" />
+        </Field>
+        <Field label="Data cap (GB)">
+          <Input value={v.capGb} onChange={update('capGb')} type="number" placeholder="leave blank for uncapped" />
+        </Field>
+        <Field label="Sites" span={2}>
+          <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+            {(store.routers ?? []).length === 0 && <span style={{ fontSize: 12.5, color: color.muted }}>No routers onboarded yet</span>}
+            {(store.routers ?? []).map((r) => (
+              <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={siteIds.includes(r.id)} onChange={() => toggleSite(r.id)} />
+                {r.name}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
+          Speeds become the Mikrotik-Rate-Limit sent to the router when a payment activates the
+          subscriber. The cap is what Fair use policy measures against. Leave every site unchecked to
+          offer this tariff everywhere, or check one or more sites to restrict it to just those.
+        </span>
+      </div>
+    );
+  };
 
   return (
     <Screen
@@ -196,7 +211,7 @@ export default function Tariffs() {
               { key: 'period', label: 'Period', render: (p) => periodLabel(p.duration_min) },
               { key: 'speed', label: 'Speed', render: speed },
               { key: 'cap', label: 'Data cap', render: (p) => <span style={{ color: color.neutralInk }}>{capLabel(p)}</span> },
-              { key: 'site', label: 'Site', render: (p) => <span style={{ color: p.router_id ? color.ink : color.muted }}>{siteLabel(p)}</span> },
+              { key: 'site', label: 'Site', render: (p) => <span style={{ color: (p.site_ids ?? []).length ? color.ink : color.muted }}>{siteLabel(p)}</span> },
               { key: 'subs', label: 'Subscribers', render: (p) => <span style={{ fontFamily: font.mono }}>{subsPerPlan[p.id] ?? 0}</span> },
               {
                 key: 'act',
@@ -228,7 +243,7 @@ export default function Tariffs() {
           </>
         }
       >
-        {fields(f, set)}
+        {fields(f, set, setRaw)}
       </Modal>
 
       <Drawer open={!!viewing} title={viewing?.title} onClose={() => setViewing(null)}>
@@ -258,7 +273,11 @@ export default function Tariffs() {
           </>
         }
       >
-        {editing && fields(editing, (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value })))}
+        {editing && fields(
+          editing,
+          (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value })),
+          (k) => (val) => setEditing((s) => ({ ...s, [k]: val }))
+        )}
       </Modal>
     </Screen>
   );

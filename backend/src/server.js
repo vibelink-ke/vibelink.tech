@@ -650,9 +650,10 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     : req.query.siteRouter ? String(req.query.siteRouter) : null;
 
   const { rows: plans } = await pool.query(
-    `select id, title, price, duration_min, rate_down from plans
+    `select id, title, price, duration_min, rate_down from plans p
       where tenant_id=$1 and service='hotspot' and active and visible
-        and (router_id is null or router_id=$2)
+        and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+             or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
       order by price limit 6`,
     [tenant.id, loginRouterId]);
 
@@ -1168,8 +1169,9 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
   // every site are safe to offer here; one restricted to a specific site
   // would be offering the wrong site's pricing to a guest we can't place yet.
   const { rows: plans } = await pool.query(
-    `select id, title, price, duration_min, rate_down from plans
-      where tenant_id=$1 and service='hotspot' and active and visible and router_id is null
+    `select id, title, price, duration_min, rate_down from plans p
+      where tenant_id=$1 and service='hotspot' and active and visible
+        and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
       order by price limit 6`,
     [tenant.id]);
 
@@ -2303,9 +2305,10 @@ app.get('/portal/plans-pppoe', wrap(async (req, res) => {
   const s = await portalSession(req);
   if (!s) return res.status(401).json({ error: 'not signed in' });
   const { rows } = await pool.query(
-    `select id, title, price, rate_down, rate_up from plans
+    `select id, title, price, rate_down, rate_up from plans p
       where tenant_id=$1 and service='pppoe' and active
-        and (router_id is null or router_id=$2)
+        and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+             or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
       order by price`, [s.tenant_id, s.router_id]);
   res.json(rows);
 }));
@@ -2351,9 +2354,10 @@ app.get('/portal/plans', async (req, res) => {
   // that doesn't know its site only ever sees bundles shared across all of them.
   const routerId = req.query.router && req.query.router !== '1' ? String(req.query.router) : null;
   const { rows } = await pool.query(
-    `select id, title, price, duration_min, devices, rate_down, data_cap_mb from plans
+    `select id, title, price, duration_min, devices, rate_down, data_cap_mb from plans p
       where tenant_id=$1 and service='hotspot' and active and visible
-        and (router_id is null or router_id=$2)
+        and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+             or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
       order by price`,
     [req.tenant.id, routerId]);
   res.json(rows);
@@ -7171,26 +7175,39 @@ app.post('/api/settlements/payout', requirePermission('payments.request_payout')
 app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) => {
   const { service } = req.query;
   const { rows } = await pool.query(
-    `select * from plans where tenant_id=$1 and active ${service ? 'and service=$2' : ''} order by price`,
+    `select p.*, coalesce(
+              (select array_agg(ps.router_id) from plan_sites ps where ps.plan_id = p.id),
+              '{}') as site_ids
+       from plans p
+      where p.tenant_id=$1 and p.active ${service ? 'and p.service=$2' : ''}
+      order by p.price`,
     service ? [req.tenant.id, service] : [req.tenant.id]);
   res.json(rows);
 }));
 
 app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
-          rateDown, rateUp, dataCapMb, radiusProfile, routerId, visible } = req.body;
+          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible } = req.body;
   const { rows: [row] } = await pool.query(
     `insert into plans (tenant_id, service, title, price, duration_min, devices,
-       rate_down, rate_up, data_cap_mb, radius_profile, router_id, visible)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+       rate_down, rate_up, data_cap_mb, radius_profile, visible)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
      rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`,
-     routerId || null, visible ?? true]);
-  res.json(row);
+     visible ?? true]);
+
+  const sites = Array.isArray(routerIds) ? routerIds.filter(Boolean) : [];
+  if (sites.length) {
+    await pool.query(
+      `insert into plan_sites (plan_id, router_id)
+       select $1, r.id from routers r where r.tenant_id=$2 and r.id = any($3::uuid[])`,
+      [row.id, req.tenant.id, sites]);
+  }
+  res.json({ ...row, site_ids: sites });
 }));
 
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
-  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerId, visible } = req.body ?? {};
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
        title        = coalesce(nullif($3,''), title),
@@ -7201,19 +7218,35 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
        rate_up      = coalesce($8, rate_up),
        -- Explicit null clears the cap, so distinguish "not sent" from "cleared".
        data_cap_mb  = case when $9::text = 'keep' then data_cap_mb else $10::bigint end,
-       -- Same "keep" trick for router_id: an explicit null here means "make
-       -- this shared across every site again," not "field wasn't sent."
-       router_id    = case when $11::text = 'keep' then router_id else $12::uuid end,
-       visible      = coalesce($13, visible),
+       visible      = coalesce($11, visible),
        updated_at   = now()
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
      devices ?? null, rateDown ?? null, rateUp ?? null,
      dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
-     routerId === undefined ? 'keep' : 'set', routerId || null,
      visible ?? null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
-  res.json(row);
+
+  // routerIds undefined means "field wasn't sent" — leave the sites alone.
+  // An explicit array (including []) replaces the set wholesale: [] is how
+  // the form says "share with every site again."
+  let siteIds;
+  if (routerIds !== undefined) {
+    const sites = Array.isArray(routerIds) ? routerIds.filter(Boolean) : [];
+    await pool.query('delete from plan_sites where plan_id=$1', [row.id]);
+    if (sites.length) {
+      await pool.query(
+        `insert into plan_sites (plan_id, router_id)
+         select $1, r.id from routers r where r.tenant_id=$2 and r.id = any($3::uuid[])`,
+        [row.id, req.tenant.id, sites]);
+    }
+    siteIds = sites;
+  } else {
+    const { rows: siteRows } = await pool.query(
+      'select router_id from plan_sites where plan_id=$1', [row.id]);
+    siteIds = siteRows.map((r) => r.router_id);
+  }
+  res.json({ ...row, site_ids: siteIds });
 }));
 
 /**

@@ -1997,12 +1997,34 @@ alter table tenants add column if not exists settlement_bank_name text;
 alter table tenants add column if not exists settlement_bank_paybill text;
 alter table tenants add column if not exists settlement_account_number text;
 
--- A plan belongs to every site by default (router_id null) — the owner's
--- call to restrict a PPPoE tariff or hotspot bundle to one physical router,
--- or leave it shared across all of them, same knob either way. visible is
+-- A plan belongs to every site by default — the owner's call to restrict a
+-- PPPoE tariff or hotspot bundle to one or several specific routers, or
+-- leave it shared across all of them, same knob either way. visible is
 -- hotspot-only in the UI: a bundle the operator isn't ready to sell yet, or
 -- one kept for internal use, stays off the guest-facing captive portal
 -- without deleting it (PPPoE has no public listing to hide from, so it is
 -- simply never surfaced there).
-alter table plans add column if not exists router_id uuid references routers on delete set null;
 alter table plans add column if not exists visible boolean not null default true;
+
+-- Which sites a plan is restricted to. No rows for a plan means shared
+-- everywhere — the same meaning the earlier single-router_id column used to
+-- carry — one or more rows means "only these sites," so "deploy to two
+-- sites and leave the rest" is just two rows, not a schema change.
+create table plan_sites (
+  plan_id   uuid not null references plans on delete cascade,
+  router_id uuid not null references routers on delete cascade,
+  primary key (plan_id, router_id)
+);
+
+-- One-time carry-over from the single-router_id column this replaces, for
+-- any tenant who set it during that column's brief lifetime before this
+-- table existed. A no-op everywhere else.
+do $$ begin
+  if exists (select 1 from information_schema.columns
+             where table_name='plans' and column_name='router_id') then
+    insert into plan_sites (plan_id, router_id)
+    select id, router_id from plans where router_id is not null
+    on conflict do nothing;
+    alter table plans drop column router_id;
+  end if;
+end $$;

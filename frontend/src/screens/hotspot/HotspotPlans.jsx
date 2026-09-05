@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { color, font, kes } from '../../theme/tokens';
+import { color, font, kes, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
-const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited', siteRouterId: '', visible: true };
+const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited', siteRouterIds: [], visible: true };
 const UNITS = ['Minutes', 'Hours', 'Days', 'Weeks', 'Months'];
 const CAPS = ['Unlimited', '250 MB', '500 MB', '1 GB', '2 GB', '5 GB'];
 
@@ -65,7 +65,7 @@ export default function HotspotPlans() {
     rateDown: (Number(v.speed) || 0) * 1000,
     rateUp: (Number(v.speed) || 0) * 1000,
     dataCapMb: CAP_MB[v.dataCap] ?? null,
-    routerId: v.siteRouterId || null,
+    routerIds: v.siteRouterIds ?? [],
     visible: !!v.visible,
   });
 
@@ -117,53 +117,71 @@ export default function HotspotPlans() {
     devices: p.devices ?? 1,
     speed: p.rate_down ? p.rate_down / 1000 : '',
     dataCap: mbToCapLabel(p.data_cap_mb),
-    siteRouterId: p.router_id ?? '',
+    siteRouterIds: p.site_ids ?? [],
     visible: p.visible ?? true,
     ...minutesToCountUnit(p.duration_min),
   });
 
-  const siteLabel = (p) => (p.router_id ? (routerById[p.router_id]?.name ?? 'Unknown site') : 'All sites');
+  const siteLabel = (p) => {
+    const ids = p.site_ids ?? [];
+    if (!ids.length) return 'All sites';
+    return ids.map((id) => routerById[id]?.name ?? 'Unknown site').join(', ');
+  };
 
-  const fields = (v, update, updateRaw) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-      <Field label="Title" span={2}>
-        <Input value={v.title} onChange={update('title')} placeholder="3 hours unlimited" />
-      </Field>
-      <Field label="Price (KES)">
-        <Input value={v.price} onChange={update('price')} type="number" />
-      </Field>
-      <Field label="Devices">
-        <Input value={v.devices} onChange={update('devices')} type="number" />
-      </Field>
-      <Field label="Duration">
-        <Input value={v.durationCount} onChange={update('durationCount')} type="number" />
-      </Field>
-      <Field label="Unit">
-        <Select value={v.durationUnit} onChange={update('durationUnit')} options={UNITS} />
-      </Field>
-      <Field label="Speed (Mbps)">
-        <Input value={v.speed} onChange={update('speed')} type="number" />
-      </Field>
-      <Field label="Data cap">
-        <Select value={v.dataCap} onChange={update('dataCap')} options={CAPS} />
-      </Field>
-      <Field label="Site" span={2}>
-        <Select
-          value={v.siteRouterId}
-          onChange={update('siteRouterId')}
-          options={[{ value: '', label: 'All sites (shared)' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
-        />
-      </Field>
-      <div style={{ gridColumn: '1 / -1' }}>
-        <Toggle
-          checked={v.visible}
-          onChange={updateRaw('visible')}
-          label="Visible to guests"
-          detail="Shown on the captive portal's price list. Turn off to keep a bundle on hold without deleting it."
-        />
+  const fields = (v, update, updateRaw) => {
+    const siteIds = v.siteRouterIds ?? [];
+    const toggleSite = (id) => {
+      updateRaw('siteRouterIds')(siteIds.includes(id) ? siteIds.filter((x) => x !== id) : [...siteIds, id]);
+    };
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <Field label="Title" span={2}>
+          <Input value={v.title} onChange={update('title')} placeholder="3 hours unlimited" />
+        </Field>
+        <Field label="Price (KES)">
+          <Input value={v.price} onChange={update('price')} type="number" />
+        </Field>
+        <Field label="Devices">
+          <Input value={v.devices} onChange={update('devices')} type="number" />
+        </Field>
+        <Field label="Duration">
+          <Input value={v.durationCount} onChange={update('durationCount')} type="number" />
+        </Field>
+        <Field label="Unit">
+          <Select value={v.durationUnit} onChange={update('durationUnit')} options={UNITS} />
+        </Field>
+        <Field label="Speed (Mbps)">
+          <Input value={v.speed} onChange={update('speed')} type="number" />
+        </Field>
+        <Field label="Data cap">
+          <Select value={v.dataCap} onChange={update('dataCap')} options={CAPS} />
+        </Field>
+        <Field label="Sites" span={2}>
+          <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+            {(store.routers ?? []).length === 0 && <span style={{ fontSize: 12.5, color: color.muted }}>No routers onboarded yet</span>}
+            {(store.routers ?? []).map((r) => (
+              <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer' }}>
+                <input type="checkbox" checked={siteIds.includes(r.id)} onChange={() => toggleSite(r.id)} />
+                {r.name}
+              </label>
+            ))}
+          </div>
+          <span style={{ fontSize: 11.5, color: color.muted, marginTop: 4, display: 'block' }}>
+            Leave every site unchecked to sell this bundle everywhere, or check one or more to
+            restrict it to just those.
+          </span>
+        </Field>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <Toggle
+            checked={v.visible}
+            onChange={updateRaw('visible')}
+            label="Visible to guests"
+            detail="Shown on the captive portal's price list. Turn off to keep a bundle on hold without deleting it."
+          />
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <Screen
@@ -189,7 +207,7 @@ export default function HotspotPlans() {
               label: 'Data cap',
               render: (p) => (p.data_cap_mb ? `${p.data_cap_mb} MB` : <span style={{ color: color.muted }}>Unlimited</span>),
             },
-            { key: 'site', label: 'Site', render: (p) => <span style={{ color: p.router_id ? color.ink : color.muted }}>{siteLabel(p)}</span> },
+            { key: 'site', label: 'Site', render: (p) => <span style={{ color: (p.site_ids ?? []).length ? color.ink : color.muted }}>{siteLabel(p)}</span> },
             {
               key: 'visible',
               label: 'Visible',
