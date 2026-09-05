@@ -2700,6 +2700,59 @@ function walledGardenWarnings(hosts) {
   return warnings;
 }
 
+/**
+ * Re-fetch the login page onto every already-configured hotspot router for
+ * this tenant, so a landing-page edit or a bundle price/visibility change
+ * shows up on the captive portal right away instead of only at the next
+ * manual Configure.
+ *
+ * Deliberately only the login-page fetch, not the full Configure push
+ * (bridge, RADIUS, DNS proxy, NAT) — those touch live network state and
+ * have no business re-running just because someone edited a banner.
+ * Fire-and-forget: called without awaiting, catches its own errors, and a
+ * router that is offline or has never been Configured (no stored service
+ * account yet) is silently skipped rather than surfaced as a failure — the
+ * request that triggered this must never wait on or fail because of it.
+ */
+async function repushHotspotLoginPage(tenantId) {
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+
+    const { rows: [t] } = await pool.query('select subdomain from tenants where id=$1', [tenantId]);
+    if (!t?.subdomain) return;
+    const portal = `${t.subdomain}.${root}`;
+
+    const { rows: routers } = await pool.query(
+      `select id, host, api_port, service_user, service_password_enc from routers
+        where tenant_id=$1 and role in ('hotspot','both') and service_user is not null`,
+      [tenantId]);
+
+    for (const r of routers) {
+      const url = `https://${portal}/hotspot/login.html?router=${r.id}`;
+      let conn;
+      try {
+        const unreachable = await loginPageReachable(url);
+        if (unreachable) throw new Error(unreachable);
+        const password = secrets.decrypt(r.service_password_enc);
+        conn = await ros.connect({
+          host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+          user: r.service_user, password, timeoutSec: 15,
+        });
+        const page = await ros.pushHotspotPage(conn, { url });
+        console.log('auto-repush login page', r.id, '→ ok:', page.path, `${page.bytes} bytes`);
+      } catch (e) {
+        console.error('auto-repush login page', r.id, '→ failed:', e.message);
+      } finally {
+        if (conn) try { ros.close(conn); } catch { /* already gone */ }
+      }
+    }
+  } catch (e) {
+    console.error('repushHotspotLoginPage', tenantId, '→', e.message);
+  }
+}
+
 app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, res) => {
   const f = req.body;
   const warnings = Array.isArray(f.walled_garden) ? walledGardenWarnings(f.walled_garden) : [];
@@ -2736,6 +2789,7 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
      f.hotspot_network ?? null, defaultWalledGarden]);
+  repushHotspotLoginPage(req.tenant.id);
   res.json({ ...s, warnings });
 });
 
@@ -7203,6 +7257,9 @@ app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res
        select $1, r.id from routers r where r.tenant_id=$2 and r.id = any($3::uuid[])`,
       [row.id, req.tenant.id, sites]);
   }
+  // The login page bakes in the top hotspot bundles at fetch time, so a new
+  // one is invisible on the captive portal until this runs.
+  if (service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
   res.json({ ...row, site_ids: sites });
 }));
 
@@ -7246,6 +7303,7 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
       'select router_id from plan_sites where plan_id=$1', [row.id]);
     siteIds = siteRows.map((r) => r.router_id);
   }
+  if (row.service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
   res.json({ ...row, site_ids: siteIds });
 }));
 
@@ -7264,7 +7322,7 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
  */
 app.delete('/api/plans/:id', requirePermission('tariffs.delete'), wrap(async (req, res) => {
   const { rows: [p] } = await pool.query(
-    'select id, title from plans where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+    'select id, title, service from plans where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!p) return res.status(404).json({ error: 'No such plan' });
 
   const { rows: [use] } = await pool.query(`
@@ -7285,6 +7343,7 @@ app.delete('/api/plans/:id', requirePermission('tariffs.delete'), wrap(async (re
     // ends up believing the database is smaller than it is.
     await pool.query('update plans set active=false where tenant_id=$1 and id=$2',
       [req.tenant.id, p.id]);
+    if (p.service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
     return res.json({
       ok: true,
       kept: true,
@@ -7298,6 +7357,7 @@ app.delete('/api/plans/:id', requirePermission('tariffs.delete'), wrap(async (re
   const { rowCount } = await pool.query(
     'delete from plans where tenant_id=$1 and id=$2', [req.tenant.id, p.id]);
   if (!rowCount) return res.status(409).json({ error: 'The plan could not be deleted' });
+  if (p.service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
   res.json({ ok: true, deleted: 1 });
 }));
 
