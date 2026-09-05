@@ -6774,14 +6774,16 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   if ('lat' in req.body) req.body.lat = coord(req.body.lat, 90);
   if ('lng' in req.body) req.body.lng = coord(req.body.lng, 180);
 
-  // Numbers only, and the same lengths the generator uses. These get dictated
-  // over the phone and typed into a router by someone who is not looking at a
-  // screen, which is the whole reason they are digits.
-  if (req.body.pppoe_user != null && !/^\d{4,12}$/.test(String(req.body.pppoe_user))) {
-    return res.status(400).json({ error: 'PPPoE username must be 4-12 digits' });
+  // The generator itself still mints digits only (dictated over the phone,
+  // typed into a router by someone not looking at a screen) — but an edit
+  // here is typed by staff at a keyboard, matching credentials that may
+  // already exist elsewhere (a router secret set up before this system, a
+  // scheme a customer picked themselves), so letters are allowed too.
+  if (req.body.pppoe_user != null && !/^[A-Za-z0-9]{4,12}$/.test(String(req.body.pppoe_user))) {
+    return res.status(400).json({ error: 'PPPoE username must be 4-12 letters/digits' });
   }
-  if (req.body.pppoe_pass != null && !/^\d{4,12}$/.test(String(req.body.pppoe_pass))) {
-    return res.status(400).json({ error: 'PPPoE password must be 4-12 digits' });
+  if (req.body.pppoe_pass != null && !/^[A-Za-z0-9]{4,12}$/.test(String(req.body.pppoe_pass))) {
+    return res.status(400).json({ error: 'PPPoE password must be 4-12 letters/digits' });
   }
 
   // A username change leaves the old radcheck row behind, still valid. Anyone

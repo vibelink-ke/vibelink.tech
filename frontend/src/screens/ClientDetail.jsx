@@ -971,22 +971,20 @@ export default function ClientDetail() {
                 options={[{ value: '', label: 'Next free address' }, ...serviceFreeIps.addresses.map((ip) => ({ value: ip, label: ip }))]}
               />
             </Field>
-            <Field label="PPPoE username" hint="What they dial in with">
+            <Field label="PPPoE username" hint="What they dial in with — 4-12 letters/digits">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={serviceForm.pppoeUser}
-                  onChange={(e) => setServiceForm((s) => ({ ...s, pppoeUser: e.target.value.replace(/\D/g, '').slice(0, 5) }))}
-                  inputMode="numeric"
+                  onChange={(e) => setServiceForm((s) => ({ ...s, pppoeUser: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}
                   style={{ fontFamily: font.mono }}
                 />
                 <Button onClick={genServiceCredentials}>Generate</Button>
               </div>
             </Field>
-            <Field label="PPPoE password" hint="7 digits">
+            <Field label="PPPoE password" hint="4-12 letters/digits">
               <Input
                 value={serviceForm.pppoePass}
-                onChange={(e) => setServiceForm((s) => ({ ...s, pppoePass: e.target.value.replace(/\D/g, '').slice(0, 7) }))}
-                inputMode="numeric"
+                onChange={(e) => setServiceForm((s) => ({ ...s, pppoePass: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}
                 style={{ fontFamily: font.mono }}
               />
             </Field>
