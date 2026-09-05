@@ -3194,7 +3194,7 @@ app.get('/api/referrers', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/referrers', wrap(async (req, res) => {
+app.post('/api/referrers', requirePermission('referrers.manage'), wrap(async (req, res) => {
   const { name, phone, staffId, subscriberId, commissionType = 'percent', commissionRate = 0, notes } = req.body ?? {};
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
   if (!['percent', 'fixed'].includes(commissionType)) {
@@ -3229,7 +3229,7 @@ app.post('/api/referrers', wrap(async (req, res) => {
   res.json(r);
 }));
 
-app.put('/api/referrers/:id', wrap(async (req, res) => {
+app.put('/api/referrers/:id', requirePermission('referrers.manage'), wrap(async (req, res) => {
   const { name, phone, commissionType, commissionRate, notes } = req.body ?? {};
   if (commissionType && !['percent', 'fixed'].includes(commissionType)) {
     return res.status(400).json({ error: 'commissionType must be percent or fixed' });
@@ -3255,7 +3255,7 @@ app.put('/api/referrers/:id', wrap(async (req, res) => {
   res.json(r);
 }));
 
-app.delete('/api/referrers/:id', wrap(async (req, res) => {
+app.delete('/api/referrers/:id', requirePermission('referrers.manage'), wrap(async (req, res) => {
   // Referred clients keep their history (referred_by -> null on delete, per
   // the FK) and any commission already recorded stays exactly as it was —
   // deleting the referrer is about not offering them for new referrals
@@ -3276,7 +3276,7 @@ app.get('/api/referrers/:id/commissions', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/referral-commissions/:id/mark-paid', wrap(async (req, res) => {
+app.post('/api/referral-commissions/:id/mark-paid', requirePermission('referrers.manage'), wrap(async (req, res) => {
   const { rows: [c] } = await pool.query(
     `update referral_commissions set status='paid', paid_at=now()
       where id=$1 and tenant_id=$2 and status='owed' returning *`,
@@ -4232,7 +4232,7 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
  * router, so this reports them all at once instead of the operator and I
  * eliminating them one round trip at a time.
  */
-app.post('/api/routers/:id/hotspot-check', wrap(async (req, res) => {
+app.post('/api/routers/:id/hotspot-check', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
 
@@ -4310,7 +4310,7 @@ app.post('/api/routers/:id/ping', requirePermission('routers.view'), wrap(async 
   }
 }));
 
-app.post('/api/routers/:id/traffic', wrap(async (req, res) => {
+app.post('/api/routers/:id/traffic', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
 
@@ -4505,7 +4505,7 @@ function closestHotspotPlan(plans, remainingMinutes) {
   return hotspot.find((p) => p.duration_min >= remainingMinutes) ?? hotspot[hotspot.length - 1];
 }
 
-app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
+app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const radius = await import('./radius.js');
@@ -4668,7 +4668,7 @@ app.post('/api/routers/:id/import-secrets', wrap(async (req, res) => {
 }));
 
 /** The router's own ports, so the operator can pick which are LAN. */
-app.post('/api/routers/:id/interfaces', wrap(async (req, res) => {
+app.post('/api/routers/:id/interfaces', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
 
@@ -5838,7 +5838,7 @@ app.delete('/api/ovpn-clients/:id', wrap(async (req, res) => {
  * answer" no matter how correct the setup was, which sent operators hunting for
  * a fault that did not exist.
  */
-app.post('/api/routers/:id/test-coa', wrap(async (req, res) => {
+app.post('/api/routers/:id/test-coa', requirePermission('routers.configure'), wrap(async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!r) return res.status(404).json({ error: 'No such router' });
@@ -6650,7 +6650,7 @@ app.get('/api/subscribers/:id/activity', requirePermission('clients.view'), wrap
  * by support. Returned once in the clear and stored only as a hash, so this is
  * the only moment anyone can see it — including us.
  */
-app.post('/api/subscribers/:id/portal-password', wrap(async (req, res) => {
+app.post('/api/subscribers/:id/portal-password', requirePermission('clients.reset_portal_password'), wrap(async (req, res) => {
   // An operator may set one the customer has chosen; omitting it generates one.
   const chosen = String(req.body?.password ?? '').trim();
   if (chosen && !/^\d{6,12}$/.test(chosen)) {
@@ -6838,7 +6838,7 @@ app.get('/api/invoices', wrap(async (req, res) => {
  * rather than left at 0, since a paid invoice showing "0 of 5000 paid"
  * would read as still owed everywhere the amount/paid pair is displayed.
  */
-app.post('/api/invoices', wrap(async (req, res) => {
+app.post('/api/invoices', requirePermission('clients.invoices'), wrap(async (req, res) => {
   const { subscriberId, amount, dueDate, reason, planId, paid } = req.body;
   if (!reason || !String(reason).trim()) {
     return res.status(400).json({ error: 'Say what this invoice is for' });
@@ -6863,7 +6863,7 @@ app.post('/api/invoices', wrap(async (req, res) => {
   res.json(i);
 }));
 
-app.put('/api/invoices/:id', wrap(async (req, res) => {
+app.put('/api/invoices/:id', requirePermission('clients.invoices'), wrap(async (req, res) => {
   const { amount, dueDate, reason, status } = req.body;
   const { rows: [existing] } = await pool.query(
     'select * from invoices where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
@@ -6893,7 +6893,7 @@ app.put('/api/invoices/:id', wrap(async (req, res) => {
  * collected with no record of what it was for. void the invoice instead
  * (PUT status=void) if it needs to stop counting toward what's owed.
  */
-app.delete('/api/invoices/:id', wrap(async (req, res) => {
+app.delete('/api/invoices/:id', requirePermission('clients.invoices'), wrap(async (req, res) => {
   const { rows: [existing] } = await pool.query(
     'select paid from invoices where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!existing) return res.status(404).json({ error: 'No such invoice' });
@@ -6935,7 +6935,7 @@ app.post('/api/payments/manual', requirePermission('payments.apply'), wrap(async
  * request stays 'pending' forever and no payment is applied. We say so in the
  * response rather than letting that look like a failure.
  */
-app.post('/api/payments/stk', wrap(async (req, res) => {
+app.post('/api/payments/stk', requirePermission('payments.stk'), wrap(async (req, res) => {
   const { provider = 'daraja', subscriberId, phone, amount, planId } = req.body;
   if (!amount || Number(amount) <= 0) return res.status(400).json({ error: 'Enter an amount' });
 
@@ -7033,7 +7033,7 @@ app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(as
  * one place a PPPoE STK push is actually initiated by staff rather than
  * the customer's own payment-method choice.
  */
-app.post('/api/subscribers/:id/stk', wrap(async (req, res) => {
+app.post('/api/subscribers/:id/stk', requirePermission('payments.stk'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     `select s.name, s.phone, s.account_code, p.price as plan_price
        from subscribers s left join plans p on p.id = s.plan_id
@@ -7057,7 +7057,7 @@ app.post('/api/subscribers/:id/stk', wrap(async (req, res) => {
 }));
 
 /** Give affected subscribers free days back after an outage. */
-app.post('/api/subscribers/compensate', wrap(async (req, res) => {
+app.post('/api/subscribers/compensate', requirePermission('clients.compensate'), wrap(async (req, res) => {
   const { ids = [], days = 1 } = req.body;
   if (!ids.length) return res.status(400).json({ error: 'no subscribers selected' });
   const { rows } = await pool.query(

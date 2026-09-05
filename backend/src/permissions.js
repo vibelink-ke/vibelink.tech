@@ -21,6 +21,16 @@ export const DEFAULT_PERMISSIONS = {
   // Real money moving with no payment behind it — same trust level as
   // payments.apply, not clients.edit (which a cashier can't touch either).
   'clients.wallet_adjust': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  // Extends service for free, in bulk, across however many accounts are
+  // named — a bigger blast radius than one wallet adjustment on one
+  // account, so owner-only by default rather than matching wallet_adjust.
+  'clients.compensate': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // A customer's own login credential, not their account data — the same
+  // trust level as viewing one (owner-only, same as the credentials read
+  // this sits beside), not general clients.edit.
+  'clients.reset_portal_password': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // Financial documents — same trust level as applying a payment.
+  'clients.invoices': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
   'routers.view':      { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'routers.edit':      { owner: true, cashier: false, technician: true,  support: false, sales: false },
@@ -61,6 +71,15 @@ export const DEFAULT_PERMISSIONS = {
   'payments.apply':  { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'payments.edit':   all(),
   'payments.request_payout': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  // Pushes a real M-Pesa prompt to an arbitrary handset — same trust level
+  // as applying a payment, not something a technician or support role needs.
+  'payments.stk': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+
+  // A referral commission is a real payout — the same trust level as
+  // payments.request_payout, deliberately not leads.edit: a sales rep who
+  // manages their own referral sources should not also be the one who
+  // authorizes paying them.
+  'referrers.manage': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
   'staff.view':               all(),
   'staff.create':             all(),
@@ -92,6 +111,9 @@ export const PERMISSION_META = [
   { key: 'clients.suspend', page: 'Clients',          action: 'Pause / suspend / resume' },
   { key: 'clients.delete',  page: 'Clients',          action: 'Delete' },
   { key: 'clients.wallet_adjust', page: 'Clients',    action: 'Adjust wallet balance' },
+  { key: 'clients.compensate', page: 'Clients',       action: 'Compensate (extend free, in bulk)' },
+  { key: 'clients.reset_portal_password', page: 'Clients', action: "Reset a customer's portal password" },
+  { key: 'clients.invoices', page: 'Clients',         action: 'Create / edit / delete invoices' },
   { key: 'routers.view',      page: 'Routers',         action: 'View' },
   { key: 'routers.edit',      page: 'Routers',         action: 'Edit' },
   { key: 'routers.configure', page: 'Routers',         action: 'Push config to a router' },
@@ -121,6 +143,8 @@ export const PERMISSION_META = [
   { key: 'payments.apply', page: 'Payments', action: 'Apply / match' },
   { key: 'payments.edit',  page: 'Payments', action: 'Edit gateway credentials' },
   { key: 'payments.request_payout', page: 'Payments', action: 'Request settlement payout' },
+  { key: 'payments.stk', page: 'Payments',            action: 'Push STK to a handset' },
+  { key: 'referrers.manage', page: 'Referrers',        action: 'Create / edit / delete / mark commission paid' },
   { key: 'staff.view',               page: 'Staff & roles', action: 'View' },
   { key: 'staff.create',             page: 'Staff & roles', action: 'Invite' },
   { key: 'staff.edit',               page: 'Staff & roles', action: 'Edit' },
