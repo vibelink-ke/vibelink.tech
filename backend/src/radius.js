@@ -56,9 +56,22 @@ const HOTSPOT_PROFILE = 'hs-default';
 
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */
 export async function activateSubscriber(c, tenantId, subId) {
+  // left join plans: an inner join here used to make the ENTIRE function a
+  // silent no-op — including the address-list-block removal below — for any
+  // subscriber whose plan_id was null or pointed at a deleted plan. That
+  // subscriber could pay, get marked active, even have staff click
+  // Suspend->Resume, and RADIUS would never hear about any of it: they stayed
+  // stuck on whatever Mikrotik-Address-List block a past suspension/expiry
+  // had set, looking "connected with a valid IP" (RADIUS auth itself still
+  // succeeds off radcheck/radreply's last-known values) but with no internet,
+  // forever — exactly what a customer reconnecting after a power outage saw,
+  // and exactly why an earlier Suspend->Resume for a different customer did
+  // nothing. A missing plan can still stop the *rate limit* from being
+  // recomputed (there is no rate to compute), but it must never stop this
+  // from clearing the block or refreshing the password/IP.
   const { rows: [s] } = await c.query(
     `select s.*, p.radius_profile, p.rate_down, p.rate_up, r.host, r.secret, r.pppoe_pool
-     from subscribers s join plans p on p.id = s.plan_id
+     from subscribers s left join plans p on p.id = s.plan_id
      left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
 
   // radcheck.username is NOT NULL. A subscriber can legitimately have no PPPoE
@@ -73,14 +86,9 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, s.pppoe_pass, tenantId]);
 
-  const rate = `${s.rate_up}k/${s.rate_down}k`;
-  await c.query(
-    `insert into radreply (tenant_id, username, attribute, op, value)
-     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
-     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, rate, tenantId]);
-
-  // Off the block list they were put on while suspended/expired/paused, if any.
+  // Off the block list they were put on while suspended/expired/paused, if
+  // any — regardless of whether a plan joined below, so a broken plan_id
+  // never leaves this half-done.
   await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
     [s.pppoe_user, 'Mikrotik-Address-List', tenantId]);
 
@@ -95,6 +103,19 @@ export async function activateSubscriber(c, tenantId, subId) {
        on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
       [s.pppoe_user, address, tenantId]);
   }
+
+  if (s.rate_down == null || s.rate_up == null) {
+    console.error('activateSubscriber: subscriber', subId, 'has no plan (plan_id', s.plan_id,
+      ') — address-list block cleared and password/IP refreshed, but rate limit and CoA skipped for lack of one');
+    return;
+  }
+
+  const rate = `${s.rate_up}k/${s.rate_down}k`;
+  await c.query(
+    `insert into radreply (tenant_id, username, attribute, op, value)
+     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [s.pppoe_user, rate, tenantId]);
 
   if (s.host) {
     await coa(c, s.host, s.secret, s.pppoe_user, rate);
