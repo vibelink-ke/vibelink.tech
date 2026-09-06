@@ -295,7 +295,7 @@ app.get('/api/platform-sms/price', wrap(async (req, res) => {
   if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_gateways where is_default');
   res.json({ pricePerCredit: Number(cfg?.price_per_credit ?? 2) });
 }));
 
@@ -315,7 +315,7 @@ app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
     return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
   }
 
-  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_gateways where is_default');
   const price = Number(cfg?.price_per_credit ?? 2);
   const amount = Math.round(quantity * price);
 
@@ -3061,7 +3061,16 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
   // rather than it being invisible to them entirely.
   const { rows: [t] } = await pool.query(
     'select platform_sms_balance from tenants where id=$1', [req.tenant.id]);
-  const { rows: [pcfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  // The price of whichever platform gateway this tenant actually falls back
+  // to (its own assignment, or the one flagged default) — not just "the"
+  // platform price, now that more than one platform gateway can exist.
+  const { rows: [pcfg] } = await pool.query(
+    `select coalesce(g.price_per_credit, d.price_per_credit) as price_per_credit
+       from tenants t
+       left join platform_sms_gateways g on g.id = t.platform_sms_gateway_id
+       left join platform_sms_gateways d on d.is_default
+      where t.id = $1`,
+    [req.tenant.id]);
   res.json({
     available: providerNames,
     // The form renders from this, so it cannot ask for a different set of fields
@@ -3091,7 +3100,13 @@ app.post('/api/sms/buy-credits', wrap(async (req, res) => {
   const quantity = Math.round(Number(req.body?.quantity));
   if (!(quantity > 0)) return res.status(400).json({ error: 'Enter how many credits to buy.' });
 
-  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_config where id=true');
+  const { rows: [cfg] } = await pool.query(
+    `select coalesce(g.price_per_credit, d.price_per_credit) as price_per_credit
+       from tenants t
+       left join platform_sms_gateways g on g.id = t.platform_sms_gateway_id
+       left join platform_sms_gateways d on d.is_default
+      where t.id = $1`,
+    [req.tenant.id]);
   const price = Number(cfg?.price_per_credit ?? 2);
   const amount = Math.round(quantity * price);
 
@@ -8761,38 +8776,64 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
  * only the ability to reset it below.
  */
 /**
- * The platform owner's own SMS gateway — a tenant with none of their own
- * configured (or an exhausted one) falls back to sending through this, at
- * the platform owner's expense, up to whatever balance that tenant was
- * individually given (see the /sms-balance route below). One row, shared
- * by every tenant that falls back to it; credentials only ever come back
- * as which keys are set, matching how a tenant's own SMS gateway settings
- * already behave.
+ * The platform owner's own SMS gateway(s) — a tenant with none of their own
+ * configured (or an exhausted one) falls back to sending through whichever
+ * of these it is assigned (tenants.platform_sms_gateway_id), or the one
+ * flagged default when it has no specific assignment. More than one row
+ * exists so tenants can be split across sender IDs (e.g. two approved
+ * sender names under the same provider account) rather than every tenant
+ * sharing one; credentials only ever come back as which keys are set,
+ * matching how a tenant's own SMS gateway settings already behave.
  */
-app.get('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
-  const { PROVIDER_FIELDS } = await import('./sms.js');
-  const { rows: [cfg] } = await pool.query(
-    'select provider, credentials, price_per_credit from platform_sms_config where id=true');
+app.get('/api/platform/sms-gateways', superAdminOnly, wrap(async (req, res) => {
+  const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
+  const { rows } = await pool.query(
+    `select id, name, provider, credentials, price_per_credit, is_default
+       from platform_sms_gateways order by is_default desc, name`);
   res.json({
-    provider: cfg?.provider ?? null,
-    credentialKeys: Object.entries(cfg?.credentials ?? {})
-      .filter(([, v]) => String(v ?? '').trim())
-      .map(([k]) => k),
+    gateways: rows.map(({ credentials, ...g }) => ({
+      ...g,
+      pricePerCredit: Number(g.price_per_credit),
+      isDefault: g.is_default,
+      credentialKeys: Object.entries(credentials ?? {})
+        .filter(([, v]) => String(v ?? '').trim())
+        .map(([k]) => k),
+      missing: missingCredentials(g.provider, credentials ?? {}),
+    })),
     fields: PROVIDER_FIELDS,
-    pricePerCredit: Number(cfg?.price_per_credit ?? 2),
   });
 }));
 
-/** The real balance on the platform owner's own gateway account — cached 5 minutes, same as a tenant's own. */
-app.get('/api/platform/sms-balance', superAdminOnly, wrap(async (req, res) => {
+/** The real balance on one of the platform owner's gateway accounts — cached 5 minutes, same as a tenant's own. */
+app.get('/api/platform/sms-gateways/:id/balance', superAdminOnly, wrap(async (req, res) => {
   const { platformSmsBalance } = await import('./sms.js');
-  res.json(await platformSmsBalance({ force: req.query.force === '1' }));
+  res.json(await platformSmsBalance({ force: req.query.force === '1', gatewayId: req.params.id }));
 }));
 
-app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
-  const { provider, credentials = {}, pricePerCredit } = req.body ?? {};
+app.post('/api/platform/sms-gateways', superAdminOnly, wrap(async (req, res) => {
+  const { name, provider, credentials = {}, pricePerCredit, isDefault } = req.body ?? {};
   const { PROVIDER_FIELDS } = await import('./sms.js');
+  if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Name is required' });
   if (!PROVIDER_FIELDS[provider]) return res.status(400).json({ error: 'unknown gateway' });
+
+  const { rows: [{ count }] } = await pool.query('select count(*)::int from platform_sms_gateways');
+  // The very first gateway is always the default — there is never a moment
+  // with gateways configured but none of them being what a tenant with no
+  // assignment actually falls back to.
+  const makeDefault = isDefault || count === 0;
+  if (makeDefault) await pool.query('update platform_sms_gateways set is_default = false');
+
+  const { rows: [row] } = await pool.query(
+    `insert into platform_sms_gateways (name, provider, credentials, price_per_credit, is_default)
+     values ($1, $2, $3, coalesce($4::numeric, 2), $5) returning id`,
+    [name.trim(), provider, credentials, pricePerCredit != null ? Number(pricePerCredit) : null, makeDefault]);
+  res.json({ ok: true, id: row.id });
+}));
+
+app.put('/api/platform/sms-gateways/:id', superAdminOnly, wrap(async (req, res) => {
+  const { name, provider, credentials = {}, pricePerCredit, isDefault } = req.body ?? {};
+  const { PROVIDER_FIELDS } = await import('./sms.js');
+  if (provider != null && !PROVIDER_FIELDS[provider]) return res.status(400).json({ error: 'unknown gateway' });
 
   // Blank fields keep whatever secret is already stored, same as a
   // tenant's own SMS gateway form — the operator never has to re-type an
@@ -8800,14 +8841,41 @@ app.put('/api/platform/sms-config', superAdminOnly, wrap(async (req, res) => {
   const incoming = Object.fromEntries(
     Object.entries(credentials).filter(([, v]) => String(v ?? '').trim() !== ''));
 
-  await pool.query(
-    `insert into platform_sms_config (id, provider, credentials, price_per_credit)
-     values (true, $1, $2, coalesce($3::numeric, 2))
-     on conflict (id) do update set
-       provider = excluded.provider,
-       credentials = platform_sms_config.credentials || excluded.credentials,
-       price_per_credit = coalesce($3::numeric, platform_sms_config.price_per_credit)`,
-    [provider, incoming, pricePerCredit != null ? Number(pricePerCredit) : null]);
+  if (isDefault) await pool.query('update platform_sms_gateways set is_default = false where id <> $1', [req.params.id]);
+
+  const { rowCount } = await pool.query(
+    `update platform_sms_gateways set
+       name = coalesce($2, name),
+       provider = coalesce($3, provider),
+       credentials = credentials || $4::jsonb,
+       price_per_credit = coalesce($5::numeric, price_per_credit),
+       is_default = case when $6 then true else is_default end
+     where id = $1`,
+    [req.params.id, name?.trim() || null, provider ?? null, incoming,
+     pricePerCredit != null ? Number(pricePerCredit) : null, !!isDefault]);
+  if (!rowCount) return res.status(404).json({ error: 'No such gateway' });
+  res.json({ ok: true });
+}));
+
+app.delete('/api/platform/sms-gateways/:id', superAdminOnly, wrap(async (req, res) => {
+  const { rows: [g] } = await pool.query('delete from platform_sms_gateways where id=$1 returning is_default', [req.params.id]);
+  if (!g) return res.status(404).json({ error: 'No such gateway' });
+  // Deleting the default leaves nothing for an unassigned tenant to fall
+  // back to — promote whatever is left rather than silently going dark.
+  if (g.is_default) {
+    await pool.query(
+      `update platform_sms_gateways set is_default = true
+        where id = (select id from platform_sms_gateways order by name limit 1)`);
+  }
+  res.json({ ok: true });
+}));
+
+/** Which platform gateway a tenant falls back to — null clears it back to whichever is flagged default. */
+app.put('/api/tenants/:id/sms-gateway', superAdminOnly, wrap(async (req, res) => {
+  const gatewayId = req.body?.gatewayId || null;
+  const { rowCount } = await pool.query(
+    'update tenants set platform_sms_gateway_id=$2 where id=$1', [req.params.id, gatewayId]);
+  if (!rowCount) return res.status(404).json({ error: 'No such tenant' });
   res.json({ ok: true });
 }));
 

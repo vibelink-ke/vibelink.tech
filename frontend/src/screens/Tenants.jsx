@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font, kes } from '../theme/tokens';
+import { color, font, kes, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
@@ -28,47 +28,82 @@ export default function Tenants() {
   const [balanceInput, setBalanceInput] = useState('');
   const [balanceBusy, setBalanceBusy] = useState(false);
 
-  const [gwProvider, setGwProvider] = useState('hostpinnacle');
+  const [gateways, setGateways] = useState([]);      // every platform-owned gateway (sender)
+  const [gwFields, setGwFields] = useState({});
+  const [gwForm, setGwForm] = useState(null);         // null=closed, {} for new, {...gw} to edit
   const [gwCreds, setGwCreds] = useState({});
-  const [gwSaved, setGwSaved] = useState(null);   // { provider, credentialKeys, fields }
   const [gwBusy, setGwBusy] = useState(false);
-  const [gwOpen, setGwOpen] = useState(false);
-  const [gwBalance, setGwBalance] = useState(null);   // real account balance, not any tenant's allocation
-  const [gwBalanceLoading, setGwBalanceLoading] = useState(false);
-  const [gwPrice, setGwPrice] = useState('2');   // KES a tenant pays per credit when they buy more
+  const [gwBalances, setGwBalances] = useState({});   // gateway id -> { loading, value }
+  const [assigning, setAssigning] = useState(null);   // tenant id currently being re-saved
 
-  const loadGatewayConfig = async () => {
+  const loadGateways = async () => {
     try {
-      const cfg = await api.platformSmsConfig();
-      setGwSaved(cfg);
-      if (cfg.provider) setGwProvider(cfg.provider);
-      if (cfg.pricePerCredit != null) setGwPrice(String(cfg.pricePerCredit));
-    } catch { /* the card just shows "not set" */ }
+      const r = await api.platformSmsGateways();
+      setGateways(r.gateways ?? []);
+      setGwFields(r.fields ?? {});
+    } catch { /* the card just shows empty */ }
   };
 
-  const checkGatewayBalance = async (force) => {
-    setGwBalanceLoading(true);
+  const checkGatewayBalance = async (id, force) => {
+    setGwBalances((s) => ({ ...s, [id]: { ...(s[id] ?? {}), loading: true } }));
     try {
-      setGwBalance(await api.platformSmsBalance(force));
+      const value = await api.platformSmsGatewayBalance(id, force);
+      setGwBalances((s) => ({ ...s, [id]: { loading: false, value } }));
     } catch (e) {
       store.toast(`Could not check balance: ${e.message}`);
-    } finally {
-      setGwBalanceLoading(false);
+      setGwBalances((s) => ({ ...s, [id]: { loading: false, value: null } }));
     }
   };
 
-  const saveGatewayConfig = async () => {
+  const openGwForm = (gw) => {
+    setGwForm(gw ?? { name: '', provider: 'hostpinnacle', pricePerCredit: '2', isDefault: gateways.length === 0 });
+    setGwCreds({});
+  };
+
+  const saveGwForm = async () => {
     setGwBusy(true);
     try {
-      await api.savePlatformSmsConfig({ provider: gwProvider, credentials: gwCreds, pricePerCredit: Number(gwPrice) || 0 });
-      store.toast('Platform SMS gateway saved');
+      const body = {
+        name: gwForm.name?.trim(),
+        provider: gwForm.provider,
+        credentials: gwCreds,
+        pricePerCredit: Number(gwForm.pricePerCredit) || 0,
+        isDefault: !!gwForm.isDefault,
+      };
+      if (!body.name) throw new Error('Give this sender a name');
+      if (gwForm.id) await api.savePlatformSmsGateway(gwForm.id, body);
+      else await api.createPlatformSmsGateway(body);
+      store.toast('Gateway saved');
+      setGwForm(null);
       setGwCreds({});
-      await loadGatewayConfig();
-      await checkGatewayBalance(true);
+      await loadGateways();
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
       setGwBusy(false);
+    }
+  };
+
+  const deleteGateway = async (gw) => {
+    try {
+      await api.deletePlatformSmsGateway(gw.id);
+      store.toast(`${gw.name} removed`);
+      await loadGateways();
+    } catch (e) {
+      store.toast(`Could not remove: ${e.message}`);
+    }
+  };
+
+  const assignSender = async (t, gatewayId) => {
+    setAssigning(t.id);
+    try {
+      await api.setTenantSmsGateway(t.id, gatewayId || null);
+      store.setCollection('tenants', (ts) => ts.map((x) =>
+        (x.id === t.id ? { ...x, platform_sms_gateway_id: gatewayId || null } : x)));
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setAssigning(null);
     }
   };
 
@@ -88,7 +123,7 @@ export default function Tenants() {
     }
   };
 
-  useEffect(() => { loadGatewayConfig(); checkGatewayBalance(false); }, []);
+  useEffect(() => { loadGateways(); }, []);
 
   // The global 30s poll (store.jsx) keeps every screen current in the
   // background, but it's on its own clock — navigate here right after it
@@ -228,57 +263,121 @@ export default function Tenants() {
       </Grid>
 
       <Card
-        title="Platform SMS gateway"
-        subtitle="Your own gateway — a tenant with none of their own configured falls back to sending through this, spending only from the balance you give them below"
-        actions={
-          <>
-            {gwSaved?.provider && (
-              <span style={{ fontSize: 12.5, color: color.muted, fontFamily: font.mono, marginRight: 4 }}>
-                {gwBalanceLoading ? 'checking…' : gwBalance?.configured
-                  ? `${gwBalance.credits} credit${gwBalance.credits === 1 ? '' : 's'} left on account`
-                  : gwBalance && !gwBalance.configured ? 'balance unavailable' : ''}
-              </span>
-            )}
-            {gwSaved?.provider && (
-              <Button onClick={() => checkGatewayBalance(true)} disabled={gwBalanceLoading}>Check balance</Button>
-            )}
-            <Button onClick={() => setGwOpen((v) => !v)}>{gwOpen ? 'Hide' : gwSaved?.provider ? `Set: ${gwSaved.provider}` : 'Set up'}</Button>
-          </>
-        }
+        title="Platform SMS gateways"
+        subtitle="Your own gateway(s) — a tenant with none of their own configured falls back to sending through whichever of these it's assigned below (or the default), spending only from the balance you give them"
+        actions={<Button variant="primary" onClick={() => openGwForm(null)}>Add sender</Button>}
       >
-        {gwOpen && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
+        {gateways.length === 0 && (
+          <div style={{ padding: '10px 0', fontSize: 13, color: color.muted }}>None set up yet — tenants with no gateway of their own can't be sent to.</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {gateways.map((g) => {
+            const bal = gwBalances[g.id];
+            return (
+              <div
+                key={g.id}
+                style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '9px 11px', border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: 13,
+                }}
+              >
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  <span style={{ fontWeight: 500 }}>
+                    {g.name}{' '}
+                    {g.isDefault && <Badge tone="active">default</Badge>}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>
+                    {g.provider} · KES {g.pricePerCredit}/credit
+                    {g.missing?.length > 0 && <span style={{ color: color.rust }}> · missing {g.missing.join(', ')}</span>}
+                  </span>
+                </span>
+                <span style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontFamily: font.mono, fontSize: 12, color: color.muted }}>
+                    {bal?.loading ? 'checking…' : bal?.value?.configured
+                      ? `${bal.value.credits} credit${bal.value.credits === 1 ? '' : 's'}`
+                      : bal?.value && !bal.value.configured ? 'unavailable' : ''}
+                  </span>
+                  <Button onClick={() => checkGatewayBalance(g.id, true)} disabled={bal?.loading}>Check balance</Button>
+                  <span onClick={() => openGwForm(g)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Edit</span>
+                  <span onClick={() => deleteGateway(g)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Remove</span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {gwForm && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420, marginTop: 16, paddingTop: 16, borderTop: `1px solid ${color.line}` }}>
+            <Field label="Sender name" hint="Just for you — shown nowhere the tenant sees">
+              <Input value={gwForm.name} onChange={(e) => setGwForm((s) => ({ ...s, name: e.target.value }))} placeholder="e.g. Sender 1" />
+            </Field>
             <Field label="Gateway">
               <Select
-                value={gwProvider}
-                onChange={(e) => { setGwProvider(e.target.value); setGwCreds({}); }}
-                options={Object.keys(gwSaved?.fields ?? { hostpinnacle: 1, africastalking: 1, twilio: 1 })}
+                value={gwForm.provider}
+                onChange={(e) => { setGwForm((s) => ({ ...s, provider: e.target.value })); setGwCreds({}); }}
+                options={Object.keys(gwFields)}
               />
             </Field>
-            {(gwSaved?.fields?.[gwProvider] ?? []).map((f) => (
+            {(gwFields[gwForm.provider] ?? []).map((f) => (
               <Field
                 key={f.key}
                 label={f.required ? f.label : `${f.label} (optional)`}
-                hint={gwSaved?.provider === gwProvider && gwSaved?.credentialKeys?.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
+                hint={gwForm.credentialKeys?.includes(f.key) ? 'Saved — leave blank to keep it' : undefined}
               >
                 <Input
                   type={f.secret ? 'password' : 'text'}
                   autoComplete="off"
                   value={gwCreds[f.key] ?? ''}
                   onChange={(e) => setGwCreds((s) => ({ ...s, [f.key]: e.target.value }))}
-                  placeholder={gwSaved?.provider === gwProvider && gwSaved?.credentialKeys?.includes(f.key) ? '••••••••' : ''}
+                  placeholder={gwForm.credentialKeys?.includes(f.key) ? '••••••••' : ''}
                 />
               </Field>
             ))}
-            <Field label="Price per credit" hint="What a tenant pays (KES) when they buy more via M-Pesa">
-              <Input type="number" min="0" step="0.5" value={gwPrice} onChange={(e) => setGwPrice(e.target.value)} />
+            <Field label="Price per credit" hint="What a tenant assigned to this sender pays (KES) when they buy more via M-Pesa">
+              <Input type="number" min="0" step="0.5" value={gwForm.pricePerCredit} onChange={(e) => setGwForm((s) => ({ ...s, pricePerCredit: e.target.value }))} />
             </Field>
-            <Button variant="primary" onClick={saveGatewayConfig} disabled={gwBusy} style={{ alignSelf: 'flex-start' }}>
-              {gwBusy ? 'Saving…' : 'Save gateway'}
-            </Button>
+            <Field label="Default sender" hint="Used by any tenant with no sender specifically assigned below">
+              <Select
+                value={gwForm.isDefault ? 'yes' : 'no'}
+                onChange={(e) => setGwForm((s) => ({ ...s, isDefault: e.target.value === 'yes' }))}
+                options={['no', 'yes']}
+              />
+            </Field>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="primary" onClick={saveGwForm} disabled={gwBusy}>{gwBusy ? 'Saving…' : 'Save sender'}</Button>
+              <Button onClick={() => setGwForm(null)} disabled={gwBusy}>Cancel</Button>
+            </div>
           </div>
         )}
       </Card>
+
+      {gateways.length > 1 && (
+        <Card title="Tenant senders" subtitle="Which sender each tenant falls back to — unset uses the default above">
+          <Table
+            rowKey={(t) => t.id}
+            rows={tenants}
+            columns={[
+              { key: 'name', label: 'ISP', render: (t) => t.name },
+              {
+                key: 'sender',
+                label: 'Sender',
+                align: 'right',
+                render: (t) => (
+                  <Select
+                    value={t.platform_sms_gateway_id ?? ''}
+                    disabled={assigning === t.id}
+                    onChange={(e) => assignSender(t, e.target.value)}
+                    options={[
+                      { value: '', label: `Default (${gateways.find((g) => g.isDefault)?.name ?? '—'})` },
+                      ...gateways.map((g) => ({ value: g.id, label: g.name })),
+                    ]}
+                  />
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
 
       <Card title="Tenants">
         <Table

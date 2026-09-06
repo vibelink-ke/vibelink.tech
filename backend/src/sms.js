@@ -341,6 +341,28 @@ async function sendSms(tenantId, to, template, vars) {
 }
 
 /**
+ * Multiple platform-owned gateways can exist now (e.g. two sender IDs under
+ * the same provider account), so a specific tenant can be pinned to a
+ * specific one — tenants.platform_sms_gateway_id, null meaning "whichever
+ * gateway is flagged default". Replaces the old single-row
+ * platform_sms_config, which is no longer read anywhere.
+ */
+async function defaultGateway() {
+  const { rows: [g] } = await pool.query(
+    'select id, provider, credentials, price_per_credit from platform_sms_gateways where is_default limit 1');
+  return g ?? null;
+}
+
+async function gatewayForTenant(tenantId) {
+  const { rows: [row] } = await pool.query(
+    `select g.id, g.provider, g.credentials, g.price_per_credit
+       from tenants t left join platform_sms_gateways g on g.id = t.platform_sms_gateway_id
+      where t.id = $1`,
+    [tenantId]);
+  return row?.provider ? row : defaultGateway();
+}
+
+/**
  * The platform owner's own gateway, spent from a balance only they can top
  * up (Tenants -> a tenant's own "SMS balance") — for a tenant with nothing
  * of their own configured, or whose own gateway just failed, rather than
@@ -353,7 +375,7 @@ async function sendViaPlatform(tenantId, to, body) {
     'select platform_sms_balance from tenants where id=$1', [tenantId]);
   if (!t || t.platform_sms_balance <= 0) return { ok: false };
 
-  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  const cfg = await gatewayForTenant(tenantId);
   if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
     console.warn('platform sms gateway not configured');
     return { ok: false };
@@ -392,7 +414,7 @@ async function sendViaPlatform(tenantId, to, body) {
  * the caller's side; this function only ever dispatches.
  */
 export async function sendViaPlatformGateway(to, body, source = 'local') {
-  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  const cfg = await defaultGateway();
   if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
     console.warn('platform sms gateway not configured — relay request from', source, 'dropped');
     return { ok: false, error: 'platform gateway not configured' };
@@ -618,12 +640,14 @@ export async function smsBalance(tenantId, { force = false } = {}) {
  * actually left on the account before every tenant's fallback stops
  * working," which is what the platform owner actually needs to watch.
  */
-export async function platformSmsBalance({ force = false } = {}) {
-  const key = '__platform__';
+export async function platformSmsBalance({ force = false, gatewayId = null } = {}) {
+  const key = gatewayId ? `__platform__${gatewayId}` : '__platform__';
   const hit = cache.get(key);
   if (!force && hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
 
-  const { rows: [cfg] } = await pool.query('select provider, credentials from platform_sms_config where id=true');
+  const cfg = gatewayId
+    ? (await pool.query('select provider, credentials from platform_sms_gateways where id=$1', [gatewayId])).rows[0]
+    : await defaultGateway();
 
   let value;
   if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {

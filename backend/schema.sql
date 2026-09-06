@@ -1713,6 +1713,38 @@ alter table tenants add column if not exists platform_sms_balance int not null d
 -- buy more platform SMS credit once their given balance runs out.
 alter table platform_sms_config add column if not exists price_per_credit numeric(12,2) not null default 2;
 
+-- More than one platform-owned gateway can now exist — e.g. two approved
+-- sender IDs under the same provider account — so specific tenants can be
+-- pinned to a specific one instead of every tenant sharing the single row
+-- above (still read nowhere in code; left in place rather than dropped).
+create table if not exists platform_sms_gateways (
+  id               uuid primary key default gen_random_uuid(),
+  name             text not null,
+  provider         text not null,
+  credentials      jsonb not null default '{}'::jsonb,
+  price_per_credit numeric(12,2) not null default 2,
+  is_default       boolean not null default false,
+  created_at       timestamptz not null default now()
+);
+create unique index if not exists platform_sms_gateways_one_default
+  on platform_sms_gateways (is_default) where is_default;
+
+-- One-time carry-over of whatever was already configured in the old
+-- singleton row, as the new default gateway — an operator who had already
+-- set up platform SMS keeps sending exactly as before after this migration.
+do $$
+begin
+  if not exists (select 1 from platform_sms_gateways) then
+    insert into platform_sms_gateways (name, provider, credentials, price_per_credit, is_default)
+    select 'Default', provider, credentials, price_per_credit, true
+      from platform_sms_config where id = true and provider is not null;
+  end if;
+end $$;
+
+-- null = falls back to whichever platform_sms_gateways row is flagged
+-- default, rather than a specific sender pinned for this tenant.
+alter table tenants add column if not exists platform_sms_gateway_id uuid references platform_sms_gateways(id) on delete set null;
+
 -- Optional customer-profile fields for the Client-info tab — none of these
 -- drive billing or RADIUS, they're just what an operator records about who
 -- the customer is, so all three are nullable with no default.
