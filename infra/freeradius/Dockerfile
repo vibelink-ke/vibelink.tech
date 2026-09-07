@@ -11,4 +11,10 @@ FROM freeradius/freeradius-server:3.2.5-alpine
 # curl is for post-auth-hook.sh — the post-auth section's fire-and-forget
 # call back to the api container to start a 'login'-mode voucher's clock.
 # Not present in the base image at all.
-RUN apk add --no-cache libpq tzdata curl
+#
+# supervisor runs radiusd and radacct-purge.sh as sibling processes (see
+# supervisord.conf) instead of radiusd alone as PID 1 — restarting just
+# radiusd on a crash, rather than Docker recreating the whole container, and
+# giving the purge loop somewhere to run without a second container of its
+# own. postgresql-client is psql, for that same purge script.
+RUN apk add --no-cache libpq tzdata curl supervisor postgresql-client

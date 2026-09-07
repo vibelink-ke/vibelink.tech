@@ -206,8 +206,9 @@ services:
     volumes:
       - ./infra/freeradius:/config:ro
     entrypoint: ['/bin/sh', '/config/entrypoint.sh']
-    # Not -X. Debug mode prints every credential it handles.
-    command: ['radiusd', '-f']
+    # entrypoint.sh always launches supervisord itself (radiusd -f is
+    # supervisord.conf's own program command, not -X — debug mode prints
+    # every credential it handles) — no command needed here any more.
 
   openvpn:
     build: ./infra/openvpn

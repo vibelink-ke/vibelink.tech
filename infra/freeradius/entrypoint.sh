@@ -1,5 +1,6 @@
 #!/bin/sh
-# Enable only what the billing server needs, then hand off to radiusd.
+# Enable only what the billing server needs, then hand off to supervisord
+# (radiusd itself, plus the radacct-purge loop — see supervisord.conf).
 #
 # The stock image ships every site and module enabled. Leaving `default` and
 # `inner-tunnel` on means a request that misses our rules can still be answered
@@ -95,9 +96,8 @@ grep -c "AND tenant_id = (SELECT tenant_id FROM routers" "$QUERIES" | {
 }
 echo "configuration OK"
 
-# The compose command says `radiusd`, which is not on PATH under the /opt prefix.
-if [ "$1" = "radiusd" ]; then
-  shift
-  set -- "$RADIUSD" "$@"
-fi
-exec "$@"
+# supervisord.conf's radiusd program invokes %(ENV_RADIUSD_BIN)s — needed
+# because /opt/sbin isn't on PATH under the /opt prefix, same reason this
+# whole file resolves RADIUSD above instead of trusting PATH to find it.
+export RADIUSD_BIN="$RADIUSD"
+exec supervisord -c /config/supervisord.conf -n
