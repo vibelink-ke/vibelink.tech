@@ -85,15 +85,6 @@ const TABS = [
   { id: 'activity', label: 'Activity log' },
 ];
 
-const Soon = ({ label }) => (
-  <div style={{
-    padding: '40px 16px', textAlign: 'center', color: color.muted, fontSize: 13,
-    background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg,
-  }}>
-    {label} — coming soon.
-  </div>
-);
-
 export default function ClientDetail() {
   const store = useStore();
   const navigate = useNavigate();
@@ -269,6 +260,27 @@ export default function ClientDetail() {
     if (tab !== 'activity' || !client) return;
     setActivity(null);
     api.subscriberActivity(client.id).then(setActivity).catch(() => setActivity([]));
+  }, [tab, client?.id]);
+
+  // Polled only while the tab is actually open — same 5s cadence as the
+  // per-router Traffic dialog (Routers.jsx), slow enough not to punish a
+  // rural link, fast enough that a change shows up while still watching.
+  const [liveTraffic, setLiveTraffic] = useState(null);   // { rxKbps, txKbps, at, error }
+  useEffect(() => {
+    if (tab !== 'live' || !client) return undefined;
+    let live = true;
+    setLiveTraffic(null);
+    const tick = async () => {
+      try {
+        const out = await api.subscriberLiveTraffic(client.id);
+        if (live) setLiveTraffic({ rxKbps: out.rxKbps, txKbps: out.txKbps, at: out.at, error: null });
+      } catch (e) {
+        if (live) setLiveTraffic({ rxKbps: null, txKbps: null, at: null, error: e.message });
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => { live = false; clearInterval(id); };
   }, [tab, client?.id]);
 
   const [addingService, setAddingService] = useState(null);
@@ -897,7 +909,38 @@ export default function ClientDetail() {
           })()}
         </div>
       )}
-      {tab === 'live' && <Soon label="Live session data" />}
+      {tab === 'live' && (
+        <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 20px' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Live throughput</div>
+          {client?.service !== 'pppoe' ? (
+            <Empty>Live data is only available for PPPoE lines right now.</Empty>
+          ) : liveTraffic === null ? (
+            <span style={{ fontSize: 13, color: color.muted }}>Checking…</span>
+          ) : liveTraffic.error ? (
+            <Empty>{liveTraffic.error}</Empty>
+          ) : (
+            <>
+              <div style={{ display: 'flex', gap: 24, padding: '6px 0 4px' }}>
+                <div>
+                  <div style={{ fontSize: 12, color: color.muted }}>Download</div>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: color.green }}>
+                    {(liveTraffic.rxKbps / 1000).toFixed(1)} <span style={{ fontSize: 14, fontWeight: 500 }}>Mbps</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: color.muted }}>Upload</div>
+                  <div style={{ fontSize: 28, fontWeight: 700 }}>
+                    {(liveTraffic.txKbps / 1000).toFixed(1)} <span style={{ fontSize: 14, fontWeight: 500 }}>Mbps</span>
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11.5, color: color.muted }}>
+                Live from the router · updates every 5s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {tab === 'activity' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Activity log</div>

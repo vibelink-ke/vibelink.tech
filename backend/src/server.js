@@ -7084,6 +7084,45 @@ app.get('/api/subscribers/:id/usage', requirePermission('clients.view'), wrap(as
  * subscriber_id: a deleted line's own log rows have subscriber_id cleared
  * (see the delete route) but stay filed under the account they belonged to.
  */
+/**
+ * Right-now throughput for one PPPoE line, polled by the Live data tab.
+ *
+ * Hotspot has no equivalent single interface per guest to monitor (shared
+ * bridge, per-IP queues at best) so this is PPPoE-only for now, same as the
+ * MAC lock and welcome-expiry features before it.
+ */
+app.get('/api/subscribers/:id/live-traffic', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select s.pppoe_user, s.service, r.host, r.api_port, r.service_user, r.service_password_enc
+       from subscribers s left join routers r on r.id = s.router_id
+      where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'No such subscriber' });
+  if (s.service !== 'pppoe' || !s.pppoe_user) {
+    return res.status(400).json({ error: 'Live data is only available for PPPoE lines right now.' });
+  }
+  if (!s.host || !s.service_user || !s.service_password_enc) {
+    return res.status(428).json({ error: 'This router has not been Configured yet.' });
+  }
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let conn;
+  try {
+    const password = secrets.decrypt(s.service_password_enc);
+    conn = await ros.connect({
+      host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
+      user: s.service_user, password, timeoutSec: 8,
+    });
+    const t = await ros.subscriberTraffic(conn, s.pppoe_user);
+    if (!t) return res.status(503).json({ error: 'This customer is not currently connected.' });
+    res.json({ ...t, at: new Date().toISOString() });
+  } catch (e) {
+    res.status(502).json({ error: 'This customer is not currently connected, or the router could not be reached.' });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.get('/api/subscribers/:id/activity', requirePermission('clients.view'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     'select account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);

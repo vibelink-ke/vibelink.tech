@@ -1208,6 +1208,30 @@ export async function portTraffic(conn) {
 }
 
 /**
+ * Live throughput for one PPPoE subscriber's own session, right now.
+ *
+ * RouterOS names a PPPoE session's dynamic interface literally
+ * "<pppoe-USERNAME>" (angle brackets included) — the same interface a
+ * per-user simple queue already targets elsewhere in this file, so this is
+ * exactly what "how fast is this customer going right now" means on the
+ * router itself. Throws if the interface does not exist — a subscriber with
+ * no active session has nothing to monitor, and the caller is expected to
+ * turn that into "not currently connected" rather than a raw error.
+ */
+export async function subscriberTraffic(conn, pppoeUser) {
+  const rows = await conn.write('/interface/monitor-traffic', [
+    `=interface=<pppoe-${pppoeUser}>`,
+    '=once=',
+  ]);
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    rxKbps: Math.round(Number(r['rx-bits-per-second'] ?? 0) / 1000),
+    txKbps: Math.round(Number(r['tx-bits-per-second'] ?? 0) / 1000),
+  };
+}
+
+/**
  * Read the PPPoE accounts already on the router.
  *
  * An ISP moving onto this platform has their whole customer list in
