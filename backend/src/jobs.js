@@ -43,7 +43,12 @@ const safely = (name, fn) => async () => {
 };
 
 export function startJobs() {
-  cron.schedule('*/5 * * * *', safely('expireAndSuspend', expireAndSuspend));
+  // Every 30s, not every 5 minutes: an expired hotspot voucher's bypassed
+  // device (a TV with no login step to fail) had nothing else forcing it
+  // offline promptly — up to 5 minutes of free access past what it paid
+  // for. Cheap to run this often: both queries below are indexed lookups
+  // scoped to just-expired rows, not a scan of every subscriber/voucher.
+  cron.schedule('*/30 * * * * *', safely('expireAndSuspend', expireAndSuspend));
   cron.schedule('*/15 * * * *', safely('enforceFup', enforceFup));
   cron.schedule('*/15 * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
   cron.schedule('*/3 * * * *', safely('expireStuckStkRequests', expireStuckStkRequests));
