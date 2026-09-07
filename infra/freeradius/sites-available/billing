@@ -66,6 +66,11 @@ server billing {
         update control {
             &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{SQL-User-Name}'}"
         }
+        # TEMPORARY — see maccheck-debug.sh's own comment. Remove this block
+        # (and that file) once the MAC-lock reject below is confirmed working.
+        update control {
+            &Tmp-String-1 := "%{exec:/bin/sh /config/maccheck-debug.sh %{SQL-User-Name} %{control:Tmp-String-0} %{Calling-Station-Id}}"
+        }
         # Bare attribute comparisons throughout, not the quoted/xlat'd-string
         # form ("%{control:Tmp-String-0}" != "%{Calling-Station-Id}") this
         # block originally used — that version silently never rejected
