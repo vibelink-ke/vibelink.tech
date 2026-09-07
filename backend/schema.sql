@@ -135,6 +135,13 @@ create table if not exists voucher_devices (
 );
 alter table voucher_devices add column if not exists router_id uuid references routers on delete set null;
 
+-- Set once expireAndSuspend actually confirms the router-side unbind
+-- succeeded — null means "still bound (or never confirmed)", which is what
+-- lets that job's retry query stay bounded to genuinely-outstanding devices
+-- instead of re-attempting a live router connection for every device ever
+-- bound, forever (this row is never deleted, by design, as history).
+alter table voucher_devices add column if not exists unbound_at timestamptz;
+
 -- ─────────────── money ───────────────
 create table invoices (
   id          uuid primary key default gen_random_uuid(),

@@ -227,17 +227,34 @@ export async function expireAndSuspend() {
     await walledGarden(pool, s.tenant_id, s.id)
       .catch((e) => console.error('expireAndSuspend: walledGarden retry failed for', s.id, '—', e.message));
   }
-  // Before the flip, not after: 'in_use' is what the join below is looking
-  // for, and unbindDeviceByMac is best-effort by design (the DB status
-  // change is the part that must not depend on a router being reachable) —
-  // a router that fails to answer here just leaves its ip-binding and queue
-  // in place until the next run tries again, never blocking the expiry itself.
+  /**
+   * unbindDeviceByMac is best-effort by design (the DB status change below
+   * must not depend on a router being reachable) — but the query used to
+   * only ever match status='in_use', and this same function flips that to
+   * 'expired' a few lines down, in the very same run. A router that failed
+   * to answer here (a timeout, a brief network blip — exactly what
+   * best-effort exists to tolerate) got exactly one attempt: the next run
+   * only ever looks for 'in_use' again, and this voucher is 'expired' for
+   * good by then. Nothing ever retried it, so a device someone paid to
+   * unblock stayed bypassed indefinitely — bound, still browsing, for a
+   * plan that had long since run out.
+   *
+   * unbound_at is what makes an 'expired' retry safe rather than unbounded:
+   * voucher_devices rows are kept forever as history (never deleted), so
+   * retrying every row that ever belonged to an expired voucher would mean
+   * a live router connection, every 30 seconds, for every device this
+   * tenant has ever bound — most of them long since actually unbound.
+   * Scoping to unbound_at is null keeps this to genuinely outstanding work:
+   * set the moment a router confirms the unbind, permanently excluding that
+   * row from every future run.
+   */
   const { rows: expiringDevices } = await pool.query(
-    `select d.mac, r.host, r.secret, r.api_port, r.service_user, r.service_password_enc
+    `select d.id as device_row_id, d.mac, r.host, r.secret, r.api_port, r.service_user, r.service_password_enc
        from vouchers v
        join voucher_devices d on d.voucher_id = v.id
        join routers r on r.id = d.router_id
-      where v.status='in_use' and v.expires_at < now() and v.tenant_id in (${enabledTenants})
+      where v.status in ('in_use','expired') and v.expires_at < now() and d.unbound_at is null
+        and v.tenant_id in (${enabledTenants})
         and r.service_user is not null and r.service_password_enc is not null`,
     ['expireAndSuspend']);
   if (expiringDevices.length) {
@@ -251,6 +268,7 @@ export async function expireAndSuspend() {
           user: d.service_user, password, timeoutSec: 8,
         });
         try { await ros.unbindDeviceByMac(conn, { mac: d.mac }); } finally { ros.close(conn); }
+        await pool.query('update voucher_devices set unbound_at=now() where id=$1', [d.device_row_id]);
       } catch (e) {
         console.warn('unbindDeviceByMac failed for', d.mac, '—', e.message);
       }
