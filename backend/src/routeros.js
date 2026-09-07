@@ -843,6 +843,29 @@ export async function applyDnsProxy(conn, { hotspotSubnet = null } = {}) {
     for (const dupe of mineAccept.slice(1)) {
       await cmd(conn, 'remove duplicate guest DNS accept', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
     }
+
+    /**
+     * Re-checked on every push, not just when both rules are first created —
+     * the comment above only ever guaranteed order at that one moment. If
+     * drop already existed from an earlier push (say, before this rate-limit
+     * accept rule existed at all) and accept was added later, accept's own
+     * place-before=0 still puts it at the very front and everything is fine
+     * — but if it ever happens the other way around (drop re-added or
+     * recreated after accept already existed), drop jumps to the front and
+     * every single guest DNS query matches its unconditional drop before the
+     * rate budget above it is ever consulted: not "DNS tunneling throttled",
+     * but DNS broken outright for every hotspot guest, silently, since the
+     * accept rule's own hit counter then never moves either. Fixed in place
+     * on every run rather than only trusted once at creation.
+     */
+    const allRules = await conn.write('/ip/firewall/filter/print', []);
+    const dropIdx = allRules.findIndex((r) => String(r.comment ?? '').startsWith('ispBlocking guest DNS rate drop'));
+    const acceptIdx = allRules.findIndex((r) => String(r.comment ?? '').startsWith('ispBlocking guest DNS rate accept'));
+    if (dropIdx !== -1 && acceptIdx !== -1 && dropIdx < acceptIdx) {
+      await cmd(conn, 'reorder guest DNS accept ahead of drop', '/ip/firewall/filter/move',
+        [`=numbers=${idOf(allRules[acceptIdx])}`, `=destination=${idOf(allRules[dropIdx])}`]);
+      done.push('fixed guest DNS accept/drop order');
+    }
   }
 
   return { enabled: true, protected: true, wan };
