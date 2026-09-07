@@ -254,11 +254,24 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
 async function framedAddress(c, tenantId, subId, s) {
   const purpose = ['expired', 'suspended', 'paused'].includes(s.status) ? 'expired' : 'normal';
 
+  // Scoped to this subscriber's own router, not just tenant + purpose — a
+  // tenant with more than one router each has its own purpose='normal' row
+  // (router_id set on both), and without this they tied on the only
+  // ordering this had, letting LIMIT 1 return either router's pool
+  // arbitrarily. A subscriber on router B could get router A's pool CIDR
+  // here, fail the inPool check below against their real (router-B) static
+  // IP for no reason a human would ever guess, and get silently
+  // reassigned a fresh address out of the wrong router's range — an IP
+  // edit that appeared to save (the response already carried the new
+  // value) but read back as reverted moments later, because this ran
+  // after that response was built and rewrote the row again underneath it.
   const poolFor = async (p) => {
     const { rows: [row] } = await c.query(
       `select cidr from ip_pools
         where tenant_id=$1 and service='pppoe' and purpose=$2
-        order by (router_id is not null) desc limit 1`, [tenantId, p]);
+          and (router_id = $3 or router_id is null)
+        order by (router_id = $3) desc
+        limit 1`, [tenantId, p, s.router_id]);
     return row;
   };
 

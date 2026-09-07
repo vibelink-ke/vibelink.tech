@@ -67,7 +67,12 @@ function hostsInCidr(cidr, max = 254) {
   if (size < 2) return [];
   const scanLimit = Math.min(size - 1, 65536);
   const out = [];
-  for (let i = 1; i < scanLimit && out.length < max; i++) {
+  // Starts at 2, not 1: .1 is the gateway address every router in this pool
+  // gets (see planNetwork/poolFromCidr on the backend) — offering it here
+  // let an operator hand a subscriber the router's own address, which the
+  // backend's own allocator has never done (it starts its search at the
+  // same offset) but this dropdown did, silently, for anyone using it.
+  for (let i = 2; i < scanLimit && out.length < max; i++) {
     const ip = (base + i) >>> 0;
     out.push([(ip >>> 24) & 255, (ip >>> 16) & 255, (ip >>> 8) & 255, ip & 255].join('.'));
   }
