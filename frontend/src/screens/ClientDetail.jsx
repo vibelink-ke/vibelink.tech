@@ -85,6 +85,24 @@ const TABS = [
   { id: 'activity', label: 'Activity log' },
 ];
 
+const formatBytes = (n) => {
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+// A filled area under a rolling series of Kbps samples, scaled to the chart's
+// own current peak (not a fixed ceiling) so a quiet line still shows visible
+// movement instead of a flat sliver at the bottom of the graph.
+const areaPath = (values, w, h, max) => {
+  if (values.length < 2 || !max) return '';
+  const stepX = w / (values.length - 1);
+  const line = values
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * stepX).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`)
+    .join(' ');
+  return `${line} L${w},${h} L0,${h} Z`;
+};
+
 export default function ClientDetail() {
   const store = useStore();
   const navigate = useNavigate();
@@ -264,22 +282,35 @@ export default function ClientDetail() {
 
   // Polled only while the tab is actually open — same 5s cadence as the
   // per-router Traffic dialog (Routers.jsx), slow enough not to punish a
-  // rural link, fast enough that a change shows up while still watching.
+  // 2s, not 5s: a bandwidth graph reads as "live" only if it visibly moves
+  // while you watch it — samples keeps a rolling 60s window (30 points) for
+  // the chart; totals accumulate bytes-transferred-while-watching (rxKbps/8
+  // * the interval), reset whenever the tab is reopened or the line changes.
   const [liveTraffic, setLiveTraffic] = useState(null);   // { rxKbps, txKbps, at, error }
+  const [liveSamples, setLiveSamples] = useState([]);     // [{ rxKbps, txKbps }], oldest first
+  const [liveTotals, setLiveTotals] = useState({ rxBytes: 0, txBytes: 0 });
   useEffect(() => {
     if (tab !== 'live' || !client) return undefined;
     let live = true;
     setLiveTraffic(null);
+    setLiveSamples([]);
+    setLiveTotals({ rxBytes: 0, txBytes: 0 });
     const tick = async () => {
       try {
         const out = await api.subscriberLiveTraffic(client.id);
-        if (live) setLiveTraffic({ rxKbps: out.rxKbps, txKbps: out.txKbps, at: out.at, error: null });
+        if (!live) return;
+        setLiveTraffic({ rxKbps: out.rxKbps, txKbps: out.txKbps, at: out.at, error: null });
+        setLiveSamples((s) => [...s, { rxKbps: out.rxKbps, txKbps: out.txKbps }].slice(-30));
+        setLiveTotals((t) => ({
+          rxBytes: t.rxBytes + (out.rxKbps * 1000 / 8) * 2,
+          txBytes: t.txBytes + (out.txKbps * 1000 / 8) * 2,
+        }));
       } catch (e) {
         if (live) setLiveTraffic({ rxKbps: null, txKbps: null, at: null, error: e.message });
       }
     };
     tick();
-    const id = setInterval(tick, 5000);
+    const id = setInterval(tick, 2000);
     return () => { live = false; clearInterval(id); };
   }, [tab, client?.id]);
 
@@ -911,34 +942,43 @@ export default function ClientDetail() {
       )}
       {tab === 'live' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 20px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Live throughput</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 8px', flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>Live bandwidth</div>
+            {liveTraffic && !liveTraffic.error && (
+              <div style={{ display: 'flex', gap: 18, fontSize: 13, fontWeight: 600 }}>
+                <span style={{ color: color.rust }}>↓ {formatBytes(liveTotals.rxBytes)}</span>
+                <span style={{ color: color.mint }}>↑ {formatBytes(liveTotals.txBytes)}</span>
+              </div>
+            )}
+          </div>
           {client?.service !== 'pppoe' ? (
             <Empty>Live data is only available for PPPoE lines right now.</Empty>
           ) : liveTraffic === null ? (
             <span style={{ fontSize: 13, color: color.muted }}>Checking…</span>
           ) : liveTraffic.error ? (
             <Empty>{liveTraffic.error}</Empty>
-          ) : (
-            <>
-              <div style={{ display: 'flex', gap: 24, padding: '6px 0 4px' }}>
-                <div>
-                  <div style={{ fontSize: 12, color: color.muted }}>Download</div>
-                  <div style={{ fontSize: 28, fontWeight: 700, color: color.green }}>
-                    {(liveTraffic.rxKbps / 1000).toFixed(1)} <span style={{ fontSize: 14, fontWeight: 500 }}>Mbps</span>
-                  </div>
+          ) : (() => {
+            const rxSeries = liveSamples.map((s) => s.rxKbps);
+            const txSeries = liveSamples.map((s) => s.txKbps);
+            const peak = Math.max(1, ...rxSeries, ...txSeries);
+            return (
+              <>
+                <svg viewBox="0 0 600 160" preserveAspectRatio="none" style={{ width: '100%', height: 160, display: 'block' }}>
+                  <path d={areaPath(rxSeries, 600, 160, peak)} fill={color.rust} opacity={0.3} />
+                  <path d={areaPath(rxSeries, 600, 160, peak)} fill="none" stroke={color.rust} strokeWidth={1.5} />
+                  <path d={areaPath(txSeries, 600, 160, peak)} fill={color.mint} opacity={0.3} />
+                  <path d={areaPath(txSeries, 600, 160, peak)} fill="none" stroke={color.mint} strokeWidth={1.5} />
+                </svg>
+                <div style={{ display: 'flex', gap: 18, fontSize: 12.5, padding: '4px 0' }}>
+                  <span style={{ color: color.rust }}>● {(liveTraffic.rxKbps / 1000).toFixed(2)} Mbps down</span>
+                  <span style={{ color: color.mint }}>● {(liveTraffic.txKbps / 1000).toFixed(2)} Mbps up</span>
                 </div>
-                <div>
-                  <div style={{ fontSize: 12, color: color.muted }}>Upload</div>
-                  <div style={{ fontSize: 28, fontWeight: 700 }}>
-                    {(liveTraffic.txKbps / 1000).toFixed(1)} <span style={{ fontSize: 14, fontWeight: 500 }}>Mbps</span>
-                  </div>
+                <div style={{ fontSize: 11.5, color: color.muted }}>
+                  Live from the router · updates every 2s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
                 </div>
-              </div>
-              <div style={{ fontSize: 11.5, color: color.muted }}>
-                Live from the router · updates every 5s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
-              </div>
-            </>
-          )}
+              </>
+            );
+          })()}
         </div>
       )}
       {tab === 'activity' && (

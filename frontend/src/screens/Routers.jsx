@@ -33,6 +33,18 @@ const bitrate = (bps) => {
   return `${n} bps`;
 };
 
+// A filled area under a rolling series, scaled to the series' own current
+// peak (not a fixed ceiling) so a quiet port still shows visible movement
+// instead of a flat sliver at the bottom of the sparkline.
+const areaPath = (values, w, h, max) => {
+  if (values.length < 2 || !max) return '';
+  const stepX = w / (values.length - 1);
+  const line = values
+    .map((v, i) => `${i === 0 ? 'M' : 'L'}${(i * stepX).toFixed(1)},${(h - (v / max) * h).toFixed(1)}`)
+    .join(' ');
+  return `${line} L${w},${h} L0,${h} Z`;
+};
+
 /**
  * The router row's own actions menu. Seven buttons (Hotspot, Refresh,
  * Traffic, Import, Edit, Check RADIUS, Check hotspot) used to sit side by
@@ -531,15 +543,27 @@ export default function Routers() {
    * enough that plugging a cable in shows up while you are still holding it.
    */
   const [traffic, setTraffic] = useState(null);   // { router, ports, error, at }
+  // Per-port rolling history for the sparkline next to each row — keyed by
+  // port name, capped to the last 20 samples (100s at this 5s cadence).
+  const [trafficHistory, setTrafficHistory] = useState({});
 
   useEffect(() => {
     if (!traffic?.router) return undefined;
     let live = true;
+    setTrafficHistory({});
     const tick = async () => {
       try {
         const out = await api.routerTraffic(traffic.router.id);
-        if (live) setTraffic((t) => (t?.router?.id === traffic.router.id
+        if (!live) return;
+        setTraffic((t) => (t?.router?.id === traffic.router.id
           ? { ...t, ports: out.ports, at: out.at, error: null } : t));
+        setTrafficHistory((h) => {
+          const next = { ...h };
+          for (const p of out.ports) {
+            next[p.name] = [...(h[p.name] ?? []), { rxBps: p.rxBps, txBps: p.txBps }].slice(-20);
+          }
+          return next;
+        });
       } catch (e) {
         if (live) setTraffic((t) => (t?.router?.id === traffic.router.id
           ? { ...t, error: e.message } : t));
@@ -1336,23 +1360,38 @@ Revoke anyway?`
               <thead>
                 <tr>
                   <th style={th}>PORT</th>
+                  <th style={th}>LIVE</th>
                   <th style={{ ...th, textAlign: 'right' }}>DOWN</th>
                   <th style={{ ...th, textAlign: 'right' }}>UP</th>
                 </tr>
               </thead>
               <tbody>
-                {traffic.ports.map((p) => (
-                  <tr key={p.name}>
-                    <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5 }}>
-                      {p.name}
-                      {!p.running && (
-                        <span style={{ color: color.muted, fontFamily: 'inherit' }}> · no link</span>
-                      )}
-                    </td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.rxBps)}</td>
-                    <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.txBps)}</td>
-                  </tr>
-                ))}
+                {traffic.ports.map((p) => {
+                  const hist = trafficHistory[p.name] ?? [];
+                  const rxSeries = hist.map((h) => h.rxBps);
+                  const txSeries = hist.map((h) => h.txBps);
+                  const peak = Math.max(1, ...rxSeries, ...txSeries);
+                  return (
+                    <tr key={p.name}>
+                      <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5 }}>
+                        {p.name}
+                        {!p.running && (
+                          <span style={{ color: color.muted, fontFamily: 'inherit' }}> · no link</span>
+                        )}
+                      </td>
+                      <td style={{ ...td, width: 90 }}>
+                        <svg viewBox="0 0 90 28" preserveAspectRatio="none" style={{ width: 90, height: 28, display: 'block' }}>
+                          <path d={areaPath(rxSeries, 90, 28, peak)} fill={color.rust} opacity={0.3} />
+                          <path d={areaPath(rxSeries, 90, 28, peak)} fill="none" stroke={color.rust} strokeWidth={1} />
+                          <path d={areaPath(txSeries, 90, 28, peak)} fill={color.mint} opacity={0.3} />
+                          <path d={areaPath(txSeries, 90, 28, peak)} fill="none" stroke={color.mint} strokeWidth={1} />
+                        </svg>
+                      </td>
+                      <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.rxBps)}</td>
+                      <td style={{ ...td, textAlign: 'right', fontFamily: font.mono }}>{bitrate(p.txBps)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div style={{ marginTop: 10, fontSize: 12, color: color.muted }}>
