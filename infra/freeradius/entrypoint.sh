@@ -70,6 +70,10 @@ grep -q 'type = control' "$RADDB/radiusd.conf" || cat >> "$RADDB/radiusd.conf" <
 listen {
 	type = control
 	socket = /tmp/radiusd.sock
+	# rw, not the default read-only — raddebug/radmin enabling a trace is a
+	# write (it flips a debug condition on the running server), and only
+	# this container itself can reach a socket under its own /tmp anyway.
+	mode = rw
 }
 EOF
 
