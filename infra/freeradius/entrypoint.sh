@@ -57,6 +57,22 @@ sed -i 's/^\([[:space:]]*\)destination = files/\1destination = stdout/' "$RADDB/
 # log in clear, and these logs are read casually over `docker compose logs`.
 sed -i 's/^\([[:space:]]*\)auth = no/\1auth = yes/' "$RADDB/radiusd.conf"
 
+# Enables `radmin`/`raddebug` — a live trace filtered to one user's next
+# request (e.g. "show me everything this exact login evaluates to"), on
+# demand, without -X's blanket every-credential logging for all traffic and
+# without restarting radiusd to get it. Off by default in the stock config.
+#
+# radiusd.conf is part of the image and survives a restart the same way
+# queries.conf below does — guarded so the block isn't appended a second
+# time on every subsequent restart, which would make radiusd refuse to bind
+# the same socket path twice.
+grep -q 'type = control' "$RADDB/radiusd.conf" || cat >> "$RADDB/radiusd.conf" <<'EOF'
+listen {
+	type = control
+	socket = /tmp/radiusd.sock
+}
+EOF
+
 # Scope credential lookups to the tenant that owns the router the request came
 # from. Both matching lines are the radcheck and radreply authorize queries.
 #
