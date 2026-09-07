@@ -5110,10 +5110,18 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
          * this and the push was not reading it. Prefer a pool tied to this
          * router, then any pool for the service, and fall back to the default
          * only when they have defined none.
+         *
+         * purpose='normal' is not optional: a router with an 'expired' pool
+         * too (ensureExpiredPool's own walled-garden range) had two rows
+         * tied on the only ordering this had, router_id = $2 — LIMIT 1 then
+         * picked whichever came first in physical storage, arbitrarily. A
+         * push that happened to land on the expired pool set the router's
+         * actual gateway/NAT/pppoe_pool to a /20 meant for cutting people
+         * off, not the real subscriber range.
          */
         const { rows: [confPool] } = await pool.query(
           `select cidr from ip_pools
-            where tenant_id=$1 and service='pppoe'
+            where tenant_id=$1 and service='pppoe' and purpose='normal'
               and (router_id = $2 or router_id is null)
             order by (router_id = $2) desc
             limit 1`, [req.tenant.id, r.id]);
@@ -6473,8 +6481,12 @@ async function repushPppoePool(tenantId, routerId) {
         where id=$1 and tenant_id=$2 and service_user is not null`, [routerId, tenantId]);
     if (!r) return;
 
+    // purpose='normal': same fix as the manual Configure route above — a
+    // router with both a subscriber pool and an ensureExpiredPool
+    // walled-garden range for 'pppoe' had no way to tell them apart here,
+    // and LIMIT 1 with no purpose filter could pick either arbitrarily.
     const { rows: [confPool] } = await pool.query(
-      `select cidr from ip_pools where tenant_id=$1 and router_id=$2 and service='pppoe' limit 1`,
+      `select cidr from ip_pools where tenant_id=$1 and router_id=$2 and service='pppoe' and purpose='normal' limit 1`,
       [tenantId, routerId]);
 
     const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
