@@ -244,7 +244,7 @@ const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till:
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
 export async function orgVars(tenantId) {
   const { rows: [t] } = await pool.query(
-    'select name, support_phone, subdomain from tenants where id=$1', [tenantId]);
+    'select name, support_phone, subdomain, platform_collect_enabled from tenants where id=$1', [tenantId]);
   const { rows: gws } = await pool.query(
     `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
       where tenant_id=$1 and shortcode is not null
@@ -252,6 +252,40 @@ export async function orgVars(tenantId) {
   const { rows: [hs] } = await pool.query(
     'select payment_method from hotspot_settings where tenant_id=$1', [tenantId]).catch(() => ({ rows: [] }));
   const hotspotProvider = HOTSPOT_METHOD_PROVIDER[hs?.payment_method] ?? null;
+
+  let paybillPppoe = gws.find((g) => g.enabled_pppoe)?.shortcode ?? '';
+  let paybillHotspot = (
+    gws.find((g) => g.provider === hotspotProvider)?.shortcode
+    ?? gws.find((g) => g.enabled_hotspot)?.shortcode
+    ?? ''
+  );
+
+  /**
+   * A tenant with platform_collect_enabled and no gateway of their own for a
+   * service is already actually PAID through the platform owner's own
+   * paybill (stkPushForSubscriber / /hotspot/buy's usePlatformCollect,
+   * server.js) — the {paybill} token a customer reads in an SMS has to name
+   * that same number, or "Pay Paybill  acc 1234", blank, is what actually
+   * goes out. Only a fallback for whichever of the two is genuinely missing;
+   * a tenant with their own gateway for one service and platform-collect for
+   * the other keeps naming its own.
+   */
+  if ((!paybillPppoe || !paybillHotspot) && t?.platform_collect_enabled) {
+    const { rows: [owner] } = await pool.query(
+      'select tenant_id from staff where is_super_admin and tenant_id is not null limit 1');
+    if (owner) {
+      const { rows: ownerGws } = await pool.query(
+        `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
+          where tenant_id=$1 and shortcode is not null
+          order by is_default desc nulls last`, [owner.tenant_id]).catch(() => ({ rows: [] }));
+      if (!paybillPppoe) paybillPppoe = ownerGws.find((g) => g.enabled_pppoe)?.shortcode ?? '';
+      if (!paybillHotspot) {
+        paybillHotspot = ownerGws.find((g) => g.provider === hotspotProvider)?.shortcode
+          ?? ownerGws.find((g) => g.enabled_hotspot)?.shortcode ?? '';
+      }
+    }
+  }
+
   // app_settings is one row per tenant with jsonb blobs, not key/value pairs.
   const { rows: [cfg] } = await pool.query(
     "select prefs->>'supportEmail' as email, smtp->>'from' as smtp_from from app_settings where tenant_id=$1",
@@ -263,12 +297,8 @@ export async function orgVars(tenantId) {
     // Falls back to whatever address the mail gateway sends as, which is the
     // address customers would reply to anyway.
     supportEmail: cfg?.email ?? cfg?.smtp_from ?? '',
-    paybillPppoe: gws.find((g) => g.enabled_pppoe)?.shortcode ?? '',
-    paybillHotspot: (
-      gws.find((g) => g.provider === hotspotProvider)?.shortcode
-      ?? gws.find((g) => g.enabled_hotspot)?.shortcode
-      ?? ''
-    ),
+    paybillPppoe,
+    paybillHotspot,
     // {portal} in a welcome message or reminder — a link a new customer can
     // tap straight to sign-in, instead of typing the subdomain from memory.
     portal: t?.subdomain ? `https://${t.subdomain}.${root}/customer` : '',
