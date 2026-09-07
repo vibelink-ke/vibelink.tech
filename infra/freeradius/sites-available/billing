@@ -66,7 +66,15 @@ server billing {
         update control {
             &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{SQL-User-Name}'}"
         }
-        if (&control:Tmp-String-0 && "%{control:Tmp-String-0}" != "" && "%{control:Tmp-String-0}" != "%{Calling-Station-Id}") {
+        # Bare attribute comparisons throughout, not the quoted/xlat'd-string
+        # form ("%{control:Tmp-String-0}" != "%{Calling-Station-Id}") this
+        # block originally used — that version silently never rejected
+        # anything: a subscriber locked to one MAC still got Access-Accept
+        # dialling in from a completely different one, with no error anywhere
+        # to say why. dynamic_client_lookup below already proves this exact
+        # bare-attribute form is what actually works in this FreeRADIUS
+        # version for a control-attribute comparison.
+        if (&control:Tmp-String-0 && &control:Tmp-String-0 != "" && &control:Tmp-String-0 != &Calling-Station-Id) {
             reject
         }
 
