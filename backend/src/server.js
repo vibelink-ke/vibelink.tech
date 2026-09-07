@@ -762,8 +762,24 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   // redirect_url was configurable there but never read here — set, saved,
   // and silently ignored by the page it was meant to change.
   const { rows: [hs] } = await pool.query(
-    'select banner_headline, banner_subtext, template, redirect_url, multi_device from hotspot_settings where tenant_id=$1',
+    'select banner_headline, banner_subtext, template, redirect_url, multi_device, hotspot_network from hotspot_settings where tenant_id=$1',
     [tenant.id]);
+
+  // The router's own LAN gateway IP, computed the same way applyHotspotServer
+  // (routeros.js) derives it from this same network setting — a plain IP
+  // needs no DNS lookup at all, unlike hotspotDns below, which some guests'
+  // devices simply cannot resolve (Android's "Private DNS" and similar send
+  // every lookup to a public resolver instead of the router's own, and that
+  // resolver has never heard of "<subdomain>.spot"). Those guests paid, got
+  // a voucher, and the auto-login POST silently never reached the router at
+  // all — connected to the WiFi, no internet, with nothing on screen to say
+  // why. Best-effort: a malformed stored network falls back to no IP, same
+  // as before this existed.
+  let hotspotGateway = null;
+  try {
+    const { planNetwork } = await import('./routeros.js');
+    hotspotGateway = planNetwork(hs?.hotspot_network ?? '10.5.50.0/24').gateway;
+  } catch { /* keep the DNS-name fallback as the only option */ }
 
   res.type('html').send(loginPage({
     company: tenant.name ?? 'WiFi',
@@ -804,6 +820,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // pushed (routeros.js, `${subdomain}.spot`, falling back to the same
     // 'billing.spot' default when a tenant has no subdomain yet).
     hotspotDns: tenant.subdomain ? `${tenant.subdomain}.spot` : 'billing.spot',
+    hotspotGateway,
   }));
 }));
 

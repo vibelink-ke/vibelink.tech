@@ -105,6 +105,7 @@ export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
+  hotspotGateway = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   const btnInk = bestInkOn(t.accent);
@@ -581,6 +582,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   // the tenant's real domain: this only resolves on the guest's own LAN,
   // straight to RouterOS's own login handler, in plain HTTP.
   var HOTSPOT_DNS = ${JSON.stringify(hotspotDns)};
+  // The router's own LAN gateway IP — preferred over HOTSPOT_DNS above
+  // whenever we have it, since a guest whose device sends every DNS lookup
+  // to a public resolver instead of the router's own (Android's "Private
+  // DNS" and similar) can never resolve HOTSPOT_DNS at all; an IP needs no
+  // lookup. null only for a malformed/unreadable network setting.
+  var HOTSPOT_GATEWAY = ${JSON.stringify(hotspotGateway)};
 
   /**
    * A quiet inline note next to the pay button was easy to miss — a guest
@@ -653,7 +660,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         var dst = document.querySelector('input[name="dst"]').value;
         var f = document.createElement('form');
         f.method = 'post';
-        f.action = 'http://' + HOTSPOT_DNS + '/login';
+        f.action = 'http://' + (HOTSPOT_GATEWAY || HOTSPOT_DNS) + '/login';
         [['username', code], ['password', code], ['dst', dst]].forEach(function (pair) {
           var input = document.createElement('input');
           input.type = 'hidden';
