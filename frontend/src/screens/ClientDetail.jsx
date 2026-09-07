@@ -90,12 +90,6 @@ const TABS = [
   { id: 'activity', label: 'Activity log' },
 ];
 
-const formatBytes = (n) => {
-  if (n < 1024) return `${Math.round(n)} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(2)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-};
-
 // online/last_seen already come back from GET /api/subscribers (see its own
 // comment on the backend) — this just turns them into something readable.
 // Hotspot has no equivalent connected/disconnected concept per voucher, so
@@ -298,34 +292,31 @@ export default function ClientDetail() {
   }, [tab, client?.id]);
 
   // Polled only while the tab is actually open — same 5s cadence as the
-  // per-router Traffic dialog (Routers.jsx), slow enough not to punish a
-  // 2s, not 5s: a bandwidth graph reads as "live" only if it visibly moves
-  // while you watch it — samples keeps a rolling 60s window (30 points) for
-  // the chart; totals accumulate bytes-transferred-while-watching (downKbps/8
-  // * the interval), reset whenever the tab is reopened or the line changes.
-  // down/up here are already correctly mapped to the customer's own point of
-  // view by subscriberTraffic (routeros.js) — RouterOS itself reports the
-  // opposite (rx/tx from the router's side), and a previous version of this
-  // read those fields directly, which showed every download as "upload".
+  // per-router Traffic dialog (Routers.jsx), 2s, not 5s: a bandwidth graph
+  // reads as "live" only if it visibly moves while you watch it — samples
+  // keeps a rolling 60s window (30 points) for the chart, reset whenever the
+  // tab is reopened or the line changes. Deliberately just the current rate,
+  // not a running total of bytes-transferred-while-watching — that grew
+  // forever the whole time the tab stayed open and read as "how much has
+  // this customer used", which it never was: it reset to zero on every
+  // reopen and had nothing to do with their actual usage. down/up here are
+  // already correctly mapped to the customer's own point of view by
+  // subscriberTraffic (routeros.js) — RouterOS itself reports the opposite
+  // (rx/tx from the router's side), and a previous version of this read
+  // those fields directly, which showed every download as "upload".
   const [liveTraffic, setLiveTraffic] = useState(null);   // { downKbps, upKbps, at, error }
   const [liveSamples, setLiveSamples] = useState([]);     // [{ downKbps, upKbps }], oldest first
-  const [liveTotals, setLiveTotals] = useState({ downBytes: 0, upBytes: 0 });
   useEffect(() => {
     if (tab !== 'live' || !client) return undefined;
     let live = true;
     setLiveTraffic(null);
     setLiveSamples([]);
-    setLiveTotals({ downBytes: 0, upBytes: 0 });
     const tick = async () => {
       try {
         const out = await api.subscriberLiveTraffic(client.id);
         if (!live) return;
         setLiveTraffic({ downKbps: out.downKbps, upKbps: out.upKbps, at: out.at, error: null });
         setLiveSamples((s) => [...s, { downKbps: out.downKbps, upKbps: out.upKbps }].slice(-30));
-        setLiveTotals((t) => ({
-          downBytes: t.downBytes + (out.downKbps * 1000 / 8) * 2,
-          upBytes: t.upBytes + (out.upKbps * 1000 / 8) * 2,
-        }));
       } catch (e) {
         if (live) setLiveTraffic({ downKbps: null, upKbps: null, at: null, error: e.message });
       }
@@ -984,8 +975,8 @@ export default function ClientDetail() {
             <div style={{ fontSize: 13, fontWeight: 600 }}>Live bandwidth</div>
             {liveTraffic && !liveTraffic.error && (
               <div style={{ display: 'flex', gap: 18, fontSize: 13, fontWeight: 600 }}>
-                <span style={{ color: color.rust }}>↓ {formatBytes(liveTotals.downBytes)}</span>
-                <span style={{ color: color.mint }}>↑ {formatBytes(liveTotals.upBytes)}</span>
+                <span style={{ color: color.rust }}>↓ {(liveTraffic.downKbps / 1000).toFixed(2)} Mbps</span>
+                <span style={{ color: color.mint }}>↑ {(liveTraffic.upKbps / 1000).toFixed(2)} Mbps</span>
               </div>
             )}
           </div>
@@ -1007,11 +998,7 @@ export default function ClientDetail() {
                   <path d={areaPath(upSeries, 600, 160, peak)} fill={color.mint} opacity={0.3} />
                   <path d={areaPath(upSeries, 600, 160, peak)} fill="none" stroke={color.mint} strokeWidth={1.5} />
                 </svg>
-                <div style={{ display: 'flex', gap: 18, fontSize: 12.5, padding: '4px 0' }}>
-                  <span style={{ color: color.rust }}>● {(liveTraffic.downKbps / 1000).toFixed(2)} Mbps down</span>
-                  <span style={{ color: color.mint }}>● {(liveTraffic.upKbps / 1000).toFixed(2)} Mbps up</span>
-                </div>
-                <div style={{ fontSize: 11.5, color: color.muted }}>
+                <div style={{ fontSize: 11.5, color: color.muted, paddingTop: 4 }}>
                   Live from the router · updates every 2s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
                 </div>
               </>
