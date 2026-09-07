@@ -63,22 +63,30 @@ server billing {
         # subscribers.locked_mac is the same source of truth the app already
         # maintains (lockNewPppoeMacs, clear-mac-lock); querying it directly here
         # keeps the comparison isolated from everything else authorize() loads.
+        #
+        # %{User-Name}, not %{SQL-User-Name} — confirmed live via raddebug:
+        # SQL-User-Name traced as "set to '15864'" immediately before this
+        # exact query ran, and the query FreeRADIUS actually executed was
+        # still `WHERE pppoe_user=''`, empty. SQL-User-Name is populated by
+        # rlm_sql's own top-level module call (the earlier `sql` step just
+        # above, which is what set it correctly for ITS OWN radcheck/radreply
+        # queries) — referencing it from a second, independent %{sql: ...}
+        # xlat like this one doesn't reliably see that value. This is why
+        # Tmp-String-0 was always empty, on every request, correct MAC or
+        # not: not a comparison bug (both rewrites of the if() below changed
+        # nothing because there was never a real value to compare), the
+        # lookup itself silently returned nothing every single time. Safe to
+        # use the un-escaped attribute here specifically because `notfound`
+        # above already rejected anything that isn't an exact match for a
+        # real radcheck.Username — by this point User-Name cannot contain
+        # anything an attacker chose that isn't already a legitimate,
+        # provisioned pppoe_user.
         update control {
-            &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{SQL-User-Name}'}"
+            &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{User-Name}'}"
         }
-        # TEMPORARY — see maccheck-debug.sh's own comment. Remove this block
-        # (and that file) once the MAC-lock reject below is confirmed working.
-        update control {
-            &Tmp-String-1 := "%{exec:/bin/sh /config/maccheck-debug.sh %{SQL-User-Name} %{control:Tmp-String-0} %{Calling-Station-Id}}"
-        }
-        # Bare attribute comparisons throughout, not the quoted/xlat'd-string
-        # form ("%{control:Tmp-String-0}" != "%{Calling-Station-Id}") this
-        # block originally used — that version silently never rejected
-        # anything: a subscriber locked to one MAC still got Access-Accept
-        # dialling in from a completely different one, with no error anywhere
-        # to say why. dynamic_client_lookup below already proves this exact
-        # bare-attribute form is what actually works in this FreeRADIUS
-        # version for a control-attribute comparison.
+        # Bare attribute comparisons, not quoted/xlat'd strings — proven to
+        # work in this FreeRADIUS version by dynamic_client_lookup's own
+        # secret check further down this file.
         if (&control:Tmp-String-0 && &control:Tmp-String-0 != "" && &control:Tmp-String-0 != &Calling-Station-Id) {
             reject
         }
