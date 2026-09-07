@@ -221,6 +221,15 @@ export default function PlatformMonitor() {
                  health.services?.radius?.detail ?? '',
                  health.services?.radius?.ok === false ? color.rust
                    : health.services?.radius?.ok === null ? color.amberInk : null],
+                // Straight from supervisord inside the freeradius container
+                // (radiusd, radacct-purge) — not inferred like RADIUS above,
+                // which only ever sees that something tried to authenticate.
+                ['Supervisor',
+                 health.services?.supervisor?.ok === false ? 'down' : 'up',
+                 (health.services?.supervisor?.processes ?? [])
+                   .map((p) => `${p.name}: ${p.state}`).join(', ')
+                   || health.services?.supervisor?.detail || 'unreachable',
+                 health.services?.supervisor?.ok === false ? color.rust : null],
               ];
 
               return tiles.map(([label, value, note, tone]) => (

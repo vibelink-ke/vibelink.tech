@@ -8702,6 +8702,39 @@ app.get('/api/platform/overview', superAdminOnly, wrap(async (_req, res) => {
  * Owner-only: it describes the platform, not a tenant, and disk figures are
  * nobody else's business.
  */
+
+/**
+ * radiusd and radacct-purge, straight from supervisord's own view — not
+ * inferred the way services.radius above has to be (radpostauth activity is
+ * a proxy; a process can be dead with nothing having tried to authenticate
+ * yet to reveal it). Reachable at all only because this container shares its
+ * network namespace with freeradius (network_mode: service:net on both, see
+ * docker-compose.prod.yml) — 127.0.0.1:9001 is that container's own
+ * loopback, not a route across the network.
+ *
+ * supervisord speaks XML-RPC only; hand-rolled here rather than pulling in a
+ * full XML-RPC client for the one method this needs against a server we
+ * control and whose response shape is fixed.
+ */
+async function freeradiusSupervisorStatus() {
+  try {
+    const { data } = await axios.post('http://127.0.0.1:9001/RPC2',
+      '<?xml version="1.0"?><methodCall><methodName>supervisor.getAllProcessInfo</methodName><params></params></methodCall>',
+      { headers: { 'content-type': 'text/xml' }, timeout: 3000 });
+    const processes = [...String(data).matchAll(/<struct>([\s\S]*?)<\/struct>/g)].map((m) => {
+      const struct = m[1];
+      const field = (key) => struct.match(new RegExp(`<name>${key}</name>\\s*<value><string>([^<]*)</string>`))?.[1];
+      return { name: field('name'), state: field('statename') };
+    });
+    return {
+      ok: processes.length > 0 && processes.every((p) => p.state === 'RUNNING'),
+      processes,
+    };
+  } catch (e) {
+    return { ok: false, detail: e.message, processes: [] };
+  }
+}
+
 app.get('/api/platform/health', superAdminOnly, wrap(async (_req, res) => {
   const os = await import('node:os');
   const fsp = await import('node:fs/promises');
@@ -8774,6 +8807,7 @@ app.get('/api/platform/health', superAdminOnly, wrap(async (_req, res) => {
   } catch (e) {
     services.radius = { ok: false, detail: e.message };
   }
+  services.supervisor = await freeradiusSupervisorStatus();
 
   res.json({
     at: new Date().toISOString(),
