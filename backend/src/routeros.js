@@ -1225,9 +1225,16 @@ export async function subscriberTraffic(conn, pppoeUser) {
   ]);
   const r = rows[0];
   if (!r) return null;
+  // This is the router's own end of the session, so RouterOS reports rx/tx
+  // from ITS point of view, the opposite of how the customer's own device
+  // would label the same traffic: tx is what the router sends OUT to them
+  // (their download), rx is what it receives FROM them (their upload). Named
+  // down/up here, already correctly mapped, so nothing downstream has to
+  // re-derive the direction or risk getting it backwards — as the caller
+  // briefly did, showing every customer's download as "upload" and back.
   return {
-    rxKbps: Math.round(Number(r['rx-bits-per-second'] ?? 0) / 1000),
-    txKbps: Math.round(Number(r['tx-bits-per-second'] ?? 0) / 1000),
+    downKbps: Math.round(Number(r['tx-bits-per-second'] ?? 0) / 1000),
+    upKbps: Math.round(Number(r['rx-bits-per-second'] ?? 0) / 1000),
   };
 }
 

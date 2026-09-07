@@ -301,29 +301,33 @@ export default function ClientDetail() {
   // per-router Traffic dialog (Routers.jsx), slow enough not to punish a
   // 2s, not 5s: a bandwidth graph reads as "live" only if it visibly moves
   // while you watch it — samples keeps a rolling 60s window (30 points) for
-  // the chart; totals accumulate bytes-transferred-while-watching (rxKbps/8
+  // the chart; totals accumulate bytes-transferred-while-watching (downKbps/8
   // * the interval), reset whenever the tab is reopened or the line changes.
-  const [liveTraffic, setLiveTraffic] = useState(null);   // { rxKbps, txKbps, at, error }
-  const [liveSamples, setLiveSamples] = useState([]);     // [{ rxKbps, txKbps }], oldest first
-  const [liveTotals, setLiveTotals] = useState({ rxBytes: 0, txBytes: 0 });
+  // down/up here are already correctly mapped to the customer's own point of
+  // view by subscriberTraffic (routeros.js) — RouterOS itself reports the
+  // opposite (rx/tx from the router's side), and a previous version of this
+  // read those fields directly, which showed every download as "upload".
+  const [liveTraffic, setLiveTraffic] = useState(null);   // { downKbps, upKbps, at, error }
+  const [liveSamples, setLiveSamples] = useState([]);     // [{ downKbps, upKbps }], oldest first
+  const [liveTotals, setLiveTotals] = useState({ downBytes: 0, upBytes: 0 });
   useEffect(() => {
     if (tab !== 'live' || !client) return undefined;
     let live = true;
     setLiveTraffic(null);
     setLiveSamples([]);
-    setLiveTotals({ rxBytes: 0, txBytes: 0 });
+    setLiveTotals({ downBytes: 0, upBytes: 0 });
     const tick = async () => {
       try {
         const out = await api.subscriberLiveTraffic(client.id);
         if (!live) return;
-        setLiveTraffic({ rxKbps: out.rxKbps, txKbps: out.txKbps, at: out.at, error: null });
-        setLiveSamples((s) => [...s, { rxKbps: out.rxKbps, txKbps: out.txKbps }].slice(-30));
+        setLiveTraffic({ downKbps: out.downKbps, upKbps: out.upKbps, at: out.at, error: null });
+        setLiveSamples((s) => [...s, { downKbps: out.downKbps, upKbps: out.upKbps }].slice(-30));
         setLiveTotals((t) => ({
-          rxBytes: t.rxBytes + (out.rxKbps * 1000 / 8) * 2,
-          txBytes: t.txBytes + (out.txKbps * 1000 / 8) * 2,
+          downBytes: t.downBytes + (out.downKbps * 1000 / 8) * 2,
+          upBytes: t.upBytes + (out.upKbps * 1000 / 8) * 2,
         }));
       } catch (e) {
-        if (live) setLiveTraffic({ rxKbps: null, txKbps: null, at: null, error: e.message });
+        if (live) setLiveTraffic({ downKbps: null, upKbps: null, at: null, error: e.message });
       }
     };
     tick();
@@ -980,8 +984,8 @@ export default function ClientDetail() {
             <div style={{ fontSize: 13, fontWeight: 600 }}>Live bandwidth</div>
             {liveTraffic && !liveTraffic.error && (
               <div style={{ display: 'flex', gap: 18, fontSize: 13, fontWeight: 600 }}>
-                <span style={{ color: color.rust }}>↓ {formatBytes(liveTotals.rxBytes)}</span>
-                <span style={{ color: color.mint }}>↑ {formatBytes(liveTotals.txBytes)}</span>
+                <span style={{ color: color.rust }}>↓ {formatBytes(liveTotals.downBytes)}</span>
+                <span style={{ color: color.mint }}>↑ {formatBytes(liveTotals.upBytes)}</span>
               </div>
             )}
           </div>
@@ -992,20 +996,20 @@ export default function ClientDetail() {
           ) : liveTraffic.error ? (
             <Empty>{liveTraffic.error}</Empty>
           ) : (() => {
-            const rxSeries = liveSamples.map((s) => s.rxKbps);
-            const txSeries = liveSamples.map((s) => s.txKbps);
-            const peak = Math.max(1, ...rxSeries, ...txSeries);
+            const downSeries = liveSamples.map((s) => s.downKbps);
+            const upSeries = liveSamples.map((s) => s.upKbps);
+            const peak = Math.max(1, ...downSeries, ...upSeries);
             return (
               <>
                 <svg viewBox="0 0 600 160" preserveAspectRatio="none" style={{ width: '100%', height: 160, display: 'block' }}>
-                  <path d={areaPath(rxSeries, 600, 160, peak)} fill={color.rust} opacity={0.3} />
-                  <path d={areaPath(rxSeries, 600, 160, peak)} fill="none" stroke={color.rust} strokeWidth={1.5} />
-                  <path d={areaPath(txSeries, 600, 160, peak)} fill={color.mint} opacity={0.3} />
-                  <path d={areaPath(txSeries, 600, 160, peak)} fill="none" stroke={color.mint} strokeWidth={1.5} />
+                  <path d={areaPath(downSeries, 600, 160, peak)} fill={color.rust} opacity={0.3} />
+                  <path d={areaPath(downSeries, 600, 160, peak)} fill="none" stroke={color.rust} strokeWidth={1.5} />
+                  <path d={areaPath(upSeries, 600, 160, peak)} fill={color.mint} opacity={0.3} />
+                  <path d={areaPath(upSeries, 600, 160, peak)} fill="none" stroke={color.mint} strokeWidth={1.5} />
                 </svg>
                 <div style={{ display: 'flex', gap: 18, fontSize: 12.5, padding: '4px 0' }}>
-                  <span style={{ color: color.rust }}>● {(liveTraffic.rxKbps / 1000).toFixed(2)} Mbps down</span>
-                  <span style={{ color: color.mint }}>● {(liveTraffic.txKbps / 1000).toFixed(2)} Mbps up</span>
+                  <span style={{ color: color.rust }}>● {(liveTraffic.downKbps / 1000).toFixed(2)} Mbps down</span>
+                  <span style={{ color: color.mint }}>● {(liveTraffic.upKbps / 1000).toFixed(2)} Mbps up</span>
                 </div>
                 <div style={{ fontSize: 11.5, color: color.muted }}>
                   Live from the router · updates every 2s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
