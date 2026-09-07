@@ -46,6 +46,30 @@ server billing {
             reject
         }
 
+        #
+        # PPPoE anti-sharing MAC lock — deliberately NOT a radcheck
+        # Calling-Station-Id check-item (op '=='), which is how this used to be
+        # done. rlm_sql's own check-item comparison rejects the WHOLE authorize()
+        # result on any mismatch, discarding everything else it loaded in that
+        # same call — including Cleartext-Password — before mschap/pap ever ran.
+        # A stale or legitimately-changed MAC didn't just fail its own check, it
+        # broke authentication outright regardless of protocol: real customers on
+        # real hardware (Mikrotik, ONTs, Tenda routers alike) hit "No NT-Password.
+        # Cannot perform authentication" on every reconnect once their line was
+        # locked, and clearing the lock was the only thing that ever fixed it —
+        # not because the MAC itself mattered, but because clearing it removed
+        # the poisoned check-item.
+        #
+        # subscribers.locked_mac is the same source of truth the app already
+        # maintains (lockNewPppoeMacs, clear-mac-lock); querying it directly here
+        # keeps the comparison isolated from everything else authorize() loads.
+        update control {
+            &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{SQL-User-Name}'}"
+        }
+        if (&control:Tmp-String-0 && "%{control:Tmp-String-0}" != "" && "%{control:Tmp-String-0}" != "%{Calling-Station-Id}") {
+            reject
+        }
+
         expiration
         logintime
 

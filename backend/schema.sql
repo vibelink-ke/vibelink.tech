@@ -142,6 +142,17 @@ alter table voucher_devices add column if not exists router_id uuid references r
 -- bound, forever (this row is never deleted, by design, as history).
 alter table voucher_devices add column if not exists unbound_at timestamptz;
 
+-- PPPoE MAC-lock rows written the old way — a radcheck Calling-Station-Id
+-- check-item (op '=='). rlm_sql rejects its ENTIRE authorize() result on any
+-- check-item mismatch, discarding everything else it loaded in that call
+-- (including Cleartext-Password) before mschap/pap ever ran, so a stale or
+-- legitimately-changed MAC broke authentication outright for that line, on
+-- every reconnect, regardless of protocol — not a clean "wrong device"
+-- rejection. The FreeRADIUS site config now checks subscribers.locked_mac
+-- directly instead; these rows are dead weight that would otherwise keep
+-- reproducing the exact same failure for every subscriber ever locked.
+delete from radcheck where attribute = 'Calling-Station-Id';
+
 -- ─────────────── money ───────────────
 create table invoices (
   id          uuid primary key default gen_random_uuid(),

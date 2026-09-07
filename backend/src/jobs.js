@@ -127,11 +127,11 @@ async function lockNewPppoeMacs() {
       from subscribers s
      where s.service = 'pppoe' and s.pppoe_user is not null and s.locked_mac is null
        and s.tenant_id in (${enabledTenants})`, ['lockNewPppoeMacs']);
-  const radius = await import('./radius.js');
+  // The FreeRADIUS site config checks subscribers.locked_mac directly on
+  // every auth — nothing else needs telling once it's set here.
   for (const s of rows) {
     if (!s.mac) continue;
     await pool.query('update subscribers set locked_mac=$2 where id=$1', [s.id, s.mac]);
-    await radius.lockPppoeMac(pool, s.tenant_id, s.pppoe_user, s.mac).catch(() => {});
   }
 }
 
