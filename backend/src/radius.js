@@ -704,6 +704,18 @@ export async function disconnectVoucherSession(c, host, secret, code) {
 }
 
 /**
+ * Same idea for a PPPoE line — CoA cannot hand a new Framed-IP-Address to a
+ * session that is already up (that attribute only applies at the start of a
+ * session), so an operator changing a subscriber's static IP needs their
+ * live session kicked, not just radreply rewritten, for the new address to
+ * actually take effect instead of waiting for whenever they next reconnect
+ * on their own.
+ */
+export async function disconnectSubscriberSession(c, host, secret, username) {
+  await coa(c, host, secret, username, null, undefined, true);
+}
+
+/**
  * Push a live speed change to the router.
  *
  * Best-effort by design: the caller is applying a payment or running the fair-use

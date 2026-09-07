@@ -7020,6 +7020,28 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
   }
 
+  /**
+   * A static IP edit has to reach the router immediately, not just radreply —
+   * CoA cannot hand a new Framed-IP-Address to a session already up (that
+   * attribute only applies at the start of a session), so a subscriber
+   * currently connected would otherwise keep their old address until they
+   * happened to reconnect on their own, which defeats the entire point of
+   * changing it here. activateSubscriber recomputes and writes the new
+   * address; the disconnect right after forces the redial that actually
+   * picks it up, within the same couple of seconds CoA normally takes.
+   */
+  if (sets.includes('static_ip') && s.pppoe_user) {
+    const radius = await import('./radius.js');
+    const { withTenant } = await import('./db.js');
+    await withTenant(req.tenant.id, (c) => radius.activateSubscriber(c, req.tenant.id, s.id))
+      .catch((e) => console.warn('static IP change: radius not updated —', e?.message ?? e));
+    const { rows: [r] } = await pool.query('select host, secret from routers where id=$1', [s.router_id]);
+    if (r?.host) {
+      await radius.disconnectSubscriberSession(pool, r.host, r.secret, s.pppoe_user)
+        .catch((e) => console.warn('static IP change: disconnect failed —', e?.message ?? e));
+    }
+  }
+
   // Which fields, not their values — a credential or balance change belongs
   // in the log as the fact that it happened, not as a second place a
   // password or a customer's new balance sits in plain text.
