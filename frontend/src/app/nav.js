@@ -54,6 +54,13 @@ export const NAV_SECTIONS = [
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
       { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length },
       { to: '/automation', label: 'Automation' },
+      { to: '/expenses', label: 'Expenses', count: (s) => s.expenses.filter((e) => e.status === 'pending').length },
+    ],
+  },
+  {
+    heading: 'STAFF',
+    items: [
+      { to: '/hr', label: 'HR & payroll' },
     ],
   },
   {

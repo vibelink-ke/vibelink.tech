@@ -167,6 +167,24 @@ export const api = {
   referrerCommissions: (id) => get(`/api/referrers/${id}/commissions`),
   markCommissionPaid: (id) => post(`/api/referral-commissions/${id}/mark-paid`, {}),
 
+  // ── expenses ──
+  expenses: (status) => get(`/api/expenses${status ? `?status=${status}` : ''}`),
+  createExpense: (e) => post('/api/expenses', e),
+  updateExpense: (id, patchBody) => put(`/api/expenses/${id}`, patchBody),
+  deleteExpense: (id) => del(`/api/expenses/${id}`),
+  approveExpense: (id) => post(`/api/expenses/${id}/approve`, {}),
+  markExpensePaid: (id) => post(`/api/expenses/${id}/mark-paid`, {}),
+
+  // ── HR & payroll ──
+  hrProfiles: () => get('/api/hr/profiles'),
+  saveHrProfile: (staffId, profile) => put(`/api/hr/profiles/${staffId}`, profile),
+  payrollRuns: () => get('/api/payroll/runs'),
+  payrollRun: (id) => get(`/api/payroll/runs/${id}`),
+  createPayrollRun: (r) => post('/api/payroll/runs', r),
+  addPayrollItem: (runId, item) => post(`/api/payroll/runs/${runId}/items`, item),
+  approvePayrollRun: (id) => post(`/api/payroll/runs/${id}/approve`, {}),
+  disbursePayrollRun: (id, reference) => post(`/api/payroll/runs/${id}/disburse`, { reference }),
+
   messages: (subscriberId) => get(`/api/messages/${subscriberId}`),
   sendMessage: (m) => post('/api/messages', m),
 

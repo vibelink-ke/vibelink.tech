@@ -58,6 +58,8 @@ const Automation = lazy(() => import('./screens/Automation'));
 const Tenants = lazy(() => import('./screens/Tenants'));
 const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
+const Expenses = lazy(() => import('./screens/Expenses'));
+const Hr = lazy(() => import('./screens/Hr'));
 
 export default function App() {
   const { dark, session, signIn, reload } = useStore();
@@ -262,6 +264,8 @@ export default function App() {
             <Route path="/payment-methods" element={<PaymentMethods />} />
             <Route path="/site-profiles" element={<SiteProfiles />} />
             <Route path="/automation" element={<Automation />} />
+            <Route path="/expenses" element={<Expenses />} />
+            <Route path="/hr" element={<Hr />} />
 
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/saas-revenue" element={<SaasRevenue />} />

@@ -51,6 +51,7 @@ const COLLECTIONS = {
   salesReps: api.salesReps,
   ovpnClients: api.ovpnClients,
   inventory: api.inventory,
+  expenses: api.expenses,
 };
 
 const EMPTY = Object.fromEntries(Object.keys(COLLECTIONS).map((k) => [k, []]));

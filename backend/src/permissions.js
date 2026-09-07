@@ -102,6 +102,23 @@ export const DEFAULT_PERMISSIONS = {
   'inventory.create': { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'inventory.edit':   { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'inventory.delete': all(),
+
+  'expenses.view':    { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'expenses.edit':    { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  // Approving your own logged expense for payment is the same trust level
+  // as payments.apply, not expenses.edit — a cashier can log a fuel receipt,
+  // only an owner signs off on it actually getting paid.
+  'expenses.approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
+
+  'hr.view': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'hr.edit': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // Drafting a payroll run (who's on it, salary/commission/bonus lines) is
+  // separate from approving and actually disbursing it — the same
+  // propose-then-approve split as expenses.edit/expenses.approve, but
+  // owner-only on both ends here since this moves real salary money, not
+  // one line at a time.
+  'payroll.create':  { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'payroll.approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
 };
 
 export const PERMISSION_META = [
@@ -156,6 +173,13 @@ export const PERMISSION_META = [
   { key: 'inventory.create', page: 'Inventory', action: 'Create' },
   { key: 'inventory.edit',   page: 'Inventory', action: 'Edit' },
   { key: 'inventory.delete', page: 'Inventory', action: 'Delete' },
+  { key: 'expenses.view',    page: 'Expenses', action: 'View' },
+  { key: 'expenses.edit',    page: 'Expenses', action: 'Create / edit' },
+  { key: 'expenses.approve', page: 'Expenses', action: 'Approve for payment' },
+  { key: 'hr.view', page: 'HR', action: 'View staff pay/employment details' },
+  { key: 'hr.edit', page: 'HR', action: 'Edit staff pay/employment details' },
+  { key: 'payroll.create',  page: 'HR', action: 'Draft a payroll run' },
+  { key: 'payroll.approve', page: 'HR', action: 'Approve / disburse a payroll run' },
 ];
 
 /** The full matrix for a tenant — defaults with any saved overrides applied on top. */

@@ -2096,3 +2096,102 @@ create table if not exists platform_sms_relay_sources (
   source     text primary key,
   gateway_id uuid not null references platform_sms_gateways(id) on delete cascade
 );
+
+-- ─────────────── expenses, HR, payroll ───────────────
+-- Kept off the `staff` login/identity table on purpose, the same reason
+-- hotspot_settings/tenant_payment_config are their own tables rather than
+-- columns bolted onto `tenants` — employment details are a different
+-- concern from "who can log in and do what."
+create table if not exists hr_profiles (
+  staff_id          uuid primary key references staff on delete cascade,
+  tenant_id         uuid not null references tenants on delete cascade,
+  employee_no       text,
+  base_salary       numeric(12,2) not null default 0,
+  salary_frequency  text not null default 'monthly',
+  -- A staff member's own signup commission, if they earn one, already runs
+  -- through referrers/referral_commissions (referrers.staff_id) — nothing
+  -- duplicated here. This is pay/payout config only.
+  payout_method     text not null default 'manual',
+  payout_phone      text,   -- falls back to staff.phone at payout time if null
+  employment_status text not null default 'active',
+  hired_at          date,
+  created_at        timestamptz not null default now(),
+  constraint hr_profiles_salary_frequency_valid check (salary_frequency in ('monthly','weekly')),
+  constraint hr_profiles_payout_method_valid check (payout_method in ('manual','mpesa')),
+  constraint hr_profiles_employment_status_valid check (employment_status in ('active','suspended','terminated'))
+);
+create index if not exists hr_profiles_tenant_id_idx on hr_profiles (tenant_id);
+
+create table if not exists expenses (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references tenants on delete cascade,
+  category     text not null,
+  description  text,
+  amount       numeric(12,2) not null,
+  paid_to      text,
+  staff_id     uuid references staff on delete set null,   -- set when this expense IS a staff reimbursement
+  status       text not null default 'pending',
+  receipt_url  text,
+  created_by   uuid references staff on delete set null,
+  approved_by  uuid references staff on delete set null,
+  paid_at      timestamptz,
+  created_at   timestamptz not null default now(),
+  constraint expenses_status_valid check (status in ('pending','approved','paid','rejected'))
+);
+create index if not exists expenses_tenant_id_idx on expenses (tenant_id);
+create index if not exists expenses_status_idx on expenses (tenant_id, status);
+
+create table if not exists payroll_runs (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  period_start  date not null,
+  period_end    date not null,
+  status        text not null default 'draft',
+  created_by    uuid references staff on delete set null,
+  approved_by   uuid references staff on delete set null,
+  approved_at   timestamptz,
+  created_at    timestamptz not null default now(),
+  constraint payroll_runs_status_valid check (status in ('draft','approved','processing','completed'))
+);
+create index if not exists payroll_runs_tenant_id_idx on payroll_runs (tenant_id);
+
+-- source_id is a loose reference (expenses.id for expense_reimbursement,
+-- referral_commissions.id for commission) rather than an FK — the two
+-- source tables are unrelated, and `type` already says which one applies.
+create table if not exists payroll_items (
+  id         uuid primary key default gen_random_uuid(),
+  run_id     uuid not null references payroll_runs on delete cascade,
+  staff_id   uuid not null references staff on delete cascade,
+  type       text not null,
+  amount     numeric(12,2) not null,
+  source_id  uuid,
+  note       text,
+  created_at timestamptz not null default now(),
+  constraint payroll_items_type_valid check (type in ('salary','commission','expense_reimbursement','bonus','deduction'))
+);
+create index if not exists payroll_items_run_id_idx on payroll_items (run_id);
+
+-- One row per staff member per run — the actual disbursement, summing that
+-- staff's items. conversation_id is matched by the same Daraja b2c-result
+-- webhook settlements already uses (payments/daraja.js).
+create table if not exists payroll_payouts (
+  id              uuid primary key default gen_random_uuid(),
+  run_id          uuid not null references payroll_runs on delete cascade,
+  staff_id        uuid not null references staff on delete cascade,
+  tenant_id       uuid not null references tenants on delete cascade,
+  amount          numeric(12,2) not null,
+  method          text not null default 'manual',
+  status          text not null default 'pending',
+  phone           text,
+  conversation_id text,
+  fee             numeric(12,2),
+  reference       text,
+  failed_reason   text,
+  paid_at         timestamptz,
+  created_at      timestamptz not null default now(),
+  unique (run_id, staff_id),
+  constraint payroll_payouts_method_valid check (method in ('manual','mpesa')),
+  constraint payroll_payouts_status_valid check (status in ('pending','processing','paid','failed'))
+);
+create index if not exists payroll_payouts_tenant_id_idx on payroll_payouts (tenant_id);
+create index if not exists payroll_payouts_conversation_id_idx on payroll_payouts (conversation_id) where conversation_id is not null;

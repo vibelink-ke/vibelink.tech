@@ -276,21 +276,48 @@ router.post('/b2c-result', express.json(), async (req, res) => {
   const { pool } = await import('../db.js');
   const { rows: [row] } = await pool.query(
     "select id from settlements where conversation_id=$1 and status='processing'", [r.ConversationID]);
-  if (!row) return;
+
+  if (row) {
+    if (Number(r.ResultCode) === 0) {
+      const items = Object.fromEntries(
+        (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
+      await pool.query(
+        "update settlements set status='paid', settled_at=now(), reference=$2 where id=$1",
+        [row.id, String(items.TransactionReceipt ?? r.ConversationID)]);
+    } else {
+      // Back to 'pending', not 'failed' — the next settleTenants run picks it
+      // straight back up rather than this needing a human to notice and
+      // re-trigger it. A payout that fails the same way every night is still
+      // visible in this log, which is the point of logging it either way.
+      console.error('daraja b2c failed', r.ResultCode, r.ResultDesc, 'settlement', row.id);
+      await pool.query("update settlements set status='pending', conversation_id=null where id=$1", [row.id]);
+    }
+    return;
+  }
+
+  // Not a settlement — check payroll (server.js's /payroll/runs/:id/disburse).
+  // Unlike a settlement, a failed payroll payout is left 'failed' rather than
+  // requeued: nothing here re-runs a payroll disbursement on its own the way
+  // settleTenants' nightly cron does, so bouncing it back to 'pending' would
+  // just leave it silently stuck instead of visibly needing the operator's
+  // attention (retry, or switch that one payout to manual).
+  const { rows: [payout] } = await pool.query(
+    "select id from payroll_payouts where conversation_id=$1 and status='processing'", [r.ConversationID]);
+  if (!payout) return;
 
   if (Number(r.ResultCode) === 0) {
     const items = Object.fromEntries(
       (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
     await pool.query(
-      "update settlements set status='paid', settled_at=now(), reference=$2 where id=$1",
-      [row.id, String(items.TransactionReceipt ?? r.ConversationID)]);
+      "update payroll_payouts set status='paid', paid_at=now(), reference=$2 where id=$1",
+      [payout.id, String(items.TransactionReceipt ?? r.ConversationID)]);
+    const { settleStaffCommissionsForPayout } = await import('./apply.js');
+    await settleStaffCommissionsForPayout(payout.id);
   } else {
-    // Back to 'pending', not 'failed' — the next settleTenants run picks it
-    // straight back up rather than this needing a human to notice and
-    // re-trigger it. A payout that fails the same way every night is still
-    // visible in this log, which is the point of logging it either way.
-    console.error('daraja b2c failed', r.ResultCode, r.ResultDesc, 'settlement', row.id);
-    await pool.query("update settlements set status='pending', conversation_id=null where id=$1", [row.id]);
+    console.error('daraja b2c failed', r.ResultCode, r.ResultDesc, 'payroll payout', payout.id);
+    await pool.query(
+      "update payroll_payouts set status='failed', failed_reason=$2 where id=$1",
+      [payout.id, String(r.ResultDesc ?? 'M-Pesa payout failed')]);
   }
 });
 

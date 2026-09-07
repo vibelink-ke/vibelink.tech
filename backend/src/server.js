@@ -13,6 +13,7 @@ import { router as manual } from './payments/manual.js';
 import * as kk from './payments/kopokopo.js';
 import * as mpesa from './payments/daraja.js';
 import { startJobs, payoutTenantNow } from './jobs.js';
+import { settleStaffCommissionsForPayout } from './payments/apply.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
 import { requirePermission, loadPermissions, savePermissions, PERMISSION_META } from './permissions.js';
@@ -3552,6 +3553,326 @@ app.post('/api/referral-commissions/:id/mark-paid', requirePermission('referrers
     [req.params.id, req.tenant.id]);
   if (!c) return res.status(404).json({ error: 'No such owed commission' });
   res.json(c);
+}));
+
+// ── expenses ────────────────────────────────
+app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, res) => {
+  const { status } = req.query;
+  const { rows } = await pool.query(
+    `select e.*, cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name
+       from expenses e
+       left join staff cs on cs.id = e.created_by
+       left join staff ap on ap.id = e.approved_by
+       left join staff sf on sf.id = e.staff_id
+      where e.tenant_id=$1 ${status ? 'and e.status=$2' : ''}
+      order by e.created_at desc`,
+    status ? [req.tenant.id, status] : [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/expenses', requirePermission('expenses.edit'), wrap(async (req, res) => {
+  const { category, description, amount, paidTo, staffId } = req.body ?? {};
+  const value = Number(amount);
+  if (!category || !(value > 0)) return res.status(400).json({ error: 'category and a positive amount are required' });
+  if (staffId) {
+    const { rowCount } = await pool.query('select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+  const { rows: [e] } = await pool.query(
+    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [req.tenant.id, String(category).trim(), description || null, value, paidTo || null, staffId || null, req.session?.staff_id ?? null]);
+  res.json(e);
+}));
+
+app.put('/api/expenses/:id', requirePermission('expenses.edit'), wrap(async (req, res) => {
+  const { category, description, amount, paidTo } = req.body ?? {};
+  const { rows: [e] } = await pool.query(
+    `update expenses set
+       category=coalesce(nullif($3,''), category),
+       description=coalesce($4, description),
+       amount=coalesce($5, amount),
+       paid_to=coalesce($6, paid_to)
+     where id=$1 and tenant_id=$2 and status='pending' returning *`,
+    [req.params.id, req.tenant.id, category ?? '', description ?? null,
+     amount != null ? Number(amount) : null, paidTo ?? null]);
+  if (!e) return res.status(404).json({ error: 'No such pending expense' });
+  res.json(e);
+}));
+
+app.delete('/api/expenses/:id', requirePermission('expenses.edit'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    "delete from expenses where id=$1 and tenant_id=$2 and status='pending'", [req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(409).json({ error: 'Only a pending expense can be deleted' });
+  res.json({ ok: true });
+}));
+
+// Approve marks it ready to pay (or fold into a payroll run as an
+// expense_reimbursement line); it does not move money by itself — that
+// still needs either a manual "mark paid" here or a payroll run.
+app.post('/api/expenses/:id/approve', requirePermission('expenses.approve'), wrap(async (req, res) => {
+  const { rows: [e] } = await pool.query(
+    `update expenses set status='approved', approved_by=$3
+      where id=$1 and tenant_id=$2 and status='pending' returning *`,
+    [req.params.id, req.tenant.id, req.session?.staff_id ?? null]);
+  if (!e) return res.status(404).json({ error: 'No such pending expense' });
+  res.json(e);
+}));
+
+app.post('/api/expenses/:id/mark-paid', requirePermission('expenses.approve'), wrap(async (req, res) => {
+  const { rows: [e] } = await pool.query(
+    `update expenses set status='paid', paid_at=now()
+      where id=$1 and tenant_id=$2 and status='approved' returning *`,
+    [req.params.id, req.tenant.id]);
+  if (!e) return res.status(404).json({ error: 'No such approved expense' });
+  res.json(e);
+}));
+
+// ── HR ──────────────────────────────────────
+app.get('/api/hr/profiles', requirePermission('hr.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select s.id as staff_id, s.name, s.phone, s.role,
+            hp.employee_no, hp.base_salary, hp.salary_frequency, hp.payout_method,
+            hp.payout_phone, hp.employment_status, hp.hired_at
+       from staff s
+       left join hr_profiles hp on hp.staff_id = s.id
+      where s.tenant_id=$1 and s.role <> 'platform_admin'
+      order by s.name`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.put('/api/hr/profiles/:staffId', requirePermission('hr.edit'), wrap(async (req, res) => {
+  const { employeeNo, baseSalary, salaryFrequency, payoutMethod, payoutPhone, employmentStatus, hiredAt } = req.body ?? {};
+  const { rowCount: exists } = await pool.query(
+    'select 1 from staff where id=$1 and tenant_id=$2', [req.params.staffId, req.tenant.id]);
+  if (!exists) return res.status(404).json({ error: 'No such staff member' });
+  if (salaryFrequency && !['monthly', 'weekly'].includes(salaryFrequency)) {
+    return res.status(400).json({ error: 'salaryFrequency must be monthly or weekly' });
+  }
+  if (payoutMethod && !['manual', 'mpesa'].includes(payoutMethod)) {
+    return res.status(400).json({ error: 'payoutMethod must be manual or mpesa' });
+  }
+  const { rows: [hp] } = await pool.query(
+    `insert into hr_profiles (staff_id, tenant_id, employee_no, base_salary, salary_frequency,
+       payout_method, payout_phone, employment_status, hired_at)
+     values ($1,$2,$3,coalesce($4,0),coalesce($5,'monthly'),coalesce($6,'manual'),$7,coalesce($8,'active'),$9)
+     on conflict (staff_id) do update set
+       employee_no=coalesce($3, hr_profiles.employee_no),
+       base_salary=coalesce($4, hr_profiles.base_salary),
+       salary_frequency=coalesce($5, hr_profiles.salary_frequency),
+       payout_method=coalesce($6, hr_profiles.payout_method),
+       payout_phone=coalesce($7, hr_profiles.payout_phone),
+       employment_status=coalesce($8, hr_profiles.employment_status),
+       hired_at=coalesce($9, hr_profiles.hired_at)
+     returning *`,
+    [req.params.staffId, req.tenant.id, employeeNo ?? null, baseSalary != null ? Number(baseSalary) : null,
+     salaryFrequency ?? null, payoutMethod ?? null, payoutPhone ?? null, employmentStatus ?? null, hiredAt ?? null]);
+  res.json(hp);
+}));
+
+// ── payroll ─────────────────────────────────
+/**
+ * Draft a run: one salary line per active staff member with an hr_profile,
+ * plus every staff-earned commission still owed (referral_commissions rows
+ * whose referrer is a staff member, not an external/customer referrer —
+ * that money already flows through the exact same referrers.staff_id
+ * mechanism the Referrers screen uses; payroll just pulls it in rather than
+ * duplicating it in a second table).
+ */
+app.post('/api/payroll/runs', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { periodStart, periodEnd } = req.body ?? {};
+  if (!periodStart || !periodEnd) return res.status(400).json({ error: 'periodStart and periodEnd are required' });
+
+  const { rows: [run] } = await pool.query(
+    `insert into payroll_runs (tenant_id, period_start, period_end, created_by)
+     values ($1,$2,$3,$4) returning *`,
+    [req.tenant.id, periodStart, periodEnd, req.session?.staff_id ?? null]);
+
+  const { rows: salaried } = await pool.query(
+    `select staff_id, base_salary from hr_profiles
+      where tenant_id=$1 and employment_status='active' and base_salary > 0`,
+    [req.tenant.id]);
+  for (const s of salaried) {
+    await pool.query(
+      `insert into payroll_items (run_id, staff_id, type, amount, note) values ($1,$2,'salary',$3,$4)`,
+      [run.id, s.staff_id, s.base_salary, `Salary ${periodStart} – ${periodEnd}`]);
+  }
+
+  // Excludes a commission already pulled into an earlier run (any
+  // payroll_item already pointing at it) rather than adding a third
+  // referral_commissions.status value — that column's own check constraint
+  // only allows owed/paid, and it stays 'owed' here until the payout it
+  // ends up in actually pays out (settleStaffCommissions below), same
+  // moment referrers.manage's own manual mark-paid route flips it today.
+  const { rows: commissions } = await pool.query(
+    `select rc.id, r.staff_id, rc.amount from referral_commissions rc
+       join referrers r on r.id = rc.referrer_id
+      where rc.tenant_id=$1 and rc.status='owed' and r.staff_id is not null
+        and not exists (select 1 from payroll_items pi where pi.type='commission' and pi.source_id = rc.id)`,
+    [req.tenant.id]);
+  for (const c of commissions) {
+    await pool.query(
+      `insert into payroll_items (run_id, staff_id, type, amount, source_id, note)
+       values ($1,$2,'commission',$3,$4,'Referral commission')`,
+      [run.id, c.staff_id, c.amount, c.id]);
+  }
+
+  res.json({ ...run, salaryLines: salaried.length, commissionLines: commissions.length });
+}));
+
+/** Manual line — bonus, deduction, or an approved expense being reimbursed through this run. */
+app.post('/api/payroll/runs/:id/items', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { staffId, type, amount, note, expenseId } = req.body ?? {};
+  if (!['bonus', 'deduction', 'expense_reimbursement'].includes(type)) {
+    return res.status(400).json({ error: 'type must be bonus, deduction, or expense_reimbursement' });
+  }
+  const { rows: [run] } = await pool.query(
+    "select id from payroll_runs where id=$1 and tenant_id=$2 and status='draft'", [req.params.id, req.tenant.id]);
+  if (!run) return res.status(404).json({ error: 'No such draft payroll run' });
+  const { rowCount: staffOk } = await pool.query(
+    'select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
+  if (!staffOk) return res.status(404).json({ error: 'No such staff member' });
+
+  let value = Number(amount);
+  if (!(value > 0)) return res.status(400).json({ error: 'amount must be a positive number' });
+  if (type === 'deduction') value = -value;
+
+  if (type === 'expense_reimbursement') {
+    const { rowCount } = await pool.query(
+      "select 1 from expenses where id=$1 and tenant_id=$2 and status='approved' and staff_id=$3",
+      [expenseId, req.tenant.id, staffId]);
+    if (!rowCount) return res.status(404).json({ error: 'No matching approved expense for this staff member' });
+  }
+
+  const { rows: [item] } = await pool.query(
+    `insert into payroll_items (run_id, staff_id, type, amount, source_id, note)
+     values ($1,$2,$3,$4,$5,$6) returning *`,
+    [req.params.id, staffId, type, value, type === 'expense_reimbursement' ? expenseId : null, note || null]);
+  res.json(item);
+}));
+
+app.get('/api/payroll/runs', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select pr.*,
+            (select coalesce(sum(amount),0) from payroll_items where run_id=pr.id) as total
+       from payroll_runs pr where pr.tenant_id=$1 order by pr.created_at desc`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.get('/api/payroll/runs/:id', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { rows: [run] } = await pool.query(
+    'select * from payroll_runs where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!run) return res.status(404).json({ error: 'No such payroll run' });
+  const { rows: items } = await pool.query(
+    `select pi.*, s.name as staff_name from payroll_items pi
+       join staff s on s.id = pi.staff_id where pi.run_id=$1 order by s.name, pi.type`,
+    [req.params.id]);
+  const { rows: payouts } = await pool.query(
+    `select po.*, s.name as staff_name from payroll_payouts po
+       join staff s on s.id = po.staff_id where po.run_id=$1 order by s.name`,
+    [req.params.id]);
+  res.json({ ...run, items, payouts });
+}));
+
+/** Locks the run, computes one payout per staff member (summing their items), snapshots payout method/phone. */
+app.post('/api/payroll/runs/:id/approve', requirePermission('payroll.approve'), wrap(async (req, res) => {
+  const { rows: [run] } = await pool.query(
+    "select * from payroll_runs where id=$1 and tenant_id=$2 and status='draft'", [req.params.id, req.tenant.id]);
+  if (!run) return res.status(404).json({ error: 'No such draft payroll run' });
+
+  const { rows: totals } = await pool.query(
+    `select pi.staff_id, sum(pi.amount) as amount,
+            coalesce(hp.payout_method, 'manual') as method,
+            coalesce(hp.payout_phone, s.phone) as phone
+       from payroll_items pi
+       join staff s on s.id = pi.staff_id
+       left join hr_profiles hp on hp.staff_id = pi.staff_id
+      where pi.run_id=$1
+      group by pi.staff_id, hp.payout_method, hp.payout_phone, s.phone
+      having sum(pi.amount) > 0`,
+    [req.params.id]);
+
+  for (const t of totals) {
+    await pool.query(
+      `insert into payroll_payouts (run_id, staff_id, tenant_id, amount, method, phone)
+       values ($1,$2,$3,$4,$5,$6)
+       on conflict (run_id, staff_id) do nothing`,
+      [req.params.id, t.staff_id, req.tenant.id, t.amount, t.method, t.phone]);
+  }
+
+  const { rows: [updated] } = await pool.query(
+    "update payroll_runs set status='approved', approved_by=$3, approved_at=now() where id=$1 and tenant_id=$2 returning *",
+    [req.params.id, req.tenant.id, req.session?.staff_id ?? null]);
+  res.json({ ...updated, payoutCount: totals.length });
+}));
+
+/**
+ * Disburses every pending payout on an approved run — manual payouts flip
+ * straight to paid (no gateway involved, the operator has already handled
+ * the money outside this system); mpesa payouts call daraja.b2c on the
+ * TENANT's own Daraja app (platformCollect deliberately omitted — this is
+ * the tenant's own staff paid from the tenant's own money, not a
+ * platform-collect scenario). A payout whose b2c call throws (most likely:
+ * no B2C-capable Daraja credentials configured) is left 'pending' with the
+ * error recorded, for the operator to either fix the gateway and retry, or
+ * switch that one payout to manual — never silently retried as something
+ * else, same principle as everywhere else money moves in this codebase.
+ */
+app.post('/api/payroll/runs/:id/disburse', requirePermission('payroll.approve'), wrap(async (req, res) => {
+  const { rows: [run] } = await pool.query(
+    "select * from payroll_runs where id=$1 and tenant_id=$2 and status in ('approved','processing')",
+    [req.params.id, req.tenant.id]);
+  if (!run) return res.status(404).json({ error: 'No such approved payroll run' });
+
+  const { rows: pending } = await pool.query(
+    "select * from payroll_payouts where run_id=$1 and status='pending'", [req.params.id]);
+
+  const results = [];
+  for (const p of pending) {
+    if (p.method === 'manual') {
+      await pool.query(
+        "update payroll_payouts set status='paid', paid_at=now(), reference=coalesce($2,'manual') where id=$1",
+        [p.id, req.body?.reference ?? null]);
+      await settleStaffCommissionsForPayout(p.id);
+      results.push({ staffId: p.staff_id, ok: true, method: 'manual' });
+      continue;
+    }
+    if (!p.phone) {
+      await pool.query(
+        "update payroll_payouts set failed_reason='No phone number on file for this staff member' where id=$1", [p.id]);
+      results.push({ staffId: p.staff_id, ok: false, error: 'No phone on file' });
+      continue;
+    }
+    try {
+      const r = await mpesa.b2c(req.tenant.id, {
+        phone: p.phone, amount: p.amount, remarks: 'Payroll',
+        occasion: `${run.period_start}-${run.period_end}`,
+      });
+      await pool.query(
+        "update payroll_payouts set status='processing', conversation_id=$2, failed_reason=null where id=$1",
+        [p.id, r.conversationId]);
+      results.push({ staffId: p.staff_id, ok: true, method: 'mpesa', conversationId: r.conversationId });
+    } catch (e) {
+      await pool.query('update payroll_payouts set failed_reason=$2 where id=$1', [p.id, e.message]);
+      results.push({ staffId: p.staff_id, ok: false, error: e.message });
+    }
+  }
+
+  // Completed once every payout is paid; still processing while any mpesa
+  // payout awaits its webhook, back to the operator's own queue otherwise
+  // (a failed one just stays visible on the run, nothing auto-retries it).
+  // 'failed' counts as remaining too, deliberately — a run must never read
+  // as 'completed' while a payout on it still needs the operator's
+  // attention (retry, or switch that one payout to manual).
+  const { rows: [{ remaining }] } = await pool.query(
+    "select count(*)::int as remaining from payroll_payouts where run_id=$1 and status <> 'paid'",
+    [req.params.id]);
+  await pool.query('update payroll_runs set status=$2 where id=$1',
+    [req.params.id, remaining > 0 ? 'processing' : 'completed']);
+
+  res.json({ results });
 }));
 
 app.get('/api/messages/:subscriberId', requirePermission('messaging.view'), async (req, res) => {

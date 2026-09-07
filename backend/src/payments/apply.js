@@ -38,6 +38,30 @@ export async function accrueSettlement(tenantId, amount) {
 }
 
 /**
+ * A payroll payout can bundle salary, commission and bonus lines together
+ * for one staff member — once that payout is actually paid, whichever
+ * referral_commissions rows fed its commission lines (payroll_items.type=
+ * 'commission', source_id = the commission's id) need to flip to 'paid'
+ * too, the same state the manual mark-paid route (server.js) already puts
+ * them in. Lives here rather than in server.js specifically so daraja.js's
+ * b2c-result webhook can reach it too, without a server.js<->daraja.js
+ * import cycle — apply.js already sits below both.
+ */
+export async function settleStaffCommissionsForPayout(payoutId) {
+  const { rows: [payout] } = await pool.query(
+    'select run_id, staff_id from payroll_payouts where id=$1', [payoutId]);
+  if (!payout) return;
+  const { rows: items } = await pool.query(
+    "select source_id from payroll_items where run_id=$1 and staff_id=$2 and type='commission'",
+    [payout.run_id, payout.staff_id]);
+  const ids = items.map((i) => i.source_id).filter(Boolean);
+  if (!ids.length) return;
+  await pool.query(
+    "update referral_commissions set status='paid', paid_at=now() where id = any($1::uuid[]) and status='owed'",
+    [ids]);
+}
+
+/**
  * The single funnel every channel goes through.
  * Idempotent: unique (tenant_id, provider, provider_ref) makes a replayed webhook a no-op.
  *
