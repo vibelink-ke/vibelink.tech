@@ -5081,21 +5081,36 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
       await tryStep('PPP accounting', () => ros.applyPpp(conn));
       done.push('enabled PPPoE accounting with 5-minute interim updates');
 
-      // Only when ports were chosen. Building a bridge unasked could swallow the
-      // uplink and take the site off the internet.
+      // Building a bridge unasked could swallow the uplink and take the site
+      // offline, so a fresh router with nothing chosen still skips this
+      // entirely. But an already-configured router — every real LAN port
+      // already bridged — has nothing left for the picker to offer at all
+      // (it deliberately excludes ports already in a bridge), so lanPorts
+      // comes back empty on every single "Reconfigure" from then on. That
+      // used to skip the PPPoE server/pool refresh below forever, on every
+      // router that had ever been successfully set up — exactly the routers
+      // "Reconfigure" exists to refresh. An existing managed bridge found
+      // here is what tells the two situations apart.
       const lanPorts = Array.isArray(req.body?.lanPorts) ? req.body.lanPorts : null;
-      if (lanPorts?.length) {
-        const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
-        // 40s: see the note on the same call in the hotspot push above. This is
-        // the site that actually failed — RADIUS and PPP accounting both landed,
-        // then "bridge: no reply after 20s" on a router that was fine, just slow
-        // to answer the uplink-safety checks this step now makes.
-        const bridge = await tryStep('bridge', () =>
-          ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }), 40000);
-        done.push(bridge.added.length
-          ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
-          : `${bridge.bridge} already had those ports`);
-        if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
+      const bridgeName = String(req.body?.bridge ?? 'bridge-lan').trim() || 'bridge-lan';
+      const existingBridge = (await conn.write('/interface/bridge/print', [`?name=${bridgeName}`]))[0];
+      if (lanPorts?.length || existingBridge) {
+        let bridge;
+        if (lanPorts?.length) {
+          // 40s: see the note on the same call in the hotspot push above. This is
+          // the site that actually failed — RADIUS and PPP accounting both landed,
+          // then "bridge: no reply after 20s" on a router that was fine, just slow
+          // to answer the uplink-safety checks this step now makes.
+          bridge = await tryStep('bridge', () =>
+            ros.ensureBridge(conn, { name: bridgeName, ports: lanPorts }), 40000);
+          done.push(bridge.added.length
+            ? `bridged ${bridge.added.join(', ')} into ${bridge.bridge}`
+            : `${bridge.bridge} already had those ports`);
+          if (bridge.skipped.length) done.push(`left alone: ${bridge.skipped.join(', ')}`);
+        } else {
+          bridge = { bridge: bridgeName };
+          done.push(`${bridgeName} already configured — refreshing PPPoE server and pool against it`);
+        }
         // A breather after bridge creation, which makes RouterOS recompute its
         // whole interface/STP state — firing the next heavy step immediately
         // after was part of what spiked CPU to 100% and dropped the tunnel
