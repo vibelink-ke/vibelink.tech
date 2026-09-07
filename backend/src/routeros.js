@@ -1000,9 +1000,14 @@ export async function ensureHotspotUserProfile(conn, {
      * paid expects to happen.
      *
      * add-mac-cookie writes the cookie; mac-cookie-timeout is how long it is
-     * honoured. A day covers the common bundles and expires on its own.
+     * honoured. Was 1d — long enough to silently wave a device back online
+     * well past a short bundle's own expiry (the cheapest plans sold are
+     * 1-3 hours), since a cookie-triggered reconnect is not guaranteed to
+     * re-run the same Expiration check a fresh login would. 30 minutes still
+     * smooths over a screen lock or a few steps out of range without
+     * meaningfully outliving even the shortest paid bundle.
      */
-    ...(bindMac ? ['=add-mac-cookie=yes', '=mac-cookie-timeout=1d'] : ['=add-mac-cookie=no']),
+    ...(bindMac ? ['=add-mac-cookie=yes', '=mac-cookie-timeout=30m'] : ['=add-mac-cookie=no']),
     `=comment=${managed('ispHotspot user profile')}`,
   ];
   if (found) {
