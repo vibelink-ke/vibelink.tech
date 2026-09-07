@@ -363,6 +363,22 @@ async function gatewayForTenant(tenantId) {
 }
 
 /**
+ * Same idea as gatewayForTenant, but for a sibling deployment relaying
+ * through this platform (vibelink-co-ke today) rather than one of our own
+ * tenants — those have no row in `tenants` to hang an assignment off, so
+ * platform_sms_relay_sources keys it by the fixed `source` string each
+ * sibling's relay call already identifies itself with instead.
+ */
+async function gatewayForSource(source) {
+  const { rows: [row] } = await pool.query(
+    `select g.id, g.provider, g.credentials, g.price_per_credit
+       from platform_sms_relay_sources r join platform_sms_gateways g on g.id = r.gateway_id
+      where r.source = $1`,
+    [source]);
+  return row?.provider ? row : defaultGateway();
+}
+
+/**
  * The platform owner's own gateway, spent from a balance only they can top
  * up (Tenants -> a tenant's own "SMS balance") — for a tenant with nothing
  * of their own configured, or whose own gateway just failed, rather than
@@ -411,10 +427,14 @@ async function sendViaPlatform(tenantId, to, body) {
  * column) but the message itself now sends through this platform's own
  * gateway account — one shared bill instead of every deployment needing its
  * own gateway configured. Balance-checking and decrementing stay entirely on
- * the caller's side; this function only ever dispatches.
+ * the caller's side; this function only ever dispatches. Which gateway that
+ * is comes from gatewayForSource(source) — a specific sibling deployment can
+ * be pinned to a specific sender the same way a tenant can, via
+ * platform_sms_relay_sources (Tenants -> SMS gateways -> "External
+ * deployments" in the UI).
  */
 export async function sendViaPlatformGateway(to, body, source = 'local') {
-  const cfg = await defaultGateway();
+  const cfg = await gatewayForSource(source);
   if (!cfg?.provider || !credentialsComplete(cfg.provider, cfg.credentials)) {
     console.warn('platform sms gateway not configured — relay request from', source, 'dropped');
     return { ok: false, error: 'platform gateway not configured' };

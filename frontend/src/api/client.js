@@ -303,6 +303,7 @@ export const api = {
   deletePlatformSmsGateway: (id) => del(`/api/platform/sms-gateways/${id}`),
   platformSmsGatewayBalance: (id, force) => get(`/api/platform/sms-gateways/${id}/balance${force ? '?force=1' : ''}`),
   setTenantSmsGateway: (id, gatewayId) => put(`/api/tenants/${id}/sms-gateway`, { gatewayId }),
+  setRelaySourceSmsGateway: (source, gatewayId) => put(`/api/platform/sms-relay-sources/${source}`, { gatewayId }),
   setTenantSmsBalance: (id, body) => post(`/api/tenants/${id}/sms-balance`, body),
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),

@@ -35,13 +35,28 @@ export default function Tenants() {
   const [gwBusy, setGwBusy] = useState(false);
   const [gwBalances, setGwBalances] = useState({});   // gateway id -> { loading, value }
   const [assigning, setAssigning] = useState(null);   // tenant id currently being re-saved
+  const [relaySources, setRelaySources] = useState([]); // sibling deployments relaying through us
+  const [assigningSource, setAssigningSource] = useState(null);
 
   const loadGateways = async () => {
     try {
       const r = await api.platformSmsGateways();
       setGateways(r.gateways ?? []);
       setGwFields(r.fields ?? {});
+      setRelaySources(r.relaySources ?? []);
     } catch { /* the card just shows empty */ }
+  };
+
+  const assignRelaySource = async (source, gatewayId) => {
+    setAssigningSource(source);
+    try {
+      await api.setRelaySourceSmsGateway(source, gatewayId || null);
+      setRelaySources((rs) => rs.map((r) => (r.source === source ? { ...r, gatewayId: gatewayId || null } : r)));
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setAssigningSource(null);
+    }
   };
 
   const checkGatewayBalance = async (id, force) => {
@@ -367,6 +382,37 @@ export default function Tenants() {
                     value={t.platform_sms_gateway_id ?? ''}
                     disabled={assigning === t.id}
                     onChange={(e) => assignSender(t, e.target.value)}
+                    options={[
+                      { value: '', label: `Default (${gateways.find((g) => g.isDefault)?.name ?? '—'})` },
+                      ...gateways.map((g) => ({ value: g.id, label: g.name })),
+                    ]}
+                  />
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      {gateways.length > 0 && relaySources.length > 0 && (
+        <Card
+          title="External deployments"
+          subtitle="A sibling Vibelink deployment relaying SMS through your gateway(s) — which sender it uses"
+        >
+          <Table
+            rowKey={(r) => r.source}
+            rows={relaySources}
+            columns={[
+              { key: 'label', label: 'Deployment', render: (r) => r.label },
+              {
+                key: 'sender',
+                label: 'Sender',
+                align: 'right',
+                render: (r) => (
+                  <Select
+                    value={r.gatewayId ?? ''}
+                    disabled={assigningSource === r.source}
+                    onChange={(e) => assignRelaySource(r.source, e.target.value)}
                     options={[
                       { value: '', label: `Default (${gateways.find((g) => g.isDefault)?.name ?? '—'})` },
                       ...gateways.map((g) => ({ value: g.id, label: g.name })),

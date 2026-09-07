@@ -2084,3 +2084,15 @@ end $$;
 -- was never wired to anything — repurposed here as the ad's optional link
 -- rather than adding a second unused column next to it.
 alter table hotspot_settings add column if not exists ad_text text;
+
+-- Which platform gateway handles SMS relayed on behalf of a sibling Vibelink
+-- deployment (vibelink-co-ke today, any future one the same way) — those have
+-- no row in `tenants` to hang a platform_sms_gateway_id off, so this keys the
+-- assignment by the fixed `source` string each sibling's relay call already
+-- identifies itself with instead (see sendViaPlatformGateway in sms.js).
+-- Absent row = falls back to whichever platform_sms_gateways row is flagged
+-- default, same as an unassigned tenant.
+create table if not exists platform_sms_relay_sources (
+  source     text primary key,
+  gateway_id uuid not null references platform_sms_gateways(id) on delete cascade
+);

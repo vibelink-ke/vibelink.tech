@@ -8894,11 +8894,26 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
  * sharing one; credentials only ever come back as which keys are set,
  * matching how a tenant's own SMS gateway settings already behave.
  */
+/**
+ * Sibling Vibelink deployments that relay SMS through this platform's own
+ * gateway(s) — see sendViaPlatformGateway/gatewayForSource in sms.js. Just
+ * the one today; a fixed list rather than a discoverable/dynamic one because
+ * onboarding a new sibling deployment is already a manual, code-level step
+ * (its own PLATFORM_SMS_RELAY_KEY, its own env vars pointed at this
+ * platform), not something that shows up here on its own.
+ */
+const KNOWN_RELAY_SOURCES = [
+  { source: 'co.ke', label: 'billing.vibelink.co.ke' },
+];
+
 app.get('/api/platform/sms-gateways', superAdminOnly, wrap(async (req, res) => {
   const { PROVIDER_FIELDS, missingCredentials } = await import('./sms.js');
   const { rows } = await pool.query(
     `select id, name, provider, credentials, price_per_credit, is_default
        from platform_sms_gateways order by is_default desc, name`);
+  const { rows: assigned } = await pool.query(
+    'select source, gateway_id from platform_sms_relay_sources');
+  const bySource = new Map(assigned.map((r) => [r.source, r.gateway_id]));
   res.json({
     gateways: rows.map(({ credentials, ...g }) => ({
       ...g,
@@ -8910,7 +8925,27 @@ app.get('/api/platform/sms-gateways', superAdminOnly, wrap(async (req, res) => {
       missing: missingCredentials(g.provider, credentials ?? {}),
     })),
     fields: PROVIDER_FIELDS,
+    relaySources: KNOWN_RELAY_SOURCES.map((s) => ({ ...s, gatewayId: bySource.get(s.source) ?? null })),
   });
+}));
+
+/** Which platform gateway a sibling deployment's relayed SMS sends through — null clears it back to whichever is flagged default. */
+app.put('/api/platform/sms-relay-sources/:source', superAdminOnly, wrap(async (req, res) => {
+  if (!KNOWN_RELAY_SOURCES.some((s) => s.source === req.params.source)) {
+    return res.status(404).json({ error: 'Unknown relay source' });
+  }
+  const gatewayId = req.body?.gatewayId || null;
+  if (gatewayId) {
+    const { rows: [g] } = await pool.query('select id from platform_sms_gateways where id=$1', [gatewayId]);
+    if (!g) return res.status(404).json({ error: 'No such gateway' });
+    await pool.query(
+      `insert into platform_sms_relay_sources (source, gateway_id) values ($1,$2)
+       on conflict (source) do update set gateway_id = excluded.gateway_id`,
+      [req.params.source, gatewayId]);
+  } else {
+    await pool.query('delete from platform_sms_relay_sources where source=$1', [req.params.source]);
+  }
+  res.json({ ok: true });
 }));
 
 /** The real balance on one of the platform owner's gateway accounts — cached 5 minutes, same as a tenant's own. */
