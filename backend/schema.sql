@@ -2078,3 +2078,9 @@ do $$ begin
     alter table plans drop column router_id;
   end if;
 end $$;
+
+-- The captive portal's banner/advert slot (Hotspot -> Portal Design's
+-- "Banner / advert" fields). banner_url already existed on this table but
+-- was never wired to anything — repurposed here as the ad's optional link
+-- rather than adding a second unused column next to it.
+alter table hotspot_settings add column if not exists ad_text text;

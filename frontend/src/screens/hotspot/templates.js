@@ -52,4 +52,43 @@ export const BASE_TEMPLATES = [
     isGrid: true, hasBanner: true,
     desc: 'Warm modern gradient, grid layout', bestFor: 'Best for cafes and lifestyle brands',
   },
+  {
+    id: 'noir', name: 'Noir', bg: '#0a0a0a', accent: '#d4af37', tile: '#1c1c1c', line: '#333333',
+    text: '#f5f5f0', muted: '#a3a396', isList: true, hasBanner: true,
+    desc: 'Minimalist black, gold accent', bestFor: 'Best for premium or luxury-branded hotspots',
+  },
+  {
+    id: 'blush', name: 'Blush', bg: 'linear-gradient(160deg,#fff0f3 0%,#ffe0e9 100%)',
+    accent: '#e0567c', tile: '#ffe8ee', line: '#f2c3d1', text: '#3a1f26', muted: '#8c6570',
+    isGrid: true, hasBanner: true,
+    desc: 'Soft pink gradient, grid layout', bestFor: 'Best for boutiques and lifestyle spots',
+  },
+  {
+    id: 'ocean', name: 'Ocean', bg: 'linear-gradient(160deg,#03182e 0%,#0a3d62 60%,#1e6091 100%)',
+    accent: '#38bdf8', tile: '#0d2f4d', line: '#1e4b6e', text: '#eaf6ff', muted: '#8fb8d1',
+    isList: true, hasBigCta: true, hasBanner: true,
+    desc: 'Deep ocean gradient, sky-blue accent', bestFor: 'Best for coastal or marine-themed spots',
+  },
+  {
+    id: 'mango', name: 'Mango', bg: '#fff8e1', accent: '#ffb300', tile: '#fff1c2', line: '#f0dca0',
+    text: '#3a2a00', muted: '#8a7245', isList: true, hasCodeBox: true,
+    desc: 'Bright citrus-yellow, code box up front', bestFor: 'Best for daytime, high-visibility signage',
+  },
+  {
+    id: 'slate', name: 'Slate', bg: '#eef1f4', accent: '#3b5875', tile: '#e0e6ea', line: '#c3ccd3',
+    text: '#1c2733', muted: '#71818f', isList: true,
+    desc: 'Cool neutral gray-blue, professional', bestFor: 'Best for corporate and enterprise clients',
+  },
+  {
+    id: 'forest', name: 'Forest', bg: 'linear-gradient(160deg,#08210f 0%,#123a1e 60%,#1d5a30 100%)',
+    accent: '#4ade80', tile: '#153a1e', line: '#2b5c39', text: '#eef7ee', muted: '#8fbf9c',
+    isList: true, hasBigCta: true, hasBanner: true,
+    desc: 'Deep forest gradient, eco green', bestFor: 'Best for eco-lodges and rural ISPs',
+  },
+  {
+    id: 'candy', name: 'Candy', bg: 'linear-gradient(135deg,#ff6ec4 0%,#7873f5 100%)',
+    accent: '#ff2d95', tile: '#f7e9fb', line: '#e6c9ef', text: '#241436', muted: '#8a6f96',
+    isGrid: true, hasBanner: true,
+    desc: 'Bold pink-purple gradient, playful', bestFor: 'Best for youth hangouts and gaming spots',
+  },
 ];

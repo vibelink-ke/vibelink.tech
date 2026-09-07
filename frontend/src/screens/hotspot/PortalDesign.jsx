@@ -63,21 +63,23 @@ function PortalPreview({ t, plans, banner }) {
         {banner.subtext || 'Pick a bundle and pay with M-Pesa'}
       </span>
 
-      {t.hasBanner && (
+      {(t.hasBanner || banner.adText) && (
         <div
           style={{
-            height: 56,
+            minHeight: 56,
             borderRadius: 8,
             background: t.tile,
             border: `1px dashed ${t.line}`,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            textAlign: 'center',
+            padding: '6px 10px',
             fontSize: 10.5,
             color: t.muted,
           }}
         >
-          Banner / advert slot
+          {banner.adText || 'Banner / advert slot'}
         </div>
       )}
 
@@ -140,6 +142,8 @@ export default function PortalDesign() {
   const [banner, setBanner] = useState({
     headline: store.hotspotSettings?.banner_headline ?? '',
     subtext: store.hotspotSettings?.banner_subtext ?? '',
+    adText: store.hotspotSettings?.ad_text ?? '',
+    adUrl: store.hotspotSettings?.banner_url ?? '',
   });
 
   const t = BASE_TEMPLATES.find((x) => x.id === preview) ?? BASE_TEMPLATES[0];
@@ -159,8 +163,13 @@ export default function PortalDesign() {
         template: preview,
         banner_headline: banner.headline,
         banner_subtext: banner.subtext,
+        ad_text: banner.adText,
+        banner_url: banner.adUrl,
       });
-      store.setHotspotSettings(saved ?? { ...store.hotspotSettings, template: preview, banner_headline: banner.headline, banner_subtext: banner.subtext });
+      store.setHotspotSettings(saved ?? {
+        ...store.hotspotSettings, template: preview, banner_headline: banner.headline,
+        banner_subtext: banner.subtext, ad_text: banner.adText, banner_url: banner.adUrl,
+      });
       setApplied(preview);
       store.toast(`${t.name} applied to the captive portal`);
     } catch (e) {
@@ -180,7 +189,7 @@ export default function PortalDesign() {
     >
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-          <Card title="Templates" subtitle="Ten starting points, each tuned for a different buyer">
+          <Card title="Templates" subtitle="Seventeen starting points, each tuned for a different buyer">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
               {BASE_TEMPLATES.map((tpl) => {
                 const on = tpl.id === preview;
@@ -228,6 +237,30 @@ export default function PortalDesign() {
               </Field>
               <Field label="Sub-text">
                 <Input value={banner.subtext} onChange={(e) => setBanner((b) => ({ ...b, subtext: e.target.value }))} placeholder="Pick a bundle and pay with M-Pesa" />
+              </Field>
+            </div>
+          </Card>
+
+          {/* Only Duka/Sponsored/Kijani/Aurora/Citrus/... show a banner slot by
+              default (each template's own `banner` flag) — but text typed in
+              here shows on every template regardless, since the operator set
+              it on purpose. Optional link, same bare-domain normalizing as
+              Redirect after login, happens on the backend (loginPage). */}
+          <Card title="Banner / advert" subtitle="An ad or promo strip under the headline, on any template">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Field label="Advert text">
+                <Input
+                  value={banner.adText}
+                  onChange={(e) => setBanner((b) => ({ ...b, adText: e.target.value }))}
+                  placeholder="e.g. Refer a friend, both get 1GB free"
+                />
+              </Field>
+              <Field label="Link (optional)">
+                <Input
+                  value={banner.adUrl}
+                  onChange={(e) => setBanner((b) => ({ ...b, adUrl: e.target.value }))}
+                  placeholder="e.g. wa.me/2547xxxxxxxx"
+                />
               </Field>
             </div>
           </Card>

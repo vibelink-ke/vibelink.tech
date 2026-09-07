@@ -44,7 +44,7 @@ function duration(min) {
  * Look, chosen in Hotspot -> Settings or the newer Portal design screen.
  *
  * sleek/dark/bold/plain are colour-only — always the same list of bundle
- * cards, one "Buy" button per bundle. kadogo..citrus carry the structural
+ * cards, one "Buy" button per bundle. kadogo..candy carry the structural
  * flags from frontend/src/screens/hotspot/templates.js's BASE_TEMPLATES too
  * (grid/bigCta/codeBox/banner below, transcribed by hand — the frontend and
  * this backend render engine are separate deployments with no shared import
@@ -81,6 +81,13 @@ const TEMPLATES = {
   // WebView renders it like any other CSS background, no image file needed.
   aurora:    { bg: 'linear-gradient(160deg,#0b1e2d 0%,#12333f 55%,#0f4c5c 100%)', card: '#0e2431', ink: '#eef6f7', accent: '#22d3ee', radius: '20px', bigCta: true, banner: true },
   citrus:    { bg: 'linear-gradient(160deg,#fff7ed 0%,#ffe8d6 100%)', card: '#ffffff', ink: '#241c14', accent: '#ff6b35', radius: '18px', grid: true, banner: true },
+  noir:      { bg: '#0a0a0a', card: '#141414', ink: '#f5f5f0', accent: '#d4af37', radius: '10px', banner: true },
+  blush:     { bg: 'linear-gradient(160deg,#fff0f3 0%,#ffe0e9 100%)', card: '#ffffff', ink: '#3a1f26', accent: '#e0567c', radius: '20px', grid: true, banner: true },
+  ocean:     { bg: 'linear-gradient(160deg,#03182e 0%,#0a3d62 60%,#1e6091 100%)', card: '#0a2540', ink: '#eaf6ff', accent: '#38bdf8', radius: '16px', bigCta: true, banner: true },
+  mango:     { bg: '#fff8e1', card: '#ffffff', ink: '#3a2a00', accent: '#ffb300', radius: '14px', codeBox: true },
+  slate:     { bg: '#eef1f4', card: '#ffffff', ink: '#1c2733', accent: '#3b5875', radius: '10px' },
+  forest:    { bg: 'linear-gradient(160deg,#08210f 0%,#123a1e 60%,#1d5a30 100%)', card: '#0f2d17', ink: '#eef7ee', accent: '#4ade80', radius: '16px', bigCta: true, banner: true },
+  candy:     { bg: 'linear-gradient(135deg,#ff6ec4 0%,#7873f5 100%)', card: '#ffffff', ink: '#241436', accent: '#ff2d95', radius: '22px', grid: true, banner: true },
 };
 
 /**
@@ -112,7 +119,7 @@ export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
-  hotspotGateway = null,
+  hotspotGateway = null, adText = null, adUrl = null,
 }) {
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   const btnInk = bestInkOn(t.accent);
@@ -146,6 +153,11 @@ export function loginPage({
    */
   const normalizedRedirect = redirectUrl?.trim()
     ? (/^https?:\/\//i.test(redirectUrl.trim()) ? redirectUrl.trim() : `https://${redirectUrl.trim()}`)
+    : null;
+
+  // Same bare-domain problem as redirectUrl above, for the operator's ad link.
+  const normalizedAdUrl = adUrl?.trim()
+    ? (/^https?:\/\//i.test(adUrl.trim()) ? adUrl.trim() : `https://${adUrl.trim()}`)
     : null;
 
   /**
@@ -248,15 +260,23 @@ export function loginPage({
   const codeBoxOpen = t.codeBox ? '<div class="codebox">' : '';
   const codeBoxClose = t.codeBox ? '</div>' : '';
 
-  // banner: a small trust/contact strip under the headline — sponsored,
-  // duka and kijani's "banner/promo slot". There is no separate ad-content
-  // field on the tenant yet, so this surfaces the one thing already true of
-  // every hotspot (M-Pesa checkout) plus the support number when one is set,
-  // rather than inventing content that isn't there.
-  const bannerBlock = t.banner
-    ? `<div class="banner">${supportPhone
-        ? `Need help? <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a> · Secure M-Pesa checkout`
-        : 'Secure M-Pesa checkout &middot; instant activation'}</div>`
+  // banner: a small trust/contact strip under the headline — sponsored, duka,
+  // kijani and the rest's "banner/promo slot". adText is Hotspot -> Settings'
+  // actual ad-content field (Portal Design's "Banner / advert" fields); when
+  // an operator has set one, it always shows regardless of the template's own
+  // default banner flag — they typed it in on purpose, so a template that
+  // doesn't normally carry a banner slot shouldn't silently drop it. Templates
+  // that do default to a banner but have no ad configured fall back to the
+  // one thing already true of every hotspot (M-Pesa checkout) plus the
+  // support number when one is set, rather than showing an empty box.
+  const bannerBlock = (t.banner || adText)
+    ? `<div class="banner">${adText
+        ? (normalizedAdUrl
+            ? `<a href="${esc(normalizedAdUrl)}" target="_blank" rel="noopener">${esc(adText)}</a>`
+            : esc(adText))
+        : (supportPhone
+            ? `Need help? <a href="tel:${esc(supportPhone)}">${esc(supportPhone)}</a> · Secure M-Pesa checkout`
+            : 'Secure M-Pesa checkout &middot; instant activation')}</div>`
     : '';
 
   // No banner on the preview. The page is shown to operators to judge how it

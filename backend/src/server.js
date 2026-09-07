@@ -762,7 +762,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   // redirect_url was configurable there but never read here — set, saved,
   // and silently ignored by the page it was meant to change.
   const { rows: [hs] } = await pool.query(
-    'select banner_headline, banner_subtext, template, redirect_url, multi_device, hotspot_network from hotspot_settings where tenant_id=$1',
+    'select banner_headline, banner_subtext, template, redirect_url, multi_device, hotspot_network, ad_text, banner_url from hotspot_settings where tenant_id=$1',
     [tenant.id]);
 
   // The router's own LAN gateway IP, computed the same way applyHotspotServer
@@ -821,6 +821,8 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // 'billing.spot' default when a tenant has no subdomain yet).
     hotspotDns: tenant.subdomain ? `${tenant.subdomain}.spot` : 'billing.spot',
     hotspotGateway,
+    adText: hs?.ad_text ?? null,
+    adUrl: hs?.banner_url ?? null,
   }));
 }));
 
@@ -2938,10 +2940,11 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
   const { rows: [s] } = await pool.query(`
     insert into hotspot_settings (tenant_id, ssid, redirect_url, trial_minutes, idle_timeout_sec, bind_mac,
       payment_method, voucher_expiry, code_type, code_length, sms_voucher, auto_login, multi_device,
-      template, banner_headline, banner_subtext, walled_garden, hotspot_network)
+      template, banner_headline, banner_subtext, walled_garden, hotspot_network, ad_text, banner_url)
     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,
             coalesce($17, $19::text[]),
-            coalesce($18, '10.5.50.0/24'))
+            coalesce($18, '10.5.50.0/24'),
+            $20, $21)
     on conflict (tenant_id) do update set
       ssid=excluded.ssid, redirect_url=excluded.redirect_url, trial_minutes=excluded.trial_minutes,
       idle_timeout_sec=excluded.idle_timeout_sec, bind_mac=excluded.bind_mac,
@@ -2949,6 +2952,7 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
       code_type=excluded.code_type, code_length=excluded.code_length, sms_voucher=excluded.sms_voucher,
       auto_login=excluded.auto_login, multi_device=excluded.multi_device, template=excluded.template,
       banner_headline=excluded.banner_headline, banner_subtext=excluded.banner_subtext,
+      ad_text=excluded.ad_text, banner_url=excluded.banner_url,
       -- Only when the caller actually sent them. Every other screen that saves
       -- these settings posts the whole form back without these two fields, and
       -- excluded.* would quietly wipe the walled garden each time.
@@ -2959,7 +2963,7 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
      f.payment_method, f.voucher_expiry, f.code_type, f.code_length, f.sms_voucher, f.auto_login,
      f.multi_device, f.template, f.banner_headline, f.banner_subtext,
      Array.isArray(f.walled_garden) ? f.walled_garden : null,
-     f.hotspot_network ?? null, defaultWalledGarden]);
+     f.hotspot_network ?? null, defaultWalledGarden, f.ad_text ?? null, f.banner_url ?? null]);
   repushHotspotConfigToAllRouters(req.tenant.id);
   res.json({ ...s, warnings });
 });
