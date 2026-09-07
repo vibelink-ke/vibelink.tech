@@ -81,13 +81,24 @@ server billing {
         # real radcheck.Username — by this point User-Name cannot contain
         # anything an attacker chose that isn't already a legitimate,
         # provisioned pppoe_user.
+        #
+        # locked_mac is Postgres's native `macaddr` type (schema.sql), which
+        # always normalizes to lowercase on output regardless of the case it
+        # was stored in — confirmed live: this query came back
+        # "08:55:31:5f:a9:76" for a device MikroTik itself reports (and
+        # Calling-Station-Id carries) as "08:55:31:5F:A9:76". Comparing those
+        # two directly rejected the CORRECT device too, the moment the lookup
+        # above actually started working — lowercasing Calling-Station-Id
+        # into its own scratch var here, rather than the DB value, since the
+        # macaddr type's own normalization isn't something to fight.
         update control {
             &Tmp-String-0 := "%{sql: SELECT locked_mac FROM subscribers WHERE pppoe_user='%{User-Name}'}"
+            &Tmp-String-2 := "%{tolower:%{Calling-Station-Id}}"
         }
         # Bare attribute comparisons, not quoted/xlat'd strings — proven to
         # work in this FreeRADIUS version by dynamic_client_lookup's own
         # secret check further down this file.
-        if (&control:Tmp-String-0 && &control:Tmp-String-0 != "" && &control:Tmp-String-0 != &Calling-Station-Id) {
+        if (&control:Tmp-String-0 && &control:Tmp-String-0 != "" && &control:Tmp-String-0 != &control:Tmp-String-2) {
             reject
         }
 
