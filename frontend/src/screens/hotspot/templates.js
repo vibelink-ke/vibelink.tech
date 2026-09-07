@@ -40,4 +40,16 @@ export const BASE_TEMPLATES = [
     text: '#eef2f6', muted: '#93a3b3', isList: true, hasBigCta: true,
     desc: 'Premium dark, monthly plans up front', bestFor: 'Best for business and monthly buyers',
   },
+  {
+    id: 'aurora', name: 'Aurora', bg: 'linear-gradient(160deg,#0b1e2d 0%,#12333f 55%,#0f4c5c 100%)',
+    accent: '#22d3ee', tile: '#123244', line: '#2b4a58', text: '#eef6f7', muted: '#9fc1c9',
+    isList: true, hasBigCta: true, hasBanner: true,
+    desc: 'Modern dark gradient, neon accent', bestFor: 'Best for urban, youth-focused hotspots',
+  },
+  {
+    id: 'citrus', name: 'Citrus', bg: 'linear-gradient(160deg,#fff7ed 0%,#ffe8d6 100%)',
+    accent: '#ff6b35', tile: '#fff1e4', line: '#f3d9c4', text: '#241c14', muted: '#8a6a52',
+    isGrid: true, hasBanner: true,
+    desc: 'Warm modern gradient, grid layout', bestFor: 'Best for cafes and lifestyle brands',
+  },
 ];

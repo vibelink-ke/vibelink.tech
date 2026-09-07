@@ -180,7 +180,7 @@ export default function PortalDesign() {
     >
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
         <div style={{ flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 14, minWidth: 0 }}>
-          <Card title="Templates" subtitle="Eight starting points, each tuned for a different buyer">
+          <Card title="Templates" subtitle="Ten starting points, each tuned for a different buyer">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
               {BASE_TEMPLATES.map((tpl) => {
                 const on = tpl.id === preview;

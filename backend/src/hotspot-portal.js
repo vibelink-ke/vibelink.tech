@@ -44,7 +44,7 @@ function duration(min) {
  * Look, chosen in Hotspot -> Settings or the newer Portal design screen.
  *
  * sleek/dark/bold/plain are colour-only — always the same list of bundle
- * cards, one "Buy" button per bundle. kadogo..bingwa carry the structural
+ * cards, one "Buy" button per bundle. kadogo..citrus carry the structural
  * flags from frontend/src/screens/hotspot/templates.js's BASE_TEMPLATES too
  * (grid/bigCta/codeBox/banner below, transcribed by hand — the frontend and
  * this backend render engine are separate deployments with no shared import
@@ -56,8 +56,10 @@ function duration(min) {
  *   codeBox the voucher-code sign-in form gets a highlighted box, not a bare form
  *   banner  a small trust/contact strip under the headline
  *
- * bg and card are equal for the eight because templates.js authored them as
- * one flat surface, not the page-behind-a-card look sleek/dark/bold/plain use.
+ * bg and card are equal for most of these because templates.js authored them
+ * as one flat surface, not the page-behind-a-card look sleek/dark/bold/plain
+ * use — aurora/citrus are the exception: bg is a gradient string and card a
+ * flat surface a shade off it, for a page-behind-a-card look of their own.
  */
 const TEMPLATES = {
   sleek:  { bg: '#f5f6f3', card: '#ffffff', ink: '#161a17', accent: '#0f7a5f', radius: '14px' },
@@ -74,6 +76,11 @@ const TEMPLATES = {
   // Monthly (longest-duration) plans front and center, matching "monthly
   // plans up front" — the one template where order isn't just cheapest first.
   bingwa:    { bg: '#1b2430', card: '#1b2430', ink: '#eef2f6', accent: '#c9a227', radius: '14px', bigCta: true, monthlyFirst: true },
+  // bg/card below are CSS values, not just colors — a linear-gradient() string
+  // substitutes straight into the --bg/--card custom properties and RouterOS's
+  // WebView renders it like any other CSS background, no image file needed.
+  aurora:    { bg: 'linear-gradient(160deg,#0b1e2d 0%,#12333f 55%,#0f4c5c 100%)', card: '#0e2431', ink: '#eef6f7', accent: '#22d3ee', radius: '20px', bigCta: true, banner: true },
+  citrus:    { bg: 'linear-gradient(160deg,#fff7ed 0%,#ffe8d6 100%)', card: '#ffffff', ink: '#241c14', accent: '#ff6b35', radius: '18px', grid: true, banner: true },
 };
 
 /**
@@ -300,17 +307,26 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           --green:${t.accent}; --greenDark:${t.accent}; --bg:${t.bg};
           --card:${t.card}; --rad:${t.radius}; --btnInk:${btnInk}; }
   * { box-sizing: border-box; }
-  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+  /* align-items:center vertically centers the card in the viewport — on a
+     phone's tall aspect ratio that leaves a huge, dead-looking blank gap
+     above and below it instead of a page that reads as designed for a
+     phone. Anchoring to the top with breathing room fixes that; 100dvh
+     (falls back to 100vh on browsers that don't know it — an invalid
+     custom value is ignored, not an error) also avoids the extra scroll
+     gap mobile Chrome adds when 100vh includes the address bar's height. */
+  body { margin:0; min-height:100vh; min-height:100dvh; display:flex; align-items:flex-start; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
          font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; background:var(--card);
-          border:1px solid var(--line); border-radius:var(--rad);
+  .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; margin-top:${tvMode ? '0' : 'max(5vh, 16px)'};
+          background:var(--card); border:1px solid var(--line); border-radius:var(--rad);
           padding:${tvMode ? '40px 34px' : '26px 22px'}; }
   /* Television: read from a sofa, and typed with a remote. Everything scales up
      and the code box gets wide, spaced characters so a wrong digit is obvious
-     from across the room. */
+     from across the room. A TV's screen is short and wide rather than tall, so
+     the top-anchoring above (tuned for phones) isn't needed here — centered
+     reads better on a landscape screen from a couch. */
   ${tvMode ? `
-  body { font-size:20px; }
+  body { font-size:20px; align-items:center; }
   h1 { font-size:34px !important; }
   .sub { font-size:19px !important; }
   input { font-size:30px !important; letter-spacing:.35em; text-align:center; padding:18px !important; }
