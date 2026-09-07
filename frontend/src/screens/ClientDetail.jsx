@@ -91,6 +91,18 @@ const formatBytes = (n) => {
   return `${(n / (1024 * 1024)).toFixed(2)} MB`;
 };
 
+// online/last_seen already come back from GET /api/subscribers (see its own
+// comment on the backend) — this just turns them into something readable.
+// Hotspot has no equivalent connected/disconnected concept per voucher, so
+// this is PPPoE-only, same as Live data above.
+const connectionStatus = (line) => {
+  if (line.service !== 'pppoe') return null;
+  if (line.online) return { text: 'Online now', dot: color.green };
+  if (!line.last_seen) return { text: 'Never connected', dot: color.muted };
+  const when = new Date(line.last_seen).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return { text: `Offline · last seen ${when}`, dot: color.rust };
+};
+
 // A filled area under a rolling series of Kbps samples, scaled to the chart's
 // own current peak (not a fixed ceiling) so a quiet line still shows visible
 // movement instead of a flat sliver at the bottom of the graph.
@@ -558,6 +570,15 @@ export default function ClientDetail() {
                         {line.line_label || lineRouter?.name || 'Primary line'}
                       </span>
                       <span style={{ fontSize: 12, color: color.muted }}>{line.service}</span>
+                      {connectionStatus(line) && (
+                        <span
+                          title={connectionStatus(line).text}
+                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: connectionStatus(line).dot }}
+                        >
+                          <span style={{ width: 6, height: 6, borderRadius: radius.pill, background: connectionStatus(line).dot }} />
+                          {line.online ? 'online' : 'offline'}
+                        </span>
+                      )}
                     </span>
                     <span style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12.5, color: color.muted }}>
                       <span>{p?.title ?? 'No plan'}</span>
@@ -590,7 +611,15 @@ export default function ClientDetail() {
                       />
                       <KV k="Expiry" v={line.expires_at ? new Date(line.expires_at).toLocaleString('en-KE') : '—'} />
                       <KV k="Router" v={lineRouter?.name ?? '—'} />
+                      {connectionStatus(line) && (
+                        <KV k="Connection" v={<span style={{ color: connectionStatus(line).dot }}>{connectionStatus(line).text}</span>} />
+                      )}
                       <RowActions>
+                        {line.id !== client.id && (
+                          <RowAction onClick={() => navigate(`/clients/${line.id}`)} title="Open this line's own page — including its own Live data tab">
+                            View this line
+                          </RowAction>
+                        )}
                         <RowAction tone={color.amberInk} onClick={() => setAccess(line, line.status === 'active' ? 'pause' : 'resume')}>
                           {line.status === 'active' ? 'Pause' : 'Resume'}
                         </RowAction>
