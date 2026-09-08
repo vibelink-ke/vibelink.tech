@@ -78,7 +78,6 @@ try {
   // payroll_runs on delete cascade), so nothing further to do here.
 
   await c0.query('insert into hotspot_settings (tenant_id) values ($1) on conflict do nothing', [tid]);
-  await seedTenant(tid);
 
   // ── staff ──
   const pw = await hashPassword(DEMO_PASSWORD);
@@ -138,6 +137,10 @@ try {
   console.log('plans: 3');
 
   await c0.query('commit');
+  // Only now, not earlier: this uses the pool's own separate connection, so
+  // it cannot see the tenant (or anything else above) until c0's own
+  // transaction has actually committed.
+  await seedTenant(tid);
 
   // ── subscribers, invoices, payments — RLS-protected, needs withTenant ──
   const NAIROBI = [[-1.2833, 36.7833], [-1.2921, 36.7856], [-1.3031, 36.7073], [-1.3197, 36.8172]];
