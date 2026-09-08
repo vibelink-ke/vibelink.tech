@@ -39,6 +39,13 @@ export default function Tenants() {
   const [assigning, setAssigning] = useState(null);   // tenant id currently being re-saved
   const [relaySources, setRelaySources] = useState([]); // sibling deployments relaying through us
   const [assigningSource, setAssigningSource] = useState(null);
+  const [upstream, setUpstream] = useState(null);        // { totals, byProvider } across every tenant's routers
+
+  const loadUpstream = async () => {
+    try {
+      setUpstream(await api.platformUpstreamBreakdown());
+    } catch { /* the card just shows empty */ }
+  };
 
   const loadGateways = async () => {
     try {
@@ -144,7 +151,7 @@ export default function Tenants() {
     }
   };
 
-  useEffect(() => { loadGateways(); }, []);
+  useEffect(() => { loadGateways(); loadUpstream(); }, []);
 
   // The global 30s poll (store.jsx) keeps every screen current in the
   // background, but it's on its own clock — navigate here right after it
@@ -282,6 +289,47 @@ export default function Tenants() {
         <Stat label="Trial" value={byStatus('trial')} tone={color.amberInk} hint="not yet billed" />
         <Stat label="Suspended" value={byStatus('suspended')} tone={byStatus('suspended') ? color.rust : undefined} hint="API returns 402" />
       </Grid>
+
+      <Card
+        title="Upstream providers"
+        subtitle="Every onboarded router across every tenant, grouped by which ISP actually carries its internet — set per-router under Routers → Edit"
+      >
+        {!upstream || upstream.byProvider.length === 0 ? (
+          <div style={{ padding: '10px 0', fontSize: 13, color: color.muted }}>
+            {upstream ? 'No routers onboarded on the platform yet.' : 'Loading…'}
+          </div>
+        ) : (
+          <Table
+            rowKey={(row) => row.provider}
+            rows={upstream.byProvider}
+            columns={[
+              {
+                key: 'provider', label: 'Upstream',
+                render: (row) => row.provider === '(not recorded)'
+                  ? <span style={{ color: color.muted, fontStyle: 'italic' }}>{row.provider}</span>
+                  : <span style={{ fontWeight: 600 }}>{row.provider}</span>,
+              },
+              { key: 'routers', label: 'Routers', align: 'right' },
+              {
+                key: 'share', label: 'Share', align: 'right',
+                render: (row) => `${((row.routers / (upstream.totals.routers || 1)) * 100).toFixed(0)}%`,
+              },
+              { key: 'tenants', label: 'Tenants', align: 'right' },
+              {
+                key: 'down', label: 'Down now', align: 'right',
+                render: (row) => row.down > 0
+                  ? <span style={{ color: color.rust, fontWeight: 600 }}>{row.down}</span>
+                  : <span style={{ color: color.muted }}>0</span>,
+              },
+            ]}
+          />
+        )}
+        {upstream && upstream.totals.routers > 0 && (
+          <div style={{ marginTop: 10, fontSize: 12, color: color.muted }}>
+            {upstream.totals.routers} router{upstream.totals.routers === 1 ? '' : 's'} across {upstream.totals.tenants} tenant{upstream.totals.tenants === 1 ? '' : 's'} in total.
+          </div>
+        )}
+      </Card>
 
       <Card
         title="Platform SMS gateways"

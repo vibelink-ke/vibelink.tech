@@ -9,8 +9,15 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Te
 // Configure pushes it to the router, so nobody types or even sees it during
 // onboarding. It stays readable under Edit for manual setups.
 const blankRouter = () => ({
-  name: '', host: '', secret: '', apiPort: '8728', role: 'both',
+  name: '', host: '', secret: '', apiPort: '8728', role: 'both', upstreamProvider: '',
 });
+
+// Suggested, not enforced — a datalist lets the common Kenyan carriers get
+// typed consistently (so the platform breakdown groups them together)
+// without blocking a site on an upstream that isn't one of these.
+const UPSTREAM_PROVIDERS = [
+  'Safaricom', 'Airtel', 'Telkom', 'Starlink', 'Liquid Telecom', 'JTL', 'Zuku', 'Faiba',
+];
 
 // Traffic dialog's own table styles — referenced by the per-port table below
 // but never actually defined, so opening Traffic and letting a poll fill in
@@ -854,6 +861,7 @@ export default function Routers() {
       const updated = await api.updateRouter(edit.id, {
         name: edit.name, host: edit.host, secret: edit.secret,
         apiPort: Number(edit.apiPort) || undefined, role: edit.role,
+        upstreamProvider: edit.upstreamProvider ?? '',
       });
       store.setCollection('routers', (rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
       store.toast(`${updated.name} updated`);
@@ -948,6 +956,7 @@ Revoke anyway?`
         secret: form.secret,
         apiPort: Number(form.apiPort) || 8728,
         role: form.role,
+        upstreamProvider: form.upstreamProvider,
         // Set once the router this peer was minted for actually exists —
         // wg_peers had no router row to point at until this exact moment,
         // which is why a WireGuard-onboarded router showed "Unassigned" in
@@ -1113,6 +1122,7 @@ Revoke anyway?`
             { key: 'host', label: 'NAS address', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.host}</span> },
             { key: 'api_port', label: 'API port', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.api_port}</span> },
             { key: 'role', label: 'Role' },
+            { key: 'upstream_provider', label: 'Upstream', render: (r) => r.upstream_provider || <span style={{ color: color.muted }}>—</span> },
             { key: 'onboarding', label: 'Onboarded' },
             { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
             {
@@ -1234,6 +1244,7 @@ Revoke anyway?`
                           // The real secret, not blank: it is generated for you, so this
                           // is the only place to read it when configuring a router by hand.
                           secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
+                          upstreamProvider: r.upstream_provider ?? '',
                         });
                       }}
                     >
@@ -2079,6 +2090,14 @@ Revoke anyway?`
                 onChange={(e) => setEdit((s) => ({ ...s, apiPort: e.target.value }))}
               />
             </Field>
+            <Field label="Upstream provider" hint="Which ISP this site's internet comes from — feeds the platform-wide breakdown.">
+              <Input
+                list="upstream-providers"
+                value={edit.upstreamProvider ?? ''}
+                placeholder="Safaricom, Airtel, Starlink…"
+                onChange={(e) => setEdit((s) => ({ ...s, upstreamProvider: e.target.value }))}
+              />
+            </Field>
             <Field label="RADIUS shared secret" span={2}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
@@ -2140,6 +2159,9 @@ Revoke anyway?`
             <Field label="API port">
               <Input value={form.apiPort} onChange={set('apiPort')} type="number" />
             </Field>
+            <Field label="Upstream provider" span={2} hint="Which ISP this site's internet comes from — feeds the platform-wide breakdown.">
+              <Input list="upstream-providers" value={form.upstreamProvider} onChange={set('upstreamProvider')} placeholder="Safaricom, Airtel, Starlink…" />
+            </Field>
             {/* No secret field. It is generated on the server and pushed to the
                 router by Configure, so showing it here only invited someone to
                 replace a random value with a memorable one. It remains readable
@@ -2165,6 +2187,10 @@ Revoke anyway?`
           </div>
         )}
       </Modal>
+
+      <datalist id="upstream-providers">
+        {UPSTREAM_PROVIDERS.map((p) => <option key={p} value={p} />)}
+      </datalist>
     </Screen>
   );
 }

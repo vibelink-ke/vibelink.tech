@@ -2211,3 +2211,12 @@ alter table leads add column if not exists created_by uuid references staff on d
 -- through a shared referrer_id, so neither page can show the other.
 alter table leads add column if not exists subscriber_id uuid references subscribers on delete set null;
 create index if not exists leads_subscriber_id_idx on leads (subscriber_id) where subscriber_id is not null;
+
+-- Which upstream carries a router's internet — freeform, since the operator
+-- chooses from a suggested list of Kenyan carriers but can type any name.
+-- Platform-owner only (GET /api/platform/upstream-breakdown): with hundreds
+-- of tenants and routers, "who do we actually depend on" is otherwise
+-- invisible — an outage or a price change from one upstream should be
+-- answerable with a number, not a guess.
+alter table routers add column if not exists upstream_provider text;
+create index if not exists routers_upstream_provider_idx on routers (upstream_provider) where upstream_provider is not null;

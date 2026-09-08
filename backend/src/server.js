@@ -5715,19 +5715,21 @@ async function repushRadiusSecret(tenantId, routerId) {
 }
 
 app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
-  const { name, host, secret, apiPort, role, nasIdentifier } = req.body ?? {};
+  const { name, host, secret, apiPort, role, nasIdentifier, upstreamProvider } = req.body ?? {};
   const { rows: [r] } = await pool.query(
     `update routers set
-       name           = coalesce(nullif($3,''), name),
-       host           = coalesce(nullif($4,'')::inet, host),
-       secret         = coalesce(nullif($5,''), secret),
-       api_port       = coalesce($6, api_port),
-       role           = coalesce(nullif($7,''), role),
-       nas_identifier = coalesce(nullif($8,''), nas_identifier)
+       name              = coalesce(nullif($3,''), name),
+       host              = coalesce(nullif($4,'')::inet, host),
+       secret            = coalesce(nullif($5,''), secret),
+       api_port          = coalesce($6, api_port),
+       role              = coalesce(nullif($7,''), role),
+       nas_identifier    = coalesce(nullif($8,''), nas_identifier),
+       upstream_provider = case when $9::boolean then nullif($10,'') else upstream_provider end
      where id=$1 and tenant_id=$2
      returning *`,
     [req.params.id, req.tenant.id, name ?? '', host ?? '', secret ?? '',
-     apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '']);
+     apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '',
+     upstreamProvider !== undefined, upstreamProvider ?? '']);
   if (!r) return res.status(404).json({ error: 'No such router' });
   if (secret) repushRadiusSecret(req.tenant.id, r.id);
   res.json(r);
@@ -6521,7 +6523,7 @@ app.get('/api/routers', async (req, res) => {
 
 /** Confirm the router after the OVPN tunnel is up: nickname, NAS secret, API port (default 8728). */
 app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
-  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both', wgPeerId } = req.body;
+  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both', wgPeerId, upstreamProvider } = req.body;
 
   // Nobody needs to invent this. It is a shared secret between us and one router,
   // it is never typed by a human now that Configure pushes it, and a chosen one
@@ -6530,9 +6532,10 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
   const nasSecret = String(secret ?? '').trim() || randomPassword(24);
 
   const { rows: [r] } = await pool.query(
-    `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret)
-     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
-    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
+    `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret, upstream_provider)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret,
+     String(upstreamProvider ?? '').trim() || null]);
 
   // The peer this router's WireGuard/failover onboarding minted, before
   // this row existed to point at — the WireGuard peers list showed
@@ -9187,6 +9190,33 @@ app.get('/api/platform/overview', superAdminOnly, wrap(async (_req, res) => {
     order by t.created_at desc`);
 
   res.json(rows);
+}));
+
+/**
+ * Which upstreams the whole platform's routers actually depend on.
+ *
+ * A router's upstream is set per-router (not per-tenant) because a tenant with
+ * several sites often mixes carriers site by site — the useful question is
+ * "how many of our 350 MikroTiks sit behind Safaricom" not "how many tenants
+ * mention Safaricom somewhere". Unset routers are counted separately rather
+ * than dropped, since a large "not recorded" bucket is itself the signal that
+ * this needs backfilling before the numbers can be trusted.
+ */
+app.get('/api/platform/upstream-breakdown', superAdminOnly, wrap(async (_req, res) => {
+  const { rows: byProvider } = await pool.query(`
+    select
+      coalesce(nullif(trim(r.upstream_provider), ''), '(not recorded)') as provider,
+      count(*)::int as routers,
+      count(distinct r.tenant_id)::int as tenants,
+      count(*) filter (where r.status = 'down')::int as down
+    from routers r
+    group by 1
+    order by routers desc`);
+
+  const { rows: [totals] } = await pool.query(
+    `select count(*)::int as routers, count(distinct tenant_id)::int as tenants from routers`);
+
+  res.json({ totals, byProvider });
 }));
 
 /**

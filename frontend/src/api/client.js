@@ -315,6 +315,7 @@ export const api = {
   // ── platform owner ──
   tenants: () => get('/api/tenants'),
   platformOverview: () => get('/api/platform/overview'),
+  platformUpstreamBreakdown: () => get('/api/platform/upstream-breakdown'),
   platformHealth: () => get('/api/platform/health'),
   restartApi: () => post('/api/platform/restart', {}),
   platformSmsGateways: () => get('/api/platform/sms-gateways'),
