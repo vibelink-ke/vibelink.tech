@@ -446,6 +446,38 @@ export default function Routers() {
     }
   };
 
+  /**
+   * For a router that already has a tunnel but has lost its local config —
+   * a factory reset, most often, done by mistake on-site. Unlike "+ Onboard",
+   * this keeps the router's existing row and its existing tunnel address
+   * (RADIUS CoA and the watchdog only know it by that address); only the
+   * keys are rotated, since the private key was never stored to begin with.
+   * Same script, same paste-it-in flow — just for a router that already
+   * exists here instead of a brand new one.
+   */
+  const reonboardTunnel = async (r) => {
+    if (!window.confirm(
+      `Re-issue ${r.name}'s tunnel keys? Paste the new script into it once you have — its old tunnel keys `
+      + 'stop working the moment you do, so only do this if it actually needs re-onboarding.'
+    )) return;
+    setBusy(true);
+    try {
+      const res = await api.reonboardTunnel(r.id);
+      setOvpn({
+        kind: res.failover ? 'failover' : 'wireguard',
+        existingRouter: r,
+        script: res.script,
+        username: r.name,
+        nasIp: res.assignedIp,
+        defaultApiPort: 8728,
+      });
+    } catch (e) {
+      store.toast(`Could not re-issue the tunnel: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyScript = async () => {
     try {
       await navigator.clipboard.writeText(ovpn.script);
@@ -1165,6 +1197,12 @@ Revoke anyway?`
                       Refresh
                     </MenuItem>
                     <MenuItem
+                      onClick={() => { setMenuFor(null); reonboardTunnel(r); }}
+                      title="Router lost its tunnel config (e.g. a factory reset)? Re-issue fresh keys for its existing tunnel and get the paste-in script again."
+                    >
+                      Re-onboard tunnel
+                    </MenuItem>
+                    <MenuItem
                       onClick={() => { setMenuFor(null); setTraffic({ router: r, ports: null, error: null }); }}
                       title="Live throughput on every port"
                     >
@@ -1277,7 +1315,9 @@ Revoke anyway?`
       {/* Step 1 — the generated RouterOS script */}
       <Modal
         open={!!ovpn && !form}
-        title={ovpn?.kind === 'wireguard'
+        title={ovpn?.existingRouter
+          ? `Re-onboard ${ovpn.existingRouter.name}'s tunnel`
+          : ovpn?.kind === 'wireguard'
           ? 'Paste this into the MikroTik terminal (WireGuard)'
           : ovpn?.kind === 'failover'
           ? 'Paste this into the MikroTik terminal (WireGuard + OVPN failover)'
@@ -1285,13 +1325,21 @@ Revoke anyway?`
         width={640}
         onClose={() => setOvpn(null)}
         footer={
-          <>
-            <Button onClick={copyScript}>Copy</Button>
-            <Button onClick={downloadScript}>Download .rsc</Button>
-            <Button variant="primary" onClick={() => setForm({ ...blankRouter(), host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}>
-              Tunnel is up — continue
-            </Button>
-          </>
+          ovpn?.existingRouter ? (
+            <>
+              <Button onClick={copyScript}>Copy</Button>
+              <Button onClick={downloadScript}>Download .rsc</Button>
+              <Button variant="primary" onClick={() => setOvpn(null)}>Done</Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={copyScript}>Copy</Button>
+              <Button onClick={downloadScript}>Download .rsc</Button>
+              <Button variant="primary" onClick={() => setForm({ ...blankRouter(), host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}>
+                Tunnel is up — continue
+              </Button>
+            </>
+          )
         }
       >
         {ovpn && (
@@ -1312,7 +1360,14 @@ Revoke anyway?`
               style={{ fontFamily: font.mono, fontSize: 12, background: '#12211d', color: '#eaf3ef', borderColor: '#12211d' }}
             />
             <span style={{ fontSize: 12, color: color.muted }}>
-              {ovpn.kind === 'wireguard' ? (
+              {ovpn.existingRouter ? (
+                <>
+                  Fresh keys for {ovpn.existingRouter.name}'s existing tunnel — its address stays the
+                  same, so nothing else about it (RADIUS, CoA, its router row here) needs to change.
+                  Its old keys stop working the moment this is pasted, so only run this if it actually
+                  lost its config (a reset, most often) — not as a routine refresh.
+                </>
+              ) : ovpn.kind === 'wireguard' ? (
                 <>
                   RouterOS 7 only. The private key in this script is shown once and is not
                   stored here — if you lose it, make a new peer rather than looking for it.

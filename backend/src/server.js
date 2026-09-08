@@ -6406,6 +6406,98 @@ app.post('/api/routers/failover-script', requireRole('owner'), wrap(async (req, 
   });
 }));
 
+/**
+ * Re-issue the tunnel setup script for a router that already has one — for
+ * exactly the "someone factory-reset it by mistake" case. The router lost
+ * its WireGuard (and, for a failover router, OVPN) config locally, but this
+ * side still has the router's own row, its wg_peers row, and its assigned
+ * tunnel address. The private key itself can never be recovered — createPeer
+ * never stores it — so this mints a fresh keypair, but for the *same*
+ * wg_peers row and the *same* address, rather than allocating a new one the
+ * way "+ Onboard" does. RADIUS CoA and the watchdog only ever know this
+ * router by that address, so keeping it unchanged is what makes this a
+ * recovery rather than a router swap that leaves an orphaned peer behind.
+ */
+app.post('/api/routers/:id/reonboard-tunnel', requireRole('owner'), wrap(async (req, res) => {
+  const wg = await import('./wireguard.js');
+  const { rows: [r] } = await pool.query(
+    'select id, name, ros_version from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  if (r.ros_version && /^6\b/.test(r.ros_version)) {
+    return res.status(409).json({
+      error: `This router last identified itself as RouterOS ${r.ros_version}, which has no WireGuard.`,
+    });
+  }
+
+  const { rows: [peer] } = await pool.query(
+    'select id, assigned_ip from wg_peers where tenant_id=$1 and router_id=$2', [req.tenant.id, r.id]);
+  if (!peer) {
+    return res.status(404).json({
+      error: 'This router has no WireGuard tunnel on file to re-issue. Use "+ Onboard via WireGuard" to set one up fresh.',
+    });
+  }
+
+  const endpoint = process.env.WG_ENDPOINT;
+  const serverPublicKey = process.env.WG_SERVER_PUBLIC_KEY;
+  if (!endpoint || !serverPublicKey) {
+    return res.status(400).json({
+      error: 'WG_ENDPOINT and WG_SERVER_PUBLIC_KEY are not set. See docs/NETWORK-SETUP.md.',
+    });
+  }
+
+  const { privateKey, publicKey } = wg.keypair();
+  const presharedKey = wg.presharedKey();
+  await pool.query('update wg_peers set public_key=$2, preshared_key=$3 where id=$1',
+    [peer.id, publicKey, presharedKey]);
+
+  const sync = await wg.syncServer().catch((e) => ({ written: false, reloaded: false, reason: e.message }));
+
+  // A failover-provisioned router also has an ovpn_clients row on the same
+  // address — same "found, so include it" test the rest of this file uses
+  // to tell a plain WireGuard router from one with a standby, rather than a
+  // stored flag that could drift from reality.
+  const assignedIp = peer.assigned_ip;
+  const { rows: [ovpnClient] } = await pool.query(
+    'select username from ovpn_clients where tenant_id=$1 and assigned_ip=$2', [req.tenant.id, assignedIp]);
+
+  let script = wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey });
+  if (ovpnClient) {
+    const ovpnToken = crypto.randomBytes(6).toString('hex');
+    await pool.query(
+      `update ovpn_clients set password_hash=crypt($2, gen_salt('bf')) where tenant_id=$1 and username=$3`,
+      [req.tenant.id, ovpnToken, ovpnClient.username]);
+    const host = tunnelHost(req);
+    const authDigest = (process.env.OVPN_AUTH_DIGEST ?? 'sha1').toLowerCase();
+    script = [
+      script,
+      '',
+      '# OVPN standby — added disabled; billing-failover enables it only if',
+      '# billing-wg\'s handshake goes stale.',
+      '/interface ovpn-client remove [find name=billing-ovpn]',
+      `/interface ovpn-client add name=billing-ovpn connect-to=${host} port=1194 `
+        + `user=${ovpnClient.username} password=${ovpnToken} certificate=none cipher=aes256-cbc auth=${authDigest} `
+        + 'add-default-route=no mode=ip disabled=yes',
+      '/ip firewall nat remove [find where comment="ispVpn tunnel egress (managed)"]',
+      '/ip firewall nat add chain=srcnat out-interface=billing-ovpn action=masquerade '
+        + 'comment="ispVpn tunnel egress (managed)"',
+      '',
+      wg.failoverScript(),
+      '',
+      ':log info "billing WireGuard/OVPN failover re-onboarded"',
+    ].join('\n');
+  }
+
+  res.json({
+    assignedIp,
+    publicKey,
+    script,
+    failover: !!ovpnClient,
+    note: `The private key is shown once and is not stored. Apply it before closing this — `
+      + `it replaces ${r.name}'s previous tunnel keys, so the old ones stop working the moment this is pasted.`,
+    sync,
+  });
+}));
+
 app.get('/api/routers/wg-peers', wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select p.id, p.name, p.assigned_ip, p.enabled, p.last_handshake, p.rx_bytes, p.tx_bytes,

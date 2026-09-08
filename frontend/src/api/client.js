@@ -260,6 +260,7 @@ export const api = {
   vpnAccessRevoke: (id) => del(`/api/routers/vpn-access/${id}`),
   wgPeer: (opts = {}) => post('/api/routers/wg-peer', opts),
   failoverScript: (opts = {}) => post('/api/routers/failover-script', opts),
+  reonboardTunnel: (routerId) => post(`/api/routers/${routerId}/reonboard-tunnel`, {}),
   wgPeers: () => get('/api/routers/wg-peers'),
   deleteWgPeer: (id) => del(`/api/routers/wg-peers/${id}`),
   tunnelInfo: () => get('/api/routers/tunnel-info'),

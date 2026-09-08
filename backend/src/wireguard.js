@@ -113,35 +113,60 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
  * router itself is the only place that actually knows which transport last
  * worked, so it is the only place that can decide.
  *
- * Never both interfaces enabled at once: they would both try to hold the
- * same tunnel address, and OVPN's own address comes from the server
- * assigning it dynamically by username, not from anything set here — RADIUS
- * CoA and the watchdog only ever address the router by that one shared
- * address, so only one interface may be carrying it at a time.
+ * Never both interfaces enabled at once for longer than the ~10s retest
+ * window below: they would both try to hold the same tunnel address, and
+ * OVPN's own address comes from the server assigning it dynamically by
+ * username, not from anything set here — RADIUS CoA and the watchdog only
+ * ever address the router by that one shared address, so only one interface
+ * may be carrying it for any real length of time.
  *
  * staleAfter is a RouterOS time literal ("90s", "2m") — three times
  * mikrotikScript's own persistent-keepalive=25s, so one or two missed
  * keepalives do not trigger a failover on their own.
+ *
+ * A disabled WireGuard interface does not attempt handshakes at all, so its
+ * peer's own last-handshake value simply freezes the moment it is disabled
+ * and only ever grows staler from there — reading it while still disabled
+ * can never show a recovery, no matter how long WireGuard has actually been
+ * back up on the server end. Once failed over to OVPN this used to mean
+ * staying there forever, since the condition that would trigger a failback
+ * could never become true on its own. So while on OVPN, this now briefly
+ * re-enables WireGuard, waits long enough for a real handshake attempt, and
+ * checks a fresh reading before deciding: recovered means committing to the
+ * switch back, still down means disabling it again and trying once more on
+ * the next scheduled run.
  */
 export function failoverScript({ staleAfter = '90s' } = {}) {
   return [
     '/system script',
     'remove [find name=billing-failover]',
     'add name=billing-failover policy=read,write,test source={',
-    '  :local peer [/interface wireguard peers find where interface=billing-wg];',
-    '  :local age 1d;',
-    '  :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
-    `  :if ($age > ${staleAfter}) do={`,
-    '    :if ([/interface ovpn-client get [find name=billing-ovpn] disabled]) do={',
+    '  :local wg [/interface wireguard find where name=billing-wg];',
+    '  :local ovpn [/interface ovpn-client find where name=billing-ovpn];',
+    '  :local wgDisabled [/interface wireguard get $wg disabled];',
+    '',
+    '  :if ($wgDisabled = false) do={',
+    '    :local peer [/interface wireguard peers find where interface=billing-wg];',
+    '    :local age 1d;',
+    '    :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
+    `    :if ($age > ${staleAfter}) do={`,
     '      :log warning "billing-wg stale ($age) -- failing over to OVPN";',
-    '      /interface wireguard set [find name=billing-wg] disabled=yes;',
-    '      /interface ovpn-client set [find name=billing-ovpn] disabled=no;',
+    '      /interface wireguard set $wg disabled=yes;',
+    '      /interface ovpn-client set $ovpn disabled=no;',
     '    }',
     '  } else={',
-    '    :if ([/interface ovpn-client get [find name=billing-ovpn] disabled] = false) do={',
+    '    :log info "on OVPN -- retesting billing-wg";',
+    '    /interface wireguard set $wg disabled=no;',
+    '    :delay 10s;',
+    '    :local peer [/interface wireguard peers find where interface=billing-wg];',
+    '    :local age 1d;',
+    '    :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
+    `    :if ($age <= ${staleAfter}) do={`,
     '      :log info "billing-wg recovered -- switching back from OVPN";',
-    '      /interface ovpn-client set [find name=billing-ovpn] disabled=yes;',
-    '      /interface wireguard set [find name=billing-wg] disabled=no;',
+    '      /interface ovpn-client set $ovpn disabled=yes;',
+    '    } else={',
+    '      :log info "billing-wg still down ($age) -- staying on OVPN";',
+    '      /interface wireguard set $wg disabled=yes;',
     '    }',
     '  }',
     '}',
