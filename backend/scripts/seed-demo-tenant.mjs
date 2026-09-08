@@ -172,13 +172,13 @@ try {
       const amount = i % 3 === 0 ? 2500 : 1500;
       const { rows: [inv] } = await c.query(
         `insert into invoices (tenant_id, subscriber_id, amount, paid, due_date, status, number)
-         values ($1,$2,$3,$4,current_date - $5, $6, $7) returning id`,
+         values ($1,$2,$3,$4,current_date - $5::int, $6, $7) returning id`,
         [tid, s.id, amount, i === 5 ? amount / 2 : amount, i, i === 5 ? 'partial' : 'paid',
          `DEMO-INV-${1000 + i}`]);
       await c.query(
         `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, payer_name,
            raw_account, subscriber_id, invoice_id, status, received_at, applied_at)
-         values ($1,'daraja',$2,$3,$4,$5,$6,$7,$8,'applied', now() - ($9 || ' days')::interval, now() - ($9 || ' days')::interval)`,
+         values ($1,'daraja',$2,$3,$4,$5,$6,$7,$8,'applied', now() - ($9::text || ' days')::interval, now() - ($9::text || ' days')::interval)`,
         [tid, `DEMO${9000 + i}QR`, i === 5 ? amount / 2 : amount, fakePhone(i), KE_NAMES[i],
          s.account_code, s.id, inv.id, i]);
     }
