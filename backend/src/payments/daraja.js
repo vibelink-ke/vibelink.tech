@@ -339,9 +339,36 @@ router.post('/b2c-timeout', express.json(), async (req, res) => {
 // Validation: accept anything we can plausibly place; Safaricom needs a fast 200.
 router.post('/validate', verifyWebhook, (_req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));
 
+/**
+ * Account references our own STK pushes use that are never a real
+ * subscriber's account code — allocateAccountCode only ever hands out
+ * 4-6 digit numbers, so these can never collide with one.
+ *
+ * Safaricom fires this confirmation webhook and the STK result callback
+ * (handleStkResult, below) independently for the very same transaction,
+ * in no guaranteed order. handleStkResult already knows exactly what an
+ * SMSCREDIT or HOTSPOT purchase is — SMS balance to credit, or a plan/MAC
+ * to grant hotspot access for — and applies it correctly. This handler
+ * has none of that context; all it can do for one of these references is
+ * fail to match a subscriber and mark the payment 'unmatched'.
+ *
+ * Confirmed live: when this webhook happens to arrive first, its own
+ * insert claims the (tenant_id, provider, provider_ref) row before
+ * handleStkResult's correct one runs — the unique constraint then makes
+ * handleStkResult's insert a silent no-op, leaving the payment stuck
+ * 'unmatched' forever and, for a purchase routed through applyPayment's
+ * generic path (hotspot), the thing actually paid for never granted.
+ * Recognizing these references here and stepping aside — handleStkResult
+ * remains the sole path for them, regardless of which webhook wins the
+ * race — closes that gap without touching the dedup logic itself.
+ */
+const RESERVED_BILL_REFS = new Set(['SMSCREDIT', 'HOTSPOT']);
+
 router.post('/confirm', verifyWebhook, async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
   const b = req.body;
+
+  if (RESERVED_BILL_REFS.has(String(b.BillRefNumber ?? '').trim().toUpperCase())) return;
 
   /**
    * A walk-in payment for a platform-collected tenant: BillRefNumber
@@ -529,6 +556,16 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
       if (ins.rows[0]) {
         await pool.query('update tenants set platform_sms_balance = platform_sms_balance + $2 where id=$1',
           [p.tenant_id, Number(p.quantity) || 0]);
+        // Real money this tenant spent — the payment itself only ever landed
+        // on the platform owner's own paybill/tenant above, so without this
+        // the buying tenant's own books never showed it at all. Logged
+        // 'paid' outright, not 'pending': M-Pesa has already settled it by
+        // the time this callback runs, there is nothing left to approve.
+        await pool.query(
+          `insert into expenses (tenant_id, category, description, amount, paid_to, status, paid_at)
+           values ($1,'SMS',$2,$3,'Platform SMS gateway','paid',now())`,
+          [p.tenant_id, `${p.quantity} SMS credits`, Number(req.amount)]).catch((e) =>
+            console.error('sms_credit: could not log expense for', p.tenant_id, e.message));
       }
       return;
     }
