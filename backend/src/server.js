@@ -80,6 +80,10 @@ app.use((req, res, next) => {
 // moment KOPOKOPO_WEBHOOK_SECRET was actually set (crypto.Hmac.update()
 // does not accept undefined) and took every tenant down with it, not just
 // that one webhook.
+// Receipt photos run well past the default 100kb body cap once base64'd;
+// this narrower parser must be mounted before the global one below, since
+// whichever json parser consumes the request stream first wins.
+app.use('/api/expenses/:id/receipt', express.json({ limit: '8mb' }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 
 // Caddy is the only thing in front of this process; without this, IP-based
@@ -3559,7 +3563,10 @@ app.post('/api/referral-commissions/:id/mark-paid', requirePermission('referrers
 app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, res) => {
   const { status } = req.query;
   const { rows } = await pool.query(
-    `select e.*, cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name
+    `select e.id, e.tenant_id, e.category, e.description, e.amount, e.paid_to, e.staff_id,
+            e.status, e.created_by, e.approved_by, e.paid_at, e.created_at,
+            (e.receipt_data is not null) as has_receipt,
+            cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name
        from expenses e
        left join staff cs on cs.id = e.created_by
        left join staff ap on ap.id = e.approved_by
@@ -3580,7 +3587,8 @@ app.post('/api/expenses', requirePermission('expenses.edit'), wrap(async (req, r
   }
   const { rows: [e] } = await pool.query(
     `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+     values ($1,$2,$3,$4,$5,$6,$7)
+     returning id, tenant_id, category, description, amount, paid_to, staff_id, status, created_by, approved_by, paid_at, created_at`,
     [req.tenant.id, String(category).trim(), description || null, value, paidTo || null, staffId || null, req.session?.staff_id ?? null]);
   res.json(e);
 }));
@@ -3626,6 +3634,35 @@ app.post('/api/expenses/:id/mark-paid', requirePermission('expenses.approve'), w
     [req.params.id, req.tenant.id]);
   if (!e) return res.status(404).json({ error: 'No such approved expense' });
   res.json(e);
+}));
+
+const RECEIPT_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'application/pdf']);
+// A phone-camera receipt photo comfortably fits under 5MB raw; base64'd
+// (~+33%) that's still well inside express.json()'s bumped body limit below.
+const RECEIPT_MAX_BYTES = 5 * 1024 * 1024;
+
+app.put('/api/expenses/:id/receipt', requirePermission('expenses.edit'), wrap(async (req, res) => {
+  const dataUrl = String(req.body?.dataUrl ?? '');
+  const m = /^data:([\w./+-]+);base64,(.+)$/.exec(dataUrl);
+  if (!m) return res.status(400).json({ error: 'Not a recognisable file.' });
+  const [, mime, b64] = m;
+  if (!RECEIPT_MIME.has(mime)) return res.status(400).json({ error: 'Use a PNG, JPEG, WebP or PDF file.' });
+  const buf = Buffer.from(b64, 'base64');
+  if (buf.length > RECEIPT_MAX_BYTES) {
+    return res.status(400).json({ error: `That file is too large — keep it under ${Math.round(RECEIPT_MAX_BYTES / 1024 / 1024)}MB.` });
+  }
+  const { rowCount } = await pool.query(
+    'update expenses set receipt_data=$3, receipt_mime=$4 where id=$1 and tenant_id=$2',
+    [req.params.id, req.tenant.id, buf, mime]);
+  if (!rowCount) return res.status(404).json({ error: 'No such expense' });
+  res.json({ ok: true });
+}));
+
+app.get('/api/expenses/:id/receipt', requirePermission('expenses.view'), wrap(async (req, res) => {
+  const { rows: [row] } = await pool.query(
+    'select receipt_data, receipt_mime from expenses where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!row?.receipt_mime) return res.status(404).end();
+  res.type(row.receipt_mime).send(row.receipt_data);
 }));
 
 // ── HR ──────────────────────────────────────

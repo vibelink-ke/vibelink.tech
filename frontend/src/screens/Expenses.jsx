@@ -6,9 +6,16 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, T
 
 const CATEGORIES = ['Fuel', 'Equipment', 'Rent', 'Utilities', 'Salaries', 'Marketing', 'Repairs', 'Other'];
 
-const blank = () => ({ category: 'Fuel', description: '', amount: '', paidTo: '', staffId: '' });
+const blank = () => ({ category: 'Fuel', description: '', amount: '', paidTo: '', staffId: '', receiptFile: null });
 
 const STATUS_TONE = { pending: 'pending', approved: 'default', paid: 'active', rejected: 'suspended' };
+
+const fileToDataUrl = (file) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(reader.result);
+  reader.onerror = reject;
+  reader.readAsDataURL(file);
+});
 
 /**
  * A running log of money spent, separate from payroll's own salary/
@@ -34,10 +41,17 @@ export default function Expenses() {
     if (!(amount > 0)) return store.toast('Enter a positive amount');
     setBusy(true);
     try {
-      await api.createExpense({
+      const created = await api.createExpense({
         category: form.category, description: form.description || undefined,
         amount, paidTo: form.paidTo || undefined, staffId: form.staffId || undefined,
       });
+      if (form.receiptFile) {
+        try {
+          await api.uploadExpenseReceipt(created.id, await fileToDataUrl(form.receiptFile));
+        } catch (e) {
+          store.toast(`Expense logged, but the receipt didn't upload: ${e.message}`);
+        }
+      }
       await reload();
       store.toast('Expense logged');
       setForm(null);
@@ -140,6 +154,12 @@ export default function Expenses() {
             },
             { key: 'status', label: 'Status', render: (e) => <Badge tone={STATUS_TONE[e.status]}>{e.status}</Badge> },
             {
+              key: 'receipt', label: 'Receipt',
+              render: (e) => e.has_receipt
+                ? <a href={`/api/expenses/${e.id}/receipt`} target="_blank" rel="noreferrer" style={{ color: color.green, fontSize: 12.5, fontWeight: 600 }}>View</a>
+                : <span style={{ color: color.muted }}>—</span>,
+            },
+            {
               key: 'act', label: '', align: 'right',
               render: (e) => (
                 <span style={{ whiteSpace: 'nowrap' }}>
@@ -190,6 +210,13 @@ export default function Expenses() {
             </Field>
             <Field label="Notes" span={2}>
               <Textarea rows={3} value={form.description} onChange={set('description')} placeholder="Any other detail worth keeping" />
+            </Field>
+            <Field label="Receipt" span={2} hint="Photo or PDF of the receipt, up to 5MB">
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp,application/pdf"
+                onChange={(e) => setForm((s) => ({ ...s, receiptFile: e.target.files?.[0] ?? null }))}
+              />
             </Field>
           </div>
         )}

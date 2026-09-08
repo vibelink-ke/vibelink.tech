@@ -174,6 +174,7 @@ export const api = {
   deleteExpense: (id) => del(`/api/expenses/${id}`),
   approveExpense: (id) => post(`/api/expenses/${id}/approve`, {}),
   markExpensePaid: (id) => post(`/api/expenses/${id}/mark-paid`, {}),
+  uploadExpenseReceipt: (id, dataUrl) => put(`/api/expenses/${id}/receipt`, { dataUrl }),
 
   // ── HR & payroll ──
   hrProfiles: () => get('/api/hr/profiles'),

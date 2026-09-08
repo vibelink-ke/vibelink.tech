@@ -2140,6 +2140,10 @@ create table if not exists expenses (
 );
 create index if not exists expenses_tenant_id_idx on expenses (tenant_id);
 create index if not exists expenses_status_idx on expenses (tenant_id, status);
+-- A photographed receipt, stored the same way a tenant's favicon is: raw
+-- bytes + mime in the row, served back through its own authenticated route.
+alter table expenses add column if not exists receipt_data bytea;
+alter table expenses add column if not exists receipt_mime text;
 
 create table if not exists payroll_runs (
   id            uuid primary key default gen_random_uuid(),
