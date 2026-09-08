@@ -12,6 +12,7 @@
  */
 import { createRequire } from 'node:module';
 import nodeCrypto from 'node:crypto';
+import dns from 'node:dns/promises';
 import pkg from 'node-routeros';
 const { RouterOSAPI } = pkg;
 
@@ -959,6 +960,51 @@ export async function applyWalledGarden(conn, hosts = []) {
     ]);
     await sleep(40);
   }
+
+  /**
+   * A second, IP-level allow for the same hosts.
+   *
+   * The host-based rule above matches HTTPS by having RouterOS inspect the
+   * TLS ClientHello's own SNI field — confirmed live to intermittently miss
+   * that match (a fragmented handshake, a timing quirk) and reset the
+   * connection instead of letting it through, which looks to a guest like
+   * the portal randomly working, then not, then working again on retry
+   * with nothing on this side ever changing. An IP-level entry needs no
+   * such inspection — it is a plain destination-address match — so the
+   * same host is reachable through a path that structurally cannot have
+   * this failure mode. Kept alongside the host-based rule rather than
+   * instead of it: DNS is resolved once per push here, not once per
+   * packet, so a host whose address changes between pushes still has the
+   * host-based rule covering it until the next one runs.
+   */
+  const ipCurrent = await conn.write('/ip/hotspot/walled-garden/ip/print', []);
+  const ipMine = ipCurrent.filter((r) => isManaged(r));
+  const wantedIps = new Set();
+  for (const host of wanted) {
+    try {
+      for (const ip of await dns.resolve4(host)) wantedIps.add(ip);
+    } catch (e) {
+      console.warn(`applyWalledGarden: could not resolve ${host} for its IP-level allow`, e.message);
+    }
+  }
+  const ipHave = new Set(ipMine.map((r) => String(r['dst-address']).split('/')[0]));
+  const ipToRemove = ipMine.filter((r) => !wantedIps.has(String(r['dst-address']).split('/')[0]));
+  const ipToAdd = [...wantedIps].filter((ip) => !ipHave.has(ip));
+
+  for (const row of ipToRemove) {
+    await conn.write('/ip/hotspot/walled-garden/ip/remove', [`=.id=${idOf(row)}`]);
+    await sleep(40);
+  }
+  for (const ip of ipToAdd) {
+    // Not "allow" — the IP-level walled garden speaks the same accept/drop/
+    // reject vocabulary as /ip firewall filter, unlike the host-based menu
+    // just above it.
+    await conn.write('/ip/hotspot/walled-garden/ip/add', [
+      `=dst-address=${ip}/32`, '=action=accept', `=comment=${managed('ispHotspot walled garden')}`,
+    ]);
+    await sleep(40);
+  }
+
   return { allowed: wanted.length };
 }
 
