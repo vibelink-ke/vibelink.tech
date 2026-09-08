@@ -1812,11 +1812,10 @@ app.post('/chat/start', wrap(async (req, res) => {
       }).catch((e) => console.error('chat_offline auto-reply failed', e.message));
 
       // The visitor got told "we'll get back to you" — someone actually has
-      // to. Same on-call/owner phone + web-push pair the router watchdog
-      // already alerts through, just pointed at this chat instead of
-      // /routers, so tapping it goes straight to the conversation.
-      const { notifyOwner } = await import('./jobs.js');
-      await notifyOwner(tenant.id, `${name} started a live chat and nobody's online to answer.`,
+      // to. Sales line rather than the technical on-call number: a live
+      // chat is a prospective or existing customer, not a router outage.
+      const { notifySales } = await import('./jobs.js');
+      await notifySales(tenant.id, `${name} started a live chat and nobody's online to answer.`,
         { url: `/live-support?chat=${chat.id}`, title: 'New live chat' }).catch(() => {});
     }
   }
@@ -10413,11 +10412,12 @@ app.get('/api/settings', requirePermission('settings.view'), wrap(async (req, re
     smtp: extra?.smtp ?? {},
     prefs: extra?.prefs ?? {},
     alertPhone: extra?.alert_phone ?? null,
+    salesPhone: extra?.sales_phone ?? null,
   });
 }));
 
 app.put('/api/settings', requirePermission('settings.edit'), wrap(async (req, res) => {
-  const { org, smtp, prefs, alertPhone } = req.body;
+  const { org, smtp, prefs, alertPhone, salesPhone } = req.body;
 
   // Where router alerts go. Stored on app_settings rather than staff, because
   // it is a rota decision, not a person's contact detail.
@@ -10426,6 +10426,15 @@ app.put('/api/settings', requirePermission('settings.edit'), wrap(async (req, re
       `insert into app_settings (tenant_id, alert_phone) values ($1, nullif($2,''))
        on conflict (tenant_id) do update set alert_phone = excluded.alert_phone`,
       [req.tenant.id, String(alertPhone ?? '').trim()]);
+  }
+  // Same rota-decision reasoning as alertPhone, for a prospective customer
+  // (a live chat, a website lead) rather than a technical fault — see
+  // jobs.js's notifySales for the fallback chain when this is unset.
+  if (salesPhone !== undefined) {
+    await pool.query(
+      `insert into app_settings (tenant_id, sales_phone) values ($1, nullif($2,''))
+       on conflict (tenant_id) do update set sales_phone = excluded.sales_phone`,
+      [req.tenant.id, String(salesPhone ?? '').trim()]);
   }
   if (org) {
     await pool.query(

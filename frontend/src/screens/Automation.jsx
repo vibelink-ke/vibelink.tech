@@ -47,14 +47,27 @@ export default function Automation() {
   // switches on this page from working.
   const [runs, setRuns] = useState(null);
   const [alertPhone, setAlertPhone] = useState('');
+  const [salesPhone, setSalesPhone] = useState('');
   useEffect(() => {
-    api.settings().then((d) => setAlertPhone(d.alertPhone ?? '')).catch(() => {});
+    api.settings().then((d) => {
+      setAlertPhone(d.alertPhone ?? '');
+      setSalesPhone(d.salesPhone ?? '');
+    }).catch(() => {});
   }, []);
 
   const saveAlertPhone = async () => {
     try {
       await api.saveSettings({ alertPhone });
       store.toast(alertPhone ? `Router alerts go to ${alertPhone}` : 'Router alerts go to the owner');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
+
+  const saveSalesPhone = async () => {
+    try {
+      await api.saveSettings({ salesPhone });
+      store.toast(salesPhone ? `Lead/chat alerts go to ${salesPhone}` : 'Lead/chat alerts go to the router-alerts number');
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     }
@@ -95,6 +108,25 @@ export default function Automation() {
             </Field>
           </div>
           <Button variant="primary" onClick={saveAlertPhone}>Save</Button>
+        </div>
+      </Card>
+
+      {/* Separate from the number above on purpose — a live chat or a new
+          lead is a prospective/existing customer needing a person, not a
+          technical fault, and rarely the same phone as the on-call
+          technician's. */}
+      <Card title="Sales & support alerts" subtitle="Where a new live chat (nobody online) or website lead goes">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 220 }}>
+            <Field label="Phone for lead/chat alerts" hint="Blank uses the router-alerts number, then the owner's">
+              <Input
+                value={salesPhone}
+                onChange={(e) => setSalesPhone(e.target.value)}
+                placeholder="07xx xxx xxx"
+              />
+            </Field>
+          </div>
+          <Button variant="primary" onClick={saveSalesPhone}>Save</Button>
         </div>
       </Card>
 

@@ -2228,3 +2228,12 @@ create index if not exists routers_upstream_provider_idx on routers (upstream_pr
 alter table routers add column if not exists upstream_source text not null default 'auto';
 alter table routers add column if not exists upstream_checked_at timestamptz;
 alter table routers add column if not exists upstream_public_ip inet;
+
+-- Where a prospective-customer alert goes (a live chat with nobody online,
+-- a new website lead) — separate from alert_phone above, which is for
+-- technical/router-down alerts. A sales rep and the on-call technician are
+-- rarely the same person, and treating a hot lead as low-priority network
+-- noise (or paging a technician for a sales question) is exactly the
+-- mismatch this exists to avoid. Falls back to alert_phone, then the
+-- owner's own phone, when unset — see notifySales in jobs.js.
+alter table app_settings add column if not exists sales_phone text;

@@ -656,6 +656,36 @@ export async function notifyOwner(tenantId, body, { url = '/routers', title = 'V
   }
 }
 
+/**
+ * Same shape as notifyOwner, for a prospective customer needing attention
+ * (a live chat with nobody online, a new website lead) rather than a
+ * technical fault — a sales rep and the on-call technician are rarely the
+ * same person, and sharing notifyOwner's alert_phone would mean either a
+ * hot lead pages someone expecting a router outage, or a tenant has to
+ * choose one number for both. Falls back through alert_phone, then the
+ * owner, so an unconfigured sales_phone still reaches somebody rather than
+ * going nowhere.
+ */
+export async function notifySales(tenantId, body, { url = '/leads', title = 'Vibelink alert' } = {}) {
+  try {
+    const { rows: [pick] } = await pool.query(
+      `select coalesce(
+                (select nullif(sales_phone,'') from app_settings where tenant_id=$1),
+                (select nullif(alert_phone,'') from app_settings where tenant_id=$1),
+                (select phone from staff where tenant_id=$1 and role='owner'
+                  and phone is not null limit 1)) as phone`, [tenantId]);
+    if (pick?.phone) await send(tenantId, pick.phone, 'custom', { body });
+  } catch (e) {
+    console.error('sales notify failed', tenantId, e.message);
+  }
+  try {
+    const push = await import('./push.js');
+    await push.sendPush(tenantId, { title, body, url });
+  } catch (e) {
+    console.error('sales push failed', tenantId, e.message);
+  }
+}
+
 
 /**
  * Put a router's RADIUS back when it drifts.
