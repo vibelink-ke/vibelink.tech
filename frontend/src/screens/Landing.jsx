@@ -220,6 +220,39 @@ export default function Landing({ onRegister }) {
       </Section>
       </div>
 
+      {/* A real login into a real, fully-populated tenant — not a video, not
+          a set of screenshots. Resets itself every hour (jobs.js's
+          resetDemoTenant), so whatever the last visitor clicked or "bought"
+          is never still sitting there. */}
+      <div style={{ borderBottom: `1px solid ${color.line}` }}>
+        <Section style={{ padding: '28px 22px' }}>
+          <div style={{
+            border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.cardBg,
+            padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            flexWrap: 'wrap', gap: 16,
+          }}>
+            <div>
+              <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>See it running before you register</h3>
+              <p style={{ margin: 0, fontSize: 13.5, color: color.inkSoft }}>
+                A live, fully populated demo tenant — routers, customers, leads, payroll, all of it.
+                Resets itself every hour, so go ahead and click anything.
+              </p>
+            </div>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+              fontFamily: font.mono, fontSize: 13,
+            }}>
+              <a href="https://demo.vibelink.tech" target="_blank" rel="noreferrer"
+                 className="vl-btn vl-solid" style={{ ...solid, textDecoration: 'none', padding: '9px 16px' }}>
+                demo.vibelink.tech
+              </a>
+              <span style={{ color: color.inkSoft }}>demo@vibelink.tech</span>
+              <span style={{ color: color.inkSoft }}>demo@123</span>
+            </div>
+          </div>
+        </Section>
+      </div>
+
       <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
         <Section style={{ padding: '40px 22px' }}>
           <div style={{
