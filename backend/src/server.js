@@ -6499,7 +6499,28 @@ app.post('/api/routers/:id/reonboard-tunnel', requireRole('owner'), wrap(async (
   const { rows: [ovpnClient] } = await pool.query(
     'select username from ovpn_clients where tenant_id=$1 and assigned_ip=$2', [req.tenant.id, assignedIp]);
 
-  let script = wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey });
+  // Confirmed live: pasting mikrotikScript's own `add name=billing-wg ...`
+  // into a router that already has that interface does nothing useful —
+  // RouterOS refuses a second interface with the same name, errors on just
+  // that one line, and the private key underneath it is never actually
+  // replaced. Nothing about the paste looks wrong (every other line still
+  // runs), so the router keeps dialing with its old key indefinitely while
+  // the server waits for a new one that never arrives. Clearing the old
+  // tunnel first — same `remove [find ...]`-then-`add` idiom already used
+  // for billing-ovpn below, a no-op if nothing matches — is what makes a
+  // re-onboard actually re-onboard.
+  const cleanup = [
+    '# Clears the previous tunnel before re-adding it — see reonboard-tunnel',
+    '# in server.js for why a plain add-only script does not work here.',
+    '/ip firewall filter remove [find comment="billing server"]',
+    '/ip route remove [find gateway=billing-wg]',
+    '/ip address remove [find interface=billing-wg]',
+    '/interface wireguard peers remove [find interface=billing-wg]',
+    '/interface wireguard remove [find name=billing-wg]',
+    '',
+  ].join('\n');
+
+  let script = cleanup + wg.mikrotikScript({ privateKey, presharedKey, assignedIp, endpoint, serverPublicKey });
   if (ovpnClient) {
     const ovpnToken = crypto.randomBytes(6).toString('hex');
     await pool.query(
