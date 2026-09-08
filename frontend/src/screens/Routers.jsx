@@ -9,7 +9,7 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Te
 // Configure pushes it to the router, so nobody types or even sees it during
 // onboarding. It stays readable under Edit for manual setups.
 const blankRouter = () => ({
-  name: '', host: '', secret: '', apiPort: '8728', role: 'both', upstreamProvider: '',
+  name: '', host: '', secret: '', apiPort: '8728', role: 'both',
 });
 
 // Suggested, not enforced — a datalist lets the common Kenyan carriers get
@@ -315,6 +315,7 @@ export default function Routers() {
   const [plan, setPlan] = useState(null);                 // ports read back, awaiting choices
   const [result, setResult] = useState(null);             // outcome of the last push
   const [showSecret, setShowSecret] = useState(false);
+  const [detecting, setDetecting] = useState(null);        // router id currently being auto-detected
   // Asked before minting: RouterOS 6 and 7 need different cipher names. The
   // address is filled in from the deployment rather than typed.
   const [dial, setDial] = useState({ open: false, routerosVersion: '7', serverHost: '' });
@@ -861,7 +862,13 @@ export default function Routers() {
       const updated = await api.updateRouter(edit.id, {
         name: edit.name, host: edit.host, secret: edit.secret,
         apiPort: Number(edit.apiPort) || undefined, role: edit.role,
-        upstreamProvider: edit.upstreamProvider ?? '',
+        // Only sent when the operator actually touched it — otherwise a
+        // save that changes nothing about the upstream field would still
+        // resend its pre-filled current value and get treated as a manual
+        // override, silently taking an auto-detected router off the
+        // background sweep.
+        ...(edit.upstreamProvider !== edit.originalUpstreamProvider
+          ? { upstreamProvider: edit.upstreamProvider ?? '' } : {}),
       });
       store.setCollection('routers', (rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
       store.toast(`${updated.name} updated`);
@@ -870,6 +877,22 @@ export default function Routers() {
       store.toast(`Could not save: ${e.message}`);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const detectUpstream = async (routerId) => {
+    setDetecting(routerId);
+    try {
+      const updated = await api.detectRouterUpstream(routerId);
+      store.setCollection('routers', (rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
+      if (edit?.id === routerId) {
+        setEdit((s) => ({ ...s, upstreamProvider: updated.upstream_provider ?? '', upstreamSource: updated.upstream_source, originalUpstreamProvider: updated.upstream_provider ?? '' }));
+      }
+      store.toast(`Detected: ${updated.upstream_provider}`);
+    } catch (e) {
+      store.toast(`Could not detect an upstream: ${e.message}`);
+    } finally {
+      setDetecting(null);
     }
   };
 
@@ -956,7 +979,6 @@ Revoke anyway?`
         secret: form.secret,
         apiPort: Number(form.apiPort) || 8728,
         role: form.role,
-        upstreamProvider: form.upstreamProvider,
         // Set once the router this peer was minted for actually exists —
         // wg_peers had no router row to point at until this exact moment,
         // which is why a WireGuard-onboarded router showed "Unassigned" in
@@ -1122,7 +1144,12 @@ Revoke anyway?`
             { key: 'host', label: 'NAS address', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.host}</span> },
             { key: 'api_port', label: 'API port', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.api_port}</span> },
             { key: 'role', label: 'Role' },
-            { key: 'upstream_provider', label: 'Upstream', render: (r) => r.upstream_provider || <span style={{ color: color.muted }}>—</span> },
+            {
+              key: 'upstream_provider', label: 'Upstream',
+              render: (r) => r.upstream_provider
+                ? <span>{r.upstream_provider}{r.upstream_source === 'manual' && <span style={{ color: color.muted, fontSize: 11 }}> (manual)</span>}</span>
+                : <span style={{ color: color.muted }}>—</span>,
+            },
             { key: 'onboarding', label: 'Onboarded' },
             { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
             {
@@ -1245,10 +1272,18 @@ Revoke anyway?`
                           // is the only place to read it when configuring a router by hand.
                           secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
                           upstreamProvider: r.upstream_provider ?? '',
+                          originalUpstreamProvider: r.upstream_provider ?? '',
+                          upstreamSource: r.upstream_source ?? 'auto',
                         });
                       }}
                     >
                       Edit
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); detectUpstream(r.id); }}
+                      title="Look up which ISP this router's own public IP belongs to"
+                    >
+                      Detect upstream
                     </MenuItem>
                     <MenuItem onClick={() => { setMenuFor(null); checkRadius(r); }}>Check RADIUS</MenuItem>
                     <MenuItem
@@ -2090,13 +2125,26 @@ Revoke anyway?`
                 onChange={(e) => setEdit((s) => ({ ...s, apiPort: e.target.value }))}
               />
             </Field>
-            <Field label="Upstream provider" hint="Which ISP this site's internet comes from — feeds the platform-wide breakdown.">
-              <Input
-                list="upstream-providers"
-                value={edit.upstreamProvider ?? ''}
-                placeholder="Safaricom, Airtel, Starlink…"
-                onChange={(e) => setEdit((s) => ({ ...s, upstreamProvider: e.target.value }))}
-              />
+            <Field
+              label="Upstream provider"
+              span={2}
+              hint={
+                edit.upstreamSource === 'manual'
+                  ? 'Manually set — clear this field to let auto-detection take it over again.'
+                  : "Auto-detected from this router's own public IP. Type a name here only to override it."
+              }
+            >
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Input
+                  list="upstream-providers"
+                  value={edit.upstreamProvider ?? ''}
+                  placeholder="Auto-detected — Safaricom, Airtel, Starlink…"
+                  onChange={(e) => setEdit((s) => ({ ...s, upstreamProvider: e.target.value }))}
+                />
+                <Button onClick={() => detectUpstream(edit.id)} disabled={detecting === edit.id}>
+                  {detecting === edit.id ? 'Detecting…' : 'Detect now'}
+                </Button>
+              </div>
             </Field>
             <Field label="RADIUS shared secret" span={2}>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -2159,9 +2207,9 @@ Revoke anyway?`
             <Field label="API port">
               <Input value={form.apiPort} onChange={set('apiPort')} type="number" />
             </Field>
-            <Field label="Upstream provider" span={2} hint="Which ISP this site's internet comes from — feeds the platform-wide breakdown.">
-              <Input list="upstream-providers" value={form.upstreamProvider} onChange={set('upstreamProvider')} placeholder="Safaricom, Airtel, Starlink…" />
-            </Field>
+            {/* No upstream-provider field here — it's auto-detected once this
+                router is configured and reachable, not something to guess at
+                onboarding time. See Edit for the manual override. */}
             {/* No secret field. It is generated on the server and pushed to the
                 router by Configure, so showing it here only invited someone to
                 replace a random value with a memorable one. It remains readable

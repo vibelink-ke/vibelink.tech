@@ -81,6 +81,42 @@ export function startJobs() {
   // it gets wiped and reseeded from scratch, so no one ever inherits the
   // last visitor's mess and nothing risky can accumulate.
   cron.schedule('0 * * * *', safely('resetDemoTenant', resetDemoTenant));
+  // Every 6 hours, not continuously: this calls out to a third-party IP-to-ISP
+  // service per router, so it is deliberately paced rather than run on the
+  // same tight loop as the ping watchdog.
+  cron.schedule('20 */6 * * *', safely('detectUpstreamProviders', detectUpstreamProviders));
+}
+
+/**
+ * Keep routers.upstream_provider current without anyone typing it in.
+ *
+ * Only 'auto' rows are touched — a 'manual' one is an operator's deliberate
+ * correction and stays put until they clear it themselves (PUT /api/routers/:id
+ * resets it to 'auto' when the field is emptied). Re-checks every router on
+ * this cadence rather than only once, since an ISP outage or a site moved to
+ * a different upstream should eventually be reflected without anyone editing
+ * it by hand.
+ */
+export async function detectUpstreamProviders() {
+  const { rows } = await pool.query(
+    `select id, tenant_id, host, api_port, service_user, service_password_enc
+       from routers
+      where upstream_source = 'auto'
+        and service_user is not null
+        and service_password_enc is not null
+        and tenant_id in (${enabledTenants})`, ['detectUpstreamProviders']);
+
+  const secrets = await import('./secrets.js');
+  const { detectRouterUpstream } = await import('./upstream.js');
+
+  for (const r of rows) {
+    const password = secrets.decrypt(r.service_password_enc);
+    const result = await detectRouterUpstream(r, password);
+    if (!result) continue;
+    await pool.query(
+      `update routers set upstream_provider=$2, upstream_checked_at=now(), upstream_public_ip=$3
+         where id=$1`, [r.id, result.provider, result.ip]);
+  }
 }
 
 /**

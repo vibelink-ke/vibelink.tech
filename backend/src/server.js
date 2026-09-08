@@ -5716,6 +5716,11 @@ async function repushRadiusSecret(tenantId, routerId) {
 
 app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
   const { name, host, secret, apiPort, role, nasIdentifier, upstreamProvider } = req.body ?? {};
+  // A typed-in value overrides auto-detection until the operator clears the
+  // field again — clearing it (empty string, not "unset") hands it back to
+  // the background sweep rather than leaving it permanently blank.
+  const upstreamSet = upstreamProvider !== undefined;
+  const upstreamValue = String(upstreamProvider ?? '').trim();
   const { rows: [r] } = await pool.query(
     `update routers set
        name              = coalesce(nullif($3,''), name),
@@ -5724,15 +5729,47 @@ app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, 
        api_port          = coalesce($6, api_port),
        role              = coalesce(nullif($7,''), role),
        nas_identifier    = coalesce(nullif($8,''), nas_identifier),
-       upstream_provider = case when $9::boolean then nullif($10,'') else upstream_provider end
+       upstream_provider = case when $9::boolean then nullif($10,'') else upstream_provider end,
+       upstream_source   = case when $9::boolean then (case when $10 = '' then 'auto' else 'manual' end) else upstream_source end
      where id=$1 and tenant_id=$2
      returning *`,
     [req.params.id, req.tenant.id, name ?? '', host ?? '', secret ?? '',
      apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '',
-     upstreamProvider !== undefined, upstreamProvider ?? '']);
+     upstreamSet, upstreamValue]);
   if (!r) return res.status(404).json({ error: 'No such router' });
   if (secret) repushRadiusSecret(req.tenant.id, r.id);
   res.json(r);
+}));
+
+/**
+ * On-demand refresh, for right after a router comes online instead of
+ * waiting for the next background sweep (detectUpstreamProviders, jobs.js) —
+ * same detection logic, reusing the service credentials Configure already
+ * stored. Never runs against a manual override; the operator clears the
+ * field first if they want auto-detection to take it back.
+ */
+app.post('/api/routers/:id/detect-upstream', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    `select id, host, api_port, service_user, service_password_enc, upstream_source
+       from routers where id=$1 and tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  if (!r.service_user || !r.service_password_enc)
+    return res.status(409).json({ error: 'Run Configure on this router first — detection needs its service credentials.' });
+  if (r.upstream_source === 'manual')
+    return res.status(409).json({ error: 'This router has a manually-set upstream. Clear it first to let detection take over.' });
+
+  const { detectRouterUpstream } = await import('./upstream.js');
+  const { decrypt } = await import('./secrets.js');
+  const result = await detectRouterUpstream(r, decrypt(r.service_password_enc));
+  if (!result)
+    return res.status(422).json({ error: 'Could not detect an upstream — the router may be behind CGNAT, unreachable, or its IP Cloud is disabled.' });
+
+  const { rows: [updated] } = await pool.query(
+    `update routers set upstream_provider=$3, upstream_source='auto',
+            upstream_checked_at=now(), upstream_public_ip=$4
+       where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, result.provider, result.ip]);
+  res.json(updated);
 }));
 
 /**
@@ -6523,7 +6560,7 @@ app.get('/api/routers', async (req, res) => {
 
 /** Confirm the router after the OVPN tunnel is up: nickname, NAS secret, API port (default 8728). */
 app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
-  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both', wgPeerId, upstreamProvider } = req.body;
+  const { name, nasIdentifier, host, secret, apiPort = 8728, role = 'both', wgPeerId } = req.body;
 
   // Nobody needs to invent this. It is a shared secret between us and one router,
   // it is never typed by a human now that Configure pushes it, and a chosen one
@@ -6532,10 +6569,9 @@ app.post('/api/routers', requireRole('owner'), wrap(async (req, res) => {
   const nasSecret = String(secret ?? '').trim() || randomPassword(24);
 
   const { rows: [r] } = await pool.query(
-    `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret, upstream_provider)
-     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret,
-     String(upstreamProvider ?? '').trim() || null]);
+    `insert into routers (tenant_id, name, host, api_port, nas_identifier, role, secret)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [req.tenant.id, name, host, apiPort, nasIdentifier ?? host, role, nasSecret]);
 
   // The peer this router's WireGuard/failover onboarding minted, before
   // this row existed to point at — the WireGuard peers list showed

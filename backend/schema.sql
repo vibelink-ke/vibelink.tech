@@ -2220,3 +2220,11 @@ create index if not exists leads_subscriber_id_idx on leads (subscriber_id) wher
 -- answerable with a number, not a guess.
 alter table routers add column if not exists upstream_provider text;
 create index if not exists routers_upstream_provider_idx on routers (upstream_provider) where upstream_provider is not null;
+
+-- 'auto' rows are free for the background sweep (detectUpstreamProviders, in
+-- jobs.js) to overwrite as a router's carrier changes; 'manual' rows are an
+-- operator's own correction (set whenever they type a non-empty value under
+-- Routers → Edit) and are left alone until they clear the field themselves.
+alter table routers add column if not exists upstream_source text not null default 'auto';
+alter table routers add column if not exists upstream_checked_at timestamptz;
+alter table routers add column if not exists upstream_public_ip inet;

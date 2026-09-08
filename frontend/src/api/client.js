@@ -266,6 +266,7 @@ export const api = {
   tunnelInfo: () => get('/api/routers/tunnel-info'),
   licence: () => get('/api/licence'),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
+  detectRouterUpstream: (id) => post(`/api/routers/${id}/detect-upstream`, {}),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
   radiusCheck: (id) => post(`/api/routers/${id}/radius-check`, {}),
