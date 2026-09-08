@@ -89,7 +89,16 @@ export async function applyPayment(tenantId, tx) {
     if (target.type === 'subscriber') {
       const r = await settleSubscriber(c, tenantId, target.id, tx.amount, paymentId, target.invoiceId ?? null);
       await activateSubscriber(c, tenantId, target.id);
-      await send(tenantId, tx.phone, 'receipt', { amount: tx.amount, code: tx.ref, ...r });
+      // A payment that didn't cover a full period leaves expires_at right
+      // where it was — sending the usual receipt here would read "Active
+      // until <the date it already expires>" with no hint that anything is
+      // still owed. settleSubscriber already tells us this (partial +
+      // balance); the days-left figure is the same expires_at the receipt
+      // would have shown, just spelled out as "how long you actually have"
+      // rather than a date that looks unchanged from before they paid.
+      const days = Math.max(0, Math.ceil((new Date(r.expires).getTime() - Date.now()) / 86400000));
+      await send(tenantId, tx.phone, r.partial ? 'partial' : 'receipt',
+        { amount: tx.amount, code: tx.ref, days, ...r });
       return { paymentId, applied: true, ...r };
     }
 
