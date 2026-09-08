@@ -1078,6 +1078,66 @@ export async function applyAntiSharing(conn, { bridge = 'bridge-lan' } = {}) {
  * management tunnel rides over it), and the walled garden is irrelevant here
  * because the router is not a hotspot client of itself.
  */
+/**
+ * MikroTik's own default hotspot skin.
+ *
+ * Documented to be auto-extracted into the html-directory the moment a
+ * hotspot server profile is first created — confirmed live not to be
+ * reliable in practice: a router that went through a factory reset and was
+ * reprovisioned entirely through this platform's API ended up with nothing
+ * in its hotspot directory except the login.html pushHotspotPage writes,
+ * and none of the other stock files RouterOS's own hotspot engine needs for
+ * its general request-handling flow. redirect.html is the critical one —
+ * it is the template RouterOS renders the actual "send this unauthenticated
+ * request to the login page" response from — but its absence is invisible
+ * until an actual guest device tries to connect: the one path that keeps
+ * working regardless (a literal request for /login, which serves login.html
+ * directly, a hardcoded lookup with no template involved) is also the one
+ * path nobody's browser ever actually requests on its own.
+ *
+ * Sourced from a public unmodified backup of MikroTik's own bundled files
+ * rather than reinventing RouterOS's proprietary "$(link-redirect)" template
+ * syntax. login.html is deliberately excluded from this list — that one is
+ * always the tenant's own (pushHotspotPage), never this stock copy.
+ */
+const STOCK_SKIN_BASE = 'https://raw.githubusercontent.com/RanggaBS/mikrotik-hotspot-default/main/hotspot';
+const STOCK_SKIN_FILES = [
+  'alogin.html', 'error.html', 'logout.html', 'radvert.html', 'redirect.html',
+  'rlogin.html', 'status.html', 'favicon.ico', 'md5.js', 'errors.txt',
+  'css/style.css',
+  'img/password.svg', 'img/user.svg',
+  'xml/alogin.html', 'xml/error.html', 'xml/flogout.html', 'xml/login.html',
+  'xml/logout.html', 'xml/rlogin.html', 'xml/WISPAccessGatewayParam.xsd',
+];
+
+/**
+ * Fetch whichever of the stock skin files are missing from `dir` — cheap to
+ * call on every push, since an already-complete skin costs one /file/print
+ * per file and no fetches at all. Best-effort per file: a cosmetic asset
+ * (css/img/xml) failing to download must never stop redirect.html or
+ * error.html — the ones that actually matter — from being tried right after it.
+ */
+export async function ensureHotspotSkin(conn, { dir = 'hotspot' } = {}) {
+  const restored = [];
+  for (const rel of STOCK_SKIN_FILES) {
+    const dst = `${dir}/${rel}`;
+    const found = await conn.write('/file/print', [`?name=${dst}`]);
+    if (Number(found[0]?.size ?? 0) > 0) continue;
+    try {
+      await cmd(conn, `fetch stock ${rel}`, '/tool/fetch', [
+        `=url=${STOCK_SKIN_BASE}/${rel}`,
+        `=dst-path=${dst}`,
+        '=check-certificate=no',
+        '=mode=https',
+      ]);
+      restored.push(rel);
+    } catch (e) {
+      console.warn(`ensureHotspotSkin: could not fetch ${rel}`, e.message);
+    }
+  }
+  return { restored };
+}
+
 export async function pushHotspotPage(conn, { url, bridge }) {
   if (!/^https?:\/\//i.test(String(url ?? ''))) {
     throw new Error(`"${url}" is not a usable URL for the hotspot page.`);
@@ -1106,6 +1166,12 @@ export async function pushHotspotPage(conn, { url, bridge }) {
     const profiles = await conn.write('/ip/hotspot/profile/print', [`?name=${server.profile}`]);
     dir = String(profiles[0]?.['html-directory'] ?? 'hotspot').replace(/\/+$/, '');
   }
+
+  // Before login.html: a stock file this fetches is never allowed to
+  // overwrite the tenant's own page, but the tenant's page overwriting a
+  // freshly-restored stock login.html (the one file both sets touch) the
+  // other way round is exactly what's supposed to happen.
+  await ensureHotspotSkin(conn, { dir }).catch((e) => console.warn('ensureHotspotSkin failed', e.message));
 
   const dst = `${dir}/login.html`;
   await cmd(conn, 'fetch login page', '/tool/fetch', [
