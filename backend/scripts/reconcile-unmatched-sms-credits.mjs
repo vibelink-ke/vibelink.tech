@@ -13,13 +13,15 @@
  *   node scripts/reconcile-unmatched-sms-credits.mjs            # dry run
  *   node scripts/reconcile-unmatched-sms-credits.mjs --apply    # fix for real
  *
- * Scope: SMS credits only. A mis-marked HOTSPOT purchase is reported but
- * never auto-fixed — retroactively granting hotspot access to a purchase
- * that old risks handing it to a customer who has since bought another
- * bundle or moved on, which needs a human looking at the specific case,
- * not a script guessing.
+ * Scope: SMS credits only (both a local sms_credit purchase and one relayed
+ * from a sibling deployment — sms_credit_relay). A mis-marked HOTSPOT
+ * purchase is reported but never auto-fixed — retroactively granting
+ * hotspot access to a purchase that old risks handing it to a customer who
+ * has since bought another bundle or moved on, which needs a human looking
+ * at the specific case, not a script guessing.
  */
 import 'dotenv/config';
+import axios from 'axios';
 import { pool } from '../src/db.js';
 
 const apply = process.argv.includes('--apply');
@@ -49,7 +51,7 @@ for (const pay of candidates) {
   }
 
   // The stk_request that was actually meant to handle this transaction:
-  // handleStkResult flips status to 'success' before ever reaching the
+  // handleStkResult flips status to 'success' before ever reaching either
   // sms_credit branch, so a race-lost purchase still shows success here
   // even though its own insert into payments was silently discarded.
   //
@@ -63,16 +65,16 @@ for (const pay of candidates) {
   // same tenant almost never land within 15 minutes of each other, and if
   // they do, this reports it as ambiguous rather than guessing.
   const { rows: matches } = await pool.query(
-    `select id, purpose, created_at from stk_requests
+    `select id, checkout_id, purpose, created_at from stk_requests
       where tenant_id = $1 and provider = $2 and amount = $3
-        and status = 'success' and purpose->>'type' = 'sms_credit'
+        and status = 'success' and purpose->>'type' in ('sms_credit', 'sms_credit_relay')
         and abs(extract(epoch from (created_at - $4))) < 900
       order by abs(extract(epoch from (created_at - $4))) asc`,
     [pay.tenant_id, pay.provider, pay.amount, pay.received_at]);
 
   if (!matches.length) {
     console.log(`[NO MATCH] payment ${pay.id} — KES ${pay.amount}, ${pay.payer_phone}, `
-      + `received ${pay.received_at.toISOString()} — no matching successful sms_credit stk_request within 15 min, skipping.`);
+      + `received ${pay.received_at.toISOString()} — no matching successful sms_credit(_relay) stk_request within 15 min, skipping.`);
     skipped++;
     continue;
   }
@@ -86,12 +88,63 @@ for (const pay of candidates) {
 
   const req = matches[0];
   const p = req.purpose;
-  const forTenant = p.for_tenant ?? p.tenant_id;
   const quantity = Number(p.quantity) || 0;
 
-  if (!forTenant || !quantity) {
+  if (!quantity) {
     console.log(`[BAD PURPOSE] payment ${pay.id} — matched stk_request ${req.id} but its purpose `
-      + `is missing tenant/quantity (${JSON.stringify(p)}), skipping.`);
+      + `is missing quantity (${JSON.stringify(p)}), skipping.`);
+    skipped++;
+    continue;
+  }
+
+  if (p.type === 'sms_credit_relay') {
+    // The tenant to credit lives in a sibling deployment's own database —
+    // there is nothing local to update here besides the payment row itself.
+    // Re-running the callback is safe even if it partly already happened:
+    // the sibling's own credit-callback route only credits once, guarded by
+    // `status <> 'success'` on its own local stk_requests row.
+    const callbackUrl = process.env.SMS_CREDIT_CALLBACK_URL;
+    if (!callbackUrl || !process.env.PLATFORM_SMS_RELAY_KEY) {
+      console.log(`[NEEDS ENV] payment ${pay.id} — matched a sms_credit_relay request (${req.checkout_id}) `
+        + `for ${p.source ?? 'a sibling'} tenant ${p.source_tenant_id}, but SMS_CREDIT_CALLBACK_URL/`
+        + 'PLATFORM_SMS_RELAY_KEY are not set here — cannot call the sibling to credit it. Skipping.');
+      skipped++;
+      continue;
+    }
+
+    console.log(`[${apply ? 'FIXING' : 'WOULD FIX'}] payment ${pay.id} → relay ${quantity} SMS credits to `
+      + `${p.source ?? 'sibling'} tenant ${p.source_tenant_id}, mark payment applied `
+      + `(matched stk_request ${req.id} / checkout ${req.checkout_id}, created ${req.created_at.toISOString()})`);
+
+    if (!apply) { fixed++; continue; }
+
+    try {
+      const res = await axios.post(callbackUrl,
+        { sourceTenantId: p.source_tenant_id, quantity, checkoutId: req.checkout_id, resultDesc: 'Reconciled manually' },
+        { headers: { 'x-platform-api-key': process.env.PLATFORM_SMS_RELAY_KEY }, timeout: 15000 });
+      if (!res.data?.ok) {
+        console.error(`  callback did not confirm for payment ${pay.id}:`, JSON.stringify(res.data ?? '').slice(0, 300));
+        skipped++;
+        continue;
+      }
+      await pool.query(
+        `update payments set status='applied', applied_at=now(),
+                payload = coalesce(payload, '{}'::jsonb) || $2
+          where id=$1`,
+        [pay.id, { type: 'sms_credit_relay', source_tenant_id: p.source_tenant_id, quantity, reconciled: true }]);
+      fixed++;
+    } catch (e) {
+      console.error(`  relay callback failed for payment ${pay.id}:`, e.message);
+      skipped++;
+    }
+    continue;
+  }
+
+  // p.type === 'sms_credit' — the local case, credited directly here.
+  const forTenant = p.for_tenant ?? p.tenant_id;
+  if (!forTenant) {
+    console.log(`[BAD PURPOSE] payment ${pay.id} — matched stk_request ${req.id} but its purpose `
+      + `is missing a tenant (${JSON.stringify(p)}), skipping.`);
     skipped++;
     continue;
   }
