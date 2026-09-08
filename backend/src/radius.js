@@ -143,7 +143,17 @@ export async function activateSubscriber(c, tenantId, subId) {
  */
 export async function syncSubscriberCredentials(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac,
+    // s.router_id (not just r.pppoe_pool) matters here: framedAddress's own
+    // pool lookup matches a router-*specific* ip_pools row by router_id, not
+    // just by the pool range text — omitting it left router_id undefined on
+    // this object, which only ever matched a tenant-wide fallback pool
+    // (router_id is null). Invisible for a tenant with a single shared pool,
+    // but for one with a distinct pool per router (no fallback row at all)
+    // the lookup matched nothing, framedAddress returned null, and every
+    // affected line's Framed-IP-Address silently never got set — a
+    // customer stuck re-dialling forever with no address, indistinguishable
+    // from a credentials problem.
+    `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac, s.router_id,
             p.rate_down, p.rate_up, p.radius_profile,
             r.pppoe_pool
        from subscribers s
