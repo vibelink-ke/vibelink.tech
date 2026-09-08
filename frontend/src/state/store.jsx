@@ -136,6 +136,40 @@ export function StoreProvider({ children }) {
    * Dashboard's own "New from customers" row is the durable record; this is
    * only ever the moment-it-happened nudge.
    */
+  /**
+   * A short two-note chime for new customer activity — no audio file to
+   * ship or fail to load, just the Web Audio oscillator every browser
+   * already has. Lazily creates one AudioContext and reuses it: browsers
+   * cap how many can exist, and each one starts "suspended" until a user
+   * gesture resumes it anyway, so there is no point making a fresh one per
+   * chime. A tab that has never seen a click/keypress yet (autoplay policy)
+   * simply stays silent rather than throwing — the toast and, on tech,
+   * the SMS/push pair still carry the alert either way.
+   */
+  const chimeCtx = useRef(null);
+  const playChime = useCallback(() => {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      const ctx = chimeCtx.current ?? (chimeCtx.current = new Ctx());
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      const now = ctx.currentTime;
+      [880, 1320].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const start = now + i * 0.11;
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(0.18, start + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.22);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.24);
+      });
+    } catch { /* best-effort — a missed chime is not worth surfacing an error over */ }
+  }, []);
+
   const seenActivityIds = useRef(null);
   const notifyNewCustomerActivity = useCallback((tickets, liveQueue) => {
     const isNewPortalTicket = (t) => t.source === 'portal' && t.status === 'open';
@@ -161,15 +195,17 @@ export function StoreProvider({ children }) {
         isPlanChange ? `Plan change requested: ${t.subject.replace('Plan change request: ', '')}` : `New ticket: ${t.subject}`,
         { onClick: () => navigate('/tickets') },
       );
+      playChime();
     }
     for (const c of liveQueue ?? []) {
       const key = `chat:${c.id}`;
       if (!isWaitingChat(c) || seenActivityIds.current.has(key)) continue;
       toast(`${c.display_name || 'A visitor'} started a chat`, { onClick: () => navigate(`/live-support?chat=${c.id}`) });
+      playChime();
     }
 
     seenActivityIds.current = current;
-  }, [toast, navigate]);
+  }, [toast, navigate, playChime]);
 
   /**
    * Fetch everything in parallel; a failing slice stays empty and is recorded.

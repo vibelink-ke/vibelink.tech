@@ -632,7 +632,7 @@ async function watchdog() {
  * stop the watchdog checking the rest of the fleet, and the outage is recorded
  * on the router row either way.
  */
-async function notifyOwner(tenantId, body) {
+export async function notifyOwner(tenantId, body, { url = '/routers', title = 'Vibelink alert' } = {}) {
   try {
     // The rota number if one is set, otherwise the owner. A tenant with an
     // on-call phone should not have alerts going to whoever signed up.
@@ -650,7 +650,7 @@ async function notifyOwner(tenantId, body) {
   // tenant with nobody subscribed yet still gets the text either way.
   try {
     const push = await import('./push.js');
-    await push.sendPush(tenantId, { title: 'Vibelink alert', body, url: '/routers' });
+    await push.sendPush(tenantId, { title, body, url });
   } catch (e) {
     console.error('watchdog push failed', tenantId, e.message);
   }

@@ -1810,6 +1810,14 @@ app.post('/chat/start', wrap(async (req, res) => {
         company: org.company, support_phone: org.supportPhone,
         account_status: accountStatus, help_link: helpLink,
       }).catch((e) => console.error('chat_offline auto-reply failed', e.message));
+
+      // The visitor got told "we'll get back to you" — someone actually has
+      // to. Same on-call/owner phone + web-push pair the router watchdog
+      // already alerts through, just pointed at this chat instead of
+      // /routers, so tapping it goes straight to the conversation.
+      const { notifyOwner } = await import('./jobs.js');
+      await notifyOwner(tenant.id, `${name} started a live chat and nobody's online to answer.`,
+        { url: `/live-support?chat=${chat.id}`, title: 'New live chat' }).catch(() => {});
     }
   }
 
