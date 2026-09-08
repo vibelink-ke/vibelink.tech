@@ -69,10 +69,13 @@ try {
   // Wipe this tenant's own rows in everything this script seeds, so re-runs
   // give a clean slate rather than piling up duplicates from every demo.
   for (const c of ['lead_notes', 'leads', 'referral_commissions', 'referrers', 'expenses',
-    'hr_profiles', 'payroll_payouts', 'payroll_items', 'payroll_runs', 'tickets',
+    'hr_profiles', 'payroll_payouts', 'payroll_runs', 'tickets',
     'invoices', 'payments', 'subscribers', 'ip_pools', 'plans', 'routers', 'staff']) {
     await c0.query(`delete from ${c} where tenant_id=$1`, [tid]);
   }
+  // No tenant_id column of its own — scoped via run_id, and payroll_runs
+  // above already cascades into it (payroll_items.run_id references
+  // payroll_runs on delete cascade), so nothing further to do here.
 
   await c0.query('insert into hotspot_settings (tenant_id) values ($1) on conflict do nothing', [tid]);
   await seedTenant(tid);
