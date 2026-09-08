@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -26,6 +27,7 @@ const fileToDataUrl = (file) => new Promise((resolve, reject) => {
  */
 export default function Expenses() {
   const store = useStore();
+  const navigate = useNavigate();
   const items = store.expenses ?? [];
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -146,7 +148,9 @@ export default function Expenses() {
             },
             {
               key: 'paid_to', label: 'Paid to',
-              render: (e) => e.staff_name || e.paid_to || <span style={{ color: color.muted }}>—</span>,
+              render: (e) => e.staff_name
+                ? <span onClick={() => navigate(`/staff?open=${e.staff_id}`)} style={{ color: color.ink, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline dotted' }}>{e.staff_name}</span>
+                : e.paid_to || <span style={{ color: color.muted }}>—</span>,
             },
             {
               key: 'amount', label: 'Amount', align: 'right',

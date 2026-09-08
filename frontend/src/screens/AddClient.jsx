@@ -50,6 +50,7 @@ export default function AddClient() {
   // referrer already known and not worth retyping. referredBy carries
   // straight through to createSubscriber's referredBy in save() below.
   const fromLeadReferrer = params.get('referredBy') ?? '';
+  const fromLeadId = params.get('leadId') ?? '';
   const [f, setF] = useState(() => {
     if (linkedAccount) {
       const [firstName = '', ...rest] = (params.get('name') ?? '').trim().split(/\s+/);
@@ -194,6 +195,7 @@ export default function AddClient() {
         staticIp: f.assignedIp || null,
         lineLabel: f.lineLabel || null,
         referredBy: f.referredBy || null,
+        leadId: fromLeadId || undefined,
         location: f.location || null,
         lat: f.lat,
         lng: f.lng,

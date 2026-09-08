@@ -2199,3 +2199,15 @@ create table if not exists payroll_payouts (
 );
 create index if not exists payroll_payouts_tenant_id_idx on payroll_payouts (tenant_id);
 create index if not exists payroll_payouts_conversation_id_idx on payroll_payouts (conversation_id) where conversation_id is not null;
+
+-- Who actually entered a lead — separate from assigned_to, which can move
+-- to someone else after the fact. Commission attribution on a won lead
+-- with no explicit referrer falls back to the assignee, then to whoever
+-- created it, so a signup never loses its staff credit just because no one
+-- picked a "Referred by" — see PATCH /api/leads/:id.
+alter table leads add column if not exists created_by uuid references staff on delete set null;
+-- The subscriber a lead became, once "Convert" is used — without this a
+-- won lead and the account it turned into are only ever linked implicitly
+-- through a shared referrer_id, so neither page can show the other.
+alter table leads add column if not exists subscriber_id uuid references subscribers on delete set null;
+create index if not exists leads_subscriber_id_idx on leads (subscriber_id) where subscriber_id is not null;

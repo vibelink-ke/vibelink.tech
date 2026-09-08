@@ -192,7 +192,7 @@ export default function Leads() {
    * asking the operator to retype a lead they're looking straight at.
    */
   const convertToClient = (l) => {
-    const params = new URLSearchParams({ name: l.name, phone: l.phone });
+    const params = new URLSearchParams({ name: l.name, phone: l.phone, leadId: l.id });
     if (l.referrer_id) params.set('referredBy', l.referrer_id);
     navigate(`/clients/new?${params.toString()}`);
   };
@@ -362,7 +362,13 @@ export default function Leads() {
                   render: (l) => (
                     <div>
                       <div>{l.source ?? '—'}</div>
-                      {l.referrer_name && <div style={{ fontSize: 11.5, color: color.muted }}>via {l.referrer_name}</div>}
+                      {l.referrer_name && (
+                        <div style={{ fontSize: 11.5, color: color.muted }}>
+                          via {l.referrer_staff_id
+                            ? <span onClick={() => navigate(`/staff?open=${l.referrer_staff_id}`)} style={{ cursor: 'pointer', textDecoration: 'underline dotted' }}>{l.referrer_name}</span>
+                            : l.referrer_name}
+                        </div>
+                      )}
                     </div>
                   ),
                 },
@@ -388,7 +394,19 @@ export default function Leads() {
                 {
                   key: 'assignee',
                   label: 'Assigned',
-                  render: (l) => l.assignee_name ?? <span style={{ color: color.muted }}>unassigned</span>,
+                  render: (l) => (
+                    <div>
+                      {l.assignee_name
+                        ? <span onClick={() => navigate(`/staff?open=${l.assigned_to}`)} style={{ color: color.ink, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline dotted' }}>{l.assignee_name}</span>
+                        : <span style={{ color: color.muted }}>unassigned</span>}
+                      {l.created_by_name && (
+                        <div style={{ fontSize: 11.5, color: color.muted }}>
+                          added by{' '}
+                          <span onClick={() => navigate(`/staff?open=${l.created_by}`)} style={{ cursor: 'pointer', textDecoration: 'underline dotted' }}>{l.created_by_name}</span>
+                        </div>
+                      )}
+                    </div>
+                  ),
                 },
                 {
                   key: 'next_follow_up',
@@ -409,7 +427,11 @@ export default function Leads() {
                   align: 'right',
                   render: (l) => (
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                      {l.status === 'won' && <Button variant="primary" onClick={() => convertToClient(l)}>Convert</Button>}
+                      {l.status === 'won' && (
+                        l.subscriber_id
+                          ? <Button onClick={() => navigate(`/clients/${l.subscriber_id}`)}>View client</Button>
+                          : <Button variant="primary" onClick={() => convertToClient(l)}>Convert</Button>
+                      )}
                       <Button onClick={() => viewLead(l)}>View</Button>
                       <Button onClick={() => openEditLead(l)}>Edit</Button>
                       <Button onClick={() => setLeadDeleting(l)}>Delete</Button>

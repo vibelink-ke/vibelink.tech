@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -83,6 +84,20 @@ export default function Staff() {
 
   const openEdit = (s) => setEditing({ id: s.id, name: s.name, phone: s.phone, email: s.email ?? '', username: s.username ?? '', role: s.role });
   const setEdit = (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value }));
+
+  // Arrived from a link on another screen ("who created this lead/expense") —
+  // /staff?open=<id> opens straight to that person's own edit drawer instead
+  // of landing on the plain list and making the operator find them again.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const openId = params.get('open');
+    if (!openId || editing) return;
+    const s = staff.find((x) => x.id === openId);
+    if (s) {
+      openEdit(s);
+      setParams((p) => { p.delete('open'); return p; }, { replace: true });
+    }
+  }, [params, staff]);
 
   const saveEdit = async () => {
     if (!editing.name.trim() || !editing.phone.trim()) return store.toast('Name and phone are required');

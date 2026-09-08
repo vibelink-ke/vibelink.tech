@@ -3347,10 +3347,11 @@ async function referrerForStaff(tenantId, staffId) {
 
 app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   const { rows } = await pool.query(
-    `select l.*, r.name as referrer_name, st.name as assignee_name
+    `select l.*, r.name as referrer_name, r.staff_id as referrer_staff_id, st.name as assignee_name, cb.name as created_by_name
        from leads l
        left join referrers r on r.id = l.referrer_id
        left join staff st on st.id = l.assigned_to
+       left join staff cb on cb.id = l.created_by
       where l.tenant_id=$1
       order by l.created_at desc`,
     [req.tenant.id]);
@@ -3414,9 +3415,10 @@ app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
   }
 
   const { rows: [l] } = await pool.query(
-    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up)
-     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
-    [req.tenant.id, name, phone, source ?? 'manual', referrer, assignedTo || null, nextFollowUp || null]);
+    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up, created_by)
+     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    [req.tenant.id, name, phone, source ?? 'manual', referrer, assignedTo || null, nextFollowUp || null,
+     req.session?.staff_id ?? null]);
   res.json(l);
 });
 
@@ -7065,7 +7067,7 @@ async function logActivity(req, subscriberId, accountCode, action, detail = null
 app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (req, res) => {
   const { accountCode, name, phone, phoneAlt, service = 'pppoe', planId, routerId,
           pppoeUser, pppoePass, staticIp, autopay, location, lat, lng, lineLabel, referredBy,
-          email, category, identification, billingType } = req.body;
+          email, category, identification, billingType, leadId } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
   // KopoKopo is hotspot-only by policy everywhere else in this codebase
   // (kopokopo_hotspot_only db constraint, till-based flow, settings screen's
@@ -7173,6 +7175,14 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
     if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
     referrerId = referredBy;
   }
+  // Converting a won lead into a client — validated up front so the whole
+  // request fails cleanly instead of creating the subscriber and then
+  // silently failing to link it back.
+  if (leadId) {
+    const { rowCount } = await pool.query(
+      'select 1 from leads where id=$1 and tenant_id=$2', [leadId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such lead' });
+  }
 
   /**
    * A brand-new PPPoE line gets a welcome window until midnight tonight —
@@ -7201,6 +7211,10 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
      email || null, category || null, identification || null, billingType || null, welcomeExpiry]);
   await logActivity(req, s.id, s.account_code, sameAccount.length ? 'Service added' : 'Account created',
     label ? `Line "${label}"` : null);
+
+  if (leadId) {
+    await pool.query('update leads set subscriber_id=$2 where id=$1 and tenant_id=$3', [leadId, s.id, req.tenant.id]);
+  }
 
   // Before responding, not after: the operator's next move is to hand over the
   // credentials and have the customer dial in, and RADIUS has to know them by then.
@@ -8615,12 +8629,15 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
    * genuinely no referrer already: an actual named referrer (a customer
    * sending a friend, an outside party) always wins over the sales rep who
    * happened to be assigned, since that relationship was explicit and this
-   * one is inferred.
+   * one is inferred. Falls back to whoever created the lead when it was
+   * never assigned to anyone — a lead worked and closed by the same person
+   * who entered it should never lose its commission just because
+   * "assigned_to" was left blank.
    */
   if (req.body.status === 'won' && !sets.includes('referrer_id')) {
     const { rows: [current] } = await pool.query(
-      'select referrer_id, assigned_to from leads where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-    const staffId = req.body.assigned_to ?? current?.assigned_to;
+      'select referrer_id, assigned_to, created_by from leads where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    const staffId = req.body.assigned_to ?? current?.assigned_to ?? current?.created_by;
     if (current && !current.referrer_id && staffId) {
       req.body.referrer_id = await referrerForStaff(req.tenant.id, staffId);
       sets.push('referrer_id');
