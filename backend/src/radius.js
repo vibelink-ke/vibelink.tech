@@ -285,10 +285,27 @@ async function framedAddress(c, tenantId, subId, s) {
   // Whatever they already hold, provided it is still inside both the router's
   // servable range and the pool that matches their current purpose — a
   // customer moving from active to expired (or back) must not simply keep an
-  // address from the other range.
+  // address from the other range. Also refused if it is literally the pool's
+  // own network or gateway address (net+0 / net+1) or its broadcast address —
+  // the allocator below never hands those out, but a static_ip can still end
+  // up on one some other way (a manual edit, an import from the router's own
+  // pre-existing PPP secrets). The router authenticates a line on its own
+  // gateway address, finds the collision with its own interface, and kills
+  // the session a second later — "authenticated" / "connected" /
+  // "terminating" on a loop, forever, since the same bad address keeps
+  // coming back on every redial. Falling through to a fresh allocation here
+  // is what actually fixes it, not just detects it.
   if (s.static_ip) {
-    const { rows: [held] } = await c.query('select host($1::inet) as a', [s.static_ip]);
-    if (held?.a && inPool(held.a, s.pppoe_pool) && inPool(held.a, pool.cidr)) return held.a;
+    const { rows: [held] } = await c.query(
+      `select host($1::inet) as a,
+              host($1::inet) = host(network($2::cidr)) as is_network,
+              host($1::inet) = host(network($2::cidr) + 1) as is_gateway,
+              host($1::inet) = host(broadcast($2::cidr)) as is_broadcast`,
+      [s.static_ip, pool.cidr]);
+    if (held?.a && !held.is_network && !held.is_gateway && !held.is_broadcast
+        && inPool(held.a, s.pppoe_pool) && inPool(held.a, pool.cidr)) {
+      return held.a;
+    }
   }
 
   /**
