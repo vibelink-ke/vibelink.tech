@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -216,7 +217,7 @@ const WG_ROUTE_METRIC = 100;
  * replace` (never fails on an existing route, unlike `add`) at a metric that
  * lets OpenVPN's route win when both exist.
  */
-export async function renderServerConfig(serverPrivateKey, port = 51820) {
+async function loadPeerGroups() {
   const { rows } = await pool.query(
     'select name, public_key, preshared_key, assigned_ip from wg_peers where enabled order by assigned_ip'
   );
@@ -229,6 +230,11 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
     const ip = String(p.assigned_ip).split('/')[0];
     (ovpnAddresses.has(ip) ? injectedPeers : filePeers).push({ ...p, ip });
   }
+  return { filePeers, injectedPeers };
+}
+
+export async function renderServerConfig(serverPrivateKey, port = 51820) {
+  const { filePeers, injectedPeers } = await loadPeerGroups();
 
   const head = [
     '# Generated from wg_peers — edit the database, not this file.',
@@ -285,6 +291,48 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
 }
 
 /**
+ * The same peer set as renderServerConfig, but in the bare format `wg
+ * syncconf` actually understands.
+ *
+ * `wg syncconf`/`wg setconf` speak the kernel's own [Interface]/[Peer]
+ * vocabulary only — PrivateKey, ListenPort, FwMark, PublicKey, PresharedKey,
+ * AllowedIPs, Endpoint, PersistentKeepalive. Handing them wg-quick-only
+ * directives (Address, Table, PostUp, PostDown — all of which the real
+ * config needs) fails outright with "Line unrecognized". This is a second,
+ * separate rendering rather than a stripped version of the same one because
+ * injectedPeers need actual [Peer] blocks here — the PostUp `wg set` trick
+ * that adds them exists only to keep this image's route-crashing bring-up
+ * script from ever iterating them, and syncconf has no such script to crash.
+ *
+ * Also returns every peer's IP: syncconf only ever touches wg's own
+ * peer/crypto-routing table, never the kernel routing table, so a peer
+ * added this way still needs its own `ip route replace` afterwards — see
+ * the big comment on renderServerConfig for why that route has to exist at
+ * all (a /32 self-address on wg0 gives the kernel nothing to route on).
+ */
+async function renderSyncConfig(serverPrivateKey, port) {
+  const { filePeers, injectedPeers } = await loadPeerGroups();
+  const allPeers = [...filePeers, ...injectedPeers];
+
+  const text = [
+    '[Interface]',
+    `PrivateKey = ${serverPrivateKey}`,
+    `ListenPort = ${port}`,
+    '',
+    ...allPeers.map((p) =>
+      [
+        '[Peer]',
+        `PublicKey = ${p.public_key}`,
+        p.preshared_key ? `PresharedKey = ${p.preshared_key}` : null,
+        `AllowedIPs = ${p.ip}/32`,
+        '',
+      ].filter(Boolean).join('\n')),
+  ].join('\n');
+
+  return { text, ips: allPeers.map((p) => p.ip) };
+}
+
+/**
  * Write wg0.conf and try to hot-reload it — the two steps scripts/wg-sync.mjs
  * always required a human to remember to run by hand after every peer create
  * or delete. "Onboard via WireGuard" minted a peer and handed over a router
@@ -294,13 +342,15 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
  * at. Calling this from the peer routes closes that gap for the file-write
  * half unconditionally.
  *
- * The reload half stays best-effort: this runs in the api container, and wg0
- * itself lives in the separate `wireguard` compose service — a bare `wg`
- * command here can only ever act on this container's own network namespace,
- * which does not have the interface. Same fallback wg-sync.mjs already prints
- * for that case, just returned to the caller instead of only logged, so the
- * peer-creation response can hand the operator the one-liner right there
- * instead of pointing at documentation.
+ * The reload half is best-effort: `api` shares wg0's network namespace with
+ * the `wireguard` compose service (both are `network_mode: service:net`) and
+ * carries the same `wireguard-tools`/`iproute2` packages and NET_ADMIN
+ * capability, so `wg syncconf` and the route-replace below normally succeed
+ * right here. If either ever fails anyway — the image changes, a capability
+ * gets dropped — this falls back to logging (and returning) the exact
+ * two-step command an operator can run by hand inside the `wireguard`
+ * container instead, rather than leaving the new peer silently unreachable
+ * with nothing anywhere saying why its handshake never completes.
  */
 export async function syncServer() {
   const serverPrivateKey = process.env.WG_SERVER_PRIVATE_KEY;
@@ -313,11 +363,29 @@ export async function syncServer() {
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, conf, { mode: 0o600 });
 
+  const fallbackCmd = 'docker compose -f docker-compose.prod.yml exec wireguard sh -c '
+    + `"wg-quick strip ${configPath} > /tmp/wg0.sync.conf && wg syncconf wg0 /tmp/wg0.sync.conf"`;
+
   try {
-    await run('wg', ['syncconf', 'wg0', configPath]);
+    // Not configPath itself — wg syncconf rejects wg-quick-only directives
+    // (Address, Table, PostUp/PostDown) with "Line unrecognized", which is
+    // exactly the failure this used to hit unconditionally, for every peer,
+    // regardless of which container ran it.
+    const { text, ips } = await renderSyncConfig(serverPrivateKey, port);
+    const syncPath = path.join(os.tmpdir(), 'wg0.sync.conf');
+    fs.writeFileSync(syncPath, text, { mode: 0o600 });
+    await run('wg', ['syncconf', 'wg0', syncPath]);
+
+    // syncconf only ever updates wg's own peer/crypto-routing table, never
+    // the kernel routing table — a brand-new peer still needs this or
+    // nothing on this side has any way to address a packet back to it. Safe
+    // to redo for every peer every time: `replace`, not `add`, so an
+    // already-correct route is a no-op rather than an error.
+    for (const ip of ips) {
+      await run('ip', ['route', 'replace', `${ip}/32`, 'dev', 'wg0', 'metric', String(WG_ROUTE_METRIC)]).catch(() => {});
+    }
     return { written: true, reloaded: true };
   } catch (e) {
-    const fallbackCmd = `docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 ${configPath}`;
     console.log(`wg syncconf not reloaded from api (${String(e.message ?? '').trim().slice(0, 120)}) — run: ${fallbackCmd}`);
     return { written: true, reloaded: false, fallbackCmd };
   }

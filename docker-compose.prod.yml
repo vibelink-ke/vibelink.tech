@@ -68,6 +68,14 @@ services:
     container_name: billing-api
     restart: unless-stopped
     network_mode: 'service:net'
+    # wireguard.js's syncServer() runs `wg syncconf` and `ip route replace`
+    # directly against wg0 (shared via network_mode above) so a newly minted
+    # peer's handshake can complete without an operator running a manual
+    # docker-exec command every time. Same capability the `wireguard` service
+    # below already has, for the same interface — this just lets the process
+    # that actually knows about every peer touch it too.
+    cap_add:
+      - NET_ADMIN
     depends_on:
       db:
         condition: service_healthy

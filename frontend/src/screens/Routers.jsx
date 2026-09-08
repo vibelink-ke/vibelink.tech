@@ -416,6 +416,7 @@ export default function Routers() {
         // (the operator has to paste the script and bring the tunnel up
         // first), so nothing could set wg_peers.router_id until now.
         wgPeerId: res.peerId,
+        sync: res.sync,
       });
       setDial((d) => ({ ...d, open: false }));
     } catch (e) {
@@ -445,6 +446,7 @@ export default function Routers() {
         nasIp: res.assignedIp,
         defaultApiPort: 8728,
         wgPeerId: res.peerId,
+        sync: res.sync,
       });
       setDial((d) => ({ ...d, open: false }));
     } catch (e) {
@@ -478,6 +480,7 @@ export default function Routers() {
         username: r.name,
         nasIp: res.assignedIp,
         defaultApiPort: 8728,
+        sync: res.sync,
       });
     } catch (e) {
       store.toast(`Could not re-issue the tunnel: ${e.message}`);
@@ -1399,6 +1402,40 @@ Revoke anyway?`
                 Tunnel IP <strong style={{ fontFamily: font.mono }}>{ovpn.nasIp}</strong>
               </span>
             </div>
+            {ovpn.sync && !ovpn.sync.reloaded && (
+              <div style={{
+                display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px',
+                border: `1px solid ${color.rust}`, borderRadius: radius.md, background: `${color.rust}11`,
+              }}>
+                <strong style={{ fontSize: 12.5, color: color.rust }}>
+                  The server hasn't picked up this peer yet — the handshake below will not complete until you run this.
+                </strong>
+                <span style={{ fontSize: 12, color: color.muted }}>
+                  This side wrote the new peer to wg0's config but couldn't hot-reload the live tunnel
+                  from here. Run this on the server once, before or right after pasting the script into
+                  the router:
+                </span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <code style={{
+                    flex: 1, fontFamily: font.mono, fontSize: 11.5, padding: '6px 8px',
+                    background: '#12211d', color: '#eaf3ef', borderRadius: radius.sm, overflowX: 'auto',
+                  }}>
+                    {ovpn.sync.fallbackCmd ?? 'docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 /config/wg_confs/wg0.conf'}
+                  </code>
+                  <Button onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(
+                        ovpn.sync.fallbackCmd ?? 'docker compose -f docker-compose.prod.yml exec wireguard wg syncconf wg0 /config/wg_confs/wg0.conf');
+                      store.toast('Command copied');
+                    } catch {
+                      store.toast('Copy failed — select the text and copy manually');
+                    }
+                  }}>
+                    Copy
+                  </Button>
+                </div>
+              </div>
+            )}
             <Textarea
               readOnly
               value={ovpn.script}
