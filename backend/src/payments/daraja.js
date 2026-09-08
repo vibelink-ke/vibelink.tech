@@ -108,7 +108,15 @@ export async function stkPush(tenantId, { phone, amount, accountRef, description
     Amount: Math.round(amount),
     PartyA: phone, PartyB: partyB, PhoneNumber: phone,
     CallBackURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/stk`),
-    AccountReference: accountRef, TransactionDesc: description ?? 'Internet'
+    // Safaricom silently enforces 12 and 13 chars respectively and rejects
+    // the whole request with a generic "Invalid Remarks" Bad Request when
+    // either runs over — confirmed live against a tenant whose own
+    // "<subdomain>-HOTSPOT" reference came to 13 chars, one over the limit,
+    // with a caller-side .slice(0, 20) that looked like a guard but was
+    // simply capping at the wrong number. Enforced here instead of at every
+    // call site, so no future caller can reintroduce the same off-by-a-few.
+    AccountReference: String(accountRef ?? '').slice(0, 12),
+    TransactionDesc: String(description ?? 'Internet').slice(0, 13),
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
   return data;   // CheckoutRequestID -> store in stk_requests
 }
