@@ -28,7 +28,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
-  if (url.pathname.startsWith('/api/')) return;
+  // The captive portal (billing/src/hotspot-portal.js) shares this origin
+  // but is a completely separate, server-rendered page per router/tenant —
+  // never the cached app shell. Falling back to the cached "/" (this app's
+  // own index.html) for a failed request on that page substitutes an
+  // entirely unrelated document for whatever it actually asked for, which
+  // is exactly why a guest saw "expected a JavaScript module, got
+  // text/html": the fallback below doesn't know or care what the original
+  // request was for, only that fetching it failed.
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/hotspot/')) return;
 
   event.respondWith(
     fetch(event.request).catch(() => caches.match(event.request).then((r) => r ?? caches.match('/')))
