@@ -188,12 +188,48 @@ export function failoverScript({ staleAfter = '90s' } = {}) {
 // OpenVPN's without a collision.
 const WG_ROUTE_METRIC = 100;
 
-/** Server-side wg0.conf, rendered from the database. */
+/**
+ * Server-side wg0.conf, rendered from the database.
+ *
+ * A router onboarded on both WireGuard and OpenVPN for failover carries the
+ * identical tunnel address on each — OpenVPN installs its own host route for
+ * it the moment that client connects (client-config-dir), so this image's
+ * own bring-up script's default route management (a plain, non-idempotent
+ * `ip route add` per [Peer]'s AllowedIPs) fails the instant it collides with
+ * that. Its response to any single route failure is to tear the *entire*
+ * interface back down — every other peer's tunnel along with it — which is
+ * exactly how one dual-provisioned router once took every router on this
+ * tunnel offline for hours with nothing visibly wrong (the container itself
+ * stayed "Up"; only its wg0 interface silently never came up).
+ *
+ * `Table = off` is the documented wg-quick way to hand route management
+ * over entirely — but this image's bring-up script does not honour it (confirmed
+ * live: the exact same "File exists" crash recurred with Table = off already
+ * in the file), so it is not a fix here, only left in as a harmless no-op in
+ * case a future image image does respect it. The actual fix: a peer that is
+ * *also* an OpenVPN client (same assigned_ip in ovpn_clients) is left out of
+ * this file's own [Peer] blocks entirely, so the bring-up script's internal
+ * per-peer route-add loop never iterates it and can never crash on it. It is
+ * instead added after the interface is already up, via a PostUp line that
+ * calls `wg set` directly (a pure crypto/peer-config command with no routing
+ * side effect of its own) and then installs its own route with `ip route
+ * replace` (never fails on an existing route, unlike `add`) at a metric that
+ * lets OpenVPN's route win when both exist.
+ */
 export async function renderServerConfig(serverPrivateKey, port = 51820) {
   const { rows } = await pool.query(
     'select name, public_key, preshared_key, assigned_ip from wg_peers where enabled order by assigned_ip'
   );
-  const addresses = rows.map((p) => String(p.assigned_ip).split('/')[0]);
+  const { rows: ovpnRows } = await pool.query('select assigned_ip from ovpn_clients');
+  const ovpnAddresses = new Set(ovpnRows.map((o) => String(o.assigned_ip).split('/')[0]));
+
+  const filePeers = [];
+  const injectedPeers = [];
+  for (const p of rows) {
+    const ip = String(p.assigned_ip).split('/')[0];
+    (ovpnAddresses.has(ip) ? injectedPeers : filePeers).push({ ...p, ip });
+  }
+
   const head = [
     '# Generated from wg_peers — edit the database, not this file.',
     '[Interface]',
@@ -203,46 +239,49 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
     // too would install a second, equally-broad connected route for it —
     // an OVPN-onboarded router's address matches both, and which interface
     // the kernel actually picks for it is undefined. /32 installs no
-    // connected route at all; each WireGuard peer's own /32 AllowedIPs
-    // entry below is what actually routes to it, and that's always more
-    // specific than tun0's /16 regardless, so nothing but this interface's
-    // own identity address needs to be this narrow.
+    // connected route at all; each plain WireGuard-only peer's own /32
+    // AllowedIPs entry below is what actually routes to it, and that's
+    // always more specific than tun0's /16 regardless, so nothing but this
+    // interface's own identity address needs to be this narrow.
     `Address = ${SERVER_IP}/32`,
     `ListenPort = ${port}`,
     `PrivateKey = ${serverPrivateKey}`,
-    // A router onboarded on both WireGuard and OpenVPN for failover carries
-    // the identical tunnel address on each — OpenVPN installs its own host
-    // route for it the moment that client connects (client-config-dir), so
-    // wg-quick's own default route management (a plain, non-idempotent `ip
-    // route add` per peer's AllowedIPs) fails the instant it collides with
-    // that. wg-quick's response to any single route failure is to tear the
-    // *entire* interface back down — every other peer's tunnel along with
-    // it — which is exactly how a single dual-provisioned router once took
-    // every router on this tunnel offline for hours with nothing visibly
-    // wrong (the container itself stayed "Up"; only its wg0 interface
-    // silently never came up). `Table = off` hands route management to the
-    // PostUp/PostDown lines below instead, which use `ip route replace`
-    // (never fails on an existing route) at a higher metric than OpenVPN's,
-    // so the two coexist and a disappearing OpenVPN route hands traffic to
-    // this one automatically rather than the whole tunnel refusing to start.
     'Table = off',
-    ...addresses.map((ip) => `PostUp = ip route replace ${ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`),
-    ...addresses.map((ip) => `PostDown = ip route del ${ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`),
+    ...injectedPeers.map((p) => {
+      // wg set's own preshared-key flag only accepts a file path, not the
+      // key inline — /dev/stdin via a plain pipe works in any POSIX sh, no
+      // bashisms (herestrings, process substitution) required, which matters
+      // since PostUp runs through whatever minimal shell this image uses.
+      const addPeer = p.preshared_key
+        ? `printf '%s' '${p.preshared_key}' | wg set %i peer ${p.public_key} allowed-ips ${p.ip}/32 preshared-key /dev/stdin`
+        : `wg set %i peer ${p.public_key} allowed-ips ${p.ip}/32`;
+      return `PostUp = ${addPeer}; ip route replace ${p.ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`;
+    }),
+    ...injectedPeers.map((p) =>
+      `PostDown = wg set %i peer ${p.public_key} remove || true; ip route del ${p.ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`),
+    // Plain WireGuard-only peers stay in their normal [Peer] blocks below —
+    // no OpenVPN route ever exists for them to collide with, so the
+    // container's own built-in route-add for their AllowedIPs is safe as-is
+    // and needs no help from PostUp/PostDown here.
     '',
   ];
-  const peers = rows.map((p) =>
+  const peers = filePeers.map((p) =>
     [
       `# ${p.name}`,
       '[Peer]',
       `PublicKey = ${p.public_key}`,
       p.preshared_key ? `PresharedKey = ${p.preshared_key}` : null,
-      `AllowedIPs = ${String(p.assigned_ip).split('/')[0]}/32`,
+      `AllowedIPs = ${p.ip}/32`,
       '',
     ]
       .filter(Boolean)
       .join('\n')
   );
-  return head.concat(peers).join('\n');
+  const injectedComment = injectedPeers.length
+    ? [`# Added via PostUp above, not as [Peer] blocks here — see the comment on`,
+       `# renderServerConfig for why: ${injectedPeers.map((p) => p.name).join(', ')}`, '']
+    : [];
+  return head.concat(injectedComment).concat(peers).join('\n');
 }
 
 /**
