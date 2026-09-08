@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { color, font, radius } from '../theme/tokens';
 
 /**
@@ -32,6 +32,65 @@ const CATEGORY_COLOR = {
   OPERATIONS: color.rust,
   SUPPORT: color.mint,
   GROWTH: color.amber,
+  TEAM: color.green,
+};
+
+/**
+ * One small line-icon per category — hand-drawn inline rather than a new
+ * dependency, since this is the one page in the app that isn't already
+ * pulling in an icon set. Same currentColor trick as everything else here:
+ * set the category colour once on the wrapper, the stroke follows it.
+ */
+const CATEGORY_ICON = {
+  PAYMENTS: (
+    <>
+      <rect x="3" y="6" width="18" height="12" rx="2" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <line x1="7" y1="14" x2="11" y2="14" />
+    </>
+  ),
+  NETWORK: (
+    <>
+      <rect x="4" y="11" width="16" height="6" rx="1.5" />
+      <line x1="8" y1="11" x2="8" y2="8" />
+      <line x1="16" y1="11" x2="16" y2="8" />
+      <circle cx="8" cy="14" r=".6" fill="currentColor" stroke="none" />
+      <circle cx="12" cy="14" r=".6" fill="currentColor" stroke="none" />
+    </>
+  ),
+  HOTSPOT: (
+    <>
+      <path d="M5 9a11 11 0 0 1 14 0" />
+      <path d="M8 12.5a7 7 0 0 1 8 0" />
+      <path d="M11 16a3 3 0 0 1 2 0" />
+      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
+    </>
+  ),
+  OPERATIONS: (
+    <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2z" />
+  ),
+  SUPPORT: (
+    <>
+      <path d="M4 13a8 8 0 0 1 16 0" />
+      <rect x="3" y="13" width="4" height="6" rx="1.5" />
+      <rect x="17" y="13" width="4" height="6" rx="1.5" />
+      <path d="M20 19v1a3 3 0 0 1-3 3h-2" />
+    </>
+  ),
+  GROWTH: (
+    <>
+      <polyline points="3 17 9 11 13 15 21 7" />
+      <polyline points="15 7 21 7 21 13" />
+    </>
+  ),
+  TEAM: (
+    <>
+      <circle cx="9" cy="8" r="3" />
+      <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
+      <circle cx="17" cy="9" r="2.4" />
+      <path d="M15.5 14.3c2.6.4 4.5 2.6 4.5 5.7" />
+    </>
+  ),
 };
 
 const FEATURES = [
@@ -39,6 +98,8 @@ const FEATURES = [
    'Paybill, till and STK push. Payments match to the account number the customer typed, and the ones that do not are put in front of you rather than lost.'],
   ['PAYMENTS', 'No paybill yet? We collect for you',
    'Turn on collection and your customers pay into our paybill from day one, PPPoE or hotspot — we pay you out nightly, net of a small commission, straight to your own M-Pesa number.'],
+  ['PAYMENTS', 'A message that matches what happened',
+   'Full payment, partial, a voucher, a top-up — each gets the SMS that actually describes it, balance owed included, not one generic "payment received" for every case.'],
   ['NETWORK', 'MikroTik without the console',
    'Point a router at us over a tunnel — no public IP, no port forwarding. RADIUS, PPPoE, hotspot, DHCP and the firewall rules are pushed for you.'],
   ['NETWORK', 'Speed changes that land now',
@@ -59,6 +120,12 @@ const FEATURES = [
    'Every site, router and customer plotted where they actually are. Send a technician to a job knowing exactly what is already there.'],
   ['GROWTH', 'Grow the list, not just serve it',
    'Leads, SMS and email campaigns, and the routine follow-ups running themselves — so selling the next customer is not a second full-time job.'],
+  ['GROWTH', 'Commission that finds the right person',
+   'A signed-up customer credits whoever actually brought them in — the rep who closed it, not just whoever the account happens to be assigned to by the time anyone checks.'],
+  ['TEAM', 'Payroll that runs itself',
+   'Salaries and staff commissions computed every cycle and paid by M-Pesa or marked paid by hand — one run at month end, not a spreadsheet.'],
+  ['TEAM', 'Every shilling spent, on record',
+   'Expenses logged with a receipt, approved before anyone pays it, and pulled straight into payroll when it turns out to be a staff reimbursement.'],
 ];
 
 /**
@@ -102,6 +169,38 @@ const Section = ({ children, style }) => (
   </section>
 );
 
+/**
+ * Fades a block up into place the first time it scrolls into view, once,
+ * never again — a feature grid a visitor has already scrolled past has
+ * nothing left to announce by re-animating on every re-render. Plain
+ * IntersectionObserver rather than a library: this is the one page in the
+ * app with no build-step budget for one, and the effect itself is three
+ * CSS properties.
+ */
+function Reveal({ children, delay = 0, style }) {
+  const ref = useRef(null);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setShown(true); io.disconnect(); } },
+      { threshold: 0.15 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <div
+      ref={ref}
+      className={`vl-reveal${shown ? ' vl-in' : ''}`}
+      style={{ transitionDelay: `${delay}ms`, ...style }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function Landing({ onRegister }) {
   return (
     <div style={{
@@ -111,12 +210,31 @@ export default function Landing({ onRegister }) {
       {/* Scoped to this page. Restrained on purpose: a border-colour change on
           hover, nothing that moves on its own or asks to be noticed. */}
       <style>{`
-        .vl-card { transition: background .15s ease; }
-        .vl-card:hover { background: ${color.subtleBg}; }
-        .vl-btn { transition: background .15s ease, border-color .15s ease, opacity .15s ease; }
-        .vl-solid:hover { background: ${color.greenDark}; }
+        .vl-card {
+          transition: background .15s ease, transform .25s ease, box-shadow .25s ease, border-top-color .25s ease;
+        }
+        .vl-card:hover {
+          background: ${color.subtleBg};
+          transform: translateY(-3px);
+          box-shadow: 0 10px 24px -14px rgba(20, 30, 25, .28);
+        }
+        .vl-card:hover .vl-feature-icon { transform: scale(1.08) rotate(-4deg); }
+        .vl-feature-icon { transition: transform .25s ease; }
+        .vl-btn { transition: background .15s ease, border-color .15s ease, opacity .15s ease, transform .15s ease; }
+        .vl-solid:hover { background: ${color.greenDark}; transform: translateY(-1px); }
         .vl-ghost:hover { border-color: ${color.green}; color: ${color.green}; }
         .vl-cta-btn:hover { background: #eef2ef; }
+        .vl-reveal {
+          opacity: 0;
+          transform: translateY(22px);
+          transition: opacity .6s cubic-bezier(.2,.7,.3,1), transform .6s cubic-bezier(.2,.7,.3,1);
+        }
+        .vl-reveal.vl-in { opacity: 1; transform: none; }
+        @media (prefers-reduced-motion: reduce) {
+          .vl-reveal { opacity: 1; transform: none; transition: none; }
+          .vl-card:hover { transform: none; }
+          .vl-card:hover .vl-feature-icon { transform: none; }
+        }
       `}</style>
 
       <header style={{ borderBottom: `1px solid ${color.line}`, background: color.cardBg }}>
@@ -259,20 +377,35 @@ export default function Landing({ onRegister }) {
             display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 1,
             background: color.line,
           }}>
-            {FEATURES.map(([tag, title, body]) => (
-              <div key={title} className="vl-card" style={{
-                background: color.cardBg, borderTop: `2.5px solid ${CATEGORY_COLOR[tag]}`,
-                padding: '20px 20px 22px',
-              }}>
-                <div style={{
-                  fontFamily: font.mono, fontSize: 11, fontWeight: 700, color: CATEGORY_COLOR[tag],
-                  letterSpacing: '.06em', marginBottom: 10,
+            {FEATURES.map(([tag, title, body], i) => (
+              <Reveal key={title} delay={(i % 4) * 70} style={{ display: 'flex' }}>
+                <div className="vl-card" style={{
+                  background: color.cardBg, borderTop: `2.5px solid ${CATEGORY_COLOR[tag]}`,
+                  padding: '20px 20px 22px', width: '100%',
                 }}>
-                  {tag}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                    <span
+                      className="vl-feature-icon"
+                      style={{
+                        display: 'grid', placeItems: 'center', width: 26, height: 26, borderRadius: radius.sm,
+                        background: `${CATEGORY_COLOR[tag]}1a`, color: CATEGORY_COLOR[tag], flexShrink: 0,
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        {CATEGORY_ICON[tag]}
+                      </svg>
+                    </span>
+                    <span style={{
+                      fontFamily: font.mono, fontSize: 11, fontWeight: 700, color: CATEGORY_COLOR[tag],
+                      letterSpacing: '.06em',
+                    }}>
+                      {tag}
+                    </span>
+                  </div>
+                  <h3 style={{ margin: '0 0 6px', fontSize: 15.5 }}>{title}</h3>
+                  <p style={{ margin: 0, fontSize: 14, color: color.inkSoft }}>{body}</p>
                 </div>
-                <h3 style={{ margin: '0 0 6px', fontSize: 15.5 }}>{title}</h3>
-                <p style={{ margin: 0, fontSize: 14, color: color.inkSoft }}>{body}</p>
-              </div>
+              </Reveal>
             ))}
           </div>
         </Section>
