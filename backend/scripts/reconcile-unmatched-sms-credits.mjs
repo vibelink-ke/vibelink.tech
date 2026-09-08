@@ -52,17 +52,34 @@ for (const pay of candidates) {
   // handleStkResult flips status to 'success' before ever reaching the
   // sms_credit branch, so a race-lost purchase still shows success here
   // even though its own insert into payments was silently discarded.
+  //
+  // Not matched by phone: confirmed live that Safaricom's C2B confirmation
+  // sometimes sends a hashed/tokenized MSISDN instead of the real number
+  // for some shortcode configurations (payload.MSISDN a 64-char hex string,
+  // not a phone number) — stk_requests.phone holds the real one the tenant
+  // actually typed, so the two can never be equal for those transactions.
+  // Matched on tenant + provider + amount + closest timestamp instead, with
+  // a 15-minute window: two unrelated purchases of the same amount from the
+  // same tenant almost never land within 15 minutes of each other, and if
+  // they do, this reports it as ambiguous rather than guessing.
   const { rows: matches } = await pool.query(
     `select id, purpose, created_at from stk_requests
-      where tenant_id = $1 and provider = $2 and phone = $3 and amount = $4
+      where tenant_id = $1 and provider = $2 and amount = $3
         and status = 'success' and purpose->>'type' = 'sms_credit'
-      order by abs(extract(epoch from (created_at - $5))) asc
-      limit 3`,
-    [pay.tenant_id, pay.provider, pay.payer_phone, pay.amount, pay.received_at]);
+        and abs(extract(epoch from (created_at - $4))) < 900
+      order by abs(extract(epoch from (created_at - $4))) asc`,
+    [pay.tenant_id, pay.provider, pay.amount, pay.received_at]);
 
   if (!matches.length) {
     console.log(`[NO MATCH] payment ${pay.id} — KES ${pay.amount}, ${pay.payer_phone}, `
-      + `received ${pay.received_at.toISOString()} — no matching successful sms_credit stk_request found, skipping.`);
+      + `received ${pay.received_at.toISOString()} — no matching successful sms_credit stk_request within 15 min, skipping.`);
+    skipped++;
+    continue;
+  }
+  if (matches.length > 1) {
+    console.log(`[AMBIGUOUS] payment ${pay.id} — KES ${pay.amount}, received ${pay.received_at.toISOString()} — `
+      + `${matches.length} equally-plausible stk_requests within 15 minutes (${matches.map((m) => m.id).join(', ')}), `
+      + 'skipping rather than guessing which one it was.');
     skipped++;
     continue;
   }
