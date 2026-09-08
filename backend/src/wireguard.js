@@ -152,11 +152,23 @@ export function failoverScript({ staleAfter = '90s' } = {}) {
   ].join('\n');
 }
 
+// Higher than the implicit metric-0 OpenVPN installs for a connected
+// client's own host route (client-config-dir/iroute) — so when a router is
+// provisioned on both transports for failover and both routes exist at
+// once, OpenVPN's wins outright, exactly matching which interface is
+// actually carrying live traffic to it. Precedence barely matters in
+// practice since only one side is ever really handshaking (the router
+// itself only enables one interface at a time — see failoverScript above);
+// what matters is that this route can always be *installed* alongside
+// OpenVPN's without a collision.
+const WG_ROUTE_METRIC = 100;
+
 /** Server-side wg0.conf, rendered from the database. */
 export async function renderServerConfig(serverPrivateKey, port = 51820) {
   const { rows } = await pool.query(
     'select name, public_key, preshared_key, assigned_ip from wg_peers where enabled order by assigned_ip'
   );
+  const addresses = rows.map((p) => String(p.assigned_ip).split('/')[0]);
   const head = [
     '# Generated from wg_peers — edit the database, not this file.',
     '[Interface]',
@@ -173,6 +185,24 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
     `Address = ${SERVER_IP}/32`,
     `ListenPort = ${port}`,
     `PrivateKey = ${serverPrivateKey}`,
+    // A router onboarded on both WireGuard and OpenVPN for failover carries
+    // the identical tunnel address on each — OpenVPN installs its own host
+    // route for it the moment that client connects (client-config-dir), so
+    // wg-quick's own default route management (a plain, non-idempotent `ip
+    // route add` per peer's AllowedIPs) fails the instant it collides with
+    // that. wg-quick's response to any single route failure is to tear the
+    // *entire* interface back down — every other peer's tunnel along with
+    // it — which is exactly how a single dual-provisioned router once took
+    // every router on this tunnel offline for hours with nothing visibly
+    // wrong (the container itself stayed "Up"; only its wg0 interface
+    // silently never came up). `Table = off` hands route management to the
+    // PostUp/PostDown lines below instead, which use `ip route replace`
+    // (never fails on an existing route) at a higher metric than OpenVPN's,
+    // so the two coexist and a disappearing OpenVPN route hands traffic to
+    // this one automatically rather than the whole tunnel refusing to start.
+    'Table = off',
+    ...addresses.map((ip) => `PostUp = ip route replace ${ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`),
+    ...addresses.map((ip) => `PostDown = ip route del ${ip}/32 dev %i metric ${WG_ROUTE_METRIC} || true`),
     '',
   ];
   const peers = rows.map((p) =>

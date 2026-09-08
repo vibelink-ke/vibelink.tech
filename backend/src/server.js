@@ -6856,7 +6856,7 @@ async function repushPppoePool(tenantId, routerId) {
   let conn;
   try {
     const { rows: [r] } = await pool.query(
-      `select id, host, api_port, service_user, service_password_enc from routers
+      `select id, host, secret, api_port, service_user, service_password_enc from routers
         where id=$1 and tenant_id=$2 and service_user is not null`, [routerId, tenantId]);
     if (!r) return;
 
@@ -6893,6 +6893,38 @@ async function repushPppoePool(tenantId, routerId) {
     });
     await pool.query('update routers set pppoe_pool=$2 where id=$1', [routerId, confPool?.cidr ?? null]);
     console.log('auto-repush pppoe pool', routerId, '→ ok:', confPool?.cidr ?? '(cleared)');
+
+    // Narrowing (or moving) the range does not relocate anyone already
+    // holding an address outside it — the Networks screen says so, but
+    // saying so is not the same as anyone actually going and fixing them.
+    // Left alone, those subscribers keep the stale radreply.Framed-IP-
+    // Address forever: FreeRADIUS just answers with whatever's already on
+    // file, it never recomputes on its own, so nothing looks wrong here
+    // until the customer's router logs "could not determine remote
+    // address" on their next reconnect and support has no idea why. Catch
+    // it right here instead: reassign each of them from the new pool and
+    // force the redial that makes it stick, the same fix an operator would
+    // otherwise have to find and apply by hand, one ticket at a time.
+    if (confPool?.cidr) {
+      const { rows: affected } = await pool.query(
+        `select s.id, s.pppoe_user from subscribers s
+          where s.tenant_id=$1 and s.router_id=$2 and s.static_ip is not null
+            and not (s.static_ip <<= $3::cidr)`,
+        [tenantId, routerId, confPool.cidr]);
+      if (affected.length) {
+        const radius = await import('./radius.js');
+        const { withTenant } = await import('./db.js');
+        for (const s of affected) {
+          try {
+            await withTenant(tenantId, (c) => radius.syncSubscriberCredentials(c, tenantId, s.id));
+            if (s.pppoe_user) await radius.disconnectSubscriberSession(pool, r.host, r.secret, s.pppoe_user);
+          } catch (e) {
+            console.error('auto-repush pppoe pool', routerId, '→ resync failed for', s.id, ':', e.message);
+          }
+        }
+        console.log('auto-repush pppoe pool', routerId, `→ resynced ${affected.length} subscriber(s) outside the new range`);
+      }
+    }
   } catch (e) {
     console.error('auto-repush pppoe pool', routerId, '→ failed:', e.message);
   } finally {
