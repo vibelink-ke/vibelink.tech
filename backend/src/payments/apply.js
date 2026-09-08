@@ -279,6 +279,52 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
 }
 
 /**
+ * A cashier resolving a genuinely unmatched payment by hand — a customer
+ * typed a wrong or nonexistent account number, support identified who they
+ * actually are, and now points the payment at that subscriber directly.
+ *
+ * Confirmed live: this was called (server.js's POST /api/payments/:id/match)
+ * but never actually existed — `applyMatched` had no export anywhere in this
+ * file, so `applyMatched?.(...)` silently evaluated to undefined and the
+ * route fell back to `?? { ok: true }`, reporting success on every single
+ * call while touching nothing at all. The button appeared to work and the
+ * payment stayed unmatched forever, with no error anywhere to say why.
+ *
+ * Reuses settleSubscriber exactly as the automatic match() path does — same
+ * wallet crediting, same expiry math, same receipt SMS — the only thing
+ * different about a manual match is skipping match() itself and being told
+ * directly which subscriber this was always meant for.
+ */
+export async function applyMatched(tenantId, paymentId, subscriberId) {
+  if (!subscriberId) throw new Error('Choose which customer this payment belongs to.');
+  return withTenant(tenantId, async (c) => {
+    const { rows: [pay] } = await c.query(
+      "select * from payments where id=$1 and tenant_id=$2 and status='unmatched' for update",
+      [paymentId, tenantId]);
+    if (!pay) throw new Error('That payment was not found, or has already been applied.');
+
+    const { rows: [sub] } = await c.query(
+      'select id from subscribers where id=$1 and tenant_id=$2', [subscriberId, tenantId]);
+    if (!sub) throw new Error('That customer was not found.');
+
+    const r = await settleSubscriber(c, tenantId, subscriberId, pay.amount, pay.id, null);
+    await activateSubscriber(c, tenantId, subscriberId);
+
+    const days = Math.max(0, Math.ceil((new Date(r.expires).getTime() - Date.now()) / 86400000));
+    await send(tenantId, pay.payer_phone, r.partial ? 'partial' : 'receipt',
+      { amount: pay.amount, code: pay.provider_ref, days, ...r }).catch(() => {
+        // payer_phone on a manually-matched payment is often the number M-Pesa
+        // reported for the transaction, not necessarily one that can receive
+        // an SMS (Safaricom sometimes reports a hashed/tokenized value here
+        // rather than a real MSISDN) — the match itself must not fail just
+        // because the courtesy receipt couldn't be delivered.
+      });
+
+    return { paymentId, applied: true, ...r };
+  });
+}
+
+/**
  * One-time commission, on the client's first applied payment only — the
  * unique (subscriber_id) constraint on referral_commissions is what makes
  * that a database guarantee rather than something this function has to get

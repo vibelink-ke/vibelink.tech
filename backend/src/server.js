@@ -2786,12 +2786,12 @@ app.get('/api/payments/unmatched', async (req, res) => {
   res.json(rows);
 });
 
-/** Cashier resolves an unmatched payment; we remember the phone for next time. */
-app.post('/api/payments/:id/match', requirePermission('payments.apply'), async (req, res) => {
+/** Cashier resolves an unmatched payment by pointing it at the right customer. */
+app.post('/api/payments/:id/match', requirePermission('payments.apply'), wrap(async (req, res) => {
   const { subscriberId } = req.body;
   const { applyMatched } = await import('./payments/apply.js');
-  res.json(await applyMatched?.(req.tenant.id, req.params.id, subscriberId) ?? { ok: true });
-});
+  res.json(await applyMatched(req.tenant.id, req.params.id, subscriberId));
+}));
 
 // ── hotspot settings (Hotspot -> Settings) ─────────
 app.get('/api/hotspot/settings', requirePermission('hotspot.view'), async (req, res) => {
