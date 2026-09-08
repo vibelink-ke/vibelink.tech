@@ -9422,13 +9422,30 @@ app.put('/api/tenants/:id/sms-gateway', superAdminOnly, wrap(async (req, res) =>
  * become the platform owner's own bill without them having chosen it.
  */
 app.post('/api/tenants/:id/sms-balance', superAdminOnly, wrap(async (req, res) => {
-  const { delta, set } = req.body ?? {};
+  const { delta, set, cost, paidTo } = req.body ?? {};
   const { rows: [t] } = await pool.query(
     set != null
       ? 'update tenants set platform_sms_balance=$2 where id=$1 returning platform_sms_balance'
       : 'update tenants set platform_sms_balance=greatest(platform_sms_balance + $2, 0) where id=$1 returning platform_sms_balance',
     [req.params.id, set != null ? Number(set) : Number(delta) || 0]);
   if (!t) return res.status(404).json({ error: 'No such tenant' });
+
+  // Optional: this top-up was a real purchase from the upstream SMS
+  // provider, not just a correction or goodwill credit — log it as an
+  // expense on the platform owner's own tenant so it shows up in that
+  // tenant's Expenses log like any other cost of running the business.
+  const costValue = Number(cost);
+  if (costValue > 0) {
+    const { rows: [owner] } = await pool.query(
+      "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+    if (owner) {
+      await pool.query(
+        `insert into expenses (tenant_id, category, description, amount, paid_to, status, created_by, paid_at)
+         values ($1,'SMS',$2,$3,$4,'paid',$5,now())`,
+        [owner.tenant_id, `SMS credit top-up for tenant ${req.params.id}`, costValue,
+         paidTo || 'SMS gateway provider', req.session?.staff_id ?? null]);
+    }
+  }
   res.json({ platform_sms_balance: t.platform_sms_balance });
 }));
 

@@ -26,6 +26,8 @@ export default function Tenants() {
   const [resetResult, setResetResult] = useState(null);
   const [balanceFor, setBalanceFor] = useState(null);   // tenant row being topped up
   const [balanceInput, setBalanceInput] = useState('');
+  const [balanceCost, setBalanceCost] = useState('');
+  const [balancePaidTo, setBalancePaidTo] = useState('');
   const [balanceBusy, setBalanceBusy] = useState(false);
 
   const [gateways, setGateways] = useState([]);      // every platform-owned gateway (sender)
@@ -126,7 +128,11 @@ export default function Tenants() {
     if (!balanceFor) return;
     setBalanceBusy(true);
     try {
-      const r = await api.setTenantSmsBalance(balanceFor.id, { set: Number(balanceInput) || 0 });
+      const cost = Number(balanceCost);
+      const r = await api.setTenantSmsBalance(balanceFor.id, {
+        set: Number(balanceInput) || 0,
+        ...(cost > 0 ? { cost, paidTo: balancePaidTo || undefined } : {}),
+      });
       store.setCollection('tenants', (ts) => ts.map((x) =>
         (x.id === balanceFor.id ? { ...x, platform_sms_balance: r.platform_sms_balance } : x)));
       store.toast(`${balanceFor.name}: ${r.platform_sms_balance} platform SMS credits`);
@@ -461,7 +467,7 @@ export default function Tenants() {
               align: 'right',
               render: (t) => (
                 <span
-                  onClick={() => { setBalanceFor(t); setBalanceInput(String(t.platform_sms_balance ?? 0)); }}
+                  onClick={() => { setBalanceFor(t); setBalanceInput(String(t.platform_sms_balance ?? 0)); setBalanceCost(''); setBalancePaidTo(''); }}
                   title="From the platform gateway — click to change"
                   style={{
                     fontFamily: font.mono, cursor: 'pointer',
@@ -821,6 +827,14 @@ export default function Tenants() {
           <Field label="Credits">
             <Input type="number" min="0" value={balanceInput} onChange={(e) => setBalanceInput(e.target.value)} />
           </Field>
+          <Field label="Cost paid to your SMS provider (KES)" hint="Only fill this in if you actually just bought this credit — it gets logged in Expenses. Leave blank for a correction or goodwill credit.">
+            <Input type="number" min="0" value={balanceCost} onChange={(e) => setBalanceCost(e.target.value)} placeholder="0" />
+          </Field>
+          {Number(balanceCost) > 0 && (
+            <Field label="Paid to" hint="Vendor name, defaults to “SMS gateway provider”">
+              <Input value={balancePaidTo} onChange={(e) => setBalancePaidTo(e.target.value)} placeholder="e.g. Africa's Talking" />
+            </Field>
+          )}
         </div>
       </Modal>
     </Screen>
