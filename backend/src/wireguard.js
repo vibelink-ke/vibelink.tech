@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -366,13 +365,21 @@ export async function syncServer() {
   const fallbackCmd = 'docker compose -f docker-compose.prod.yml exec wireguard sh -c '
     + `"wg-quick strip ${configPath} > /tmp/wg0.sync.conf && wg syncconf wg0 /tmp/wg0.sync.conf"`;
 
+  // Not configPath itself — wg syncconf rejects wg-quick-only directives
+  // (Address, Table, PostUp/PostDown) with "Line unrecognized", which is
+  // exactly the failure this used to hit unconditionally, for every peer,
+  // regardless of which container ran it. Written into the same shared
+  // /config/wg_confs directory as configPath (not os.tmpdir(), which is
+  // private to this container) so infra/wireguard-init's own background
+  // sync loop can read the identical, already-correct file instead of
+  // deriving its own via `wg-quick strip` — which silently drops any peer
+  // kept out of a [Peer] block on purpose (see renderServerConfig's own
+  // comment for why some are), the exact failure that kept undoing this
+  // fix every 15 seconds until both sides read the same file.
+  const syncPath = path.join(path.dirname(configPath), 'wg0.sync.conf');
+
   try {
-    // Not configPath itself — wg syncconf rejects wg-quick-only directives
-    // (Address, Table, PostUp/PostDown) with "Line unrecognized", which is
-    // exactly the failure this used to hit unconditionally, for every peer,
-    // regardless of which container ran it.
     const { text, ips } = await renderSyncConfig(serverPrivateKey, port);
-    const syncPath = path.join(os.tmpdir(), 'wg0.sync.conf');
     fs.writeFileSync(syncPath, text, { mode: 0o600 });
     await run('wg', ['syncconf', 'wg0', syncPath]);
 
