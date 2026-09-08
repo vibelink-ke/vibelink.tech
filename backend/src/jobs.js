@@ -10,6 +10,7 @@ import { dbBackup } from './backup.js';
 import { ceilToMidnight, settleSubscriber } from './payments/apply.js';
 import { activateSubscriber } from './radius.js';
 import { withTenant } from './db.js';
+import { resetDemoTenant } from './demo-tenant.js';
 
 /**
  * A job that throws must not take the process down with it — node-cron does not
@@ -73,6 +74,13 @@ export function startJobs() {
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
   cron.schedule('*/1 * * * *', safely('pollWireguardStatus', pollWireguardStatus));
+  // The sales-demo tenant ("demo" subdomain) is the real app on real data —
+  // nothing about it is a mock — so whatever a prospect clicks, edits or
+  // "buys" while exploring it genuinely persists, the same as any tenant.
+  // This is what keeps that from meaning anything: on the hour, every hour,
+  // it gets wiped and reseeded from scratch, so no one ever inherits the
+  // last visitor's mess and nothing risky can accumulate.
+  cron.schedule('0 * * * *', safely('resetDemoTenant', resetDemoTenant));
 }
 
 /**
