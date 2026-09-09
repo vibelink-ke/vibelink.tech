@@ -7970,6 +7970,50 @@ app.get('/api/payments', wrap(async (req, res) => {
 }));
 
 /**
+ * Hotspot Revenue screen's actual numbers — a real date-ranged query, not a
+ * client-side filter over /api/payments above. That endpoint caps at the
+ * 500 most recent payments *of every kind* (PPPoE renewals included), so a
+ * tenant with real volume had hotspot sales crowded out of the very data
+ * this screen was computing "Hotspot revenue" from — undercounting, and
+ * silently worse the longer the selected period claimed to cover. The
+ * period selector itself never actually filtered anything either: every
+ * period showed the same totals, just under a different label.
+ */
+app.get('/api/hotspot/revenue', wrap(async (req, res) => {
+  const since = {
+    '7d': "now() - interval '7 days'",
+    '30d': "now() - interval '30 days'",
+    '4m': "now() - interval '4 months'",
+    year: "date_trunc('year', now())",
+  }[req.query.period] ?? "now() - interval '4 months'";
+
+  const { rows: sales } = await pool.query(`
+    select pay.plan_id, pay.amount
+      from payments pay
+      join vouchers v on v.id = pay.voucher_id
+     where pay.tenant_id=$1 and pay.status='applied' and pay.voucher_id is not null
+       and pay.received_at >= ${since}`,
+    [req.tenant.id]);
+
+  const { rows: plans } = await pool.query(
+    `select id, title, price from plans where tenant_id=$1 and service='hotspot'`, [req.tenant.id]);
+
+  const byPlan = new Map(plans.map((p) => [p.id, { title: p.title, price: p.price, sold: 0, revenue: 0 }]));
+  let total = 0;
+  for (const s of sales) {
+    total += Number(s.amount ?? 0);
+    const row = byPlan.get(s.plan_id);
+    if (row) { row.sold += 1; row.revenue += Number(s.amount ?? 0); }
+  }
+
+  res.json({
+    total, count: sales.length,
+    avg: sales.length ? Math.round(total / sales.length) : 0,
+    byPlan: [...byPlan.values()].sort((a, b) => b.revenue - a.revenue),
+  });
+}));
+
+/**
  * Payment monitoring by site — how much each physical router has actually
  * collected, PPPoE and hotspot combined.
  *
