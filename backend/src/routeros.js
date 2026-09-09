@@ -1948,11 +1948,15 @@ export async function bindDeviceByMac(conn, { mac, downKbps, upKbps, comment = '
  * reopen that check. That is the whole bug this once was: the DB moved to
  * 'expired', the ip-binding and queue were gone, and the TV kept browsing
  * anyway, because nothing had ever told the router this specific device was
- * still live and needed kicking. /ip/hotspot/active is that live table for a
- * bypassed host exactly as much as an authenticated one; removing this MAC's
- * row from it is what actually drops the session. /ip/hotspot/host is then
- * cleared too so a stale cache entry can't let it slide back through
+ * still live and needed kicking. A `type=bypassed` binding skips HotSpot's
+ * authentication/session handling entirely, so a device using one never
+ * shows up in /ip/hotspot/active at all (confirmed live) — /ip/hotspot/host
+ * is its actual live table, and clearing this MAC's row there is what
+ * forces RouterOS to re-evaluate it instead of sliding back through
  * bypassed on its very next packet before DHCP/ARP even notices it's gone.
+ * The /ip/hotspot/active removal below still runs regardless — harmless for
+ * a bypassed device (nothing to find there), but real for one that instead
+ * typed a voucher code and got a normal authenticated session.
  */
 export async function unbindDeviceByMac(conn, { mac }) {
   const MAC = String(mac).toUpperCase();
