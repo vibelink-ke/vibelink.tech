@@ -85,6 +85,58 @@ export function startJobs() {
   // service per router, so it is deliberately paced rather than run on the
   // same tight loop as the ping watchdog.
   cron.schedule('20 */6 * * *', safely('detectUpstreamProviders', detectUpstreamProviders));
+  // Every 5 minutes, not on every RADIUS auth — this is a correction for
+  // something that happens rarely (a customer physically relocating), not
+  // a hot path, and a live session already tells us the moment it starts.
+  cron.schedule('*/5 * * * *', safely('autoRelocateSubscribers', autoRelocateSubscribers));
+}
+
+/**
+ * A PPPoE customer connected from a *different one of their own tenant's
+ * routers* than the one on file — not a stranger's NAS, a genuinely known
+ * sibling router on the same account — has almost certainly relocated: a
+ * house move, a shop that changed premises, someone plugging into the
+ * nearer tower after a cable got laid. Left as-is, every later sync still
+ * resolves their pool and address against the OLD router, which is
+ * exactly the "authenticated / connected / terminating" loop chased down
+ * earlier — the session comes up, then gets handed an address from a pool
+ * the router it is actually on does not own.
+ *
+ * Scoped to tenants with more than one router: a single-router tenant has
+ * nowhere else a real session could come from, so there is nothing to
+ * correct and no risk of matching a customer's own line against a router
+ * they were never near.
+ *
+ * activateSubscriber, not syncSubscriberCredentials — this subscriber has
+ * a session open right now, and activateSubscriber is the one that also
+ * recomputes their Framed-IP-Address for the new router's pool and forces
+ * a reconnect via CoA when that address actually changes (Framed-IP-Address
+ * cannot be handed to a live session any other way). syncSubscriberCredentials
+ * deliberately skips CoA, for the opposite case — a subscriber with no
+ * session yet to disturb.
+ */
+export async function autoRelocateSubscribers() {
+  const { rows } = await pool.query(
+    `select s.id as subscriber_id, s.tenant_id, s.pppoe_user,
+            old_r.name as old_router_name, new_r.id as new_router_id, new_r.name as new_router_name
+       from radacct a
+       join subscribers s on s.pppoe_user = a.username and s.pppoe_user is not null
+       join routers new_r on new_r.tenant_id = s.tenant_id and host(new_r.host) = host(a.nasipaddress)
+       left join routers old_r on old_r.id = s.router_id
+      where a.acctstoptime is null
+        and s.router_id is distinct from new_r.id
+        and s.tenant_id in (${enabledTenants})
+        and (select count(*) from routers r2 where r2.tenant_id = s.tenant_id) > 1`,
+    ['autoRelocateSubscribers']);
+
+  for (const row of rows) {
+    await withTenant(row.tenant_id, async (c) => {
+      await c.query('update subscribers set router_id=$2 where id=$1', [row.subscriber_id, row.new_router_id]);
+      await activateSubscriber(c, row.tenant_id, row.subscriber_id);
+    });
+    console.log(`autoRelocateSubscribers: ${row.pppoe_user} moved from `
+      + `${row.old_router_name ?? '(no router on file)'} to ${row.new_router_name}`);
+  }
 }
 
 /**
