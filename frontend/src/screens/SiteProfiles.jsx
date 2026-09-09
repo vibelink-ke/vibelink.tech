@@ -26,6 +26,23 @@ export default function SiteProfiles() {
 
   const [busy, setBusy] = useState(false);
 
+  const paybillsForProvider = (provider) => (store.paymentMethods ?? []).filter((m) => m.provider === provider);
+
+  // Picking a paybill fills the shortcode from it — the shortcode column is
+  // always one of the tenant's already-configured gateways, never free text,
+  // so there is no way to save a site profile pointing at a typo'd number
+  // that doesn't match any real credential.
+  const pickPaybill = (e) => {
+    const id = e.target.value;
+    const row = paybillsForProvider(f.provider).find((m) => m.id === id);
+    setF((s) => ({ ...s, paymentConfigId: id, shortcode: row?.shortcode ?? '' }));
+  };
+
+  const setProvider = (e) => {
+    const provider = e.target.value;
+    setF((s) => ({ ...s, provider, paymentConfigId: '', shortcode: '' }));
+  };
+
   const save = async () => {
     if (!f.site.trim() || !f.shortcode.trim()) return store.toast('Site and shortcode are required');
     setBusy(true);
@@ -138,36 +155,34 @@ export default function SiteProfiles() {
             />
           </Field>
           <Field label="Channel">
-            <Select value={f.provider} onChange={set('provider')} options={PROVIDERS} />
+            <Select value={f.provider} onChange={setProvider} options={PROVIDERS} />
           </Field>
-          <Field label="Shortcode">
-            <Input value={f.shortcode} onChange={set('shortcode')} placeholder="4098221" />
+          <Field
+            label="Paybill"
+            hint={
+              paybillsForProvider(f.provider).length
+                ? f.provider === 'kopokopo'
+                  ? "Hotspot always charges through the tenant's one default gateway — pick which shortcode to show, it doesn't change routing."
+                  : undefined
+                : 'No paybills configured for this channel yet — add one under Settings → Payment methods first.'
+            }
+          >
+            <Select
+              value={f.paymentConfigId}
+              onChange={pickPaybill}
+              disabled={!paybillsForProvider(f.provider).length}
+              options={[
+                { value: '', label: 'Choose a paybill…' },
+                ...paybillsForProvider(f.provider).map((m) => ({
+                  value: m.id,
+                  label: `${m.label || m.provider}${m.shortcode ? ` (${m.shortcode})` : ''}`,
+                })),
+              ]}
+            />
           </Field>
           <Field label="Account prefix" hint="Prepended to what the client types">
             <Input value={f.account} onChange={set('account')} placeholder="KIM-" />
           </Field>
-          {f.provider === 'kopokopo' ? (
-            <Field label="Paybill used" span={2} hint="Hotspot always charges through the tenant's one default gateway, for every site">
-              <Input value="Tenant default" disabled />
-            </Field>
-          ) : (
-            <Field
-              label="Paybill used"
-              span={2}
-              hint="Which of the tenant's already-configured paybills this site actually charges through. Leave as tenant default if there's only one."
-            >
-              <Select
-                value={f.paymentConfigId}
-                onChange={set('paymentConfigId')}
-                options={[
-                  { value: '', label: 'Tenant default' },
-                  ...(store.paymentMethods ?? [])
-                    .filter((m) => m.provider === f.provider)
-                    .map((m) => ({ value: m.id, label: m.label || m.shortcode || m.provider })),
-                ]}
-              />
-            </Field>
-          )}
         </div>
       </Modal>
     </Screen>
