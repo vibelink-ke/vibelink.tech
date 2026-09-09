@@ -500,7 +500,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       else; an external file would simply not load.
     -->
     ${codeBoxOpen}
-    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="document.getElementById('password').value = document.getElementById('username').value;">
+    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="event.preventDefault(); submitHotspotLogin(document.getElementById('username').value); return false;">
       <!--
         Where the guest lands once connected. An operator's configured
         redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
@@ -664,9 +664,17 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
    * to a guest. The meta-refresh at the top of this page (routerRedirect)
    * fetches this same markup straight from us instead, specifically to
    * escape a broken WebView, and we are not RouterOS: the token reaches the
-   * browser untouched, so form.submit() posts to the literal string
-   * "$(link-login-only)", resolved as a relative URL against this page —
-   * "buys but does not auto-connect" was this, not the payment.
+   * browser untouched, so a plain form.submit() posts to the literal string
+   * "$(link-login-only)", resolved as a relative URL against this page — a
+   * guest landed on billing.<domain>/hotspot/$(link-login-only), a 404/405
+   * from our own Express app, instead of ever reaching the router.
+   *
+   * The visible "Connect" button's form submit routes through here too, not
+   * just the background auto-login paths below — it used to call
+   * form.submit() directly, so anyone who opened this page any way other
+   * than RouterOS actually proxying the walled-garden fetch (a bookmark, a
+   * shared link, the same broken-WebView case routerRedirect already works
+   * around) hit exactly that dead POST on manual submit as well.
    *
    * The fallback goes straight to HOTSPOT_DNS — the router's own hotspot DNS
    * name (applyHotspotServer in routeros.js, "\${subdomain}.spot") — a real
