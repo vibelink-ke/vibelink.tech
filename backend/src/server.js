@@ -1586,7 +1586,12 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
   const { rows: existing } = await pool.query(
     `select mac from voucher_devices where voucher_id=$1
      union all select $2::macaddr`, [found.voucher.id, found.voucher.mac]);
-  const taken = new Set(existing.map((r) => String(r.mac).toUpperCase()).filter(Boolean));
+  // A voucher created with no mac (the common case for a bare/pre-generated
+  // code) makes the union's second leg a real SQL NULL row — filter() has to
+  // run before String(), not after: String(null) is the truthy text "null",
+  // so filtering post-stringify let a device-less voucher's own empty slot
+  // count as "taken", capping slotsLeft at 0 and refusing every device.
+  const taken = new Set(existing.map((r) => r.mac).filter(Boolean).map((m) => String(m).toUpperCase()));
   /**
    * This used to require multi_device to be on at all — but this list is a
    * MAC-picker for whichever device the guest is registering, not the
@@ -1642,7 +1647,14 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   const limit = hs?.multi_device ? 3 : 1;
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
-  if (count + 1 >= limit) {   // +1 for the voucher's own original device
+  // +1 reserves a slot for the voucher's own original device — but a bare
+  // voucher (no mac recorded at creation, the case a never-used code hits
+  // via voucherAndRouter's router-fallback above) has no original device to
+  // reserve for. Reserving one anyway made a single-device plan's very
+  // first bind always report "already full" before a single device was
+  // ever added.
+  const reservedForOriginal = found.voucher.mac ? 1 : 0;
+  if (count + reservedForOriginal >= limit) {
     return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
   }
 
