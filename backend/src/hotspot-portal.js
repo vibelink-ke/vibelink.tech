@@ -1250,7 +1250,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       if (!code) return;
       var err = document.getElementById('err1');
       err.innerHTML = '';
-      fetch(API + '/hotspot/nearby-devices?code=' + encodeURIComponent(code))
+      fetch(API + '/hotspot/nearby-devices?code=' + encodeURIComponent(code) + (ROUTER_ID ? '&router=' + encodeURIComponent(ROUTER_ID) : ''))
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           if (!res.ok) { err.innerHTML = '<p class="err">' + (res.d.error || 'Could not check that code.') + '</p>'; return; }
@@ -1289,7 +1289,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       var note = document.getElementById('bindNote');
       fetch(API + '/hotspot/nearby-devices/bind', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: code, mac: mac, label: name.trim() }),
+        body: JSON.stringify({ code: code, mac: mac, label: name.trim(), routerId: ROUTER_ID }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {

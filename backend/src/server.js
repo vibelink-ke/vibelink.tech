@@ -1250,8 +1250,21 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
  * router it is actually online through right now — everything after this
  * needs both, and getting the router wrong means reading the wrong box's
  * host list entirely.
+ *
+ * A voucher whose clock starts at creation (hotspot_settings.voucher_expiry
+ * = 'creation') is already 'in_use' the moment it is generated — a
+ * pre-printed or admin-issued code, say — with no device having ever
+ * actually authenticated on it yet. That leaves no radacct session to find
+ * the router from, which used to dead-end this whole feature for exactly
+ * the case it names in its own UI copy ("Already have a code and just
+ * adding an extra device?" — a TV with no keyboard needs this for its
+ * *first* device, not just a second one). pageRouterId is the fallback:
+ * the router the login page itself was served through (RouterOS sets this
+ * at Configure time), trusted the same way tv-buy already trusts a
+ * client-supplied router id — by re-checking the device against that
+ * router's own live host list below, never by trusting the id alone.
  */
-async function voucherAndRouter(tenantId, code) {
+async function voucherAndRouter(tenantId, code, pageRouterId) {
   const { rows: [v] } = await pool.query(
     `select * from vouchers where tenant_id=$1 and code=$2 and status='in_use'
        and (expires_at is null or expires_at > now())`,
@@ -1262,11 +1275,17 @@ async function voucherAndRouter(tenantId, code) {
     `select host(nasipaddress) as nas from radacct
       where username=$1 and acctstoptime is null
       order by acctstarttime desc limit 1`, [code]);
-  if (!session?.nas) return { error: 'That device does not look connected right now — try again once it is online.' };
 
-  const { rows: [r] } = await pool.query(
-    `select id, name, host, api_port, service_user, service_password_enc
-       from routers where tenant_id=$1 and host(host)=$2`, [tenantId, session.nas]);
+  const routerQuery = session?.nas
+    ? { text: `select id, name, host, api_port, service_user, service_password_enc
+                 from routers where tenant_id=$1 and host(host)=$2`, values: [tenantId, session.nas] }
+    : pageRouterId
+    ? { text: `select id, name, host, api_port, service_user, service_password_enc
+                 from routers where tenant_id=$1 and id=$2`, values: [tenantId, pageRouterId] }
+    : null;
+  if (!routerQuery) return { error: 'That device does not look connected right now — try again once it is online.' };
+
+  const { rows: [r] } = await pool.query(routerQuery.text, routerQuery.values);
   if (!r?.service_user || !r.service_password_enc) {
     return { error: 'This router has not been configured for the billing system yet.' };
   }
@@ -1557,10 +1576,11 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
 
   const code = String(req.query.code ?? '').trim();
   if (!code) return res.status(400).json({ error: 'no code' });
+  const pageRouterId = req.query.router ? String(req.query.router) : null;
 
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
 
-  const found = await voucherAndRouter(tenant.id, code);
+  const found = await voucherAndRouter(tenant.id, code, pageRouterId);
   if (found.error) return res.status(404).json({ error: found.error });
 
   const { rows: existing } = await pool.query(
@@ -1608,11 +1628,12 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   const code = String(req.body?.code ?? '').trim();
   const mac = String(req.body?.mac ?? '').trim().toUpperCase();
   const label = String(req.body?.label ?? '').trim().slice(0, 60) || null;
+  const pageRouterId = req.body?.routerId ? String(req.body.routerId) : null;
   if (!code || !mac) return res.status(400).json({ error: 'code and mac are required' });
 
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
 
-  const found = await voucherAndRouter(tenant.id, code);
+  const found = await voucherAndRouter(tenant.id, code, pageRouterId);
   if (found.error) return res.status(404).json({ error: found.error });
 
   // Same limit as the list above: 3 slots when sharing is on, 1 when it's
