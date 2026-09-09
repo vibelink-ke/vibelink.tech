@@ -5341,12 +5341,20 @@ app.post('/api/routers/:id/interfaces', requirePermission('routers.configure'), 
   const host = String(r.host).split('/')[0];
   let conn;
   try {
-    conn = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+    // Not a plain ros.connect() — this is the same stale-service-account
+    // recovery every other push already uses (openRouter's own comment
+    // explains why). Without it, a router whose stored account no longer
+    // works (a re-onboard, a factory reset) never reached the "ask for
+    // admin credentials again" path at all: it just failed here, on the
+    // very first step of Configure, with the generic "rejected those
+    // credentials" message and no way forward — confirmed live.
+    ({ conn } = await openRouter(ros, { host, port: r.api_port ?? 8728, login, body: req.body }));
     const [lan, bridgeList, info] = await Promise.all([
       ros.lanCandidates(conn), ros.bridges(conn), ros.identify(conn),
     ]);
     res.json({ lan, bridges: bridgeList, ...info });
   } catch (e) {
+    if (e.needsAdmin) return res.status(428).json({ error: e.message, needsAdmin: true });
     res.status(502).json({ error: describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728) });
   } finally {
     if (conn) ros.close(conn);
