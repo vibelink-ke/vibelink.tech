@@ -8574,6 +8574,50 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
 }));
 
 /**
+ * Kick every device bound to one of these vouchers via the picker (a TV/
+ * console let in through the ip-binding bypass, never through RADIUS at
+ * all) before the voucher rows disappear — same reasoning as
+ * forgetVoucherAccess just below, and the same unbind jobs.js's
+ * expireAndSuspend already uses for a natural expiry. Deleting the voucher
+ * row alone leaves a bypassed MAC exactly as browsing as it was the moment
+ * before: RouterOS decided that MAC gets through the instant it first saw
+ * the ip-binding, and keeps forwarding its traffic under that decision
+ * until something explicitly tells the router to stop — no code in our
+ * database naming that MAC is not the same thing as telling the router.
+ * Best-effort like every other unbind in this codebase: an unreachable
+ * router must not block the delete the operator actually asked for.
+ */
+async function unbindVoucherDevices(tenantId, voucherIds) {
+  if (!voucherIds.length) return;
+  const { rows: devices } = await pool.query(
+    `select dv.mac, r.host, r.api_port, r.service_user, r.service_password_enc
+       from voucher_devices dv
+       join routers r on r.id = dv.router_id
+      where dv.voucher_id = any($1::uuid[]) and r.tenant_id = $2
+        and r.service_user is not null and r.service_password_enc is not null`,
+    [voucherIds, tenantId]);
+  if (!devices.length) return;
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  for (const d of devices) {
+    let conn;
+    try {
+      const password = secrets.decrypt(d.service_password_enc);
+      conn = await ros.connect({
+        host: String(d.host).split('/')[0], port: d.api_port ?? 8728,
+        user: d.service_user, password, timeoutSec: 8,
+      });
+      await ros.unbindDeviceByMac(conn, { mac: d.mac });
+    } catch (e) {
+      console.warn('unbindVoucherDevices: failed for', d.mac, '—', e.message);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+}
+
+/**
  * Delete vouchers, and the access they carry.
  *
  * A voucher's code is a RADIUS username: issuing one writes radcheck and
@@ -8590,6 +8634,8 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
   const { rows: doomed } = await pool.query(
     'select code from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
 
+  await unbindVoucherDevices(req.tenant.id, ids);
+
   const { rowCount } = await pool.query(
     'delete from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
 
@@ -8600,7 +8646,10 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
 
 app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { rows: doomed } = await pool.query(
-    "select code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
+    "select id, code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
+
+  await unbindVoucherDevices(req.tenant.id, doomed.map((v) => v.id));
+
   const { rowCount } = await pool.query(
     "delete from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
   const { forgetVoucherAccess } = await import('./radius.js');
