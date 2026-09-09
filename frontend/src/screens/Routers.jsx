@@ -742,7 +742,18 @@ export default function Routers() {
     return () => clearTimeout(id);
   }, [result?.state, result?.router?.id]);
 
-  const runAutoconfig = async (r, opts) => {
+  /**
+   * `interactive: false` is Refresh's own flag — it re-sends the current
+   * settings unattended, and unattended must never mean popping a modal
+   * asking someone to type the router's admin password. If the stored
+   * service account has gone stale (a factory reset, a re-onboard) the
+   * server still answers 428 exactly as it would for Configure; the only
+   * difference here is that Refresh reports that as a plain failure and
+   * points at Configure, rather than opening the credentials dialog itself.
+   * Configure keeps the interactive prompt, since typing the admin password
+   * once is the whole point of that button.
+   */
+  const runAutoconfig = async (r, opts, { interactive = true } = {}) => {
     setConfiguring(r.id);
     // The port picker has served its purpose the moment Apply is pressed, and
     // leaving it up stacks two dialogs: a dead form on top, the live progress
@@ -762,14 +773,21 @@ export default function Routers() {
           ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString(), ros_version: res.version }
           : x)));
     } catch (e) {
-      // 428 is the server saying it has no account yet and needs one from you.
-      if (e.status === 428) {
+      // 428 is the server saying it has no working account and needs one from
+      // you — normally that opens the prompt, but not for a Refresh.
+      if (e.status === 428 && interactive) {
         setResult(null);
         setAdminPrompt({ router: r, username: 'admin', password: '' });
       } else {
         // Whatever it managed before failing is worth showing — it says how far
         // it got, which is the difference between "wrong password" and "wrong port".
-        setResult({ router: r, state: 'failed', error: e.message, applied: e.body?.applied ?? [], opts });
+        setResult({
+          router: r, state: 'failed',
+          error: e.status === 428
+            ? `${e.message} Use Configure to enter it — Refresh never asks.`
+            : e.message,
+          applied: e.body?.applied ?? [], opts,
+        });
         store.setCollection('routers', (rs) =>
           rs.map((x) => (x.id === r.id ? { ...x, autoconfig_last_ok: false } : x)));
       }
@@ -1231,8 +1249,8 @@ Revoke anyway?`
                         already succeeded, which withheld the retry button from
                         exactly the routers that needed retrying. */}
                     <MenuItem
-                      onClick={() => { setMenuFor(null); runAutoconfig(r, {}); }}
-                      title="Push the current settings again, without asking about ports"
+                      onClick={() => { setMenuFor(null); runAutoconfig(r, {}, { interactive: false }); }}
+                      title="Push the current settings again, without asking about ports or admin credentials"
                     >
                       Refresh
                     </MenuItem>
