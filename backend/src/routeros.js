@@ -1067,6 +1067,47 @@ export async function ensureHotspotUserProfile(conn, {
 }
 
 /**
+ * Re-applies just the billing-failover script/scheduler over the API — for
+ * a router that already has WireGuard/OVPN set up and only needs the
+ * failover logic itself refreshed (a staleAfter tuning change, say), with
+ * no reason to touch tunnel keys at all. wireguard.js's failoverScript()
+ * covers this same content for a fresh onboarding, where an operator
+ * pastes a whole setup script by hand; this is the same script, applied
+ * directly through the API connection this project already holds to every
+ * onboarded router, so a fix to the shared logic can reach production
+ * without asking anyone to paste anything anywhere.
+ */
+export async function pushFailoverScript(conn, { staleAfter = '240s' } = {}) {
+  // The script references billing-ovpn by name — meaningless, possibly a
+  // hard RouterOS error on the `find where name=billing-ovpn` with nothing
+  // to match, for a router onboarded without OVPN failover at all. Skip
+  // rather than push logic that assumes an interface this router doesn't
+  // have.
+  const ovpn = await conn.write('/interface/ovpn-client/print', ['?name=billing-ovpn']);
+  if (!ovpn.length) return { skipped: 'no billing-ovpn interface — failover was never set up here' };
+
+  const { failoverScriptSource } = await import('./wireguard.js');
+  const source = failoverScriptSource({ staleAfter });
+
+  const scripts = await conn.write('/system/script/print', ['?name=billing-failover']);
+  for (const s of scripts) {
+    await cmd(conn, 'remove old billing-failover script', '/system/script/remove', [`=.id=${idOf(s)}`]);
+  }
+  await cmd(conn, 'add billing-failover script', '/system/script/add', [
+    '=name=billing-failover', '=policy=read,write,test', `=source=${source}`,
+  ]);
+
+  const scheds = await conn.write('/system/scheduler/print', ['?name=billing-failover-check']);
+  for (const s of scheds) {
+    await cmd(conn, 'remove old billing-failover-check scheduler', '/system/scheduler/remove', [`=.id=${idOf(s)}`]);
+  }
+  await cmd(conn, 'add billing-failover-check scheduler', '/system/scheduler/add', [
+    '=name=billing-failover-check', '=interval=2m', '=on-event=billing-failover',
+  ]);
+  return { updated: true };
+}
+
+/**
  * Stop one paid session being shared with the whole building.
  *
  * Packets leaving towards the guest LAN get TTL 1. A phone that has paid can use

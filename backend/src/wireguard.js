@@ -120,9 +120,26 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
  * ever address the router by that one shared address, so only one interface
  * may be carrying it for any real length of time.
  *
- * staleAfter is a RouterOS time literal ("90s", "2m") — three times
- * mikrotikScript's own persistent-keepalive=25s, so one or two missed
- * keepalives do not trigger a failover on their own.
+ * staleAfter is a RouterOS time literal ("90s", "2m") — this used to be 90s,
+ * reasoned as "three times mikrotikScript's own persistent-keepalive=25s".
+ * That conflated two different things: persistent-keepalive only sends an
+ * empty packet to hold a NAT/firewall mapping open, it does not force a
+ * fresh handshake on that schedule. WireGuard's own session actually
+ * re-handshakes on its protocol's own timer — roughly every two to three
+ * minutes under the reference implementation, on a perfectly healthy link
+ * with light traffic — so 90s was shorter than the interval a fine tunnel
+ * naturally sits idle between real handshakes. Confirmed live: two routers'
+ * peers sat at 106s and 205s of handshake age while actively passing real
+ * traffic (hundreds of KB and several MB transferred, not stalled) — both
+ * already "stale" by the old threshold, on a schedule that reruns this
+ * check every 2 minutes, on every router. That is a false failover
+ * roughly every other run, not an occasional edge case: PPPoE customers
+ * dialling in during the ~10s window this spends with WireGuard disabled
+ * and OVPN not yet confirmed up got no route to FreeRADIUS at all —
+ * indistinguishable from "could not determine remote address" on the
+ * router's own PPP log, on every affected line, network-wide. 240s clears
+ * WireGuard's own worst-case idle handshake interval with real margin,
+ * while still failing over within two scheduled runs of an actual outage.
  *
  * A disabled WireGuard interface does not attempt handshakes at all, so its
  * peer's own last-handshake value simply freezes the moment it is disabled
@@ -136,39 +153,55 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
  * switch back, still down means disabling it again and trying once more on
  * the next scheduled run.
  */
-export function failoverScript({ staleAfter = '90s' } = {}) {
+/**
+ * Just the script body — the part inside billing-failover's own source={...}
+ * — shared between failoverScript() (the CLI-paste text below, wrapped in
+ * `/system script ... source={ }`) and routeros.js's pushFailoverScript
+ * (which sends this same text as one API field, `=source=`, no braces
+ * needed since the API takes the value directly rather than parsing CLI
+ * syntax around it). One copy of the actual logic either way reaches a
+ * router: paste-a-script onboarding and a live API push must never drift
+ * into two different failover behaviours.
+ */
+export function failoverScriptSource({ staleAfter = '240s' } = {}) {
+  return [
+    ':local wg [/interface wireguard find where name=billing-wg];',
+    ':local ovpn [/interface ovpn-client find where name=billing-ovpn];',
+    ':local wgDisabled [/interface wireguard get $wg disabled];',
+    '',
+    ':if ($wgDisabled = false) do={',
+    '  :local peer [/interface wireguard peers find where interface=billing-wg];',
+    '  :local age 1d;',
+    '  :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
+    `  :if ($age > ${staleAfter}) do={`,
+    '    :log warning "billing-wg stale ($age) -- failing over to OVPN";',
+    '    /interface wireguard set $wg disabled=yes;',
+    '    /interface ovpn-client set $ovpn disabled=no;',
+    '  }',
+    '} else={',
+    '  :log info "on OVPN -- retesting billing-wg";',
+    '  /interface wireguard set $wg disabled=no;',
+    '  :delay 10s;',
+    '  :local peer [/interface wireguard peers find where interface=billing-wg];',
+    '  :local age 1d;',
+    '  :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
+    `  :if ($age <= ${staleAfter}) do={`,
+    '    :log info "billing-wg recovered -- switching back from OVPN";',
+    '    /interface ovpn-client set $ovpn disabled=yes;',
+    '  } else={',
+    '    :log info "billing-wg still down ($age) -- staying on OVPN";',
+    '    /interface wireguard set $wg disabled=yes;',
+    '  }',
+    '}',
+  ].join('\n');
+}
+
+export function failoverScript({ staleAfter = '240s' } = {}) {
   return [
     '/system script',
     'remove [find name=billing-failover]',
     'add name=billing-failover policy=read,write,test source={',
-    '  :local wg [/interface wireguard find where name=billing-wg];',
-    '  :local ovpn [/interface ovpn-client find where name=billing-ovpn];',
-    '  :local wgDisabled [/interface wireguard get $wg disabled];',
-    '',
-    '  :if ($wgDisabled = false) do={',
-    '    :local peer [/interface wireguard peers find where interface=billing-wg];',
-    '    :local age 1d;',
-    '    :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
-    `    :if ($age > ${staleAfter}) do={`,
-    '      :log warning "billing-wg stale ($age) -- failing over to OVPN";',
-    '      /interface wireguard set $wg disabled=yes;',
-    '      /interface ovpn-client set $ovpn disabled=no;',
-    '    }',
-    '  } else={',
-    '    :log info "on OVPN -- retesting billing-wg";',
-    '    /interface wireguard set $wg disabled=no;',
-    '    :delay 10s;',
-    '    :local peer [/interface wireguard peers find where interface=billing-wg];',
-    '    :local age 1d;',
-    '    :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
-    `    :if ($age <= ${staleAfter}) do={`,
-    '      :log info "billing-wg recovered -- switching back from OVPN";',
-    '      /interface ovpn-client set $ovpn disabled=yes;',
-    '    } else={',
-    '      :log info "billing-wg still down ($age) -- staying on OVPN";',
-    '      /interface wireguard set $wg disabled=yes;',
-    '    }',
-    '  }',
+    failoverScriptSource({ staleAfter }),
     '}',
     '',
     '/system scheduler',
