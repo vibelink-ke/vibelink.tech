@@ -5509,7 +5509,7 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
           `select cidr from ip_pools
             where tenant_id=$1 and service='pppoe' and purpose='normal'
               and (router_id = $2 or router_id is null)
-            order by (router_id = $2) desc
+            order by (router_id = $2) desc nulls last
             limit 1`, [req.tenant.id, r.id]);
 
         // A cidr has to become a usable range: .1 is the gateway, and the
@@ -6669,7 +6669,7 @@ async function ensureExpiredPool(tenantId, routerId, routerName) {
     `select cidr from ip_pools
       where tenant_id=$1 and service='pppoe' and purpose='expired'
         and (router_id = $2 or router_id is null)
-      order by (router_id = $2) desc
+      order by (router_id = $2) desc nulls last
       limit 1`, [tenantId, routerId]);
   if (existing) return existing;
 
