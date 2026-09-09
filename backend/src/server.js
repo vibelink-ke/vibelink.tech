@@ -8394,14 +8394,14 @@ app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) =
 
 app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
-          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible } = req.body;
+          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible, contentionRatio } = req.body;
   const { rows: [row] } = await pool.query(
     `insert into plans (tenant_id, service, title, price, duration_min, devices,
-       rate_down, rate_up, data_cap_mb, radius_profile, visible)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+       rate_down, rate_up, data_cap_mb, radius_profile, visible, contention_ratio)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
      rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`,
-     visible ?? true]);
+     visible ?? true, contentionRatio ?? 1]);
 
   const sites = Array.isArray(routerIds) ? routerIds.filter(Boolean) : [];
   if (sites.length) {
@@ -8417,7 +8417,7 @@ app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res
 }));
 
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
-  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible } = req.body ?? {};
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
        title        = coalesce(nullif($3,''), title),
@@ -8429,12 +8429,13 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
        -- Explicit null clears the cap, so distinguish "not sent" from "cleared".
        data_cap_mb  = case when $9::text = 'keep' then data_cap_mb else $10::bigint end,
        visible      = coalesce($11, visible),
+       contention_ratio = coalesce($12, contention_ratio),
        updated_at   = now()
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
      devices ?? null, rateDown ?? null, rateUp ?? null,
      dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
-     visible ?? null]);
+     visible ?? null, contentionRatio ?? null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
 
   // routerIds undefined means "field wasn't sent" — leave the sites alone.

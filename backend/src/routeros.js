@@ -1067,6 +1067,86 @@ export async function ensureHotspotUserProfile(conn, {
 }
 
 /**
+ * The shared bandwidth pool for one (router, tariff) pair — a contention
+ * ratio above 1:1 means several subscribers' own queues nest under this
+ * one as children (see ensureContentionMember below), so the SUM of their
+ * traffic is capped at this queue's own max-limit, not each of theirs
+ * independently.
+ *
+ * Simple Queue requires a real target even for an entry that only ever
+ * exists to be a parent — 0.0.0.0/32 is the standard inert placeholder for
+ * that: it matches nothing any real subscriber's traffic could ever be
+ * addressed as, so it never competes with a child queue for bandwidth on
+ * its own account.
+ */
+export async function ensureContentionPool(conn, { name, rateDown, rateUp }) {
+  const fields = [
+    '=target=0.0.0.0/32',
+    `=max-limit=${rateUp}k/${rateDown}k`,
+    `=comment=${managed('ispContention pool')}`,
+  ];
+  const rows = await conn.write('/queue/simple/print', [`?name=${name}`]);
+  const found = rows[0];
+  if (found) {
+    if (!unchanged(found, fields)) {
+      await cmd(conn, 'contention pool queue', '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
+    }
+    return { name, created: false };
+  }
+  await cmd(conn, 'contention pool queue', '/queue/simple/add', [`=name=${name}`, ...fields]);
+  return { name, created: true };
+}
+
+/**
+ * One subscriber's own queue within a contention pool — target is their
+ * live PPPoE interface, not an IP: RouterOS names a dynamic PPP session's
+ * interface `<pppoe-username>` literally, including the angle brackets,
+ * for as long as that session is up. Targeting it directly means this
+ * never has to know or track the subscriber's own address at all, and
+ * keeps working across an IP change with nothing to resync.
+ *
+ * max-limit is still this subscriber's own individual ceiling (the same
+ * value Mikrotik-Rate-Limit already enforces) — parent is what makes the
+ * *group's* combined usage share the pool's single cap, not this queue's
+ * own max-limit, which alone would just be a second copy of the RADIUS
+ * limit.
+ */
+export async function ensureContentionMember(conn, { poolName, pppoeUser, rateDown, rateUp }) {
+  const target = `<pppoe-${pppoeUser}>`;
+  const fields = [
+    `=target=${target}`,
+    `=max-limit=${rateUp}k/${rateDown}k`,
+    `=parent=${poolName}`,
+    `=comment=${managed('ispContention member')}`,
+  ];
+  const rows = await conn.write('/queue/simple/print', [`?target=${target}`]);
+  const found = rows[0];
+  if (found) {
+    if (!unchanged(found, fields)) {
+      await cmd(conn, 'contention member queue', '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
+    }
+    return { pppoeUser, created: false };
+  }
+  await cmd(conn, 'contention member queue', '/queue/simple/add', [`=name=${pppoeUser}`, ...fields]);
+  return { pppoeUser, created: true };
+}
+
+/**
+ * Undo ensureContentionMember — a subscriber moved off a contended plan,
+ * or their tariff's ratio was edited back down to 1:1. Leaves the pool
+ * queue itself in place even if this was its last member: an empty parent
+ * queue is harmless, and recreating it the next time someone joins that
+ * same tariff is no more work than deleting it now would save.
+ */
+export async function removeContentionMember(conn, { pppoeUser }) {
+  const target = `<pppoe-${pppoeUser}>`;
+  const rows = await conn.write('/queue/simple/print', [`?target=${target}`]);
+  for (const row of rows) {
+    if (isManaged(row)) await cmd(conn, 'remove contention member queue', '/queue/simple/remove', [`=.id=${idOf(row)}`]);
+  }
+}
+
+/**
  * Re-applies just the billing-failover script/scheduler over the API — for
  * a router that already has WireGuard/OVPN set up and only needs the
  * failover logic itself refreshed (a staleAfter tuning change, say), with

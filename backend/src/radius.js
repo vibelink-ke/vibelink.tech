@@ -70,7 +70,8 @@ export async function activateSubscriber(c, tenantId, subId) {
   // recomputed (there is no rate to compute), but it must never stop this
   // from clearing the block or refreshing the password/IP.
   const { rows: [s] } = await c.query(
-    `select s.*, p.radius_profile, p.rate_down, p.rate_up, r.host, r.secret, r.pppoe_pool
+    `select s.*, p.radius_profile, p.rate_down, p.rate_up, p.contention_ratio,
+            r.host, r.secret, r.pppoe_pool, r.api_port, r.service_user, r.service_password_enc
      from subscribers s left join plans p on p.id = s.plan_id
      left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
 
@@ -117,6 +118,9 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate, tenantId]);
 
+  await applyContentionQueue(s).catch((e) =>
+    console.warn('activateSubscriber: applyContentionQueue failed for', s.pppoe_user, '—', e.message));
+
   if (s.host) {
     await coa(c, s.host, s.secret, s.pppoe_user, rate);
     // A live session cannot be handed a new Framed-IP-Address by CoA — that
@@ -126,6 +130,53 @@ export async function activateSubscriber(c, tenantId, subId) {
     if (address && s.static_ip && String(s.static_ip).split('/')[0] !== address) {
       await coa(c, s.host, s.secret, s.pppoe_user, rate, undefined, true);
     }
+  }
+}
+
+/**
+ * The router-side half of contention: activateSubscriber's own RADIUS
+ * writes (Mikrotik-Rate-Limit above) give this subscriber an individual
+ * ceiling regardless of contention_ratio — this additionally provisions a
+ * shared queue when their tariff calls for it, or tears one down if it no
+ * longer applies (moved to a different plan, or the tariff's ratio was
+ * edited back to 1:1).
+ *
+ * `s` carries whatever the caller already loaded — activateSubscriber's
+ * own query above, or the backfill script's equivalent — so this never
+ * queries the database itself; it only needs contention_ratio, plan_id,
+ * router_id/host/api_port/service_user/service_password_enc, and
+ * pppoe_user, rate_down, rate_up already being present on it.
+ *
+ * Best-effort throughout: a router unreachable right now must never block
+ * the RADIUS write that actually keeps a subscriber online.
+ */
+export async function applyContentionQueue(s) {
+  if (!s.pppoe_user || !s.router_id || !s.service_user || !s.service_password_enc) return;
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let conn;
+  try {
+    const password = secrets.decrypt(s.service_password_enc);
+    conn = await ros.connect({
+      host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
+      user: s.service_user, password, timeoutSec: 8,
+    });
+
+    if (!s.contention_ratio || s.contention_ratio <= 1 || !s.plan_id) {
+      await ros.removeContentionMember(conn, { pppoeUser: s.pppoe_user });
+      return;
+    }
+
+    await ros.ensureContentionPool(conn, {
+      name: `contention-${s.plan_id}`, rateDown: s.rate_down, rateUp: s.rate_up,
+    });
+    await ros.ensureContentionMember(conn, {
+      poolName: `contention-${s.plan_id}`, pppoeUser: s.pppoe_user,
+      rateDown: s.rate_down, rateUp: s.rate_up,
+    });
+  } finally {
+    if (conn) ros.close(conn);
   }
 }
 

@@ -25,12 +25,22 @@ const PERIODS = [
   { value: 1440, label: 'Daily' },
 ];
 
-const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterIds: [] };
+const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterIds: [], contentionRatio: 1 };
+
+const CONTENTION_OPTIONS = [1, 2, 3, 4, 5, 6].map((n) => ({ value: n, label: `1:${n}` }));
 
 const mbps = (kbps) => (kbps ? Math.round(kbps / 1000) : 0);
 const speed = (p) => (p.rate_down ? `${mbps(p.rate_down)}/${mbps(p.rate_up)} Mbps` : '—');
 const periodLabel = (m) => PERIODS.find((x) => x.value === Number(m))?.label ?? `${m} min`;
 const capLabel = (p) => (p.data_cap_mb ? `${Math.round(p.data_cap_mb / 1024)} GB` : 'Uncapped');
+// Ties directly to activateSubscriber's own queue provisioning in
+// radius.js: a ratio above 1:1 shares one pool sized at the plan's own
+// rate across that many subscribers, instead of each getting an
+// independent dedicated Mikrotik-Rate-Limit.
+const contentionLabel = (p) => {
+  const n = Number(p.contention_ratio ?? 1);
+  return n > 1 ? `1:${n} shared` : 'Dedicated (1:1)';
+};
 
 const selectStyle = {
   padding: '7px 10px', border: `1px solid ${color.line}`, borderRadius: radius.md,
@@ -74,6 +84,7 @@ export default function Tariffs() {
     rateUp: Number(v.speedUp) * 1000 || 0,
     dataCapMb: v.capGb === '' || v.capGb == null ? null : Math.round(Number(v.capGb) * 1024),
     routerIds: v.siteRouterIds ?? [],
+    contentionRatio: Number(v.contentionRatio) || 1,
   });
 
   const create = async () => {
@@ -134,6 +145,7 @@ export default function Tariffs() {
     capGb: p.data_cap_mb ? Math.round(p.data_cap_mb / 1024) : '',
     durationMin: p.duration_min ?? 43200,
     siteRouterIds: p.site_ids ?? [],
+    contentionRatio: p.contention_ratio ?? 1,
   });
 
   const siteLabel = (p) => {
@@ -169,6 +181,11 @@ export default function Tariffs() {
         <Field label="Data cap (GB)">
           <Input value={v.capGb} onChange={update('capGb')} type="number" placeholder="leave blank for uncapped" />
         </Field>
+        <Field label="Contention ratio">
+          <select value={v.contentionRatio ?? 1} onChange={update('contentionRatio')} style={selectStyle}>
+            {CONTENTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
         <Field label="Sites" span={2}>
           <div style={{ border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '8px 10px', display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
             {(store.routers ?? []).length === 0 && <span style={{ fontSize: 12.5, color: color.muted }}>No routers onboarded yet</span>}
@@ -184,6 +201,8 @@ export default function Tariffs() {
           Speeds become the Mikrotik-Rate-Limit sent to the router when a payment activates the
           subscriber. The cap is what Fair use policy measures against. Leave every site unchecked to
           offer this tariff everywhere, or check one or more sites to restrict it to just those.
+          Contention above 1:1 shares one pool sized at this plan's own speed across that many
+          subscribers on the router — 1:1 (dedicated) is unaffected.
         </span>
       </div>
     );
@@ -211,6 +230,7 @@ export default function Tariffs() {
               { key: 'period', label: 'Period', render: (p) => periodLabel(p.duration_min) },
               { key: 'speed', label: 'Speed', render: speed },
               { key: 'cap', label: 'Data cap', render: (p) => <span style={{ color: color.neutralInk }}>{capLabel(p)}</span> },
+              { key: 'contention', label: 'Contention', render: (p) => <span style={{ color: Number(p.contention_ratio ?? 1) > 1 ? color.green : color.muted }}>{contentionLabel(p)}</span> },
               { key: 'site', label: 'Site', render: (p) => <span style={{ color: (p.site_ids ?? []).length ? color.ink : color.muted }}>{siteLabel(p)}</span> },
               { key: 'subs', label: 'Subscribers', render: (p) => <span style={{ fontFamily: font.mono }}>{subsPerPlan[p.id] ?? 0}</span> },
               {
@@ -254,6 +274,7 @@ export default function Tariffs() {
             <KV k="Download" v={viewing.rate_down ? `${mbps(viewing.rate_down)} Mbps` : '—'} />
             <KV k="Upload" v={viewing.rate_up ? `${mbps(viewing.rate_up)} Mbps` : '—'} />
             <KV k="Data cap" v={capLabel(viewing)} />
+            <KV k="Contention ratio" v={contentionLabel(viewing)} />
             <KV k="Site" v={siteLabel(viewing)} />
             <KV k="Subscribers" v={subsPerPlan[viewing.id] ?? 0} />
             <KV k="Active" v={viewing.active ? 'Yes' : 'No'} />

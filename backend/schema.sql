@@ -2246,3 +2246,16 @@ alter table app_settings add column if not exists sales_phone text;
 -- gateway is flagged is_default — a tenant with only one paybill never
 -- needs to touch this at all.
 alter table site_profiles add column if not exists payment_config_id uuid references tenant_payment_config on delete set null;
+
+-- How many subscribers genuinely share one bandwidth pool on a PPPoE
+-- tariff, MikroTik-style ("1:4" etc.) — 1 (the default) is today's
+-- unchanged behaviour, a dedicated Mikrotik-Rate-Limit with no queue
+-- involved at all. Above 1, activateSubscriber (radius.js) provisions a
+-- parent Simple Queue per (router, plan) sized at the plan's own rate,
+-- and each subscriber gets a child queue under it — so N people sharing
+-- a 10 Mbps tariff can each burst to 10 Mbps alone, but split it when
+-- several are active at once, rather than each getting an independent
+-- dedicated 10 Mbps.
+alter table plans add column if not exists contention_ratio integer not null default 1;
+alter table plans drop constraint if exists plans_contention_ratio_check;
+alter table plans add constraint plans_contention_ratio_check check (contention_ratio between 1 and 6);
