@@ -1722,6 +1722,28 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
      on conflict (voucher_id, mac) do update set router_id = excluded.router_id,
        label = coalesce(excluded.label, voucher_devices.label)`,
     [found.voucher.id, mac, r.id, label]);
+
+  /**
+   * The ip-binding above is a router-level bypass — it never touches RADIUS,
+   * so it does not consume the code's actual login credentials. Without
+   * this, a single-device code stayed fully valid to type into a second,
+   * completely different device's own sign-in page afterward: RouterOS's
+   * shared-users limit only counts RADIUS-authenticated sessions, sees zero
+   * of those for a code whose one device got in via ip-binding, and happily
+   * authenticates a first one for anyone who still has the code. Two
+   * independent devices online on one single-device purchase, neither
+   * aware of the other.
+   *
+   * Revoking radcheck/radreply closes that without touching the device
+   * just bound above (its access is the ip-binding, not these rows) — the
+   * code simply stops being able to authenticate a second device from here
+   * on. Multi-device vouchers are left alone: sharing a code across
+   * several devices is the point there, not a hole to close.
+   */
+  if (!hs?.multi_device) {
+    const { forgetVoucherAccess } = await import('./radius.js');
+    await forgetVoucherAccess(pool, [found.voucher.code], tenant.id).catch(() => {});
+  }
   res.json({ ok: true });
 }));
 
