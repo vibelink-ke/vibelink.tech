@@ -1289,7 +1289,13 @@ async function voucherAndRouter(tenantId, code, pageRouterId) {
   if (!r?.service_user || !r.service_password_enc) {
     return { error: 'This router has not been configured for the billing system yet.' };
   }
-  return { voucher: v, router: r };
+  // Whether a device is already actually using this code — the ordinary
+  // "type the code into your own phone" purchase never records a mac
+  // anywhere (voucher.mac is only set by the device-picker/tv-buy flow),
+  // so a live session is the only sign that phone exists at all. Both
+  // callers below need this to reserve its slot correctly: v.mac alone
+  // undercounts every typed-code voucher's own already-connected phone.
+  return { voucher: v, router: r, hasLiveSession: !!session?.nas };
 }
 
 /**
@@ -1605,7 +1611,11 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
    * once, in either case.
    */
   const limit = hs?.multi_device ? 3 : 1;
-  const slotsLeft = Math.max(0, limit - taken.size);
+  // taken already counts voucher.mac when the device-picker flow set one;
+  // a typed-code voucher never does, so a live session with no mac means an
+  // ordinary phone is already using this code's one slot uncounted above.
+  const reservedForOriginal = found.hasLiveSession && !found.voucher.mac ? 1 : 0;
+  const slotsLeft = Math.max(0, limit - taken.size - reservedForOriginal);
 
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -1647,13 +1657,17 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   const limit = hs?.multi_device ? 3 : 1;
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
-  // +1 reserves a slot for the voucher's own original device — but a bare
-  // voucher (no mac recorded at creation, the case a never-used code hits
-  // via voucherAndRouter's router-fallback above) has no original device to
-  // reserve for. Reserving one anyway made a single-device plan's very
+  // Reserves a slot for the voucher's own original device — but only when
+  // one actually exists. voucher.mac alone undercounts it: that column is
+  // only ever set by the device-picker/tv-buy flow, while the ordinary
+  // "type the code into your own phone" purchase leaves it null even
+  // though that phone is real and already connected (hasLiveSession is
+  // the only record of it anywhere). A voucher with neither — the
+  // never-used, router-fallback case above — truly has no original device
+  // to reserve for; reserving one anyway made a single-device plan's very
   // first bind always report "already full" before a single device was
   // ever added.
-  const reservedForOriginal = found.voucher.mac ? 1 : 0;
+  const reservedForOriginal = found.voucher.mac || found.hasLiveSession ? 1 : 0;
   if (count + reservedForOriginal >= limit) {
     return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
   }
