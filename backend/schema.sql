@@ -2237,3 +2237,12 @@ alter table routers add column if not exists upstream_public_ip inet;
 -- mismatch this exists to avoid. Falls back to alert_phone, then the
 -- owner's own phone, when unset — see notifySales in jobs.js.
 alter table app_settings add column if not exists sales_phone text;
+
+-- Which of a tenant's own already-configured paybills (tenant_payment_config
+-- — several are supported per provider, see the "several paybills per
+-- provider" migration above) a customer at this router actually pays into.
+-- On site_profiles rather than a new table: a router already has at most
+-- one row there. Left unset, a router's customers fall back to whichever
+-- gateway is flagged is_default — a tenant with only one paybill never
+-- needs to touch this at all.
+alter table site_profiles add column if not exists payment_config_id uuid references tenant_payment_config on delete set null;

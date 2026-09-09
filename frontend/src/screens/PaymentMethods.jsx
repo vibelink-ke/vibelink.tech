@@ -57,10 +57,57 @@ export default function PaymentMethods() {
   const store = useStore();
   const [creds, setCreds] = useState({});
   const [forwarder, setForwarder] = useState(false);
+  const [extra, setExtra] = useState({});
 
-  const configured = Object.fromEntries((store.paymentMethods ?? []).map((m) => [m.provider, m]));
+  const allMethods = store.paymentMethods ?? [];
+  const configured = Object.fromEntries(allMethods.map((m) => [m.provider, m]));
+  const byProvider = (id) => allMethods.filter((m) => m.provider === id);
 
   const [busy, setBusy] = useState(false);
+
+  const setExtraField = (channel, key) => (e) =>
+    setExtra((c) => ({ ...c, [channel]: { ...(c[channel] ?? {}), [key]: e.target.value } }));
+
+  const addExtra = async (ch) => {
+    const entered = extra[ch.id] ?? {};
+    const { label, shortcode, ...rest } = entered;
+    if (!label) return store.toast('Give this paybill a label first');
+    setBusy(true);
+    try {
+      await api.addPaymentMethod({
+        provider: ch.id, label, shortcode: shortcode ?? null, credentials: rest,
+        enabledPppoe: ch.id !== 'kopokopo', enabledHotspot: true,
+      });
+      setExtra((c) => ({ ...c, [ch.id]: {} }));
+      await store.reload();
+      store.toast(`${label} added`);
+    } catch (e) {
+      store.toast(`Could not add: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const makeDefault = async (row) => {
+    try {
+      await api.setDefaultPaymentMethod(row.id);
+      await store.reload();
+      store.toast(`${row.label ?? row.shortcode ?? row.provider} is now the default`);
+    } catch (e) {
+      store.toast(`Could not set default: ${e.message}`);
+    }
+  };
+
+  const removeMethod = async (row) => {
+    if (!window.confirm(`Remove ${row.label ?? row.shortcode ?? row.provider}?`)) return;
+    try {
+      await api.deletePaymentMethod(row.id);
+      await store.reload();
+      store.toast('Removed');
+    } catch (e) {
+      store.toast(`Could not remove: ${e.message}`);
+    }
+  };
 
   const set = (channel, key) => (e) =>
     setCreds((c) => ({ ...c, [channel]: { ...(c[channel] ?? {}), [key]: e.target.value } }));
@@ -160,6 +207,47 @@ export default function PaymentMethods() {
                   </Button>
                   <Button onClick={() => test(ch)}>Test</Button>
                 </div>
+
+                {byProvider(ch.id).length > 1 && (
+                  <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>
+                      ALL PAYBILLS FOR THIS PROVIDER
+                    </span>
+                    {byProvider(ch.id).map((row) => (
+                      <div key={row.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5 }}>
+                        <Badge tone={row.is_default ? 'active' : 'unused'}>{row.is_default ? 'Default' : 'Site-only'}</Badge>
+                        <span>{row.label || row.shortcode || '(unlabeled)'}</span>
+                        {row.shortcode && <span style={{ fontFamily: font.mono, color: color.muted }}>· {row.shortcode}</span>}
+                        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                          {!row.is_default && <Button size="sm" onClick={() => makeDefault(row)}>Make default</Button>}
+                          <Button size="sm" onClick={() => removeMethod(row)}>Remove</Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <details>
+                  <summary style={{ cursor: 'pointer', fontSize: 12.5, color: color.muted }}>
+                    Add another {ch.name} paybill (for a specific site)
+                  </summary>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
+                    <Field label="Label (e.g. site name)">
+                      <Input value={extra[ch.id]?.label ?? ''} onChange={setExtraField(ch.id, 'label')} />
+                    </Field>
+                    {ch.fields.map((f) => (
+                      <Field key={f.key} label={f.label}>
+                        <Input
+                          type={f.secret ? 'password' : 'text'}
+                          autoComplete="off"
+                          value={extra[ch.id]?.[f.key] ?? ''}
+                          onChange={setExtraField(ch.id, f.key)}
+                        />
+                      </Field>
+                    ))}
+                    <Button onClick={() => addExtra(ch)} disabled={busy}>Add paybill</Button>
+                  </div>
+                </details>
               </div>
             </Card>
           );

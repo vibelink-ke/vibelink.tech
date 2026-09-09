@@ -120,6 +120,9 @@ export const api = {
   // ── payment channels ──
   paymentMethods: () => get('/api/payment-methods'),
   savePaymentMethod: (provider, cfg) => put(`/api/payment-methods/${provider}`, cfg),
+  addPaymentMethod: (cfg) => post('/api/payment-methods', cfg),
+  setDefaultPaymentMethod: (id) => post(`/api/payment-methods/${id}/default`, {}),
+  deletePaymentMethod: (id) => del(`/api/payment-methods/${id}`),
   testPaymentMethod: (provider) => post(`/api/payment-methods/${provider}/test`, {}),
 
   // ── SMS ──

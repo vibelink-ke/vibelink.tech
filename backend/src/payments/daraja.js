@@ -1,7 +1,7 @@
 import axios from 'axios';
 import express from 'express';
 import crypto from 'node:crypto';
-import { config, platformCollectConfig, tenantByShortcode } from '../db.js';
+import { config, configForRouter, platformCollectConfig, tenantByShortcode } from '../db.js';
 import { applyPayment, accrueSettlement } from './apply.js';
 
 const BASE = process.env.DARAJA_ENV === 'sandbox'
@@ -77,9 +77,13 @@ export async function testAuth(tenantId) {
  * dedicated platform-collect paybill, if one has been set up. Falls back to
  * the ordinary one when it hasn't, so collect-and-settle keeps working for a
  * tenant who hasn't configured a separate paybill yet.
+ *
+ * routerId is ignored for platformCollect: that path always settles through
+ * the platform's own collection arrangement regardless of which site the
+ * customer is on — site-specific routing is for a tenant's own paybills.
  */
-async function resolveConfig(tenantId, provider, platformCollect) {
-  if (!platformCollect) return config(tenantId, provider);
+async function resolveConfig(tenantId, provider, platformCollect, routerId) {
+  if (!platformCollect) return configForRouter(tenantId, provider, routerId);
   return (await platformCollectConfig(tenantId, provider)) ?? config(tenantId, provider);
 }
 
@@ -95,8 +99,8 @@ async function resolveConfig(tenantId, provider, platformCollect) {
  * tenant that has actually registered their own till, never as a general
  * "send money elsewhere" primitive.
  */
-export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false, till = null }) {
-  const cfg = await resolveConfig(tenantId, 'daraja', platformCollect);
+export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false, till = null, routerId = null }) {
+  const cfg = await resolveConfig(tenantId, 'daraja', platformCollect, routerId);
   if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
   const ts = stamp();
   const password = Buffer.from(cfg.shortcode + cfg.credentials.passkey + ts).toString('base64');

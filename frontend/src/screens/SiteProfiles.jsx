@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { site: '', router: '', provider: 'daraja', shortcode: '', account: '' };
+const BLANK = { site: '', router: '', provider: 'daraja', shortcode: '', account: '', paymentConfigId: '' };
 const PROVIDERS = [
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
   { value: 'kopokopo', label: 'KopoKopo till (hotspot)' },
@@ -36,6 +36,9 @@ export default function SiteProfiles() {
         provider: f.provider,
         shortcode: f.shortcode,
         accountPrefix: f.account || null,
+        // Hotspot always uses the tenant's one default gateway, by design —
+        // only PPPoE payments can be routed to a specific paybill per site.
+        paymentConfigId: f.provider === 'kopokopo' ? null : (f.paymentConfigId || null),
       });
       store.setCollection('siteProfiles', (ps) => [...ps.filter((p) => p.id !== created.id), created]);
       store.toast(`${created.site} profile saved`);
@@ -85,6 +88,16 @@ export default function SiteProfiles() {
             { key: 'router_name', label: 'Router', render: (p) => p.router_name ?? '—' },
             { key: 'provider', label: 'Channel', render: (p) => <Badge tone="default">{p.provider}</Badge> },
             { key: 'shortcode', label: 'Shortcode', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.shortcode}</span> },
+            {
+              key: 'payment_config_label',
+              label: 'Paybill used',
+              render: (p) =>
+                p.provider === 'kopokopo'
+                  ? <span style={{ color: color.muted }}>Tenant default (hotspot)</span>
+                  : p.payment_config_id
+                  ? <span>{p.payment_config_label || p.payment_config_shortcode || 'Custom paybill'}</span>
+                  : <span style={{ color: color.muted }}>Tenant default</span>,
+            },
             { key: 'account_prefix', label: 'Account prefix', render: (p) => p.account_prefix || '—' },
             {
               key: 'act',
@@ -133,6 +146,28 @@ export default function SiteProfiles() {
           <Field label="Account prefix" hint="Prepended to what the client types">
             <Input value={f.account} onChange={set('account')} placeholder="KIM-" />
           </Field>
+          {f.provider === 'kopokopo' ? (
+            <Field label="Paybill used" span={2} hint="Hotspot always charges through the tenant's one default gateway, for every site">
+              <Input value="Tenant default" disabled />
+            </Field>
+          ) : (
+            <Field
+              label="Paybill used"
+              span={2}
+              hint="Which of the tenant's already-configured paybills this site actually charges through. Leave as tenant default if there's only one."
+            >
+              <Select
+                value={f.paymentConfigId}
+                onChange={set('paymentConfigId')}
+                options={[
+                  { value: '', label: 'Tenant default' },
+                  ...(store.paymentMethods ?? [])
+                    .filter((m) => m.provider === f.provider)
+                    .map((m) => ({ value: m.id, label: m.label || m.shortcode || m.provider })),
+                ]}
+              />
+            </Field>
+          )}
         </div>
       </Modal>
     </Screen>

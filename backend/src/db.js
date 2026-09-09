@@ -65,6 +65,28 @@ export async function config(tenantId, provider) {
 }
 
 /**
+ * config(), but a customer's router gets first say when the tenant has
+ * actually assigned one of their own paybills to that site (site_profiles.
+ * payment_config_id) — otherwise identical to config(). A tenant running
+ * one paybill never sets this on any router, so this is a no-op fallback
+ * to config() for the common case; it only changes behaviour once an
+ * operator has deliberately picked a specific paybill for a specific site
+ * under Site payment profiles.
+ */
+export async function configForRouter(tenantId, provider, routerId) {
+  if (routerId) {
+    const { rows: [viaSite] } = await pool.query(
+      `select tpc.* from site_profiles sp
+         join tenant_payment_config tpc on tpc.id = sp.payment_config_id
+        where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider=$3`,
+      [routerId, tenantId, provider]
+    );
+    if (viaSite) return viaSite;
+  }
+  return config(tenantId, provider);
+}
+
+/**
  * The platform owner's dedicated paybill for collect-and-settle (see
  * tenant_payment_config.is_platform_collect) — deliberately separate from
  * config()'s pick, which is whatever that same tenant uses for its own

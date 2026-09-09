@@ -2289,7 +2289,7 @@ app.get('/portal/usage', wrap(async (req, res) => {
  * purpose.tenant_id is who the money is actually for. handleStkResult
  * reads purpose to decide which one applies.
  */
-async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose }) {
+async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose, routerId }) {
   const { rows: [t] } = await pool.query(
     'select subdomain, platform_collect_enabled, settlement_commission_pct from tenants where id=$1', [tenantId]);
 
@@ -2324,7 +2324,7 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
     return { checkoutId };
   }
 
-  const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description });
+  const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description, routerId });
   const checkoutId = data?.CheckoutRequestID ?? null;
   if (checkoutId) {
     await pool.query(
@@ -2341,7 +2341,7 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
   if (!s) return res.status(401).json({ error: 'not signed in' });
 
   const { rows: [sub] } = await pool.query(
-    `select sub.name, sub.phone, sub.account_code, p.price as plan_price
+    `select sub.name, sub.phone, sub.account_code, sub.router_id, p.price as plan_price
        from subscribers sub left join plans p on p.id = sub.plan_id
       where sub.id=$1 and sub.tenant_id=$2`, [s.subscriber_id, s.tenant_id]);
   if (!sub) return res.status(404).json({ error: 'not found' });
@@ -2371,7 +2371,7 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
     // back, sitting on "check your phone" even after Safaricom answered.
     const { checkoutId } = await stkPushForSubscriber(s.tenant_id, {
       phone, amount, accountCode: sub.account_code, description: `${sub.name} — ${sub.account_code}`,
-      purpose: { subscriber_id: s.subscriber_id },
+      purpose: { subscriber_id: s.subscriber_id }, routerId: sub.router_id,
     });
     res.json({ phone, amount, checkoutId });
   } catch (e) {
@@ -2415,7 +2415,7 @@ app.post('/portal/pay-invoice', stkLimiter, wrap(async (req, res) => {
     // present, rather than falling back to "earliest open".
     const { checkoutId } = await stkPushForSubscriber(s.tenant_id, {
       phone, amount, accountCode: s.account_code, description: `Invoice ${inv.number}`,
-      purpose: { subscriber_id: s.subscriber_id, invoice_id: inv.id },
+      purpose: { subscriber_id: s.subscriber_id, invoice_id: inv.id }, routerId: s.router_id,
     });
     res.json({ phone, amount, checkoutId });
   } catch (e) {
@@ -3076,7 +3076,8 @@ app.get('/api/email/history', wrap(async (req, res) => {
 /** Which payment channels this tenant may choose from — drives the Preferences dropdown. */
 app.get('/api/payment-methods', async (req, res) => {
   const { rows } = await pool.query(
-    'select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config where tenant_id=$1',
+    `select id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot
+       from tenant_payment_config where tenant_id=$1 order by provider, is_default desc, id`,
     [req.tenant.id]);
   res.json(rows);
 });
@@ -8057,13 +8058,15 @@ app.post('/api/payments/stk', requirePermission('payments.stk'), wrap(async (req
 
   let msisdn = phone;
   let accountRef = req.body.accountRef;
+  let subRouterId = null;
   if (subscriberId) {
     const { rows: [s] } = await pool.query(
-      'select phone, account_code from subscribers where tenant_id=$1 and id=$2',
+      'select phone, account_code, router_id from subscribers where tenant_id=$1 and id=$2',
       [req.tenant.id, subscriberId]);
     if (!s) return res.status(404).json({ error: 'subscriber not found' });
     msisdn = msisdn || s.phone;
     accountRef = accountRef || s.account_code;
+    subRouterId = s.router_id;
   }
   if (!msisdn) return res.status(400).json({ error: 'No phone number to push to' });
   msisdn = String(msisdn).replace(/^\+?(?:254)?0?/, '254');
@@ -8090,7 +8093,7 @@ app.post('/api/payments/stk', requirePermission('payments.stk'), wrap(async (req
       // need one.
       const r = await stkPushForSubscriber(req.tenant.id, {
         phone: msisdn, amount: Number(amount), accountCode: accountRef || 'TOPUP',
-        description: 'Account top-up', purpose: { subscriber_id: subscriberId ?? null },
+        description: 'Account top-up', purpose: { subscriber_id: subscriberId ?? null }, routerId: subRouterId,
       });
       checkoutId = r.checkoutId;
       if (!checkoutId) return res.status(502).json({ error: 'Gateway did not return a checkout id' });
@@ -8151,7 +8154,7 @@ app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(as
  */
 app.post('/api/subscribers/:id/stk', requirePermission('payments.stk'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
-    `select s.name, s.phone, s.account_code, p.price as plan_price
+    `select s.name, s.phone, s.account_code, s.router_id, p.price as plan_price
        from subscribers s left join plans p on p.id = s.plan_id
       where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
@@ -8164,7 +8167,7 @@ app.post('/api/subscribers/:id/stk', requirePermission('payments.stk'), wrap(asy
     const { checkoutId } = await stkPushForSubscriber(req.tenant.id, {
       phone: mpesa.normalise(s.phone), amount, accountCode: s.account_code,
       description: `${s.name} — ${s.account_code}`,
-      purpose: { subscriber_id: req.params.id },
+      purpose: { subscriber_id: req.params.id }, routerId: s.router_id,
     });
     res.json({ ok: true, phone: s.phone, amount, checkoutId });
   } catch (e) {
@@ -8968,22 +8971,25 @@ app.delete('/api/kb-articles/:id', requirePermission('kb.delete'), wrap(async (r
 // ── site payment profiles ─────────────────────────
 app.get('/api/site-profiles', wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `select p.*, r.name as router_name from site_profiles p
+    `select p.*, r.name as router_name, tpc.label as payment_config_label, tpc.shortcode as payment_config_shortcode
+     from site_profiles p
      left join routers r on r.id = p.router_id
+     left join tenant_payment_config tpc on tpc.id = p.payment_config_id
      where p.tenant_id=$1 order by p.site`, [req.tenant.id]);
   res.json(rows);
 }));
 
 app.post('/api/site-profiles', wrap(async (req, res) => {
-  const { site, routerId, provider, shortcode, accountPrefix } = req.body;
+  const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
   if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
   const { rows: [p] } = await pool.query(
-    `insert into site_profiles (tenant_id, site, router_id, provider, shortcode, account_prefix)
-     values ($1,$2,$3,$4,$5,$6)
+    `insert into site_profiles (tenant_id, site, router_id, provider, shortcode, account_prefix, payment_config_id)
+     values ($1,$2,$3,$4,$5,$6,$7)
      on conflict (tenant_id, site) do update set router_id=excluded.router_id,
-       provider=excluded.provider, shortcode=excluded.shortcode, account_prefix=excluded.account_prefix
+       provider=excluded.provider, shortcode=excluded.shortcode, account_prefix=excluded.account_prefix,
+       payment_config_id=excluded.payment_config_id
      returning *`,
-    [req.tenant.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null]);
+    [req.tenant.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null]);
   res.json(p);
 }));
 
@@ -8993,6 +8999,15 @@ app.delete('/api/site-profiles/:id', wrap(async (req, res) => {
 }));
 
 // ── payment credentials (Payment methods screen) ──
+/**
+ * Upsert-by-(provider, shortcode) — the original single-gateway-per-provider
+ * form still posts here. The original `on conflict (tenant_id, provider)`
+ * target stopped matching anything the day "several paybills per provider"
+ * dropped that plain unique constraint in favour of `tpc_tenant_provider_shortcode`
+ * (schema.sql, tenant_id+provider+coalesce(shortcode,'')), so this always threw
+ * "no unique or exclusion constraint matching the ON CONFLICT specification"
+ * once actually exercised. Target the index that still exists.
+ */
 app.put('/api/payment-methods/:provider', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
   if (req.params.provider === 'kopokopo' && enabledPppoe)
@@ -9000,10 +9015,48 @@ app.put('/api/payment-methods/:provider', requirePermission('payments.edit'), wr
   await pool.query(
     `insert into tenant_payment_config (tenant_id, provider, shortcode, credentials, enabled_pppoe, enabled_hotspot)
      values ($1,$2,$3,$4,$5,$6)
-     on conflict (tenant_id, provider) do update set shortcode=excluded.shortcode,
+     on conflict (tenant_id, provider, coalesce(shortcode, '')) do update set
        credentials=excluded.credentials, enabled_pppoe=excluded.enabled_pppoe,
        enabled_hotspot=excluded.enabled_hotspot`,
     [req.tenant.id, req.params.provider, shortcode ?? null, credentials, enabledPppoe, enabledHotspot]);
+  res.json({ ok: true });
+}));
+
+/** Add another named paybill for a provider a tenant already has one configured for. */
+app.post('/api/payment-methods', requirePermission('payments.edit'), wrap(async (req, res) => {
+  const { provider, label, shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
+  if (!provider) return res.status(400).json({ error: 'provider is required' });
+  if (provider === 'kopokopo' && enabledPppoe)
+    return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
+  const { rows: [row] } = await pool.query(
+    `insert into tenant_payment_config (tenant_id, provider, label, shortcode, credentials, enabled_pppoe, enabled_hotspot)
+     values ($1,$2,$3,$4,$5,$6,$7)
+     on conflict (tenant_id, provider, coalesce(shortcode, '')) do update set
+       label=excluded.label, credentials=excluded.credentials,
+       enabled_pppoe=excluded.enabled_pppoe, enabled_hotspot=excluded.enabled_hotspot
+     returning id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot`,
+    [req.tenant.id, provider, label ?? null, shortcode ?? null, credentials, enabledPppoe, enabledHotspot]);
+  res.json(row);
+}));
+
+app.post('/api/payment-methods/:id/default', requirePermission('payments.edit'), wrap(async (req, res) => {
+  const { rows: [row] } = await pool.query(
+    'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  // tpc_one_default_per_provider is a partial unique index — clear the old
+  // default first, in the same transaction, so setting a new one never trips it.
+  const { withTenant } = await import('./db.js');
+  await withTenant(req.tenant.id, async (c) => {
+    await c.query('update tenant_payment_config set is_default=false where tenant_id=$1 and provider=$2',
+      [req.tenant.id, row.provider]);
+    await c.query('update tenant_payment_config set is_default=true where tenant_id=$1 and id=$2',
+      [req.tenant.id, req.params.id]);
+  });
+  res.json({ ok: true });
+}));
+
+app.delete('/api/payment-methods/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
+  await pool.query('delete from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
 
