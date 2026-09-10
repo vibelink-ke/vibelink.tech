@@ -354,7 +354,7 @@ app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
 
 app.get('/api/auth/session', wrap(async (req, res) => {
   const s = await auth.readSession(auth.sessionToken(req));
-  res.json(s ? auth.publicSession(s) : null);
+  res.json(s ? await auth.publicSession(s) : null);
 }));
 
 app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
@@ -422,7 +422,7 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
     redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
   }
 
-  res.json({ ...auth.publicSession(s), redirectTo });
+  res.json({ ...(await auth.publicSession(s)), redirectTo });
 }));
 
 /** Provisions a tenant plus its owner in one transaction. */
@@ -492,7 +492,7 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
     redirectTo = `https://${sub}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
   }
 
-  res.json({ ...auth.publicSession(s), redirectTo });
+  res.json({ ...(await auth.publicSession(s)), redirectTo });
 }));
 
 /**
@@ -3143,13 +3143,13 @@ app.get('/api/email/history', wrap(async (req, res) => {
 }));
 
 /** Which payment channels this tenant may choose from — drives the Preferences dropdown. */
-app.get('/api/payment-methods', async (req, res) => {
+app.get('/api/payment-methods', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot
        from tenant_payment_config where tenant_id=$1 order by provider, is_default desc, id`,
     [req.tenant.id]);
   res.json(rows);
-});
+}));
 
 // ── SMS gateways ──────────────────────────────────
 app.get('/api/sms/gateways', wrap(async (req, res) => {
@@ -7948,7 +7948,7 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
 }));
 
 // ── money (Payments screen) ───────────────────────
-app.get('/api/payments', wrap(async (req, res) => {
+app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select pay.*,
            -- Which bundle a hotspot sale actually paid for — a payment
@@ -10033,7 +10033,7 @@ app.get('/api/fup-usage', wrap(async (req, res) => {
  * roll up honestly) rather than just summing sticker prices, which would
  * overstate a base with non-monthly plans on it.
  */
-app.get('/api/analytics/mrr', wrap(async (req, res) => {
+app.get('/api/analytics/mrr', requirePermission('analytics.view'), wrap(async (req, res) => {
   const { rows: [mrrRow] } = await pool.query(
     `select coalesce(sum(p.price * (43200.0 / greatest(p.duration_min, 1))), 0) as mrr,
             count(*) as active_count

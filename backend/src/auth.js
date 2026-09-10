@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { pool } from './db.js';
+import { loadPermissions } from './permissions.js';
 
 const scrypt = promisify(crypto.scrypt);
 
@@ -186,8 +187,18 @@ export function sessionToken(req) {
   return null;
 }
 
-/** Shape handed to the browser. Never includes the hash or the token. */
-export const publicSession = (s) => ({
+/**
+ * Shape handed to the browser. Never includes the hash or the token.
+ *
+ * perms is this session's role resolved against the tenant's actual
+ * (possibly customized) matrix — requirePermission already checks this
+ * server-side on every route, but until now nothing told the frontend
+ * what the result would be, so a nav item or a widget could only ever
+ * gate itself on a hardcoded role check, silently ignoring anything a
+ * tenant changed under Staff & Roles. A super-admin session gets every
+ * key true, matching requirePermission's own is_super_admin bypass.
+ */
+export const publicSession = async (s) => ({
   email: s.email,
   username: s.username,
   name: s.name,
@@ -195,6 +206,11 @@ export const publicSession = (s) => ({
   company: s.company,
   subdomain: s.subdomain,
   superAdmin: s.is_super_admin,
+  perms: s.is_super_admin
+    ? Object.fromEntries(Object.keys(await loadPermissions(s.tenant_id)).map((k) => [k, true]))
+    : Object.fromEntries(
+        Object.entries(await loadPermissions(s.tenant_id)).map(([k, byRole]) => [k, !!byRole[s.role]])
+      ),
   platformCollectEnabled: s.platform_collect_enabled,
   settlementMethod: s.settlement_method,
   settlementPhone: s.settlement_phone,

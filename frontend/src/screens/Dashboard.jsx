@@ -70,6 +70,12 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [range, setRange] = useState('Today');
   const [menuOpen, setMenuOpen] = useState(false);
+  // Gates just the raw revenue figures on this page (collected/PPPoE
+  // income tiles, the collections chart, KES-at-risk) — everything else
+  // here (online count, tickets, automation) stays visible to anyone who
+  // can reach the Dashboard at all. Undefined session (still loading)
+  // fails closed rather than flashing money figures before perms arrive.
+  const canSeeFinance = !!store.session?.perms?.['dashboard.finance'];
 
 
   const today = useMemo(
@@ -203,7 +209,13 @@ export default function Dashboard() {
   const newFromCustomers = (store.tickets ?? []).filter((t) => t.source === 'portal' && t.status === 'open').length;
 
   const exportCsv = () => {
-    const rows = [['metric', 'value'], ['range', range], ['collected', collected], ['online', active.length], ['unmatched', store.unmatched.length]];
+    const rows = [
+      ['metric', 'value'],
+      ['range', range],
+      ...(canSeeFinance ? [['collected', collected]] : []),
+      ['online', active.length],
+      ['unmatched', store.unmatched.length],
+    ];
     const blob = new Blob([rows.map((r) => r.join(',')).join('\n')], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -264,16 +276,20 @@ export default function Dashboard() {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
-        <Tile
-          label="COLLECTED TODAY"
-          value={`KES ${kes(collected)}`}
-          hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
-        />
-        <Tile
-          label="PPPOE INCOME TODAY"
-          value={`KES ${kes(collectedPppoeToday)}`}
-          hint={collected ? `${Math.round((collectedPppoeToday / collected) * 100)}% of today's total` : 'no collections yet'}
-        />
+        {canSeeFinance && (
+          <>
+            <Tile
+              label="COLLECTED TODAY"
+              value={`KES ${kes(collected)}`}
+              hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
+            />
+            <Tile
+              label="PPPOE INCOME TODAY"
+              value={`KES ${kes(collectedPppoeToday)}`}
+              hint={collected ? `${Math.round((collectedPppoeToday / collected) * 100)}% of today's total` : 'no collections yet'}
+            />
+          </>
+        )}
         <Tile
           label="ONLINE NOW"
           value={online.length}
@@ -308,44 +324,46 @@ export default function Dashboard() {
         />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.55fr) minmax(0, 1fr)', gap: 14 }}>
-        <div style={{ ...card, gap: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 14.5, fontWeight: 600 }}>Collections by channel · last 7 days</span>
-            <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected7d)}</span>
+      <div style={{ display: 'grid', gridTemplateColumns: canSeeFinance ? 'minmax(0, 1.55fr) minmax(0, 1fr)' : '1fr', gap: 14 }}>
+        {canSeeFinance && (
+          <div style={{ ...card, gap: 18 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 14.5, fontWeight: 600 }}>Collections by channel · last 7 days</span>
+              <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected7d)}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
+              {chartDays.map((day, i) => (
+                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%' }}>
+                  {day.total > 0 ? (
+                    <div
+                      title={`KES ${kes(day.total)}`}
+                      style={{
+                        height: `${Math.max(2, (day.total / chartPeak) * 100)}%`,
+                        display: 'flex', flexDirection: 'column-reverse',
+                        borderRadius: '3px 3px 0 0', overflow: 'hidden',
+                      }}
+                    >
+                      {day.segments.filter((s) => s.total > 0).map((s, si) => (
+                        <div key={si} style={{ background: s.swatch, height: `${(s.total / day.total) * 100}%` }} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ height: 1, background: '#c3ccc6' }} />
+                  )}
+                  <span style={{ textAlign: 'center', fontSize: 11, color: color.muted, paddingTop: 5 }}>{day.label}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', borderTop: '1px solid #eef0ec', paddingTop: 12 }}>
+              {CHANNELS.map((c) => (
+                <span key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#4a524c' }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: c.swatch }} />
+                  {c.label}
+                </span>
+              ))}
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
-            {chartDays.map((day, i) => (
-              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%' }}>
-                {day.total > 0 ? (
-                  <div
-                    title={`KES ${kes(day.total)}`}
-                    style={{
-                      height: `${Math.max(2, (day.total / chartPeak) * 100)}%`,
-                      display: 'flex', flexDirection: 'column-reverse',
-                      borderRadius: '3px 3px 0 0', overflow: 'hidden',
-                    }}
-                  >
-                    {day.segments.filter((s) => s.total > 0).map((s, si) => (
-                      <div key={si} style={{ background: s.swatch, height: `${(s.total / day.total) * 100}%` }} />
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ height: 1, background: '#c3ccc6' }} />
-                )}
-                <span style={{ textAlign: 'center', fontSize: 11, color: color.muted, paddingTop: 5 }}>{day.label}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', borderTop: '1px solid #eef0ec', paddingTop: 12 }}>
-            {CHANNELS.map((c) => (
-              <span key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#4a524c' }}>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: c.swatch }} />
-                {c.label}
-              </span>
-            ))}
-          </div>
-        </div>
+        )}
 
         <div style={{ ...card, gap: 14 }}>
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Live automation feed</span>
@@ -390,7 +408,7 @@ export default function Dashboard() {
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Expiring next 72 hours</span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontFamily: font.mono, fontSize: 30, fontWeight: 500 }}>{expiring.length}</span>
-            <span style={{ fontSize: 13, color: color.neutralInk }}>accounts · KES {kes(atRisk)} at risk</span>
+            <span style={{ fontSize: 13, color: color.neutralInk }}>accounts{canSeeFinance ? ` · KES ${kes(atRisk)} at risk` : ''}</span>
           </div>
           <div style={{ height: 8, borderRadius: radius.pill, background: '#eef0ec', overflow: 'hidden', display: 'flex' }}>
             {expiring.length > 0 && (

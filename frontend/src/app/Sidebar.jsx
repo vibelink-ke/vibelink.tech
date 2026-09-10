@@ -215,11 +215,13 @@ export default function Sidebar() {
         {NAV_SECTIONS.filter((s) => !s.ownerOnly || store.isPlatformOwner).map((section, si) => (
           <React.Fragment key={section.heading}>
             <div style={{ ...heading, paddingTop: si === 0 ? 10 : 16 }}>{section.heading}</div>
-            {section.items.map((item) => (
-              item.children
-                ? <Group key={item.label} item={item} store={store} />
-                : <Row key={item.to} item={item} store={store} />
-            ))}
+            {section.items
+              .filter((item) => !item.perm || store.session?.perms?.[item.perm])
+              .map((item) => (
+                item.children
+                  ? <Group key={item.label} item={item} store={store} />
+                  : <Row key={item.to} item={item} store={store} />
+              ))}
           </React.Fragment>
         ))}
       </nav>

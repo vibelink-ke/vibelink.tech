@@ -51,6 +51,17 @@ export const DEFAULT_PERMISSIONS = {
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'tickets.delete':  all(),
 
+  // Revenue/MRR reporting — same trust level as payments.view, since it's
+  // the same underlying money figures rolled up rather than itemized.
+  'analytics.view': { owner: true, cashier: true, technician: false, support: false, sales: false },
+
+  // Gates only the Dashboard's own revenue tiles (collected today, PPPoE
+  // income, the collections chart, KES-at-risk) — everything else on the
+  // page (online count, tickets, automation feed) stays visible to anyone
+  // who can reach the Dashboard at all. Same default as payments.view: it
+  // is the same class of figure, just surfaced on a different screen.
+  'dashboard.finance': { owner: true, cashier: true, technician: false, support: false, sales: false },
+
   'leads.view':      { owner: true, cashier: false, technician: false, support: false, sales: true },
   'leads.create':    { owner: true, cashier: false, technician: false, support: false, sales: true },
   'leads.edit':      { owner: true, cashier: false, technician: false, support: false, sales: true },
@@ -146,6 +157,8 @@ export const PERMISSION_META = [
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },
+  { key: 'analytics.view', page: 'Analytics', action: 'View' },
+  { key: 'dashboard.finance', page: 'Dashboard', action: 'View revenue figures' },
   { key: 'leads.view',     page: 'Leads', action: 'View' },
   { key: 'leads.create',   page: 'Leads', action: 'Create' },
   { key: 'leads.edit',     page: 'Leads', action: 'Edit' },
