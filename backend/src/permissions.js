@@ -86,6 +86,21 @@ export const DEFAULT_PERMISSIONS = {
   // as applying a payment, not something a technician or support role needs.
   'payments.stk': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
+  // Its own page/keys, not folded into payments.* — a tenant may want a
+  // cashier who can view and apply day-to-day payments without also being
+  // able to see or change gateway API credentials (view) or which paybill
+  // a router settles into (edit), so this needs to be grantable
+  // independently rather than riding along with the general Payments page.
+  'payment_gateways.view': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'payment_gateways.edit': all(),
+
+  // Which of the tenant's paybills a given router's payments actually
+  // settle into — same reasoning as payment_gateways above: a payment-
+  // routing decision, not general payments viewing, so it gets its own
+  // page in the matrix rather than sharing payments.*.
+  'site_profiles.view': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'site_profiles.edit': all(),
+
   // A referral commission is a real payout — the same trust level as
   // payments.request_payout, deliberately not leads.edit: a sales rep who
   // manages their own referral sources should not also be the one who
@@ -171,9 +186,13 @@ export const PERMISSION_META = [
   { key: 'kb.delete', page: 'Knowledge base', action: 'Delete' },
   { key: 'payments.view',  page: 'Payments', action: 'View' },
   { key: 'payments.apply', page: 'Payments', action: 'Apply / match' },
-  { key: 'payments.edit',  page: 'Payments', action: 'Edit gateway credentials' },
+  { key: 'payments.edit',  page: 'Payments', action: 'Change settlement payout destination' },
   { key: 'payments.request_payout', page: 'Payments', action: 'Request settlement payout' },
   { key: 'payments.stk', page: 'Payments',            action: 'Push STK to a handset' },
+  { key: 'payment_gateways.view', page: 'Payment gateways', action: 'View' },
+  { key: 'payment_gateways.edit', page: 'Payment gateways', action: 'Add / edit / delete / reveal credentials' },
+  { key: 'site_profiles.view', page: 'Site payment profiles', action: 'View' },
+  { key: 'site_profiles.edit', page: 'Site payment profiles', action: 'Create / edit / delete' },
   { key: 'referrers.manage', page: 'Referrers',        action: 'Create / edit / delete / mark commission paid' },
   { key: 'staff.view',               page: 'Staff & roles', action: 'View' },
   { key: 'staff.create',             page: 'Staff & roles', action: 'Invite' },

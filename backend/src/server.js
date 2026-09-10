@@ -3143,7 +3143,7 @@ app.get('/api/email/history', wrap(async (req, res) => {
 }));
 
 /** Which payment channels this tenant may choose from — drives the Preferences dropdown. */
-app.get('/api/payment-methods', requirePermission('payments.view'), wrap(async (req, res) => {
+app.get('/api/payment-methods', requirePermission('payment_gateways.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot
        from tenant_payment_config where tenant_id=$1 order by provider, is_default desc, id`,
@@ -9136,7 +9136,7 @@ app.delete('/api/kb-articles/:id', requirePermission('kb.delete'), wrap(async (r
 // profile decides which of the tenant's paybills a router's payments
 // actually settle into, which is a payment-configuration change even
 // though it lives on its own screen.
-app.get('/api/site-profiles', requirePermission('payments.view'), wrap(async (req, res) => {
+app.get('/api/site-profiles', requirePermission('site_profiles.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name, tpc.label as payment_config_label, tpc.shortcode as payment_config_shortcode
      from site_profiles p
@@ -9146,7 +9146,7 @@ app.get('/api/site-profiles', requirePermission('payments.view'), wrap(async (re
   res.json(rows);
 }));
 
-app.post('/api/site-profiles', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/site-profiles', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
   const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
   if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
   const { rows: [p] } = await pool.query(
@@ -9160,7 +9160,7 @@ app.post('/api/site-profiles', requirePermission('payments.edit'), wrap(async (r
   res.json(p);
 }));
 
-app.delete('/api/site-profiles/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.delete('/api/site-profiles/:id', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
   await pool.query('delete from site_profiles where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
@@ -9175,7 +9175,7 @@ app.delete('/api/site-profiles/:id', requirePermission('payments.edit'), wrap(as
  * "no unique or exclusion constraint matching the ON CONFLICT specification"
  * once actually exercised. Target the index that still exists.
  */
-app.put('/api/payment-methods/:provider', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.put('/api/payment-methods/:provider', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
   if (req.params.provider === 'kopokopo' && enabledPppoe)
     return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
@@ -9190,7 +9190,7 @@ app.put('/api/payment-methods/:provider', requirePermission('payments.edit'), wr
 }));
 
 /** Add another named paybill for a provider a tenant already has one configured for. */
-app.post('/api/payment-methods', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-methods', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { provider, label, shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false } = req.body;
   if (!provider) return res.status(400).json({ error: 'provider is required' });
   if (provider === 'kopokopo' && enabledPppoe)
@@ -9206,7 +9206,7 @@ app.post('/api/payment-methods', requirePermission('payments.edit'), wrap(async 
   res.json(row);
 }));
 
-app.post('/api/payment-methods/:id/default', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-methods/:id/default', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(
     'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!row) return res.status(404).json({ error: 'not found' });
@@ -9222,7 +9222,7 @@ app.post('/api/payment-methods/:id/default', requirePermission('payments.edit'),
   res.json({ ok: true });
 }));
 
-app.delete('/api/payment-methods/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.delete('/api/payment-methods/:id', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   await pool.query('delete from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
@@ -10161,7 +10161,7 @@ app.delete('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
 }));
 
 // ── payment gateways: several per provider ────────
-app.get('/api/payment-gateways', wrap(async (req, res) => {
+app.get('/api/payment-gateways', requirePermission('payment_gateways.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, provider, label, shortcode, is_default, is_platform_collect, enabled_pppoe, enabled_hotspot,
             last_callback_at, credentials
@@ -10176,7 +10176,7 @@ app.get('/api/payment-gateways', wrap(async (req, res) => {
   })));
 }));
 
-app.post('/api/payment-gateways', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-gateways', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { provider, label, shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false, isDefault } = req.body;
   if (!provider || !shortcode) return res.status(400).json({ error: 'Channel and shortcode are required' });
   if (provider === 'kopokopo' && enabledPppoe)
@@ -10216,7 +10216,7 @@ app.post('/api/payment-gateways', requirePermission('payments.edit'), wrap(async
  * returning secrets on every page load, this is a deliberate action — the same
  * shape as the router's RADIUS secret.
  */
-app.get('/api/payment-gateways/:id/credentials', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.get('/api/payment-gateways/:id/credentials', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select credentials from tenant_payment_config where id=$1 and tenant_id=$2',
     [req.params.id, req.tenant.id]);
@@ -10231,7 +10231,7 @@ app.get('/api/payment-gateways/:id/credentials', requirePermission('payments.edi
  * posts to whatever URL was registered, which for a new shortcode is nothing at
  * all. registerC2B existed since the import and had no way to be called.
  */
-app.post('/api/payment-gateways/:id/register-urls', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/register-urls', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select * from tenant_payment_config where id=$1 and tenant_id=$2',
     [req.params.id, req.tenant.id]);
@@ -10268,7 +10268,7 @@ app.post('/api/payment-gateways/:id/register-urls', requirePermission('payments.
   }
 }));
 
-app.put('/api/payment-gateways/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.put('/api/payment-gateways/:id', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { label, shortcode, credentials, enabledPppoe, enabledHotspot } = req.body;
 
   // Checked before the update runs, not after: the CHECK constraint would
@@ -10298,7 +10298,7 @@ app.put('/api/payment-gateways/:id', requirePermission('payments.edit'), wrap(as
   res.json({ ok: true });
 }));
 
-app.post('/api/payment-gateways/:id/default', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/default', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'select provider from tenant_payment_config where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   if (!g) return res.status(404).json({ error: 'not found' });
@@ -10379,7 +10379,7 @@ app.patch('/api/settings/settlement-method', requirePermission('payments.edit'),
  * tenant that isn't the owner — it would just be a no-op, and this avoids
  * the confusion of a toggle that appears to work but silently does nothing.
  */
-app.post('/api/payment-gateways/:id/platform-collect', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.post('/api/payment-gateways/:id/platform-collect', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   if (!req.session.is_super_admin)
     return res.status(403).json({ error: 'Only the platform owner can designate a platform-collect paybill.' });
   const { rows: [g] } = await pool.query(
@@ -10406,7 +10406,7 @@ app.post('/api/payment-gateways/:id/platform-collect', requirePermission('paymen
   }
 }));
 
-app.delete('/api/payment-gateways/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
+app.delete('/api/payment-gateways/:id', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { rows: [g] } = await pool.query(
     'delete from tenant_payment_config where tenant_id=$1 and id=$2 returning provider, is_default',
     [req.tenant.id, req.params.id]);

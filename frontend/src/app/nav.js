@@ -52,7 +52,7 @@ export const NAV_SECTIONS = [
     heading: 'MONEY',
     items: [
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
-      { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length },
+      { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length, perm: 'site_profiles.view' },
       { to: '/automation', label: 'Automation' },
       { to: '/expenses', label: 'Expenses', count: (s) => s.expenses.filter((e) => e.status === 'pending').length },
     ],
