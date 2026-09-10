@@ -2856,11 +2856,11 @@ app.get('/api/hotspot/online', requirePermission('hotspot.view'), wrap(async (re
   res.json(rows);
 }));
 
-app.get('/api/payments/unmatched', async (req, res) => {
+app.get('/api/payments/unmatched', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     "select * from payments where tenant_id=$1 and status='unmatched' order by received_at desc", [req.tenant.id]);
   res.json(rows);
-});
+}));
 
 /** Cashier resolves an unmatched payment by pointing it at the right customer. */
 app.post('/api/payments/:id/match', requirePermission('payments.apply'), wrap(async (req, res) => {
@@ -8029,7 +8029,7 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
  * nothing, and unmatched ones have no subscriber or voucher to attribute
  * through in the first place.
  */
-app.get('/api/payments/by-site', wrap(async (req, res) => {
+app.get('/api/payments/by-site', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select router_id, router_name,
            sum(pppoe_amount) as pppoe_amount, sum(pppoe_count) as pppoe_count,
@@ -8225,7 +8225,7 @@ app.post('/api/payments/stk', requirePermission('payments.stk'), wrap(async (req
 }));
 
 /** Poll an STK request the admin fired. */
-app.get('/api/payments/stk/:checkoutId', wrap(async (req, res) => {
+app.get('/api/payments/stk/:checkoutId', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows: [r] } = await pool.query(
     'select checkout_id, provider, phone, amount, status, result_code, result_desc, created_at from stk_requests where tenant_id=$1 and checkout_id=$2',
     [req.tenant.id, req.params.checkoutId]);
@@ -9132,7 +9132,11 @@ app.delete('/api/kb-articles/:id', requirePermission('kb.delete'), wrap(async (r
 }));
 
 // ── site payment profiles ─────────────────────────
-app.get('/api/site-profiles', wrap(async (req, res) => {
+// Same trust level as the payment-methods routes just below — a site
+// profile decides which of the tenant's paybills a router's payments
+// actually settle into, which is a payment-configuration change even
+// though it lives on its own screen.
+app.get('/api/site-profiles', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name, tpc.label as payment_config_label, tpc.shortcode as payment_config_shortcode
      from site_profiles p
@@ -9142,7 +9146,7 @@ app.get('/api/site-profiles', wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/site-profiles', wrap(async (req, res) => {
+app.post('/api/site-profiles', requirePermission('payments.edit'), wrap(async (req, res) => {
   const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
   if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
   const { rows: [p] } = await pool.query(
@@ -9156,7 +9160,7 @@ app.post('/api/site-profiles', wrap(async (req, res) => {
   res.json(p);
 }));
 
-app.delete('/api/site-profiles/:id', wrap(async (req, res) => {
+app.delete('/api/site-profiles/:id', requirePermission('payments.edit'), wrap(async (req, res) => {
   await pool.query('delete from site_profiles where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });
 }));
