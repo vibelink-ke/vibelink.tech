@@ -87,11 +87,14 @@ services:
       PGUSER: billing
       PGPASSWORD: secret
       PGDATABASE: billing
-    # Owns the namespace freeradius joins, so RADIUS ports are published here too.
-    ports:
-      - '1194:1194/tcp'   # TCP, not UDP: the RouterOS 6 client cannot do UDP
-      - '1812:1812/udp'   # authentication
-      - '1813:1813/udp'   # accounting
+    # Ports moved to docker-compose.prod.yml — see that file's comment on
+    # this service. Compose concatenates `ports:` sequences across -f files
+    # rather than letting a later file clear an earlier one (an empty
+    # `ports: []` override there does nothing), so this key cannot coexist
+    # here at all once the prod override adds `network_mode: service:net`.
+    # No standalone/base-only deployment of this service actually runs in
+    # practice — prod.yml is always combined with this file — so nothing
+    # depends on these ports being reachable from the base file alone.
     volumes:
       - billing-ovpn-pki:/etc/openvpn/pki
       # Status file, so the API can see which routers are actually connected.
@@ -114,8 +117,9 @@ services:
       PUID: '1000'
       PGID: '1000'
       TZ: Africa/Nairobi
-    ports:
-      - '51820:51820/udp'
+    # Port moved to docker-compose.prod.yml / `net` — see openvpn's comment
+    # above for why this cannot coexist with the prod override's
+    # network_mode: service:net.
     volumes:
       - ./infra/wireguard:/config
       - /lib/modules:/lib/modules:ro

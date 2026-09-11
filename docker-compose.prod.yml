@@ -228,18 +228,17 @@ services:
       net:
         condition: service_started
     network_mode: 'service:net'
-    # Compose merges `ports:` across files by concatenation, not replacement —
-    # the base docker-compose.yml's own `ports:` (for standalone/dev use
-    # without `net`) survives into this override untouched, and Docker
-    # rejects network_mode + ports together outright: "conflicting options:
-    # port publishing and the container type network mode". Confirmed live —
-    # this container ran fine for days on an old container object created
-    # before this ever got exercised, then could not be recreated at all the
-    # moment it needed to be (a plain image rebuild+recreate, nothing
-    # exotic), taking real router OVPN tunnels down with it. Explicit empty
-    # list is what actually clears the inherited one; omitting the key here
-    # does not.
-    ports: []
+    # No ports: here — `net` already publishes 1194/1812/1813 above, and
+    # `network_mode: service:net` cannot coexist with a `ports:` key on
+    # this service at all. Compose concatenates `ports:` sequences across
+    # -f files rather than letting a later file clear an earlier one (an
+    # empty `ports: []` override here does nothing — confirmed live), so
+    # the base docker-compose.yml's own `ports:` for this service had to be
+    # removed entirely rather than overridden. Confirmed live: this
+    # container ran fine for days on an old container object created
+    # before this ever got exercised, then could not be recreated at all
+    # the moment it actually needed to be (a plain image rebuild, nothing
+    # exotic), taking real router OVPN tunnels down with it.
     # Capabilities and devices are per-container even when the namespace is shared,
     # so these stay here rather than moving to `net`.
     cap_add:
@@ -276,10 +275,9 @@ services:
     # the tunnel worked, but nothing on the api/freeradius side had a route
     # into it, so an onboarded router stayed unreachable regardless.
     network_mode: 'service:net'
-    # Same ports-merge conflict as openvpn just above — see its comment.
-    # Dormant here only because this container has not needed recreating
-    # yet; the fix is identical.
-    ports: []
+    # No ports: here — same reasoning as openvpn just above. This one had
+    # only been dormant because the container had not needed recreating
+    # yet, not because it was actually fine.
     # Capabilities are per-container even when the namespace is shared, so
     # these stay here rather than moving to `net`.
     cap_add:
