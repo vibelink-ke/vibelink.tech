@@ -98,6 +98,39 @@ else
        "client-to-client is on, so do not issue staff VPN peers until this is fixed" >&2
 fi
 
+# A router's WireGuard peer only ever accepts packets sourced from this
+# server's own tunnel address (mikrotikScript's allowed-address=SERVER_IP/32
+# — deliberately narrow, "a management tunnel, not a default route") and
+# only knows how to route replies back to that one address (its own
+# /ip/route add dst-address=SERVER_IP/32). A staff peer's own OVPN address
+# (10.x.1.N, a different address entirely) reaching a router that currently
+# happens to be on WireGuard rather than its own OVPN failover client —
+# the ordinary, majority state, not an edge case — got forwarded out wg0
+# correctly (routing inside this shared netns is fine) and then silently
+# dropped by the router itself: source address rejected, no reply possible
+# even in principle. Winbox just hangs on "Connecting..." forever, with
+# nothing in any of our own logs to say why.
+#
+# Masquerading anything leaving via wg0 to look like it came from the
+# server's own address fixes this without touching a single router's
+# config: every router already trusts and knows how to answer that address,
+# because it is the same one all of our own server-initiated API calls
+# already use. Skipped for traffic already sourced from SERVER_IP (the
+# router-tunnel-management API calls this container's own siblings make)
+# so it is never double-masqueraded.
+SERVER_IP="10.${TUNNEL_BASE_OCTET:-50}.0.1"
+if command -v iptables >/dev/null 2>&1; then
+  iptables -t nat -D POSTROUTING -o wg0 '!' -s "$SERVER_IP" -j MASQUERADE 2>/dev/null || true
+  iptables -t nat -I POSTROUTING 1 -o wg0 '!' -s "$SERVER_IP" -j MASQUERADE || true
+  if iptables -t nat -C POSTROUTING -o wg0 '!' -s "$SERVER_IP" -j MASQUERADE 2>/dev/null; then
+    echo "wg0 masquerade ready — staff VPN peers can now reach WireGuard-connected routers"
+  else
+    echo "WARNING: could not install the wg0 masquerade rule — staff VPN access to a" \
+         "router currently on WireGuard (rather than OVPN failover) will hang with no" \
+         "response, even though the tunnel itself is healthy." >&2
+  fi
+fi
+
 # OpenVPN does not hand its own environment to auth.sh and client-connect.sh — it
 # builds a fresh one holding only the variables it defines, so PATH and every PG*
 # setting would be missing there. Snapshot them to a file the scripts source.
