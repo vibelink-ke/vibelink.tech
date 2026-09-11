@@ -228,6 +228,18 @@ services:
       net:
         condition: service_started
     network_mode: 'service:net'
+    # Compose merges `ports:` across files by concatenation, not replacement —
+    # the base docker-compose.yml's own `ports:` (for standalone/dev use
+    # without `net`) survives into this override untouched, and Docker
+    # rejects network_mode + ports together outright: "conflicting options:
+    # port publishing and the container type network mode". Confirmed live —
+    # this container ran fine for days on an old container object created
+    # before this ever got exercised, then could not be recreated at all the
+    # moment it needed to be (a plain image rebuild+recreate, nothing
+    # exotic), taking real router OVPN tunnels down with it. Explicit empty
+    # list is what actually clears the inherited one; omitting the key here
+    # does not.
+    ports: []
     # Capabilities and devices are per-container even when the namespace is shared,
     # so these stay here rather than moving to `net`.
     cap_add:
@@ -264,6 +276,10 @@ services:
     # the tunnel worked, but nothing on the api/freeradius side had a route
     # into it, so an onboarded router stayed unreachable regardless.
     network_mode: 'service:net'
+    # Same ports-merge conflict as openvpn just above — see its comment.
+    # Dormant here only because this container has not needed recreating
+    # yet; the fix is identical.
+    ports: []
     # Capabilities are per-container even when the namespace is shared, so
     # these stay here rather than moving to `net`.
     cap_add:
