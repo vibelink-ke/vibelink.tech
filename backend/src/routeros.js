@@ -577,13 +577,14 @@ export async function applyHotspotServer(conn, {
     // straight through to the normal code-based login page, exactly as
     // before this was added.
     //
-    // mac-cookie is its own distinct RouterOS login method, not just "mac"
-    // plus "cookie" together — it is what actually makes add-mac-cookie's
-    // stored cookie get checked against the device's MAC before RouterOS
-    // will accept it, rather than accepting any browser presenting that
-    // cookie value. Without it listed here too, add-mac-cookie's cookie is
-    // written but never actually consulted at login.
-    '=login-by=http-pap,mac,mac-cookie,cookie',
+    // mac-cookie was also added here briefly (it is a real, separate
+    // RouterOS login-by value — an extension of a basic method like
+    // http-pap, not a synonym for mac+cookie together) but reverted: it
+    // broke every voucher redemption in production with "configuration
+    // error" on this fleet's RouterOS version the moment it was pushed.
+    // Needs to be re-tested against a single non-production router on the
+    // actual RouterOS version in use before trying again.
+    '=login-by=http-pap,mac,cookie',
     /**
      * Deliberately always cleared, never set.
      *
