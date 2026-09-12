@@ -75,7 +75,18 @@ export default function Payments() {
     }
   };
 
-  const collected = all.filter((p) => p.status === 'applied').reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  // Labeled "this month" but was summing every applied payment /api/payments
+  // returned (its last 500, of every kind, no date filter at all) — a
+  // lifetime-ish total masquerading as a monthly one, which is exactly why it
+  // never reconciled against Pending settlement (a true current snapshot).
+  const now = new Date();
+  const collected = all
+    .filter((p) => {
+      if (p.status !== 'applied') return false;
+      const t = new Date(p.received_at ?? 0);
+      return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    })
+    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
   const openInvoices = invoices.filter((i) => i.status === 'open' || i.status === 'partial');
   const outstanding = openInvoices.reduce((a, i) => a + (Number(i.amount ?? 0) - Number(i.paid ?? 0)), 0);
   const matchRate = all.length ? Math.round(((all.length - unmatched.length) / all.length) * 100) : null;
