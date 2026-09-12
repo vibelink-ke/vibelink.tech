@@ -30,6 +30,22 @@ server billing {
     authorize {
         preprocess
 
+        # A login-by=mac attempt sends the device's own MAC as User-Name —
+        # normalized here to uppercase-with-colons before the sql lookup
+        # below, rather than trusted to arrive in whatever case this
+        # particular RouterOS version happens to default to. radcheck rows
+        # for these (ensureMacRadiusLogin, radius.js) are always written
+        # uppercase for the same reason: matching case has to happen
+        # somewhere, and one normalization point here is safer than betting
+        # on RouterOS's own convention matching ours in every firmware this
+        # fleet runs. A voucher code never matches this pattern, so this
+        # never touches an ordinary login.
+        if (&User-Name =~ /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/) {
+            update request {
+                &User-Name := "%{toupper:%{User-Name}}"
+            }
+        }
+
         # Vouchers and PPPoE users both live in radcheck; the Expiration
         # attribute is what makes a voucher stop working on its own.
         sql
@@ -158,8 +174,15 @@ server billing {
         # same compose service — the script's own executable bit is not
         # something a read-only bind mount from a host checkout can be
         # trusted to carry.
+        # Calling-Station-Id (the device's own MAC, confirmed live via
+        # raddebug elsewhere in this file) rides along as a second argument
+        # so post-auth-hook.sh can tell the app which device this was —
+        # ensureMacRadiusLogin (radius.js) uses it to give that same device
+        # a way back in by MAC alone, without waiting for a fresh login to
+        # supply one. A PPPoE login has one too but it is never looked up
+        # against anything, since %{username} there matches no voucher.
         update control {
-            &Tmp-String-0 := "%{exec:/bin/sh /config/post-auth-hook.sh %{User-Name}}"
+            &Tmp-String-0 := "%{exec:/bin/sh /config/post-auth-hook.sh %{User-Name} %{Calling-Station-Id}}"
         }
 
         Post-Auth-Type REJECT {

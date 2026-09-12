@@ -1969,6 +1969,7 @@ app.post('/radius/post-auth', wrap(async (req, res) => {
 
   const username = String(req.body?.username ?? '').trim();
   if (!username) return res.json({ ok: true });
+  const mac = String(req.body?.mac ?? '').trim() || null;
 
   const { rows: [v] } = await pool.query(
     'select tenant_id from vouchers where code=$1', [username]);
@@ -1976,7 +1977,7 @@ app.post('/radius/post-auth', wrap(async (req, res) => {
 
   const { startVoucherClock } = await import('./radius.js');
   const { withTenant } = await import('./db.js');
-  await withTenant(v.tenant_id, (c) => startVoucherClock(c, v.tenant_id, username));
+  await withTenant(v.tenant_id, (c) => startVoucherClock(c, v.tenant_id, username, mac));
   res.json({ ok: true });
 }));
 
@@ -8677,7 +8678,7 @@ async function unbindVoucherDevices(tenantId, voucherIds) {
 app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { ids = [] } = req.body;
   const { rows: doomed } = await pool.query(
-    'select code from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
+    'select code, mac from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
 
   await unbindVoucherDevices(req.tenant.id, ids);
 
@@ -8685,20 +8686,20 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
     'delete from vouchers where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, ids]);
 
   const { forgetVoucherAccess } = await import('./radius.js');
-  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id);
+  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id, doomed.map((v) => v.mac));
   res.json({ deleted: rowCount, revoked });
 }));
 
 app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { rows: doomed } = await pool.query(
-    "select id, code from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
+    "select id, code, mac from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
 
   await unbindVoucherDevices(req.tenant.id, doomed.map((v) => v.id));
 
   const { rowCount } = await pool.query(
     "delete from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
   const { forgetVoucherAccess } = await import('./radius.js');
-  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id);
+  const revoked = await forgetVoucherAccess(pool, doomed.map((v) => v.code), req.tenant.id, doomed.map((v) => v.mac));
   res.json({ deleted: rowCount, revoked });
 }));
 

@@ -4,7 +4,10 @@
 # apart before this runs). $1 is the RADIUS username; for a hotspot login
 # that is a voucher code, which is the only case the endpoint itself
 # actually does anything with — a PPPoE username matches no voucher and the
-# call is a harmless no-op there.
+# call is a harmless no-op there. $2 is Calling-Station-Id, the device's own
+# MAC — used to back-fill vouchers.mac for a code typed on an unknown
+# device, and to give that device a login-by=mac way back in later
+# (ensureMacRadiusLogin, radius.js).
 #
 # freeradius shares the same network namespace as the api container
 # (both network_mode: 'service:net'), so the api's own port is reachable
@@ -15,4 +18,4 @@
 # auth, never a precondition for it.
 curl -s -m 3 -X POST "http://localhost:8080/radius/post-auth" \
   -H 'Content-Type: application/json' \
-  -d "{\"username\":\"$1\"}" >/dev/null 2>&1 &
+  -d "{\"username\":\"$1\",\"mac\":\"$2\"}" >/dev/null 2>&1 &

@@ -549,12 +549,19 @@ export async function forgetSubscriberCredentials(c, username, tenantId) {
  * automatic purgeExpiredVouchers, so there is exactly one place that knows
  * a voucher's access lives in radcheck/radreply too, not only in vouchers.
  */
-export async function forgetVoucherAccess(c, codes, tenantId) {
-  if (!codes.length) return 0;
+export async function forgetVoucherAccess(c, codes, tenantId, macs = []) {
+  // macs are the deleted vouchers' own device MACs (vouchers.mac) — a
+  // caller has to pass these separately because by the time this runs the
+  // voucher row is usually already gone, taking that column with it. Each
+  // one also got a MAC-keyed radcheck/radreply pair from ensureMacRadiusLogin
+  // above; leaving those behind would let that device keep logging in by
+  // MAC alone forever, for a voucher that no longer exists.
+  const usernames = [...codes, ...macs.filter(Boolean).map((m) => String(m).toUpperCase())];
+  if (!usernames.length) return 0;
   const { rowCount } = await c.query(
-    'delete from radcheck where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+    'delete from radcheck where tenant_id=$1 and username = any($2::text[])', [tenantId, usernames]);
   await c.query(
-    'delete from radreply where tenant_id=$1 and username = any($2::text[])', [tenantId, codes]);
+    'delete from radreply where tenant_id=$1 and username = any($2::text[])', [tenantId, usernames]);
   return rowCount;
 }
 
@@ -789,7 +796,7 @@ async function uniqueCode(c, tenantId, prefs) {
  * duration on every presence check, which is the exact bug this exists to
  * close, not reopen.
  */
-export async function startVoucherClock(c, tenantId, code) {
+export async function startVoucherClock(c, tenantId, code, mac) {
   const { rows: [v] } = await c.query(
     `update vouchers v set status='in_use', starts_at=now(),
             expires_at = now() + (p.duration_min || ' minutes')::interval
@@ -818,6 +825,63 @@ export async function startVoucherClock(c, tenantId, code) {
          ($1,$2,'Expiration',':=',$3)`,
       [tenantId, code, radiusDate(expiresAt)]);
   }
+
+  // Backfill vouchers.mac from the device that actually logged in, when a
+  // batch-generated code (issued with no known device) is typed for the
+  // first time — this is the only chance to ever learn it, and it is what
+  // ensureMacRadiusLogin below needs to give that same device a way back in
+  // without retyping the code.
+  if (mac) await c.query(
+    'update vouchers set mac=$3 where tenant_id=$1 and code=$2 and mac is null', [tenantId, code, mac]);
+
+  await ensureMacRadiusLogin(c, tenantId, code);
+}
+
+/**
+ * Lets a voucher's own device log back in using its MAC address as the
+ * RADIUS username (RouterOS's login-by=mac) — a second, RADIUS-native way
+ * back in alongside the hotspot user profile's mac-cookie, one that
+ * survives a cleared browser cache rather than depending on one.
+ *
+ * vouchers.mac is where the device is known from: either captured at
+ * purchase (the STK-push/dashboard-generated flow, issueVoucherAccess's own
+ * mac argument) or backfilled by startVoucherClock above the first time a
+ * batch-generated code gets typed in. No mac known yet, or the voucher has
+ * no expiry yet (voucher_expiry='login', not used once), means nothing to
+ * write — this is called again on every subsequent login too, so it always
+ * catches up once either becomes true.
+ *
+ * Case matters and is easy to get backwards here: Postgres's `macaddr`
+ * column type always normalizes to lowercase on output regardless of the
+ * case it was stored in, but RouterOS sends the MAC as User-Name in
+ * uppercase for a real login-by=mac attempt (confirmed live via raddebug
+ * against Calling-Station-Id from this same fleet — see the PPPoE
+ * anti-sharing comment in sites-available/billing). radcheck.username is
+ * plain text, compared byte-for-byte, so reading vouchers.mac straight into
+ * it would silently never match a real login. Upper-cased here for exactly
+ * that reason.
+ */
+export async function ensureMacRadiusLogin(c, tenantId, code) {
+  const { rows: [v] } = await c.query(
+    `select v.mac, v.expires_at, p.rate_up, p.rate_down, p.duration_min
+       from vouchers v join plans p on p.id = v.plan_id
+      where v.tenant_id=$1 and v.code=$2 and v.mac is not null and v.expires_at is not null`,
+    [tenantId, code]);
+  if (!v) return;
+  const macUser = String(v.mac).toUpperCase();
+  await c.query(
+    `insert into radcheck (tenant_id, username, attribute, op, value) values
+       ($1,$2,'Cleartext-Password',':=',$2),
+       ($1,$2,'Expiration',':=',$3)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [tenantId, macUser, radiusDate(v.expires_at)]);
+  await c.query(
+    `insert into radreply (tenant_id, username, attribute, op, value) values
+       ($1,$2,'Mikrotik-Rate-Limit',':=',$3),
+       ($1,$2,'Session-Timeout',':=',$4),
+       ($1,$2,'Mikrotik-Group',':=',$5)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [tenantId, macUser, `${v.rate_up}k/${v.rate_down}k`, v.duration_min * 60, hotspotCookieProfile(v.duration_min)]);
 }
 
 /**

@@ -398,7 +398,7 @@ async function purgeExpiredVouchers() {
   // column's own default is true) must still get the default behaviour,
   // not be silently skipped for having no row to match at all.
   const { rows: doomed } = await pool.query(
-    `select v.id, v.code, v.tenant_id from vouchers v
+    `select v.id, v.code, v.mac, v.tenant_id from vouchers v
        left join hotspot_settings hs on hs.tenant_id = v.tenant_id
       where v.status='expired' and v.expires_at < now() - interval '24 hours'
         and coalesce(hs.auto_purge_vouchers, true) = true
@@ -413,11 +413,12 @@ async function purgeExpiredVouchers() {
   // tenant_id=... pairing forgetVoucherAccess already does per call.
   const byTenant = new Map();
   for (const v of doomed) {
-    if (!byTenant.has(v.tenant_id)) byTenant.set(v.tenant_id, []);
-    byTenant.get(v.tenant_id).push(v.code);
+    if (!byTenant.has(v.tenant_id)) byTenant.set(v.tenant_id, { codes: [], macs: [] });
+    byTenant.get(v.tenant_id).codes.push(v.code);
+    if (v.mac) byTenant.get(v.tenant_id).macs.push(v.mac);
   }
-  for (const [tenantId, codes] of byTenant) {
-    await forgetVoucherAccess(pool, codes, tenantId);
+  for (const [tenantId, { codes, macs }] of byTenant) {
+    await forgetVoucherAccess(pool, codes, tenantId, macs);
   }
 }
 
