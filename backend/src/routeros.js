@@ -568,7 +568,15 @@ export async function applyHotspotServer(conn, {
     // without "cookie" as an accepted login method here, a returning guest
     // with a perfectly valid cookie still hits the full login page every
     // time, silently defeating the whole auto-reconnect feature.
-    '=login-by=http-pap,cookie',
+    //
+    // mac is listed alongside it as a second, independent way back in: it
+    // survives a cleared browser cache or a switch to a different browser
+    // on the same phone (the cookie does not), at the cost of one extra
+    // MAC-Radius Access-Request per new device — since nothing in radcheck
+    // is keyed by MAC, that request is simply rejected and the router falls
+    // straight through to the normal code-based login page, exactly as
+    // before this was added.
+    '=login-by=http-pap,mac,cookie',
     /**
      * Deliberately always cleared, never set.
      *
