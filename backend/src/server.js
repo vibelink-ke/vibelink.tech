@@ -4846,7 +4846,7 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
     // hotspotCookieProfile for why a single flat one cannot serve every
     // bundle length safely.
     const { ensureHotspotProfiles } = await import('./radius.js');
-    await tryStep('hotspot user profiles', () => ensureHotspotProfiles(conn, pool, req.tenant.id, hs), 40000);
+    await tryStep('hotspot user profiles', () => ensureHotspotProfiles(conn, pool, tenantId, hs), 40000);
     done.push(`sessions use hs-cookie-<N> (${hs?.multi_device ? 3 : 1} device`
       + `${hs?.multi_device ? 's' : ''} per code, `
       + `${hs?.bind_mac ?? true ? 'device remembered' : 'code required each time'})`);
