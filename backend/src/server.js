@@ -4837,17 +4837,17 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
         // subdomain yet, matching what has always been pushed until now.
         dnsName: t?.subdomain ? `${t.subdomain}.spot` : 'billing.spot',
         network: opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
-        // The profile a voucher will name, built with the same hotspot.
-        sharedUsers: hs?.multi_device ? 3 : 1,
-        idleSeconds: hs?.idle_timeout_sec ?? 30,
-        bindMac: hs?.bind_mac ?? true,
       }), 40000);
     done.push(`hotspot on ${bridge.bridge} at ${built.gateway}, pool ${built.pool}`);
     if (built.changed.length) done.push(`created ${built.changed.join(', ')}`);
 
-    // The user profile is built by applyHotspotServer above, so both this and
-    // Configure produce it. Reported here for the operator's benefit.
-    done.push(`sessions use hs-default (${hs?.multi_device ? 3 : 1} device`
+    // One hs-cookie-<N> profile per distinct hotspot bundle length this
+    // tenant sells — see radius.js's ensureHotspotProfiles/
+    // hotspotCookieProfile for why a single flat one cannot serve every
+    // bundle length safely.
+    const { ensureHotspotProfiles } = await import('./radius.js');
+    await tryStep('hotspot user profiles', () => ensureHotspotProfiles(conn, pool, req.tenant.id, hs), 40000);
+    done.push(`sessions use hs-cookie-<N> (${hs?.multi_device ? 3 : 1} device`
       + `${hs?.multi_device ? 's' : ''} per code, `
       + `${hs?.bind_mac ?? true ? 'device remembered' : 'code required each time'})`);
 

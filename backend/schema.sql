@@ -1306,8 +1306,15 @@ alter table hotspot_settings add column if not exists hotspot_network text
 -- contract) but nothing writes to it after this.
 alter table hotspot_settings add column if not exists idle_timeout_sec int;
 update hotspot_settings set idle_timeout_sec = idle_timeout_min * 60 where idle_timeout_sec is null;
-alter table hotspot_settings alter column idle_timeout_sec set default 30;
+alter table hotspot_settings alter column idle_timeout_sec set default 1200;
 alter table hotspot_settings alter column idle_timeout_sec set not null;
+
+-- 30 seconds — the column default just above, until now — is short enough
+-- that ordinary browsing (reading a page, a paused video, a screen lock)
+-- routinely exceeds it, disconnecting a guest who has not actually left.
+-- No tenant is plausibly running on this on purpose; every row still sitting
+-- at exactly the old default gets the same fix new rows get going forward.
+update hotspot_settings set idle_timeout_sec = 1200 where idle_timeout_sec = 30;
 
 -- The Vouchers screen has always shown an "Auto-purge expired vouchers"
 -- toggle, checked by default, with a detail line naming the expiry job by

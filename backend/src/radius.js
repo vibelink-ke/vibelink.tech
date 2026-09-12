@@ -39,20 +39,68 @@ function radiusDate(date) {
 }
 
 /**
- * The hotspot user profile the router push creates.
+ * The hotspot user profile a voucher's session should use, sent as
+ * Mikrotik-Group so the router actually applies it (a profile created but
+ * never selected is decoration — the router falls back to its own "default"
+ * profile and every setting on ours, shared-users included, is ignored).
  *
- * Sent as Mikrotik-Group so a voucher session actually uses it. The profile was
- * being created on every hotspot push and selected by nothing, so the
- * shared-users limit and idle timeout it carries never applied — the router
- * fell back to its own "default" profile and the anti-sharing setting was
- * decoration.
+ * One profile per distinct bundle length, not a single shared one: the MAC
+ * cookie that lets a guest's device silently reconnect without retyping
+ * their code (add-mac-cookie/mac-cookie-timeout, see
+ * ensureHotspotUserProfile in routeros.js) has to be shorter than the
+ * bundle itself, or a cookie-triggered reconnect — which does not
+ * necessarily re-check the voucher's own expiry the way a fresh login does
+ * — can silently wave a device back online well past what they paid for.
+ * A single flat cookie length can only ever be safe for the *shortest*
+ * bundle a tenant sells, which starves every longer one of the actual
+ * point of the feature (surviving a screen lock or a few steps out of
+ * range without a full day's paid access ever being at risk). Scaling it
+ * to the bundle, capped at a day, gives both: short bundles keep a short
+ * cookie, long bundles actually get to use it.
  *
- * Safe to name here, unlike the PPPoE case that had to be removed: this profile
- * is created by ensureHotspotUserProfile on the same push, so it exists on any
- * router the voucher can be used on. Naming a profile the router does not have
- * is what disconnects a session immediately after it authenticates.
+ * `hs-cookie-<minutes>` profiles are created for every distinct hotspot
+ * plan duration a tenant has (server.js's Configure push, jobs.js's
+ * healRouters/autoProvisionNewRouters) — naming a profile the router does
+ * not have is what disconnects a session immediately after it
+ * authenticates, so this always has to match what those actually create.
  */
-const HOTSPOT_PROFILE = 'hs-default';
+function hotspotCookieProfile(durationMin) {
+  const minutes = Math.min(Math.max(Math.round(Number(durationMin) || 1440), 1), 1440);
+  return `hs-cookie-${minutes}`;
+}
+
+/**
+ * Creates/refreshes one hs-cookie-<N> profile per distinct hotspot plan
+ * duration this tenant currently sells — see hotspotCookieProfile just
+ * above for why a single flat one cannot serve every bundle length
+ * safely. Falls back to a single 1-day profile when the tenant has no
+ * hotspot plans yet: there is nothing to scale to, but the router still
+ * needs *a* profile to exist for whenever the first voucher is issued.
+ *
+ * Shared by every place that pushes hotspot config to a router (Configure,
+ * healRouters, autoProvisionNewRouters) so all three create the exact same
+ * set of profiles rather than three slightly different ideas of what
+ * "the" hotspot profile is.
+ */
+export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
+  const ros = await import('./routeros.js');
+  const { rows } = await dbClient.query(
+    `select distinct duration_min from plans where tenant_id=$1 and service='hotspot'`, [tenantId]);
+  const durations = rows.length ? rows.map((r) => r.duration_min) : [1440];
+  const seen = new Set();
+  for (const durationMin of durations) {
+    const name = hotspotCookieProfile(durationMin);
+    if (seen.has(name)) continue;
+    seen.add(name);
+    await ros.ensureHotspotUserProfile(conn, {
+      name,
+      sharedUsers: hs?.multi_device ? 3 : 1,
+      idleSeconds: hs?.idle_timeout_sec ?? 1200,
+      bindMac: hs?.bind_mac ?? true,
+      cookieMinutes: durationMin,
+    });
+  }
+}
 
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */
 export async function activateSubscriber(c, tenantId, subId) {
@@ -668,7 +716,7 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
        ($4,$1,'Mikrotik-Group',':=',$5)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId,
-     HOTSPOT_PROFILE]);
+     hotspotCookieProfile(plan.duration_min)]);
   return v;
 }
 

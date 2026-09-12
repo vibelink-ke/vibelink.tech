@@ -2,7 +2,7 @@ import cron from 'node-cron';
 import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
-import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession } from './radius.js';
+import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
@@ -796,22 +796,18 @@ export async function healRouters() {
       if (r.role === 'both' || r.role === 'hotspot') {
         await ros.applyHotspot(conn);
         /**
-         * The profile every voucher names.
+         * The profile(s) every voucher names.
          *
-         * A router configured before this profile was created rejects each
-         * voucher with "unknown user profile <hs-default>" — the code is right,
-         * the password is right, and the guest is refused. Rebuilding it here
+         * A router configured before these profiles were created rejects each
+         * voucher with "unknown user profile" — the code is right, the
+         * password is right, and the guest is refused. Rebuilding them here
          * means a router repairs itself rather than waiting for somebody to
          * notice and press Configure.
          */
         const { rows: [hs] } = await pool.query(
           'select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1',
           [r.tenant_id]);
-        await ros.ensureHotspotUserProfile(conn, {
-          sharedUsers: hs?.multi_device ? 3 : 1,
-          idleSeconds: hs?.idle_timeout_sec ?? 30,
-          bindMac: hs?.bind_mac ?? true,
-        });
+        await ensureHotspotProfiles(conn, pool, r.tenant_id, hs);
       }
 
       await pool.query(
@@ -883,11 +879,7 @@ export async function autoProvisionNewRouters() {
         const { rows: [hs] } = await pool.query(
           'select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1',
           [r.tenant_id]);
-        await ros.ensureHotspotUserProfile(conn, {
-          sharedUsers: hs?.multi_device ? 3 : 1,
-          idleSeconds: hs?.idle_timeout_sec ?? 30,
-          bindMac: hs?.bind_mac ?? true,
-        });
+        await ensureHotspotProfiles(conn, pool, r.tenant_id, hs);
       }
 
       await pool.query(

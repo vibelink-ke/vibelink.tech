@@ -30,7 +30,7 @@ const DEFAULTS = {
   ssid: 'WiFi',
   redirect_url: '',
   trial_minutes: 15,
-  idle_timeout_sec: 30,
+  idle_timeout_sec: 1200,
   bind_mac: true,
   payment_method: 'kopokopo',
   voucher_expiry: 'login',

@@ -474,9 +474,6 @@ export async function applyHotspotServer(conn, {
   network = '10.5.50.0/24',
   interimSeconds = 30,
   dnsName = 'billing.spot',
-  sharedUsers = 1,
-  idleSeconds = 30,
-  bindMac = true,
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
   const POOL = 'hotspot-pool';
@@ -564,7 +561,14 @@ export async function applyHotspotServer(conn, {
     // http-chap needs the login page to do the hashing; plain http-pap is what
     // actually works against a Cleartext-Password in radcheck, which is what we
     // store. Offering chap here is how you get a login page that always fails.
-    '=login-by=http-pap',
+    //
+    // cookie has to be listed too, not just http-pap: it is what makes the
+    // router actually honour a mac-cookie set by ensureHotspotUserProfile's
+    // add-mac-cookie/mac-cookie-timeout. Those only ever *write* the cookie;
+    // without "cookie" as an accepted login method here, a returning guest
+    // with a perfectly valid cookie still hits the full login page every
+    // time, silently defeating the whole auto-reconnect feature.
+    '=login-by=http-pap,cookie',
     /**
      * Deliberately always cleared, never set.
      *
@@ -617,20 +621,16 @@ export async function applyHotspotServer(conn, {
     done.push('hotspot server');
   }
 
-  /**
-   * The user profile every voucher names.
-   *
-   * Created here, not only behind the Hotspot button, because vouchers carry
-   * Mikrotik-Group=hs-default and a router that has been through Configure but
-   * not Hotspot does not have it. The login then fails with "unknown user
-   * profile <hs-default>" — the code and the password are perfect and the guest
-   * is refused, which is the same trap that Mikrotik-Group set for PPPoE.
-   *
-   * Anything that builds a hotspot must build the profile its sessions will ask
-   * for, or the two can drift apart again.
-   */
-  const profileResult = await ensureHotspotUserProfile(conn, { sharedUsers, idleSeconds, bindMac });
-  if (profileResult.created) done.push(`user profile ${profileResult.profile}`);
+  // The user profile(s) every voucher names are ensured by the caller
+  // (radius.js's ensureHotspotProfiles, right after this returns) rather
+  // than here — they are per-bundle-duration now (hs-cookie-<N>, see that
+  // function's own comment), which needs a database lookup of the
+  // tenant's actual hotspot plans that this purely-RouterOS-facing
+  // function has no way to do. Still just as required as it always was:
+  // a router that has been through Configure but not that follow-up call
+  // has none of them, and a login then fails with "unknown user profile" —
+  // the code and the password are perfect and the guest is refused, the
+  // same trap Mikrotik-Group set for PPPoE.
 
   // Without this the guests have a lease and no internet, which is the single
   // most common "the hotspot does not work" report.
@@ -1017,7 +1017,7 @@ export async function applyWalledGarden(conn, hosts = []) {
  * built-in one, which we would otherwise be editing on a box we do not own.
  */
 export async function ensureHotspotUserProfile(conn, {
-  name = 'hs-default', sharedUsers = 1, idleSeconds = 30, bindMac = true,
+  name = 'hs-default', sharedUsers = 1, idleSeconds = 1200, bindMac = true, cookieMinutes = 1440,
 } = {}) {
   const rows = await conn.write('/ip/hotspot/user/profile/print', []);
   const found = rows.find((p) => p.name === name);
@@ -1046,14 +1046,14 @@ export async function ensureHotspotUserProfile(conn, {
      * paid expects to happen.
      *
      * add-mac-cookie writes the cookie; mac-cookie-timeout is how long it is
-     * honoured. Was 1d — long enough to silently wave a device back online
-     * well past a short bundle's own expiry (the cheapest plans sold are
-     * 1-3 hours), since a cookie-triggered reconnect is not guaranteed to
-     * re-run the same Expiration check a fresh login would. 30 minutes still
-     * smooths over a screen lock or a few steps out of range without
-     * meaningfully outliving even the shortest paid bundle.
+     * honoured. Was a flat 30 minutes — long enough for the cheapest bundles
+     * but short enough to starve a multi-day bundle of the actual point of
+     * the feature. cookieMinutes is scaled by the caller to this profile's
+     * own bundle length (capped at 1 day, see hotspotCookieProfile in
+     * radius.js), since a cookie-triggered reconnect is not guaranteed to
+     * re-run the same Expiration check a fresh login would.
      */
-    ...(bindMac ? ['=add-mac-cookie=yes', '=mac-cookie-timeout=30m'] : ['=add-mac-cookie=no']),
+    ...(bindMac ? [`=add-mac-cookie=yes`, `=mac-cookie-timeout=${Math.min(Math.max(Math.round(cookieMinutes), 1), 1440)}m`] : ['=add-mac-cookie=no']),
     `=comment=${managed('ispHotspot user profile')}`,
   ];
   if (found) {
