@@ -93,7 +93,7 @@ export const api = {
   stkStatus: (checkoutId) => get(`/api/payments/stk/${checkoutId}`),
   reconcileStatement: (text) => post('/api/payments/reconcile', { text }),
   settlements: () => get('/api/settlements'),
-  requestSettlementPayout: () => post('/api/settlements/payout', {}),
+  requestSettlementPayout: (amount) => post('/api/settlements/payout', amount != null ? { amount } : {}),
 
   // ── catalogue ──
   tariffs: () => get('/api/tariffs'),

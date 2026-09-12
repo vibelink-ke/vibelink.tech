@@ -8364,7 +8364,7 @@ app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req,
  */
 app.post('/api/settlements/payout', requirePermission('payments.request_payout'), wrap(async (req, res) => {
   try {
-    const result = await payoutTenantNow(req.tenant.id);
+    const result = await payoutTenantNow(req.tenant.id, req.body?.amount);
     res.json(result);
   } catch (e) {
     // This catch previously swallowed everything silently — a failed payout

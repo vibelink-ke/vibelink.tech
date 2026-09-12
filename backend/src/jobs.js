@@ -1015,15 +1015,26 @@ export async function settleTenants() {
  * 'processing' handoff to the b2c-result webhook — this just runs it now,
  * for one tenant, and reports failure back to the click instead of only a
  * server log.
+ *
+ * requestedAmount is optional and, when given, lets a tenant settle less
+ * than everything sitting in pending (e.g. leaving a float, or matching a
+ * specific bank deposit expectation) rather than always being forced to
+ * take the whole balance out at once.
  */
-export async function payoutTenantNow(tenantId) {
+export async function payoutTenantNow(tenantId, requestedAmount) {
   const { rows: [row] } = await pool.query(
     `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.tenant_id=$1 and s.status='pending'`,
     [tenantId]);
   if (!row) throw Object.assign(new Error('Nothing pending to settle.'), { status: 400 });
-  if (Number(row.amount) < SETTLEMENT_MIN_KES) {
+
+  const pending = Number(row.amount);
+  const amount = requestedAmount == null ? pending : Number(requestedAmount);
+  if (!(amount > 0) || !Number.isFinite(amount) || amount > pending) {
+    throw Object.assign(new Error(`Enter an amount up to the pending KES ${pending}.`), { status: 400 });
+  }
+  if (amount < SETTLEMENT_MIN_KES) {
     throw Object.assign(new Error(`Minimum payout is KES ${SETTLEMENT_MIN_KES} — keep collecting until then.`), { status: 400 });
   }
   const missing = {
@@ -1037,8 +1048,26 @@ export async function payoutTenantNow(tenantId) {
   const ownerTenantId = await platformOwnerTenantId();
   if (!ownerTenantId) throw Object.assign(new Error('Platform payout account is not set up yet.'), { status: 503 });
 
-  const { conversationId, fee, net } = await payoutRow(row, ownerTenantId);
-  return { amount: Number(row.amount), fee, net, conversationId };
+  let payoutRow_ = row;
+  /**
+   * A partial request has to carve its own row rather than just paying out
+   * less against the existing one: settlements_one_pending_per_tenant only
+   * allows a single 'pending' row per tenant, and the un-requested
+   * remainder has to stay pending (still accruing, still payable later) —
+   * so the carved-off piece is inserted straight into 'processing',
+   * skipping 'pending' entirely, which is what keeps this from ever
+   * colliding with that constraint.
+   */
+  if (amount < pending) {
+    await pool.query('update settlements set amount = amount - $2 where id=$1', [row.settlement_id, amount]);
+    const { rows: [split] } = await pool.query(
+      `insert into settlements (tenant_id, amount, method, status) values ($1,$2,$3,'processing') returning id`,
+      [tenantId, amount, row.settlement_method ?? 'bank']);
+    payoutRow_ = { ...row, settlement_id: split.id, amount };
+  }
+
+  const { conversationId, fee, net } = await payoutRow(payoutRow_, ownerTenantId);
+  return { amount, fee, net, conversationId };
 }
 
 /**

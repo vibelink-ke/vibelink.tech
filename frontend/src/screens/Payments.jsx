@@ -59,13 +59,24 @@ export default function Payments() {
   const pendingSettlement = settlements
     .filter((s) => s.status === 'pending' || s.status === 'processing')
     .reduce((a, s) => a + Number(s.amount ?? 0), 0);
-  const hasPendingPayout = settlements.some((s) => s.status === 'pending');
+  const pendingRow = settlements.find((s) => s.status === 'pending');
+  const pendingRowAmount = Number(pendingRow?.amount ?? 0);
+  const hasPendingPayout = !!pendingRow;
   const [payoutBusy, setPayoutBusy] = useState(false);
+  // Blank means "the whole pending balance" — most tenants just want that,
+  // so this is opt-in rather than pre-filled with a number they'd have to
+  // clear first.
+  const [payoutAmount, setPayoutAmount] = useState('');
 
   const requestPayout = async () => {
+    const amount = payoutAmount.trim() ? Number(payoutAmount) : undefined;
+    if (amount != null && (!(amount > 0) || amount > pendingRowAmount)) {
+      return store.toast(`Enter an amount up to the pending KES ${kes(pendingRowAmount)}`);
+    }
     setPayoutBusy(true);
     try {
-      const r = await api.requestSettlementPayout();
+      const r = await api.requestSettlementPayout(amount);
+      setPayoutAmount('');
       await store.reload();
       store.toast(`Payout of KES ${kes(r.amount)} queued — it lands once M-Pesa confirms it`);
     } catch (e) {
@@ -558,7 +569,14 @@ export default function Payments() {
           {tab === 'settlements' && (
             <>
               {hasPendingPayout && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <Input
+                    type="number"
+                    value={payoutAmount}
+                    onChange={(e) => setPayoutAmount(e.target.value)}
+                    placeholder={`Full amount (KES ${kes(pendingRowAmount)})`}
+                    style={{ width: 210 }}
+                  />
                   <Button variant="primary" onClick={requestPayout} disabled={payoutBusy}>
                     {payoutBusy ? 'Requesting…' : 'Request payout now'}
                   </Button>
