@@ -20,6 +20,6 @@
   },
   "devDependencies": {
     "jsdom": "^30.0.1",
-    "vite-node": "^6.0.0"
+    "vite-node": "^3.2.4"
   }
 }

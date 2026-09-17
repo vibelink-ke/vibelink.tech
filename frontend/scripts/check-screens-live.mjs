@@ -1,7 +1,11 @@
-#!/usr/bin/env node
 /**
  * Open every screen the way a browser does, with realistic data, and report
  * the ones that break.
+ *
+ * Only ever run via `vite-node scripts/check-screens-live.mjs` (the "check"
+ * npm script), never executed directly — the shebang above was decorative
+ * and vite-node 3.x, unlike 6.x, does not strip it before evaluating the
+ * file, which threw a syntax error.
  *
  * The two faults that reached production were both invisible to the checks
  * that existed:
