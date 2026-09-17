@@ -106,6 +106,14 @@ export default function AddClient() {
   const setDigits = (k, max) => (e) =>
     setF((s) => ({ ...s, [k]: e.target.value.replace(/\D/g, '').slice(0, max) }));
 
+  // For a hand-typed PPPoE username: letters allowed (a customer or an
+  // existing router scheme may already use them), capped at 12 to match
+  // the 4-12 letters/digits the edit route already enforces (server.js) —
+  // creating something that edit would then reject is worse than capping
+  // it here first.
+  const setAlnum = (k, max) => (e) =>
+    setF((s) => ({ ...s, [k]: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, max) }));
+
   const [busy, setBusy] = useState(false);
   // Named for what it was always used for (a PPPoE-only client form), but
   // this screen also creates hotspot clients via the Service type selector
@@ -277,12 +285,12 @@ export default function AddClient() {
               label="Account number"
               hint={linkedAccount
                 ? 'Fixed to their existing account — a second line bills the same customer, not a new one'
-                : '5 digits. What the client types as the paybill account'}
+                : '4-6 digits. What the client types as the paybill account'}
             >
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={f.account}
-                  onChange={setDigits('account', 5)}
+                  onChange={setDigits('account', 6)}
                   inputMode="numeric"
                   placeholder="48213"
                   disabled={!!linkedAccount}
@@ -324,30 +332,36 @@ export default function AddClient() {
 
         <Card title="Service">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Field label="PPPoE username" hint="Defaults to the account number — one number to remember">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Input
-                  value={f.login || f.account}
-                  onChange={setDigits('login', 5)}
-                  inputMode="numeric"
-                  placeholder={f.account || '48213'}
-                  style={{ fontFamily: font.mono }}
-                />
-                <Button onClick={genLogin}>Generate</Button>
-              </div>
-            </Field>
-            <Field label="PPPoE password" hint="7 digits">
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Input
-                  value={f.password}
-                  onChange={setDigits('password', 7)}
-                  inputMode="numeric"
-                  placeholder="4827193"
-                  style={{ fontFamily: font.mono }}
-                />
-                <Button onClick={genCredentials}>Generate</Button>
-              </div>
-            </Field>
+            {/* Only meaningful for a PPPoE line — showing these for a Hotspot
+                or Static IP customer just confused the form with credentials
+                that service never uses. */}
+            {f.service === 'PPPoE' && (
+              <>
+                <Field label="PPPoE username" hint="4-12 letters/digits. Defaults to the account number — one number to remember">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Input
+                      value={f.login || f.account}
+                      onChange={setAlnum('login', 12)}
+                      placeholder={f.account || '48213'}
+                      style={{ fontFamily: font.mono }}
+                    />
+                    <Button onClick={genLogin}>Generate</Button>
+                  </div>
+                </Field>
+                <Field label="PPPoE password" hint="7 digits">
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Input
+                      value={f.password}
+                      onChange={setDigits('password', 7)}
+                      inputMode="numeric"
+                      placeholder="4827193"
+                      style={{ fontFamily: font.mono }}
+                    />
+                    <Button onClick={genCredentials}>Generate</Button>
+                  </div>
+                </Field>
+              </>
+            )}
             <Field
               label="Service type"
               hint={linkedAccount ? 'A second line on this account is PPPoE — hotspot vouchers don\'t use an account number' : undefined}

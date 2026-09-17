@@ -7345,6 +7345,20 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
   if (autopay === 'kopokopo') {
     return res.status(400).json({ error: 'KopoKopo cannot be used for autopay — it is hotspot-only.' });
   }
+  // Same shape the edit route already enforces (PUT /api/subscribers/:id,
+  // further down) — letters allowed alongside digits, since a hand-typed
+  // username may already match an existing router scheme or a customer's
+  // own choice, not only the digits-only auto-generated default. Checked
+  // here too so creation cannot produce a pppoe_user that a later edit
+  // would then reject as invalid.
+  if (pppoeUser != null && String(pppoeUser).trim() !== ''
+      && !/^[A-Za-z0-9]{4,12}$/.test(String(pppoeUser))) {
+    return res.status(400).json({ error: 'PPPoE username must be 4-12 letters/digits' });
+  }
+  if (pppoePass != null && String(pppoePass).trim() !== ''
+      && !/^[A-Za-z0-9]{4,12}$/.test(String(pppoePass))) {
+    return res.status(400).json({ error: 'PPPoE password must be 4-12 letters/digits' });
+  }
 
   /**
    * Catch the same customer being added twice.
