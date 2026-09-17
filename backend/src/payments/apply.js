@@ -9,12 +9,35 @@ import { send } from '../sms.js';
  * batch instead of a trickle of expiries scattered across all 24 hours.
  * Always rounds *up*: a customer never loses paid-for time to the rounding,
  * only ever gains the remainder of the day they paid into.
+ *
+ * Nairobi's own midnight, not the server's: getHours()/setHours() operate on
+ * whatever timezone the api container itself is running in, and the api
+ * service has no TZ set at all (unlike db/freeradius/openvpn/wireguard in
+ * docker-compose.yml, which all get TZ: Africa/Nairobi explicitly) — even if
+ * it did, this image is node:22-alpine, which ships no tzdata for a TZ env
+ * var to resolve against. Every new PPPoE customer's welcome window (and
+ * every payment's rounded-up expiry) landed at 03:00 EAT instead of
+ * midnight as a result — exactly Nairobi's own UTC+3 offset. Computed via
+ * Intl.DateTimeFormat with an explicit IANA zone instead, the same fix
+ * radiusDate (radius.js) already uses for RADIUS Expiration for the same
+ * underlying reason — Node's bundled ICU carries real timezone data
+ * regardless of the OS or TZ, so this does not depend on the container
+ * having either right.
  */
 export function ceilToMidnight(d) {
-  const r = new Date(d);
-  if (r.getHours() === 0 && r.getMinutes() === 0 && r.getSeconds() === 0 && r.getMilliseconds() === 0) return r;
-  r.setHours(24, 0, 0, 0);
-  return r;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const get = (type) => parts.find((p) => p.type === type).value;
+  // en-US + hour12:false reports midnight as "24", not "00" (see radiusDate's
+  // own note on this) — already-exactly-midnight has to recognise that.
+  const hour = get('hour') === '24' ? '00' : get('hour');
+  if (hour === '00' && get('minute') === '00' && get('second') === '00') return new Date(d);
+  // Nairobi has a fixed UTC+3 offset year-round (no DST), so tomorrow's date
+  // at Nairobi midnight is simply tomorrow 00:00 UTC minus 3 hours.
+  const y = Number(get('year')), mo = Number(get('month')), da = Number(get('day'));
+  return new Date(Date.UTC(y, mo - 1, da + 1, 0, 0, 0, 0) - 3 * 3600 * 1000);
 }
 
 /**

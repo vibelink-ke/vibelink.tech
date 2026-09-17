@@ -437,18 +437,41 @@ export default function ClientDetail() {
     }
   };
 
-  const giveDays = async (c) => {
-    const raw = window.prompt(`Free days to add for ${c.line_label || c.name} — outage credit or a grace period:`, '1');
-    if (raw === null) return;
-    const days = Number(raw);
-    if (!Number.isFinite(days) || days <= 0) return store.toast('Enter a positive number of days');
+  // { client, date } while the calendar modal is open — date is a plain
+  // "YYYY-MM-DD" from the native date input, day-count typing (window.prompt)
+  // replaced with picking the actual day this line should stay active
+  // through. Clients.jsx's own bulk "outage credit" flow still uses a
+  // relative day-count on purpose — one uniform number of days makes sense
+  // applied across many customers with different current expiries, where a
+  // single target date would not.
+  const [extending, setExtending] = useState(null);
+
+  const openExtend = (c) => {
+    const current = c.expires_at ? new Date(c.expires_at) : null;
+    // Pre-fills to the day after whatever's later of "already active until"
+    // or "today" — a customer mid-plan sees their own expiry nudged
+    // forward, not reset backward to tomorrow.
+    const base = current && current > new Date() ? current : new Date();
+    const next = new Date(base.getTime() + 86400000);
+    setExtending({ client: c, date: next.toISOString().slice(0, 10) });
+  };
+
+  const submitExtend = async () => {
+    if (!extending) return;
+    const { client, date } = extending;
+    if (!date) return store.toast('Pick a date');
     try {
-      const out = await api.compensateSubscribers([c.id], days);
-      const hit = out.rows?.[0];
-      if (hit) store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, expires_at: hit.expires_at } : x)));
-      store.toast(`Added ${out.days} day(s) for ${c.name}`);
+      // "Active through <date>" lands on the same Nairobi-midnight boundary
+      // every other PPPoE expiry already uses (ceilToMidnight, apply.js) —
+      // the instant that reads as 00:00 the FOLLOWING day in Nairobi (fixed
+      // UTC+3, no DST), so the picked day itself is fully included.
+      const expiresAt = new Date(new Date(`${date}T00:00:00+03:00`).getTime() + 86400000).toISOString();
+      const updated = await api.updateSubscriber(client.id, { expires_at: expiresAt });
+      store.setCollection('clients', (cs) => cs.map((x) => (x.id === client.id ? updated : x)));
+      store.toast(`${client.line_label || client.name} active through ${new Date(`${date}T00:00:00+03:00`).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}`);
+      setExtending(null);
     } catch (e) {
-      store.toast(`Could not add days: ${e.message}`);
+      store.toast(`Could not extend: ${e.message}`);
     }
   };
 
@@ -669,7 +692,7 @@ export default function ClientDetail() {
                             Suspend
                           </RowAction>
                         )}
-                        <RowAction tone={color.green} onClick={() => giveDays(line)} title="Outage credit or a grace period">Extend</RowAction>
+                        <RowAction tone={color.green} onClick={() => openExtend(line)} title="Outage credit or a grace period">Extend</RowAction>
                         {line.service === 'pppoe' && line.phone && (
                           <RowAction onClick={() => stkPush(line)} title="Send an M-Pesa STK prompt to their phone">Send STK</RowAction>
                         )}
@@ -1071,6 +1094,29 @@ export default function ClientDetail() {
           )}
         </div>
       )}
+
+      <Modal
+        open={!!extending}
+        title={`Extend — ${extending?.client?.line_label || extending?.client?.name || ''}`}
+        onClose={() => setExtending(null)}
+        footer={
+          <>
+            <Button onClick={() => setExtending(null)}>Cancel</Button>
+            <Button variant="primary" onClick={submitExtend}>Extend</Button>
+          </>
+        }
+      >
+        {extending && (
+          <Field label="Active through" hint="The line stays online through the end of this day">
+            <Input
+              type="date"
+              value={extending.date}
+              onChange={(e) => setExtending((s) => ({ ...s, date: e.target.value }))}
+              autoFocus
+            />
+          </Field>
+        )}
+      </Modal>
 
       <Modal
         open={!!addingService}
