@@ -54,8 +54,6 @@ function Group({ item, store }) {
 }
 
 function Row({ item, store }) {
-  const count = item.count?.(store);
-  const badge = item.badge?.(store);
   return (
     <NavLink to={item.to} end={item.end} style={{ textDecoration: 'none' }}>
       {({ isActive }) => (
@@ -75,28 +73,6 @@ function Row({ item, store }) {
           <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
             <span>{item.label}</span>
             {item.dot && <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: color.mint }} />}
-            {count !== undefined && (
-              <span style={{ fontFamily: font.mono, fontSize: 10.5, color: color.sideMuted }}>{count}</span>
-            )}
-            {badge !== undefined && (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  minWidth: 18,
-                  height: 18,
-                  padding: '0 5px',
-                  borderRadius: radius.pill,
-                  background: badge > 0 ? color.rustBg : '#e4e8e3',
-                  color: badge > 0 ? color.rust : color.sideMuted,
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                }}
-              >
-                {badge}
-              </span>
-            )}
           </span>
         </div>
       )}
