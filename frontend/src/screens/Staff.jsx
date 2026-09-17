@@ -94,7 +94,10 @@ export default function Staff() {
     }
   };
 
-  const openEdit = (s) => setEditing({ id: s.id, name: s.name, phone: s.phone, email: s.email ?? '', username: s.username ?? '', role: s.role });
+  const openEdit = (s) => {
+    setEditing({ id: s.id, name: s.name, phone: s.phone, email: s.email ?? '', username: s.username ?? '', role: s.role });
+    setResetPassword(null);
+  };
   const setEdit = (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value }));
 
   // Downscaled to a small square before it ever leaves the browser — a
@@ -163,6 +166,24 @@ export default function Staff() {
       store.toast(`Could not save: ${e.message}`);
     } finally {
       setEditBusy(false);
+    }
+  };
+
+  // Set once a reset succeeds, shown inline in the same modal rather than a
+  // toast — a generated password needs to stay on screen long enough to be
+  // read out or copied, not flash past in a few seconds.
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetPassword, setResetPassword] = useState(null);
+  const handleResetPassword = async () => {
+    setResetBusy(true);
+    setResetPassword(null);
+    try {
+      const { password } = await api.resetStaffPassword(editing.id);
+      setResetPassword(password);
+    } catch (e) {
+      store.toast(`Could not reset password: ${e.message}`);
+    } finally {
+      setResetBusy(false);
     }
   };
 
@@ -360,10 +381,10 @@ export default function Staff() {
       <Modal
         open={!!editing}
         title={editing ? `${editing.name}` : ''}
-        onClose={() => setEditing(null)}
+        onClose={() => { setEditing(null); setResetPassword(null); }}
         footer={
           <>
-            <Button onClick={() => setEditing(null)}>Cancel</Button>
+            <Button onClick={() => { setEditing(null); setResetPassword(null); }}>Cancel</Button>
             <Button variant="primary" onClick={saveEdit} disabled={editBusy}>
               {editBusy ? 'Saving…' : 'Save changes'}
             </Button>
@@ -391,6 +412,30 @@ export default function Staff() {
               <input type="file" accept="image/*" onChange={onPhotoChange} />
               {editing.photoData && (
                 <img src={editing.photoData} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', marginTop: 8 }} />
+              )}
+            </Field>
+            <Field label="Password" hint="Generated, not typed — nobody should be choosing another person's password">
+              {resetPassword ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+                  borderRadius: radius.sm, background: color.tileBg, fontFamily: font.mono, fontSize: 13,
+                }}>
+                  <span style={{ flex: 1 }}>{resetPassword}</span>
+                  <Button
+                    onClick={() => { navigator.clipboard?.writeText(resetPassword); store.toast('Copied'); }}
+                  >
+                    Copy
+                  </Button>
+                </div>
+              ) : (
+                <Button onClick={handleResetPassword} disabled={resetBusy}>
+                  {resetBusy ? 'Generating…' : 'Change password'}
+                </Button>
+              )}
+              {resetPassword && (
+                <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 6 }}>
+                  Share this with {editing.name} now — it will not be shown again. They are signed out everywhere until they use it.
+                </span>
               )}
             </Field>
           </div>
@@ -459,12 +504,27 @@ export default function Staff() {
                 {idCard.employeeNo && (
                   <div style={{ fontSize: 11, fontFamily: font.mono, color: color.muted, marginTop: 3 }}>ID {idCard.employeeNo}</div>
                 )}
+                {idCard.phone && (
+                  <div style={{ fontSize: 11, color: color.muted, marginTop: 2 }}>{idCard.phone}</div>
+                )}
                 <img src={idCard.qrDataUrl} alt="Verification QR code" style={{ width: 140, height: 140, margin: '14px 0 0' }} />
                 <div style={{ fontSize: 10.5, color: color.muted, marginTop: 8 }}>Scan to verify this staff member</div>
                 {idCard.issuedAt && (
                   <div style={{ fontSize: 10, color: color.muted, marginTop: 2 }}>
                     Staff since {new Date(idCard.issuedAt).toLocaleDateString('en-KE', { month: 'short', year: 'numeric' })}
                   </div>
+                )}
+                {idCard.expiresAt && (
+                  <div style={{
+                    fontSize: 10, marginTop: 2, fontWeight: new Date(idCard.expiresAt) < new Date() ? 700 : 400,
+                    color: new Date(idCard.expiresAt) < new Date() ? color.rust : color.muted,
+                  }}>
+                    {new Date(idCard.expiresAt) < new Date() ? 'EXPIRED — reissue this badge · ' : 'Valid until '}
+                    {new Date(idCard.expiresAt).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </div>
+                )}
+                {idCard.companyPhone && (
+                  <div style={{ fontSize: 10, color: color.muted, marginTop: 6 }}>Verify by phone: {idCard.companyPhone}</div>
                 )}
                 <div style={{ fontSize: 9.5, color: color.mutedSoft, marginTop: 12, lineHeight: 1.4, borderTop: `1px solid ${color.line}`, paddingTop: 8 }}>
                   Confirms identity only — not a system access credential.

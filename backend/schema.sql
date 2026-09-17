@@ -2300,3 +2300,9 @@ alter table hotspot_access_codes add constraint hotspot_access_codes_max_devices
 alter table staff add column if not exists verification_token uuid not null default gen_random_uuid();
 create unique index if not exists staff_verification_token_idx on staff (verification_token);
 alter table staff add column if not exists photo_data text;
+
+-- A badge's own validity, distinct from hr_profiles.employment_status — an
+-- employee can stay employed with an expired badge (due for reprinting) just
+-- as easily as an ex-employee's badge stops mattering the moment they leave.
+-- The verify page checks both independently rather than conflating them.
+alter table hr_profiles add column if not exists badge_expires_at date;

@@ -95,9 +95,25 @@ export default function VerifyStaff() {
                 ? `✓ Active employee at ${data.companyName}`
                 : `This person no longer works at ${data.companyName}`}
             </div>
+            {data.expired && (
+              // Separate from employment status on purpose — a badge can be
+              // overdue for reprinting while the person still works there,
+              // which is not the same thing as no longer being employed.
+              <div style={{
+                padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                background: '#fdf3dc', color: '#7d5c11', marginTop: 8,
+              }}>
+                ⚠ This badge has expired — ask to see a current one
+              </div>
+            )}
             {data.hiredAt && (
               <p style={{ fontSize: 11.5, color: '#9aa298', marginTop: 10 }}>
                 Staff since {new Date(data.hiredAt).toLocaleDateString('en-KE', { month: 'short', year: 'numeric' })}
+              </p>
+            )}
+            {data.companyPhone && (
+              <p style={{ fontSize: 11.5, color: '#9aa298', marginTop: 4 }}>
+                Verify by phone: {data.companyPhone}
               </p>
             )}
             <p style={{ fontSize: 11.5, color: '#9aa298', marginTop: 18 }}>

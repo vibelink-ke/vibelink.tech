@@ -188,6 +188,7 @@ export const api = {
   // ── HR & payroll ──
   hrProfiles: () => get('/api/hr/profiles'),
   saveHrProfile: (staffId, profile) => put(`/api/hr/profiles/${staffId}`, profile),
+  newEmployeeNo: () => get('/api/hr/profiles/new-employee-no'),
   payrollRuns: () => get('/api/payroll/runs'),
   payrollRun: (id) => get(`/api/payroll/runs/${id}`),
   createPayrollRun: (r) => post('/api/payroll/runs', r),
@@ -304,6 +305,7 @@ export const api = {
   staff: () => get('/api/staff'),
   createStaff: (s) => post('/api/staff', s),
   updateStaff: (id, s) => put(`/api/staff/${id}`, s),
+  resetStaffPassword: (id) => post(`/api/staff/${id}/password`, {}),
   staffIdCard: (id) => get(`/api/staff/${id}/id-card`),
   permissions: () => get('/api/permissions'),
   savePermissions: (matrix) => put('/api/permissions', { matrix }),

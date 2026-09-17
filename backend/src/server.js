@@ -886,9 +886,9 @@ app.get('/api/public/favicon', wrap(async (req, res) => {
 app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     `select s.name, s.role, s.photo_data,
-            t.name as company_name,
+            t.name as company_name, t.support_phone as company_phone,
             coalesce(hr.employment_status, 'active') as employment_status,
-            hr.hired_at, hr.employee_no
+            hr.hired_at, hr.employee_no, hr.badge_expires_at
        from staff s
        join tenants t on t.id = s.tenant_id
        left join hr_profiles hr on hr.staff_id = s.id
@@ -897,7 +897,16 @@ app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
   if (!s) return res.status(404).json({ error: 'No staff member matches this ID' });
   res.json({
     name: s.name, role: s.role, photoData: s.photo_data, companyName: s.company_name,
+    // The staff member's own phone number is deliberately never returned
+    // here — this route is scannable by anyone, not just the customer it
+    // was made for, and a personal number is exactly the kind of thing
+    // that shouldn't end up on an infinitely-scannable public page even
+    // though it's printed on the physical badge itself. companyPhone
+    // gives a safe way to double-check by calling the business instead.
+    companyPhone: s.company_phone,
     active: s.employment_status === 'active', hiredAt: s.hired_at, employeeNo: s.employee_no,
+    expiresAt: s.badge_expires_at,
+    expired: s.badge_expires_at ? new Date(s.badge_expires_at) < new Date() : false,
   });
 }));
 
@@ -3811,7 +3820,7 @@ app.get('/api/hr/profiles', requirePermission('hr.view'), wrap(async (req, res) 
   const { rows } = await pool.query(
     `select s.id as staff_id, s.name, s.phone, s.role,
             hp.employee_no, hp.base_salary, hp.salary_frequency, hp.payout_method,
-            hp.payout_phone, hp.employment_status, hp.hired_at
+            hp.payout_phone, hp.employment_status, hp.hired_at, hp.badge_expires_at
        from staff s
        left join hr_profiles hp on hp.staff_id = s.id
       where s.tenant_id=$1 and s.role <> 'platform_admin'
@@ -3820,8 +3829,24 @@ app.get('/api/hr/profiles', requirePermission('hr.view'), wrap(async (req, res) 
   res.json(rows);
 }));
 
+/**
+ * Next employee number in sequence for this tenant — offered rather than
+ * required, since a tenant may already run its own numbering (payroll
+ * system, physical badge stock printed in advance) that this would only
+ * collide with. Only ever looks at its own EMP-NNN pattern, so a tenant
+ * using a different scheme is left alone rather than having its numbers
+ * reinterpreted.
+ */
+app.get('/api/hr/profiles/new-employee-no', requirePermission('hr.edit'), wrap(async (req, res) => {
+  const { rows: [{ next }] } = await pool.query(
+    `select coalesce(max(substring(employee_no from 5)::int), 0) + 1 as next
+       from hr_profiles where tenant_id=$1 and employee_no ~ '^EMP-[0-9]+$'`,
+    [req.tenant.id]);
+  res.json({ employeeNo: `EMP-${String(next).padStart(3, '0')}` });
+}));
+
 app.put('/api/hr/profiles/:staffId', requirePermission('hr.edit'), wrap(async (req, res) => {
-  const { employeeNo, baseSalary, salaryFrequency, payoutMethod, payoutPhone, employmentStatus, hiredAt } = req.body ?? {};
+  const { employeeNo, baseSalary, salaryFrequency, payoutMethod, payoutPhone, employmentStatus, hiredAt, badgeExpiresAt } = req.body ?? {};
   const { rowCount: exists } = await pool.query(
     'select 1 from staff where id=$1 and tenant_id=$2', [req.params.staffId, req.tenant.id]);
   if (!exists) return res.status(404).json({ error: 'No such staff member' });
@@ -3833,8 +3858,8 @@ app.put('/api/hr/profiles/:staffId', requirePermission('hr.edit'), wrap(async (r
   }
   const { rows: [hp] } = await pool.query(
     `insert into hr_profiles (staff_id, tenant_id, employee_no, base_salary, salary_frequency,
-       payout_method, payout_phone, employment_status, hired_at)
-     values ($1,$2,$3,coalesce($4,0),coalesce($5,'monthly'),coalesce($6,'manual'),$7,coalesce($8,'active'),$9)
+       payout_method, payout_phone, employment_status, hired_at, badge_expires_at)
+     values ($1,$2,$3,coalesce($4,0),coalesce($5,'monthly'),coalesce($6,'manual'),$7,coalesce($8,'active'),$9,$10)
      on conflict (staff_id) do update set
        employee_no=coalesce($3, hr_profiles.employee_no),
        base_salary=coalesce($4, hr_profiles.base_salary),
@@ -3842,10 +3867,12 @@ app.put('/api/hr/profiles/:staffId', requirePermission('hr.edit'), wrap(async (r
        payout_method=coalesce($6, hr_profiles.payout_method),
        payout_phone=coalesce($7, hr_profiles.payout_phone),
        employment_status=coalesce($8, hr_profiles.employment_status),
-       hired_at=coalesce($9, hr_profiles.hired_at)
+       hired_at=coalesce($9, hr_profiles.hired_at),
+       badge_expires_at=coalesce($10, hr_profiles.badge_expires_at)
      returning *`,
     [req.params.staffId, req.tenant.id, employeeNo ?? null, baseSalary != null ? Number(baseSalary) : null,
-     salaryFrequency ?? null, payoutMethod ?? null, payoutPhone ?? null, employmentStatus ?? null, hiredAt ?? null]);
+     salaryFrequency ?? null, payoutMethod ?? null, payoutPhone ?? null, employmentStatus ?? null, hiredAt ?? null,
+     badgeExpiresAt ?? null]);
   res.json(hp);
 }));
 
@@ -8871,8 +8898,8 @@ app.get('/api/staff', wrap(async (req, res) => {
  */
 app.get('/api/staff/:id/id-card', requirePermission('staff.view'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
-    `select s.name, s.role, s.photo_data, s.verification_token,
-            hr.employee_no, hr.hired_at
+    `select s.name, s.role, s.phone, s.photo_data, s.verification_token,
+            hr.employee_no, hr.hired_at, hr.badge_expires_at
        from staff s
        left join hr_profiles hr on hr.staff_id = s.id
       where s.id=$1 and s.tenant_id=$2`,
@@ -8880,9 +8907,9 @@ app.get('/api/staff/:id/id-card', requirePermission('staff.view'), wrap(async (r
   if (!s) return res.status(404).json({ error: 'not found' });
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   res.json({
-    name: s.name, role: s.role, photoData: s.photo_data,
-    company: req.tenant.name,
-    employeeNo: s.employee_no, issuedAt: s.hired_at,
+    name: s.name, role: s.role, phone: s.phone, photoData: s.photo_data,
+    company: req.tenant.name, companyPhone: req.tenant.support_phone,
+    employeeNo: s.employee_no, issuedAt: s.hired_at, expiresAt: s.badge_expires_at,
     verifyUrl: `https://${req.tenant.subdomain}.${root}/verify-staff/${s.verification_token}`,
   });
 }));
@@ -9015,6 +9042,30 @@ app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res)
     if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });
     throw e;
   }
+}));
+
+/**
+ * Reset a staff member's own password from Staff & roles — previously the
+ * only way to do this at all was the platform-owner-only tenant management
+ * screen, unusable by the tenant's own admins for their own team.
+ *
+ * Generated rather than accepted from the request, same reasoning as the
+ * platform-owner equivalent above: nobody should be typing in a password
+ * for someone else, and it is never stored anywhere but hashed. Returned
+ * once so it can be read out or copied to the person it belongs to.
+ */
+app.post('/api/staff/:id/password', requirePermission('staff.edit'), wrap(async (req, res) => {
+  const { rows: [target] } = await pool.query(
+    'select id from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!target) return res.status(404).json({ error: 'No such member of staff' });
+
+  const fresh = crypto.randomBytes(6).toString('base64url');
+  await pool.query('update staff set password_hash=$2 where id=$1', [target.id, await auth.hashPassword(fresh)]);
+  // A reset that leaves their old sessions alive has not actually taken the
+  // account back — matters just as much for a staff member as for a tenant.
+  await pool.query('delete from admin_sessions where staff_id=$1', [target.id]);
+
+  res.json({ password: fresh });
 }));
 
 /**
