@@ -261,8 +261,14 @@ export default function Networks() {
           <Field label="CIDR" hint={f.cidr ? `${cidrHosts(f.cidr)} usable addresses` : 'e.g. 10.10.0.0/22'}>
             <Input value={f.cidr} onChange={set('cidr')} placeholder="10.10.0.0/22" />
           </Field>
+          {/* Hotspot removed: nothing reads an ip_pools row's service='hotspot'
+              back out anywhere — a hotspot's actual address range only ever
+              comes from Hotspot -> Settings' own "Hotspot network" field
+              (applyHotspotServer, routeros.js, builds a fixed 'hotspot-pool'
+              from that CIDR directly). PPPoE is real: repushPppoePool
+              (server.js) queries this exact table for it. */}
           <Field label="Service">
-            <Select value={f.service} onChange={set('service')} options={[{ value: 'pppoe', label: 'PPPoE' }, { value: 'hotspot', label: 'Hotspot' }]} />
+            <Select value={f.service} onChange={set('service')} options={[{ value: 'pppoe', label: 'PPPoE' }]} />
           </Field>
           <Field label="Router" span={2}>
             <Select
