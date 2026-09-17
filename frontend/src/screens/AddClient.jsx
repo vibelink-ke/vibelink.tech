@@ -190,17 +190,26 @@ export default function AddClient() {
     if (!f.phone.trim()) return store.toast('A phone number is required — it is how payments get matched');
     setBusy(true);
     try {
+      // Only the "add another line" form (linkedAccount) ever showed a
+      // Service section at all — a plain new customer must not get a
+      // service auto-attached from fields that were never on screen.
+      // f.login defaulting to f.account when hidden was exactly that: a
+      // fresh customer got pppoe_user silently set to their account
+      // number, which is enough for the backend to sync real RADIUS
+      // credentials (server.js: `if (s.pppoe_user) ... syncSubscriberCredentials`)
+      // — a "service" appearing to exist despite nobody choosing a plan or
+      // a router for it.
       const created = await api.createSubscriber({
         accountCode: f.account || f.login || f.phone,
         name,
         phone: f.phone,
         phoneAlt: f.phoneAlt,
-        service: f.service.toLowerCase() === 'hotspot' ? 'hotspot' : 'pppoe',
-        planId: f.planId || null,
-        routerId: f.mikrotik || null,
-        pppoeUser: f.login || f.account || null,
-        pppoePass: f.password || null,
-        staticIp: f.assignedIp || null,
+        service: linkedAccount ? (f.service.toLowerCase() === 'hotspot' ? 'hotspot' : 'pppoe') : undefined,
+        planId: linkedAccount ? (f.planId || null) : null,
+        routerId: linkedAccount ? (f.mikrotik || null) : null,
+        pppoeUser: linkedAccount ? (f.login || f.account || null) : null,
+        pppoePass: linkedAccount ? (f.password || null) : null,
+        staticIp: linkedAccount ? (f.assignedIp || null) : null,
         lineLabel: f.lineLabel || null,
         referredBy: f.referredBy || null,
         leadId: fromLeadId || undefined,
