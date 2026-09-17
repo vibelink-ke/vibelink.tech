@@ -2288,3 +2288,15 @@ create table if not exists hotspot_access_codes (
 );
 alter table hotspot_access_codes drop constraint if exists hotspot_access_codes_max_devices_check;
 alter table hotspot_access_codes add constraint hotspot_access_codes_max_devices_check check (max_devices between 1 and 50);
+
+-- A staff ID badge's own QR-verification identity — deliberately separate
+-- from username/password: this gets printed on a badge and shown to
+-- strangers, so it must never double as (or leak) anything a login could
+-- use. gen_random_uuid() is volatile, so this backfills every existing row
+-- with its own distinct token in the same statement, not just new ones.
+-- photo_data is a small data: URI (resized client-side before upload)
+-- rather than object storage — nothing else in this codebase has a file-
+-- upload path yet, and a badge photo is small enough not to need one.
+alter table staff add column if not exists verification_token uuid not null default gen_random_uuid();
+create unique index if not exists staff_verification_token_idx on staff (verification_token);
+alter table staff add column if not exists photo_data text;

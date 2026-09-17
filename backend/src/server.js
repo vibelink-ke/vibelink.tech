@@ -872,6 +872,35 @@ app.get('/api/public/favicon', wrap(async (req, res) => {
   res.type(row.favicon_mime).send(row.favicon);
 }));
 
+/**
+ * What a customer sees after scanning a staff ID badge's QR code. Same
+ * pre-middleware placement as the brand/favicon routes just above, for the
+ * same reason but stronger here: this genuinely needs no tenant-by-host
+ * resolution at all — verification_token alone already names exactly one
+ * staff member, tenant included — so it must not depend on req.hostname
+ * matching a real tenant the way the generic middleware would otherwise
+ * require. Only the fields a stranger checking a badge needs; nothing here
+ * overlaps with login credentials, on purpose (see the schema comment on
+ * verification_token).
+ */
+app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select s.name, s.role, s.photo_data,
+            t.name as company_name,
+            coalesce(hr.employment_status, 'active') as employment_status,
+            hr.hired_at
+       from staff s
+       join tenants t on t.id = s.tenant_id
+       left join hr_profiles hr on hr.staff_id = s.id
+      where s.verification_token = $1`,
+    [req.params.token]);
+  if (!s) return res.status(404).json({ error: 'No staff member matches this ID' });
+  res.json({
+    name: s.name, role: s.role, photoData: s.photo_data, companyName: s.company_name,
+    active: s.employment_status === 'active', hiredAt: s.hired_at,
+  });
+}));
+
 /** "Adding a TV or console?" — see devicesPage() for what this actually does. */
 app.get('/hotspot/devices', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
@@ -8828,10 +8857,29 @@ app.get('/api/staff', wrap(async (req, res) => {
   // Never password_hash either — nothing on this screen has a use for it,
   // and there's no reason to put a password hash on the wire on every load.
   const { rows } = await pool.query(
-    `select id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin
+    `select id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin, verification_token
        from staff where tenant_id=$1 and role<>'platform_admin' ${role ? 'and role=$2' : ''} order by name`,
     role ? [req.tenant.id, role] : [req.tenant.id]);
   res.json(rows);
+}));
+
+/**
+ * Everything the "Staff ID" badge needs, including the photo — kept off the
+ * plain list above (photo_data is a data: URI, easily a few hundred KB) so
+ * loading the whole staff list never has to carry every photo along with
+ * it just to render names in a table.
+ */
+app.get('/api/staff/:id/id-card', requirePermission('staff.view'), wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select name, role, photo_data, verification_token from staff where id=$1 and tenant_id=$2`,
+    [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'not found' });
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  res.json({
+    name: s.name, role: s.role, photoData: s.photo_data,
+    company: req.tenant.name,
+    verifyUrl: `https://${req.tenant.subdomain}.${root}/verify-staff/${s.verification_token}`,
+  });
 }));
 
 /**
@@ -8907,11 +8955,19 @@ app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) 
  * same guard rather than reopening it through a different door.
  */
 app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res) => {
-  const { name, phone, email, username, role } = req.body;
+  const { name, phone, email, username, role, photoData } = req.body;
 
   const { rows: [target] } = await pool.query(
     'select * from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!target) return res.status(404).json({ error: 'No such member of staff' });
+
+  // A generous ceiling on the data: URI itself (base64 runs ~4/3 the raw
+  // bytes), not a real limit on photo resolution — the ID card modal
+  // already downsizes to a small square before this ever reaches here.
+  // Catches a caller that skipped that resize rather than a legitimate one.
+  if (photoData != null && photoData !== '' && photoData.length > 600_000) {
+    return res.status(400).json({ error: 'That photo is too large — try a smaller image.' });
+  }
 
   if ((target.role === 'owner' || target.role === 'platform_admin') && role && role !== target.role && !req.session.is_super_admin) {
     return res.status(403).json({ error: "Only the platform owner can change an owner's role." });
@@ -8940,13 +8996,15 @@ app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res)
          phone = coalesce($4, phone),
          email = $5,
          username = $6,
-         role = coalesce($7, role)
+         role = coalesce($7, role),
+         photo_data = $8
        where id=$1 and tenant_id=$2
-       returning id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin`,
+       returning id, tenant_id, name, phone, email, role, username, last_seen, is_super_admin, verification_token`,
       [req.params.id, req.tenant.id, name?.trim() || null, phone?.trim() || null,
        email !== undefined ? (email?.trim() || null) : target.email,
        username !== undefined ? (username?.trim() || null) : target.username,
-       role || null]);
+       role || null,
+       photoData !== undefined ? (photoData || null) : target.photo_data]);
     res.json(updated);
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That phone number, email or username is already in use.' });

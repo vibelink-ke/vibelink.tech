@@ -9,6 +9,7 @@ import ResetPassword from './app/ResetPassword';
 import AcceptInvite from './app/AcceptInvite';
 import { isPlatformHost } from './app/host';
 import CustomerPortal from './screens/CustomerPortal';
+import VerifyStaff from './screens/VerifyStaff';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
 import { api } from './api/client';
@@ -148,6 +149,11 @@ export default function App() {
   // cookie the admin routes do not accept. Checked first so a subscriber never
   // sees the staff sign-in card.
   if (pathname.startsWith('/customer')) return <CustomerPortal />;
+
+  // A staff ID badge's QR code lands here — a stranger scanning it has no
+  // session and never will, so this has to be reachable the same way the
+  // customer portal above is.
+  if (pathname.startsWith('/verify-staff/')) return <VerifyStaff />;
 
   // Reachable with no session at all — that is the point of a password
   // reset — so this has to come before the session gate below, not after it.

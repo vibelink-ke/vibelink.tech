@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import QRCode from 'qrcode';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -84,6 +85,46 @@ export default function Staff() {
 
   const openEdit = (s) => setEditing({ id: s.id, name: s.name, phone: s.phone, email: s.email ?? '', username: s.username ?? '', role: s.role });
   const setEdit = (k) => (e) => setEditing((s) => ({ ...s, [k]: e.target.value }));
+
+  // Downscaled to a small square before it ever leaves the browser — a
+  // full-resolution phone photo is easily several MB, and a badge photo
+  // only ever needs to be legible at ID-card size. Cropped to cover (not
+  // fit) so a portrait or landscape source both fill the square rather
+  // than letterboxing.
+  const onPhotoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const size = 300;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const scale = Math.max(size / img.width, size / img.height);
+        const w = img.width * scale;
+        const h = img.height * scale;
+        canvas.getContext('2d').drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+        setEditing((s) => ({ ...s, photoData: canvas.toDataURL('image/jpeg', 0.82) }));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // { name, role, photoData, company, verifyUrl, qrDataUrl } while the
+  // printable ID card modal is open.
+  const [idCard, setIdCard] = useState(null);
+  const openIdCard = async (s) => {
+    try {
+      const card = await api.staffIdCard(s.id);
+      const qrDataUrl = await QRCode.toDataURL(card.verifyUrl, { width: 220, margin: 1 });
+      setIdCard({ ...card, qrDataUrl });
+    } catch (e) {
+      store.toast(`Could not load ID card: ${e.message}`);
+    }
+  };
 
   // Arrived from a link on another screen ("who created this lead/expense") —
   // /staff?open=<id> opens straight to that person's own edit drawer instead
@@ -171,6 +212,9 @@ export default function Staff() {
                   <span style={{ whiteSpace: 'nowrap' }}>
                     <span onClick={() => openEdit(s)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
                       View / Edit
+                    </span>
+                    <span onClick={() => openIdCard(s)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
+                      Staff ID
                     </span>
                     {/*
                       Always shown, even on an owner's own row — the server
@@ -332,7 +376,65 @@ export default function Staff() {
             <Field label="Role" hint={editing.role === 'owner' ? 'Only the platform owner can change an owner\'s role' : undefined}>
               <Select value={editing.role} onChange={setEdit('role')} options={ROLES.map((r) => ({ value: r.value, label: r.label }))} />
             </Field>
+            <Field label="ID photo" hint="For their printable staff ID card — leave blank to keep the current one">
+              <input type="file" accept="image/*" onChange={onPhotoChange} />
+              {editing.photoData && (
+                <img src={editing.photoData} alt="" style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', marginTop: 8 }} />
+              )}
+            </Field>
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!idCard}
+        title="Staff ID"
+        onClose={() => setIdCard(null)}
+        footer={
+          <>
+            <Button onClick={() => setIdCard(null)}>Close</Button>
+            <Button variant="primary" onClick={() => window.print()}>Print</Button>
+          </>
+        }
+      >
+        {idCard && (
+          <>
+            {/* Scoped to just the card, not the whole page — a plain window.print()
+                otherwise prints the modal's own overlay/chrome along with it. */}
+            <style>{`
+              @media print {
+                body * { visibility: hidden; }
+                #staff-id-card, #staff-id-card * { visibility: visible; }
+                #staff-id-card { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); }
+              }
+            `}</style>
+            <div
+              id="staff-id-card"
+              style={{
+                width: 300, margin: '0 auto', padding: 20, borderRadius: 14,
+                border: `1px solid ${color.line}`, textAlign: 'center', background: '#fff',
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: color.muted }}>
+                {idCard.company}
+              </div>
+              {idCard.photoData
+                ? <img src={idCard.photoData} alt="" style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', margin: '14px auto 10px' }} />
+                : (
+                  <div style={{
+                    width: 84, height: 84, borderRadius: '50%', margin: '14px auto 10px',
+                    background: '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 26, fontWeight: 600, color: color.muted,
+                  }}>
+                    {idCard.name?.trim()?.[0]?.toUpperCase() ?? '?'}
+                  </div>
+                )}
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{idCard.name}</div>
+              <div style={{ fontSize: 12.5, color: color.muted, textTransform: 'capitalize', marginBottom: 14 }}>{idCard.role}</div>
+              <img src={idCard.qrDataUrl} alt="Verification QR code" style={{ width: 140, height: 140 }} />
+              <div style={{ fontSize: 10.5, color: color.muted, marginTop: 8 }}>Scan to verify this staff member</div>
+            </div>
+          </>
         )}
       </Modal>
     </Screen>
