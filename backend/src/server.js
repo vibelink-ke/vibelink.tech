@@ -1203,6 +1203,38 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
 }));
 
 /**
+ * Recover a voucher code from the M-Pesa transaction code alone — for a
+ * guest who paid (Safaricom's own confirmation SMS proves that) but never
+ * got this tenant's SMS with their actual voucher, an SMS gateway hiccup
+ * being common enough that "I paid but got no code" is a routine support
+ * question rather than a rare edge case.
+ *
+ * payments.provider_ref already holds the exact M-Pesa TransID for a
+ * Daraja payment (applyPayment's own idempotency key) — no separate lookup
+ * table needed, this just reads it back. loginLimiter, not pollLimiter:
+ * unlike the status polls above this effectively answers "is this code
+ * valid" for a guessed input, the same shape of risk a login attempt is.
+ */
+app.get('/hotspot/voucher-by-mpesa', loginLimiter, wrap(async (req, res) => {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  if (!tenant) return res.status(404).json({ error: 'Unknown network' });
+
+  const mpesaCode = String(req.query.code ?? '').trim();
+  if (!mpesaCode) return res.status(400).json({ error: 'no code' });
+
+  const { rows: [v] } = await pool.query(
+    `select vc.code from payments p
+       join vouchers vc on vc.id = p.voucher_id
+      where p.tenant_id=$1 and p.provider='daraja' and p.status='applied'
+        and upper(p.provider_ref) = upper($2)
+      limit 1`,
+    [tenant.id, mpesaCode]);
+  if (!v) return res.status(404).json({ error: 'No payment found for that M-Pesa code — check it and try again, or wait a little longer for the SMS.' });
+  res.json({ code: v.code });
+}));
+
+/**
  * "Does this MAC already have paid time left?" — the login page calls this
  * on load and auto-submits if so, which is the actual fix for a guest
  * getting the sign-in form again after their router loses power.

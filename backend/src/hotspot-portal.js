@@ -422,6 +422,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          background:var(--bg); display:none; }
   .pay.on { display:block; }
   .pay h2 { margin:0 0 4px; font-size:16px; }
+  /* Shared by the M-Pesa-code-recovery box below the login form — same
+     reveal-panel shape as .pay/.chat, distinct name since it isn't either
+     of those specific panels. */
+  .reveal { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+            background:var(--bg); display:none; }
+  .reveal.on { display:block; }
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
   .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }
@@ -500,7 +506,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       else; an external file would simply not load.
     -->
     ${codeBoxOpen}
-    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="event.preventDefault(); submitHotspotLogin(document.getElementById('username').value); return false;">
+    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="event.preventDefault(); handleLoginSubmit(); return false;">
       <!--
         Where the guest lands once connected. An operator's configured
         redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
@@ -509,13 +515,51 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         for why link-orig is not reliable enough to depend on by default.
       -->
       <input type="hidden" name="dst" value="${normalizedRedirect ? esc(normalizedRedirect) : fallbackDst}">
-      <label for="username">Voucher code</label>
-      <input id="username" name="username" type="text" inputmode="numeric"
-             autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
-             spellcheck="false" placeholder="Type the code from your voucher" required>
+      <div id="codeMode">
+        <label for="username">Voucher code</label>
+        <input id="username" name="username" type="text" inputmode="numeric"
+               autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
+               spellcheck="false" placeholder="Type the code from your voucher">
+      </div>
+      <!--
+        A separate mode, not a second always-visible pair of fields — every
+        voucher's password is the same as its code (see the note above), so
+        showing both by default just doubled the typing for no reason. This
+        exists for the rarer case of credentials that were actually issued
+        as a distinct username/password pair (staff set up by hand, or a
+        router's own local user), toggled in and out of view rather than
+        shown alongside the code field.
+      -->
+      <div id="userPassMode" style="display:none">
+        <label for="upUser">Username</label>
+        <input id="upUser" type="text" autocapitalize="none" autocorrect="off" spellcheck="false">
+        <label for="upPass">Password</label>
+        <input id="upPass" type="text" autocapitalize="none" autocorrect="off" spellcheck="false">
+      </div>
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
+    <p class="hint">
+      <a href="javascript:void(0)" id="userPassToggle">Have a username and password instead?</a>
+    </p>
+    <p class="hint">
+      <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
+    </p>
+    <!--
+      Recovers a voucher from the one thing a guest still has even when the
+      SMS never arrived: Safaricom's own confirmation, which always carries
+      the M-Pesa transaction code. /hotspot/voucher-by-mpesa looks that up
+      against payments.provider_ref (the same value applyPayment already
+      keys on) and hands back the voucher code, which is then submitted
+      exactly like one typed in by hand.
+    -->
+    <div class="reveal" id="mpesaBox">
+      <label for="mpesaCode">M-Pesa transaction code</label>
+      <input id="mpesaCode" type="text" placeholder="e.g. SFH7XXXXXX"
+             autocapitalize="characters" autocorrect="off" spellcheck="false">
+      <button type="button" id="mpesaGo">Find my code</button>
+      <p class="hint" id="mpesaNote"></p>
+    </div>
     ${codeBoxClose}
 
     <p class="plans-title">Buy a bundle</p>
@@ -687,7 +731,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
    * interstitial instead of ever reaching a login handler. Going directly to
    * the router's real HTTP server sidesteps that entirely.
    */
-  function submitHotspotLogin(code) {
+  function submitHotspotLoginPair(user, pass) {
     try {
       var form = document.getElementById('loginForm');
       if (String(form.getAttribute('action') || '').indexOf('\$(') === 0) {
@@ -705,7 +749,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         var f = document.createElement('form');
         f.method = 'post';
         f.action = 'http://' + (HOTSPOT_GATEWAY || HOTSPOT_DNS) + '/login';
-        [['username', code], ['password', code], ['dst', dst]].forEach(function (pair) {
+        [['username', user], ['password', pass], ['dst', dst]].forEach(function (pair) {
           var input = document.createElement('input');
           input.type = 'hidden';
           input.name = pair[0];
@@ -716,10 +760,34 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         f.submit();
         return;
       }
-      document.getElementById('username').value = code;
-      document.getElementById('password').value = code;
+      document.getElementById('username').value = user;
+      document.getElementById('password').value = pass;
       form.submit();
     } catch (e) { /* nothing left to try but leave the code visible on screen */ }
+  }
+
+  // Every voucher's password is the same as its code (see the note by the
+  // form above) — this is just the common case of the pair-submit above.
+  function submitHotspotLogin(code) { submitHotspotLoginPair(code, code); }
+
+  /**
+   * Reads whichever fields are actually visible right now (userPassToggle
+   * below swaps which div is shown) rather than assuming code mode — a
+   * guest who switched to username/password and then hit Enter must not
+   * silently submit the empty code field underneath it.
+   */
+  function handleLoginSubmit() {
+    var userPassOn = document.getElementById('userPassMode').style.display !== 'none';
+    if (userPassOn) {
+      var u = document.getElementById('upUser').value.trim();
+      var p = document.getElementById('upPass').value.trim();
+      if (!u || !p) return;
+      submitHotspotLoginPair(u, p);
+    } else {
+      var code = document.getElementById('username').value.trim();
+      if (!code) return;
+      submitHotspotLogin(code);
+    }
   }
 
   /**
@@ -975,6 +1043,50 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     document.getElementById('chatSend').addEventListener('click', sendChat);
     chatText.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
   } catch (e) { /* Talk to support stays unresponsive; Buy above is unaffected */ }
+
+  /**
+   * The two login-page fallbacks: swap to a username/password pair for
+   * credentials that were actually issued as a distinct pair rather than a
+   * single code, and recover a voucher from the M-Pesa transaction code
+   * alone when the SMS carrying it never arrived. Own try/catch so a
+   * failure in either leaves the ordinary code field (and Buy/Talk to
+   * support above) fully working.
+   */
+  try {
+    var codeModeEl = document.getElementById('codeMode');
+    var userPassModeEl = document.getElementById('userPassMode');
+    var userPassToggleBtn = document.getElementById('userPassToggle');
+    userPassToggleBtn.addEventListener('click', function () {
+      var switchingToCode = userPassModeEl.style.display !== 'none';
+      userPassModeEl.style.display = switchingToCode ? 'none' : 'block';
+      codeModeEl.style.display = switchingToCode ? 'block' : 'none';
+      userPassToggleBtn.textContent = switchingToCode
+        ? 'Have a username and password instead?'
+        : 'Have a voucher code instead?';
+    });
+
+    var mpesaBox = document.getElementById('mpesaBox');
+    var mpesaNote = document.getElementById('mpesaNote');
+    document.getElementById('mpesaOpen').addEventListener('click', function () {
+      mpesaBox.classList.toggle('on');
+    });
+    document.getElementById('mpesaGo').addEventListener('click', function () {
+      var code = document.getElementById('mpesaCode').value.trim();
+      if (!code) { mpesaNote.textContent = 'Type the M-Pesa transaction code from your confirmation SMS.'; return; }
+      mpesaNote.textContent = 'Looking…';
+      fetch(API + '/hotspot/voucher-by-mpesa?code=' + encodeURIComponent(code))
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.d.code) {
+            mpesaNote.textContent = (res.d && res.d.error) || 'No payment found for that code.';
+            return;
+          }
+          mpesaNote.textContent = 'Found it — connecting…';
+          submitHotspotLogin(res.d.code);
+        })
+        .catch(function () { mpesaNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+  } catch (e) { /* toggle/recovery stay unresponsive; the voucher-code field above still works */ }
   </script>
 </body>
 </html>`;
