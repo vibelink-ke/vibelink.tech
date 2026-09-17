@@ -106,6 +106,16 @@ const OLD_TAG = '(vibelink)';
 const managed = (label) => `${label} ${TAG}`;
 const isManaged = (row) => typeof row?.comment === 'string'
   && (row.comment.endsWith(TAG) || row.comment.endsWith(OLD_TAG));
+// RouterOS manages a "dynamic" object's own lifecycle — created behind the
+// scenes (by the hotspot server, DHCP, etc.) and gone again on its own —
+// and refuses a direct remove on one outright ("can't remove dynamic
+// object"), comment tag or not. A row can end up both ours-by-comment and
+// dynamic (a static entry the router itself later recreated as dynamic,
+// seen live after a firmware upgrade/config round-trip), so this has to be
+// checked before ever attempting to remove anything "managed". Same
+// dynamic-flag read bindDeviceByMac's DHCP-lease lookup already uses:
+// present and not the literal string 'false'.
+const isDynamic = (row) => row?.dynamic !== 'false' && row?.dynamic !== undefined;
 
 /** Back-compat for anywhere still asking for the old blanket tag directly. */
 export const MANAGED_COMMENT = managed('managed');
@@ -956,7 +966,7 @@ export async function applyWalledGarden(conn, hosts = []) {
    * same as every other apply* function here.
    */
   const current = await conn.write('/ip/hotspot/walled-garden/print', []);
-  const mine = current.filter((r) => isManaged(r));
+  const mine = current.filter((r) => isManaged(r) && !isDynamic(r));
   const have = new Set(mine.map((r) => r['dst-host']));
 
   const toRemove = mine.filter((r) => !wanted.includes(r['dst-host']));
@@ -994,7 +1004,7 @@ export async function applyWalledGarden(conn, hosts = []) {
    * host-based rule covering it until the next one runs.
    */
   const ipCurrent = await conn.write('/ip/hotspot/walled-garden/ip/print', []);
-  const ipMine = ipCurrent.filter((r) => isManaged(r));
+  const ipMine = ipCurrent.filter((r) => isManaged(r) && !isDynamic(r));
   const wantedIps = new Set();
   for (const host of wanted) {
     try {
