@@ -25,6 +25,17 @@ const ROLES = [
 
 const BLANK = { name: '', phone: '', email: '', role: 'cashier' };
 
+// Lets a customer match "a technician showed up" against the badge at a
+// glance, and gives repeat scanners of the same role a consistent visual —
+// reuses the app's existing palette rather than inventing new colours.
+const ROLE_COLOR = {
+  owner: color.green,
+  cashier: color.amber,
+  technician: color.mint,
+  support: color.neutralInk,
+  sales: color.rust,
+};
+
 export default function Staff() {
   const store = useStore();
   const [tab, setTab] = useState('people');
@@ -411,28 +422,54 @@ export default function Staff() {
             <div
               id="staff-id-card"
               style={{
-                width: 300, margin: '0 auto', padding: 20, borderRadius: 14,
+                width: 300, margin: '0 auto', borderRadius: 14, overflow: 'hidden',
                 border: `1px solid ${color.line}`, textAlign: 'center', background: '#fff',
               }}
             >
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: color.muted }}>
-                {idCard.company}
-              </div>
-              {idCard.photoData
-                ? <img src={idCard.photoData} alt="" style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', margin: '14px auto 10px' }} />
-                : (
-                  <div style={{
-                    width: 84, height: 84, borderRadius: '50%', margin: '14px auto 10px',
-                    background: '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 26, fontWeight: 600, color: color.muted,
-                  }}>
-                    {idCard.name?.trim()?.[0]?.toUpperCase() ?? '?'}
+              {/* Role-coded strip — lets a customer match "a technician showed
+                  up" against the badge at a glance, and makes an old badge
+                  photo compared against a role change visibly off. */}
+              <div style={{ height: 6, background: ROLE_COLOR[idCard.role] ?? color.neutralInk }} />
+              <div style={{ padding: '16px 20px 20px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: color.muted }}>
+                  {/* Tenant's own uploaded favicon, if any — falls back to
+                      hiding itself rather than a broken-image icon, since
+                      most tenants have not uploaded one. */}
+                  <img
+                    src="/api/public/favicon"
+                    alt=""
+                    style={{ width: 14, height: 14, borderRadius: 3, objectFit: 'contain' }}
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                  {idCard.company}
+                </div>
+                {idCard.photoData
+                  ? <img src={idCard.photoData} alt="" style={{ width: 84, height: 84, borderRadius: '50%', objectFit: 'cover', margin: '14px auto 10px' }} />
+                  : (
+                    <div style={{
+                      width: 84, height: 84, borderRadius: '50%', margin: '14px auto 10px',
+                      background: '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 26, fontWeight: 600, color: color.muted,
+                    }}>
+                      {idCard.name?.trim()?.[0]?.toUpperCase() ?? '?'}
+                    </div>
+                  )}
+                <div style={{ fontSize: 17, fontWeight: 700 }}>{idCard.name}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: ROLE_COLOR[idCard.role] ?? color.neutralInk, textTransform: 'capitalize' }}>{idCard.role}</div>
+                {idCard.employeeNo && (
+                  <div style={{ fontSize: 11, fontFamily: font.mono, color: color.muted, marginTop: 3 }}>ID {idCard.employeeNo}</div>
+                )}
+                <img src={idCard.qrDataUrl} alt="Verification QR code" style={{ width: 140, height: 140, margin: '14px 0 0' }} />
+                <div style={{ fontSize: 10.5, color: color.muted, marginTop: 8 }}>Scan to verify this staff member</div>
+                {idCard.issuedAt && (
+                  <div style={{ fontSize: 10, color: color.muted, marginTop: 2 }}>
+                    Staff since {new Date(idCard.issuedAt).toLocaleDateString('en-KE', { month: 'short', year: 'numeric' })}
                   </div>
                 )}
-              <div style={{ fontSize: 16, fontWeight: 700 }}>{idCard.name}</div>
-              <div style={{ fontSize: 12.5, color: color.muted, textTransform: 'capitalize', marginBottom: 14 }}>{idCard.role}</div>
-              <img src={idCard.qrDataUrl} alt="Verification QR code" style={{ width: 140, height: 140 }} />
-              <div style={{ fontSize: 10.5, color: color.muted, marginTop: 8 }}>Scan to verify this staff member</div>
+                <div style={{ fontSize: 9.5, color: color.mutedSoft, marginTop: 12, lineHeight: 1.4, borderTop: `1px solid ${color.line}`, paddingTop: 8 }}>
+                  Confirms identity only — not a system access credential.
+                </div>
+              </div>
             </div>
           </>
         )}

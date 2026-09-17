@@ -1,5 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { font } from '../theme/tokens';
+import { color, font } from '../theme/tokens';
+
+// Matches Staff.jsx's ROLE_COLOR — a customer comparing this page against
+// the badge in front of them should see the same colour for the same role.
+const ROLE_COLOR = {
+  owner: color.green,
+  cashier: color.amber,
+  technician: color.mint,
+  support: color.neutralInk,
+  sales: color.rust,
+};
 
 /**
  * What a customer sees after scanning a staff ID badge's QR code, at
@@ -51,21 +61,31 @@ export default function VerifyStaff() {
 
         {!loading && data && (
           <>
+            <img
+              src="/api/public/favicon"
+              alt=""
+              style={{ width: 18, height: 18, borderRadius: 4, objectFit: 'contain', marginBottom: 4 }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
             {data.photoData
-              ? <img src={data.photoData} alt={data.name} style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', margin: '0 auto 14px' }} />
+              ? <img src={data.photoData} alt={data.name} style={{ width: 96, height: 96, borderRadius: '50%', objectFit: 'cover', margin: '10px auto 14px', border: `3px solid ${ROLE_COLOR[data.role] ?? '#6b756a'}` }} />
               : (
                 <div style={{
-                  width: 96, height: 96, borderRadius: '50%', margin: '0 auto 14px',
+                  width: 96, height: 96, borderRadius: '50%', margin: '10px auto 14px',
                   background: '#eef2ee', display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontSize: 30, fontWeight: 600, color: '#6b756a',
+                  border: `3px solid ${ROLE_COLOR[data.role] ?? '#6b756a'}`,
                 }}>
                   {data.name?.trim()?.[0]?.toUpperCase() ?? '?'}
                 </div>
               )}
             <h1 style={{ fontSize: 19, margin: '0 0 2px' }}>{data.name}</h1>
-            <p style={{ fontSize: 13.5, color: '#6b756a', margin: '0 0 18px', textTransform: 'capitalize' }}>
+            <p style={{ fontSize: 13.5, fontWeight: 600, color: ROLE_COLOR[data.role] ?? '#6b756a', margin: '0 0 2px', textTransform: 'capitalize' }}>
               {data.role} at {data.companyName}
             </p>
+            {data.employeeNo && (
+              <p style={{ fontSize: 11.5, fontFamily: font.mono, color: '#9aa298', margin: '0 0 16px' }}>ID {data.employeeNo}</p>
+            )}
             <div style={{
               padding: '10px 14px', borderRadius: 10, fontSize: 14, fontWeight: 600,
               background: data.active ? '#e7f5ef' : '#fdf1ec',
@@ -75,8 +95,16 @@ export default function VerifyStaff() {
                 ? `✓ Active employee at ${data.companyName}`
                 : `This person no longer works at ${data.companyName}`}
             </div>
+            {data.hiredAt && (
+              <p style={{ fontSize: 11.5, color: '#9aa298', marginTop: 10 }}>
+                Staff since {new Date(data.hiredAt).toLocaleDateString('en-KE', { month: 'short', year: 'numeric' })}
+              </p>
+            )}
             <p style={{ fontSize: 11.5, color: '#9aa298', marginTop: 18 }}>
               Verified against {data.companyName}'s own staff records.
+            </p>
+            <p style={{ fontSize: 10.5, color: '#b3bab0', marginTop: 10, lineHeight: 1.4, borderTop: '1px solid #eef1ee', paddingTop: 10 }}>
+              This page confirms identity only — it does not grant account or system access.
             </p>
           </>
         )}

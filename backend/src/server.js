@@ -888,7 +888,7 @@ app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
     `select s.name, s.role, s.photo_data,
             t.name as company_name,
             coalesce(hr.employment_status, 'active') as employment_status,
-            hr.hired_at
+            hr.hired_at, hr.employee_no
        from staff s
        join tenants t on t.id = s.tenant_id
        left join hr_profiles hr on hr.staff_id = s.id
@@ -897,7 +897,7 @@ app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
   if (!s) return res.status(404).json({ error: 'No staff member matches this ID' });
   res.json({
     name: s.name, role: s.role, photoData: s.photo_data, companyName: s.company_name,
-    active: s.employment_status === 'active', hiredAt: s.hired_at,
+    active: s.employment_status === 'active', hiredAt: s.hired_at, employeeNo: s.employee_no,
   });
 }));
 
@@ -8871,13 +8871,18 @@ app.get('/api/staff', wrap(async (req, res) => {
  */
 app.get('/api/staff/:id/id-card', requirePermission('staff.view'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
-    `select name, role, photo_data, verification_token from staff where id=$1 and tenant_id=$2`,
+    `select s.name, s.role, s.photo_data, s.verification_token,
+            hr.employee_no, hr.hired_at
+       from staff s
+       left join hr_profiles hr on hr.staff_id = s.id
+      where s.id=$1 and s.tenant_id=$2`,
     [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   res.json({
     name: s.name, role: s.role, photoData: s.photo_data,
     company: req.tenant.name,
+    employeeNo: s.employee_no, issuedAt: s.hired_at,
     verifyUrl: `https://${req.tenant.subdomain}.${root}/verify-staff/${s.verification_token}`,
   });
 }));

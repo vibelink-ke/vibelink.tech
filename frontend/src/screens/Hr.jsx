@@ -18,6 +18,7 @@ function StaffPay() {
   const openEdit = (r) => setEditing({
     staffId: r.staff_id, baseSalary: String(r.base_salary ?? 0), salaryFrequency: r.salary_frequency ?? 'monthly',
     payoutMethod: r.payout_method ?? 'manual', payoutPhone: r.payout_phone ?? '', employmentStatus: r.employment_status ?? 'active',
+    employeeNo: r.employee_no ?? '', hiredAt: r.hired_at ? String(r.hired_at).slice(0, 10) : '',
   });
 
   const save = async () => {
@@ -26,6 +27,7 @@ function StaffPay() {
       await api.saveHrProfile(editing.staffId, {
         baseSalary: Number(editing.baseSalary) || 0, salaryFrequency: editing.salaryFrequency,
         payoutMethod: editing.payoutMethod, payoutPhone: editing.payoutPhone || null, employmentStatus: editing.employmentStatus,
+        employeeNo: editing.employeeNo.trim() || null, hiredAt: editing.hiredAt || null,
       });
       await load();
       store.toast('Saved');
@@ -70,6 +72,12 @@ function StaffPay() {
       <Drawer open={!!editing} title="Edit pay details" onClose={() => setEditing(null)} width={420}>
         {editing && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Employee number" hint="Shown on their printable staff ID badge">
+              <Input value={editing.employeeNo} onChange={(e) => setEditing((s) => ({ ...s, employeeNo: e.target.value }))} placeholder="e.g. EMP-014" />
+            </Field>
+            <Field label="Hired date" hint="Shown as 'Staff since' on their badge and verification page">
+              <Input type="date" value={editing.hiredAt} onChange={(e) => setEditing((s) => ({ ...s, hiredAt: e.target.value }))} />
+            </Field>
             <Field label="Base salary (KES)">
               <Input type="number" min="0" value={editing.baseSalary} onChange={(e) => setEditing((s) => ({ ...s, baseSalary: e.target.value }))} />
             </Field>
