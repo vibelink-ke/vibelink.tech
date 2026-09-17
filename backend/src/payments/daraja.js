@@ -392,13 +392,24 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
       'select id, platform_collect_enabled, settlement_commission_pct from tenants where subdomain=$1',
       [billRef.slice(0, dash)]);
     if (t?.platform_collect_enabled) {
-      await applyPayment(t.id, {
+      // Safaricom retries a C2B confirm callback that didn't answer fast
+      // enough or errored — applyPayment already deduplicates the actual
+      // payment row on (tenant_id, provider, provider_ref) and reports it
+      // back as `duplicate`, but accruing the settlement was unconditional
+      // here regardless of that result: a replayed webhook credited the
+      // tenant's pending payout balance again for money that was never
+      // collected a second time, with nothing in the payments table to
+      // show for the extra amount — settlements could run ahead of what
+      // was ever actually paid, with no way to tell from this end alone.
+      const result = await applyPayment(t.id, {
         provider: 'daraja', ref: b.TransID, amount: Number(b.TransAmount), phone: normalise(b.MSISDN),
         name: [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' '),
         rawAccount: billRef.slice(dash + 1), payload: b,
-      }).catch(console.error);
-      await accrueSettlement(t.id, Number(b.TransAmount) * (1 - Number(t.settlement_commission_pct ?? 5) / 100))
-        .catch(console.error);
+      }).catch((e) => { console.error(e); return null; });
+      if (result && !result.duplicate) {
+        await accrueSettlement(t.id, Number(b.TransAmount) * (1 - Number(t.settlement_commission_pct ?? 5) / 100))
+          .catch(console.error);
+      }
       return;
     }
   }
@@ -450,13 +461,18 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
       // expires soonest) — exactly what it already does for an ordinary,
       // non-platform-collect direct-dial payment on that tenant's own
       // paybill. Only which TENANT this belongs to was ever ambiguous here.
-      await applyPayment(c.tenant_id, {
+      // Same replay guard as the dash-prefixed branch above: only accrue
+      // once applyPayment confirms this webhook actually inserted a new
+      // payment, not a Safaricom retry of one already recorded.
+      const result = await applyPayment(c.tenant_id, {
         provider: 'daraja', ref: b.TransID, amount: Number(b.TransAmount), phone: normalise(b.MSISDN),
         name: [b.FirstName, b.MiddleName, b.LastName].filter(Boolean).join(' '),
         rawAccount: billRef, payload: b,
-      }).catch(console.error);
-      await accrueSettlement(c.tenant_id, Number(b.TransAmount) * (1 - Number(c.settlement_commission_pct ?? 5) / 100))
-        .catch(console.error);
+      }).catch((e) => { console.error(e); return null; });
+      if (result && !result.duplicate) {
+        await accrueSettlement(c.tenant_id, Number(b.TransAmount) * (1 - Number(c.settlement_commission_pct ?? 5) / 100))
+          .catch(console.error);
+      }
       return;
     }
   }
@@ -535,15 +551,24 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      * to that tenant's settlement balance for the next payout run.
      */
     if (p.type === 'platform_collect') {
-      await applyPayment(p.tenant_id, {
+      // Same replay guard as the C2B confirm handler above: Safaricom can
+      // deliver this STK result callback more than once for the same
+      // checkoutId, and applyPayment's own (tenant_id, provider,
+      // provider_ref) dedup already handles that for the payment itself —
+      // accruing unconditionally on every delivery meant a retried
+      // callback inflated the tenant's pending settlement balance for
+      // money collected only once.
+      const result = await applyPayment(p.tenant_id, {
         provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
         rawAccount: null, payload: { checkoutId },
         target: p.subscriber_id
           ? { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null }
           : { type: 'hotspot', planId: p.plan_id, mac: p.mac ?? null, routerId: p.router_id ?? null, label: p.label ?? null },
       });
-      const commissionPct = Number(p.commissionPct ?? 5);
-      await accrueSettlement(p.tenant_id, Number(req.amount) * (1 - commissionPct / 100));
+      if (!result?.duplicate) {
+        const commissionPct = Number(p.commissionPct ?? 5);
+        await accrueSettlement(p.tenant_id, Number(req.amount) * (1 - commissionPct / 100));
+      }
       return;
     }
 
