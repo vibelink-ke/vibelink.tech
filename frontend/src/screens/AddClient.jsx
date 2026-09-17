@@ -215,7 +215,12 @@ export default function AddClient() {
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
       store.toast(`${created.name} added`);
-      navigate('/clients');
+      // A brand-new customer has no plan/router/credentials yet — service
+      // setup moved to its own tab on the client's own page rather than
+      // living on this form, so land there next instead of the bare list.
+      // Adding another line to an existing account already picked its
+      // service right here, so that one still goes back to the list.
+      navigate(linkedAccount ? '/clients' : `/clients/${created.id}?tab=services`);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
@@ -285,13 +290,12 @@ export default function AddClient() {
               label="Account number"
               hint={linkedAccount
                 ? 'Fixed to their existing account — a second line bills the same customer, not a new one'
-                : '4-6 digits. What the client types as the paybill account'}
+                : '4-12 letters/digits. What the client types as the paybill account'}
             >
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={f.account}
-                  onChange={setDigits('account', 6)}
-                  inputMode="numeric"
+                  onChange={setAlnum('account', 12)}
                   placeholder="48213"
                   disabled={!!linkedAccount}
                   style={{ fontFamily: font.mono }}
@@ -330,89 +334,83 @@ export default function AddClient() {
           </div>
         </Card>
 
-        <Card title="Service">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {/* Only meaningful for a PPPoE line — showing these for a Hotspot
-                or Static IP customer just confused the form with credentials
-                that service never uses. */}
-            {f.service === 'PPPoE' && (
-              <>
-                <Field label="PPPoE username" hint="4-12 letters/digits. Defaults to the account number — one number to remember">
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Input
-                      value={f.login || f.account}
-                      onChange={setAlnum('login', 12)}
-                      placeholder={f.account || '48213'}
-                      style={{ fontFamily: font.mono }}
-                    />
-                    <Button onClick={genLogin}>Generate</Button>
-                  </div>
-                </Field>
-                <Field label="PPPoE password" hint="7 digits">
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <Input
-                      value={f.password}
-                      onChange={setDigits('password', 7)}
-                      inputMode="numeric"
-                      placeholder="4827193"
-                      style={{ fontFamily: font.mono }}
-                    />
-                    <Button onClick={genCredentials}>Generate</Button>
-                  </div>
-                </Field>
-              </>
-            )}
-            <Field
-              label="Service type"
-              hint={linkedAccount ? 'A second line on this account is PPPoE — hotspot vouchers don\'t use an account number' : undefined}
-            >
-              <Select
-                value={f.service}
-                onChange={(e) => setF((s) => ({ ...s, service: e.target.value, planId: '' }))}
-                options={SERVICES}
-                disabled={!!linkedAccount}
-              />
-            </Field>
-            <Field label="Plan" hint="subscribers.plan_id — drives the RADIUS rate limit and billing cycle">
-              <Select
-                value={f.planId}
-                onChange={set('planId')}
-                options={[
-                  { value: '', label: pppoePlans.length ? 'Select a plan…' : `No ${f.service} plans created yet` },
-                  ...pppoePlans.map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
-                ]}
-              />
-            </Field>
-            <Field label="MikroTik router">
-              <Select
-                value={f.mikrotik}
-                onChange={set('mikrotik')}
-                options={[{ value: '', label: store.routers.length ? 'Select a router…' : 'No routers onboarded yet' },
-                  ...store.routers.map((r) => ({ value: r.id, label: r.name }))]}
-              />
-            </Field>
-            {/* Free addresses from that router's own pools, rather than a text
-                box where a typo becomes a customer who cannot get online. */}
-            <Field
-              label="Assigned IP"
-              hint={
-                !f.mikrotik ? 'Pick a router first'
-                  : freeIps.loading ? 'Reading the pool…'
-                  : freeIps.addresses.length ? `${freeIps.addresses.length} free in ${freeIps.pools.join(', ')}`
-                  : 'No pool on this router — add one under Networks'
-              }
-            >
-              <Select
-                value={f.assignedIp}
-                onChange={set('assignedIp')}
-                options={[
-                  { value: '', label: 'Next free address' },
-                  ...freeIps.addresses.map((ip) => ({ value: ip, label: ip })),
-                ]}
-              />
-            </Field>
-          </div>
-        </Card>
+        {/* Plan/router/credentials moved off this form entirely — picking a
+            service is its own step now, done from the client's own page
+            (Services tab) once they actually exist, not crammed into
+            creating them. The one exception is adding a second line to an
+            existing account: that action *is* choosing a service, so it
+            still happens right here rather than a redirect straight back
+            to a page for an account that already exists. */}
+        {!!linkedAccount && (
+          <Card title="Service">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Field label="PPPoE username" hint="4-12 letters/digits. Defaults to the account number — one number to remember">
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Input
+                    value={f.login || f.account}
+                    onChange={setAlnum('login', 12)}
+                    placeholder={f.account || '48213'}
+                    style={{ fontFamily: font.mono }}
+                  />
+                  <Button onClick={genLogin}>Generate</Button>
+                </div>
+              </Field>
+              <Field label="PPPoE password" hint="7 digits">
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Input
+                    value={f.password}
+                    onChange={setDigits('password', 7)}
+                    inputMode="numeric"
+                    placeholder="4827193"
+                    style={{ fontFamily: font.mono }}
+                  />
+                  <Button onClick={genCredentials}>Generate</Button>
+                </div>
+              </Field>
+              <Field label="Service type" hint="A second line on this account is PPPoE — hotspot vouchers don't use an account number">
+                <Select value={f.service} onChange={() => {}} options={SERVICES} disabled />
+              </Field>
+              <Field label="Plan" hint="subscribers.plan_id — drives the RADIUS rate limit and billing cycle">
+                <Select
+                  value={f.planId}
+                  onChange={set('planId')}
+                  options={[
+                    { value: '', label: pppoePlans.length ? 'Select a plan…' : `No ${f.service} plans created yet` },
+                    ...pppoePlans.map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
+                  ]}
+                />
+              </Field>
+              <Field label="MikroTik router">
+                <Select
+                  value={f.mikrotik}
+                  onChange={set('mikrotik')}
+                  options={[{ value: '', label: store.routers.length ? 'Select a router…' : 'No routers onboarded yet' },
+                    ...store.routers.map((r) => ({ value: r.id, label: r.name }))]}
+                />
+              </Field>
+              {/* Free addresses from that router's own pools, rather than a text
+                  box where a typo becomes a customer who cannot get online. */}
+              <Field
+                label="Assigned IP"
+                hint={
+                  !f.mikrotik ? 'Pick a router first'
+                    : freeIps.loading ? 'Reading the pool…'
+                    : freeIps.addresses.length ? `${freeIps.addresses.length} free in ${freeIps.pools.join(', ')}`
+                    : 'No pool on this router — add one under Networks'
+                }
+              >
+                <Select
+                  value={f.assignedIp}
+                  onChange={set('assignedIp')}
+                  options={[
+                    { value: '', label: 'Next free address' },
+                    ...freeIps.addresses.map((ip) => ({ value: ip, label: ip })),
+                  ]}
+                />
+              </Field>
+            </div>
+          </Card>
+        )}
 
         <Card title="Location">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

@@ -7376,17 +7376,26 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
    * saved without pressing Generate — the account number field has no
    * required attribute, and its placeholder text looks identical to a real
    * value at a glance. That put a 10-digit phone number where the paybill
-   * account is meant to be a 5-digit code short enough to read aloud, and
-   * everything downstream that assumes that shape — the similarity match in
-   * payments/apply.js, the account-collision reasoning in schema.sql — was
-   * built on an invariant the API never actually enforced.
+   * account is meant to be a short code, and everything downstream that
+   * assumes that shape — the similarity match in payments/apply.js (plain
+   * trigram similarity(), which works fine on letters too — nothing there
+   * actually required digits-only), the account-collision reasoning in
+   * schema.sql — was built on an invariant the API never actually enforced.
    *
-   * A syntactically valid submission is trusted (an operator correcting or
-   * choosing their own number is not this bug); anything else, including no
-   * value at all, gets a real allocated code instead of the raw phone number.
+   * Letters are allowed here (account_code is just `text`, no schema
+   * constraint ever required digits), and it's checked for account-number
+   * *shape* rather than a plain length range: an all-digit string 10 or
+   * longer is what an M-Pesa/Safaricom number looks like (07XXXXXXXX,
+   * 2547XXXXXXXX) and is rejected outright regardless of length, so a
+   * longer alphanumeric code can never reopen the exact bug this guarded
+   * against. A syntactically valid submission is trusted otherwise (an
+   * operator correcting or choosing their own number is not this bug);
+   * anything else, including no value at all, gets a real allocated code
+   * instead of the raw phone number.
    */
   const submitted = String(accountCode ?? '').trim();
-  const account = /^\d{4,6}$/.test(submitted) ? submitted
+  const looksLikeAccountCode = /^[A-Za-z0-9]{4,12}$/.test(submitted) && !/^\d{10,}$/.test(submitted);
+  const account = looksLikeAccountCode ? submitted
     : await allocateAccountCode(req.tenant.id, req.tenant.platform_collect_enabled);
   if (!account) return res.status(409).json({ error: 'Could not find a free account number.' });
 
@@ -7400,7 +7409,7 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
    * happens later via the same-account "add a line" flow below and the
    * table's own unique constraint; this only adds the wider one.
    */
-  if (req.tenant.platform_collect_enabled && /^\d{4,6}$/.test(submitted)) {
+  if (req.tenant.platform_collect_enabled && looksLikeAccountCode) {
     const { rows: elsewhere } = await pool.query(
       `select t.name from subscribers s join tenants t on t.id = s.tenant_id
         where t.platform_collect_enabled and s.tenant_id <> $1 and s.account_code = $2`,
