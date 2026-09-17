@@ -17,13 +17,11 @@ export default function AccessCodes() {
   const [creating, setCreating] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  const openCreate = async () => {
-    setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '' });
-    try {
-      const { account, password } = await api.newSubscriberCredentials();
-      setCreating((s) => (s ? { ...s, username: account, password } : s));
-    } catch { /* Generate button covers a retry */ }
-  };
+  // Starts blank rather than pre-fetching a suggestion: an auto-fill landing
+  // after the modal opens could overwrite a username/password already typed
+  // by hand in that window. Typing your own is just as valid as pressing
+  // Generate below — this only avoids the two racing.
+  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '' });
 
   const genCredentials = async () => {
     try {
