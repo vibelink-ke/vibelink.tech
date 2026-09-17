@@ -4,6 +4,7 @@ import { color, radius } from '../theme/tokens';
 import HotspotDashboard from './hotspot/HotspotDashboard';
 import HotspotPlans from './hotspot/HotspotPlans';
 import Vouchers from './hotspot/Vouchers';
+import AccessCodes from './hotspot/AccessCodes';
 import PortalDesign from './hotspot/PortalDesign';
 import HotspotRevenue from './hotspot/HotspotRevenue';
 import HotspotSettings from './hotspot/HotspotSettings';
@@ -22,6 +23,7 @@ const TABS = [
   { to: '/hotspot', label: 'Dashboard', end: true },
   { to: '/hotspot/plans', label: 'Plans' },
   { to: '/hotspot/vouchers', label: 'Vouchers' },
+  { to: '/hotspot/access-codes', label: 'Access codes' },
   { to: '/hotspot/design', label: 'Portal design' },
   { to: '/hotspot/revenue', label: 'Revenue' },
   { to: '/hotspot/settings', label: 'Settings' },
@@ -74,6 +76,7 @@ export default function Hotspot() {
         <Route index element={<HotspotDashboard />} />
         <Route path="plans" element={<HotspotPlans />} />
         <Route path="vouchers" element={<Vouchers />} />
+        <Route path="access-codes" element={<AccessCodes />} />
         <Route path="design" element={<PortalDesign />} />
         <Route path="revenue" element={<HotspotRevenue />} />
         <Route path="settings" element={<HotspotSettings />} />

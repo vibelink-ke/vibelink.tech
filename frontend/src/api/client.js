@@ -114,6 +114,11 @@ export const api = {
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),
   setAutoPurgeVouchers: (enabled) => patch('/api/hotspot/settings/auto-purge', { enabled }),
 
+  // ── permanent hotspot access codes ("Lounge WiFi" etc.) ──
+  hotspotAccessCodes: () => get('/api/hotspot/access-codes'),
+  createAccessCode: (c) => post('/api/hotspot/access-codes', c),
+  deleteAccessCode: (id) => del(`/api/hotspot/access-codes/${id}`),
+
   // ── hotspot ──
   hotspotSettings: () => get('/api/hotspot/settings'),
   saveHotspotSettings: (f) => put('/api/hotspot/settings', f),

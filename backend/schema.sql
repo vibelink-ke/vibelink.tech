@@ -2266,3 +2266,25 @@ alter table site_profiles add column if not exists payment_config_id uuid refere
 alter table plans add column if not exists contention_ratio integer not null default 1;
 alter table plans drop constraint if exists plans_contention_ratio_check;
 alter table plans add constraint plans_contention_ratio_check check (contention_ratio between 1 and 6);
+
+-- A permanent, staff-issued hotspot login — "Lounge WiFi", "Staff WiFi" —
+-- distinct from a voucher: no expiry, no purchase behind it, and shared by
+-- design rather than one device per code. max_devices is this code's own
+-- shared-users cap, independent of hotspot_settings.multi_device (that one
+-- only ever governs voucher-issued logins); ensureHotspotProfiles
+-- (radius.js) creates one hs-shared-<N> RouterOS user profile per distinct
+-- value in use so each code actually gets its own concurrent-device limit
+-- rather than sharing one flat setting.
+create table if not exists hotspot_access_codes (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references tenants on delete cascade,
+  label        text not null,
+  username     text not null,
+  password     text not null,
+  max_devices  integer not null default 1,
+  plan_id      uuid references plans,
+  created_at   timestamptz not null default now(),
+  unique (tenant_id, username)
+);
+alter table hotspot_access_codes drop constraint if exists hotspot_access_codes_max_devices_check;
+alter table hotspot_access_codes add constraint hotspot_access_codes_max_devices_check check (max_devices between 1 and 50);

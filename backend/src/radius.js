@@ -100,6 +100,71 @@ export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
       cookieMinutes: durationMin,
     });
   }
+
+  /**
+   * Same idea, one hs-shared-<N> profile per distinct max_devices a
+   * permanent access code (hotspot_access_codes — "Lounge WiFi" etc.) is
+   * actually using, own namespace from hs-cookie-<N> above: those are keyed
+   * by bundle *duration*, these by concurrent-device *count*, and a code
+   * with no expiry has no duration to key off at all. hotspotAccessProfile
+   * just below names them; ensureAccessCodeRadius selects one per code the
+   * same way issueVoucherAccess selects an hs-cookie-<N> profile per plan.
+   */
+  const { rows: accessRows } = await dbClient.query(
+    `select distinct max_devices from hotspot_access_codes where tenant_id=$1`, [tenantId]);
+  const seenShared = new Set();
+  for (const row of accessRows) {
+    const name = hotspotAccessProfile(row.max_devices);
+    if (seenShared.has(name)) continue;
+    seenShared.add(name);
+    await ros.ensureHotspotUserProfile(conn, {
+      name,
+      sharedUsers: row.max_devices,
+      idleSeconds: hs?.idle_timeout_sec ?? 1200,
+      bindMac: hs?.bind_mac ?? true,
+      cookieMinutes: 1440,
+    });
+  }
+}
+
+/** Profile name for a permanent access code's own concurrent-device cap. */
+function hotspotAccessProfile(maxDevices) {
+  const n = Math.min(Math.max(Math.round(Number(maxDevices) || 1), 1), 50);
+  return `hs-shared-${n}`;
+}
+
+/**
+ * Write/refresh RADIUS for one permanent access code — no Expiration
+ * attribute at all, unlike a voucher: the whole point is a login that does
+ * not expire on its own, only when staff delete it (forgetAccessCode below).
+ */
+export async function ensureAccessCodeRadius(c, tenantId, id) {
+  const { rows: [row] } = await c.query(
+    `select ac.username, ac.password, ac.max_devices, p.rate_up, p.rate_down
+       from hotspot_access_codes ac
+       left join plans p on p.id = ac.plan_id
+      where ac.tenant_id=$1 and ac.id=$2`,
+    [tenantId, id]);
+  if (!row) return;
+  await c.query(
+    `insert into radcheck (tenant_id, username, attribute, op, value) values
+       ($1,$2,'Cleartext-Password',':=',$3)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [tenantId, row.username, row.password]);
+  await c.query(
+    `insert into radreply (tenant_id, username, attribute, op, value) values
+       ($1,$2,'Mikrotik-Rate-Limit',':=',$3),
+       ($1,$2,'Mikrotik-Group',':=',$4)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+    [tenantId, row.username,
+     row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k` : '2048k/1024k',
+     hotspotAccessProfile(row.max_devices)]);
+}
+
+/** Remove one access code's RADIUS entry — called before its row is deleted. */
+export async function forgetAccessCode(c, tenantId, username) {
+  await c.query('delete from radcheck where tenant_id=$1 and username=$2', [tenantId, username]);
+  await c.query('delete from radreply where tenant_id=$1 and username=$2', [tenantId, username]);
 }
 
 /** Write/refresh the RADIUS check+reply attributes for a subscriber and kick CoA. */

@@ -38,6 +38,7 @@ const COLLECTIONS = {
   invoices: api.invoices,
   mpesaTx: api.payments,
   vouchers: api.vouchers,
+  accessCodes: api.hotspotAccessCodes,
   staff: api.staff,
   outages: api.outages,
   slaPolicies: api.slaPolicies,

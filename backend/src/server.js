@@ -8758,6 +8758,69 @@ app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wra
   res.json({ deleted: rowCount, revoked });
 }));
 
+/**
+ * Permanent, staff-issued hotspot logins — "Lounge WiFi", "Staff WiFi" — as
+ * distinct from a voucher: no expiry, no purchase behind them, sharable by
+ * design via their own max_devices cap (RouterOS shared-users, via a
+ * dedicated hs-shared-<N> profile — see ensureHotspotProfiles/
+ * ensureAccessCodeRadius in radius.js) rather than the tenant-wide
+ * hotspot_settings.multi_device toggle vouchers use.
+ */
+app.get('/api/hotspot/access-codes', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select ac.*, p.title as plan_title, p.rate_up, p.rate_down
+       from hotspot_access_codes ac
+       left join plans p on p.id = ac.plan_id
+      where ac.tenant_id=$1
+      order by ac.created_at desc`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const { label, username, password, maxDevices, planId } = req.body;
+  if (!String(label ?? '').trim()) return res.status(400).json({ error: 'Give this code a label' });
+  if (!/^[A-Za-z0-9]{4,12}$/.test(String(username ?? ''))) {
+    return res.status(400).json({ error: 'Username must be 4-12 letters/digits' });
+  }
+  if (!/^[A-Za-z0-9]{4,12}$/.test(String(password ?? ''))) {
+    return res.status(400).json({ error: 'Password must be 4-12 letters/digits' });
+  }
+  const devices = Math.round(Number(maxDevices));
+  if (!Number.isFinite(devices) || devices < 1 || devices > 50) {
+    return res.status(400).json({ error: 'Max devices must be between 1 and 50' });
+  }
+  let row;
+  try {
+    ({ rows: [row] } = await pool.query(
+      `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id)
+       values ($1,$2,$3,$4,$5,$6) returning *`,
+      [req.tenant.id, label.trim(), username, password, devices, planId || null]));
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That username is already in use — pick another.' });
+    throw e;
+  }
+  const { withTenant } = await import('./db.js');
+  const radius = await import('./radius.js');
+  await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
+  // Best-effort: the router-side hs-shared-<N> profile this code's Mikrotik-
+  // Group names is only actually created on the next Configure/heal cycle —
+  // pushing now means a router already Configured picks it up immediately
+  // rather than the code silently failing to log anyone in until then.
+  repushHotspotConfigToAllRouters(req.tenant.id);
+  res.json(row);
+}));
+
+app.delete('/api/hotspot/access-codes/:id', requirePermission('hotspot.delete'), wrap(async (req, res) => {
+  const { rows: [row] } = await pool.query(
+    'delete from hotspot_access_codes where tenant_id=$1 and id=$2 returning username',
+    [req.tenant.id, req.params.id]);
+  if (!row) return res.status(404).json({ error: 'not found' });
+  const radius = await import('./radius.js');
+  await radius.forgetAccessCode(pool, req.tenant.id, row.username);
+  res.json({ ok: true });
+}));
+
 // ── staff (Staff & roles) ─────────────────────────
 app.get('/api/staff', wrap(async (req, res) => {
   const { role } = req.query;
