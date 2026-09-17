@@ -138,6 +138,22 @@ export default function ClientDetail() {
     [clients, client]
   );
 
+  /**
+   * A customer record and its first line are still the same database row
+   * (subscribers) — creating a customer with no service picked yet still
+   * makes one, just with plan/router/credentials all unset. Showing that as
+   * a real "Primary line" in the Services list looked like a service
+   * existed (an "active" status, a real expiry) when nobody had chosen one
+   * yet. Filtered out of what's displayed/counted here rather than out of
+   * the database — every place that bills, matches payments, or syncs
+   * RADIUS off this row still needs it exactly as it is; only this list
+   * pretends it isn't there yet, and "+ Add service" (below) fills it in
+   * rather than creating a second row next to it.
+   */
+  const isEmptyLine = (l) => !l.plan_id && !l.router_id && !l.pppoe_user && !l.pppoe_pass && !l.static_ip;
+  const emptyLine = siblings.find(isEmptyLine);
+  const visibleSiblings = siblings.filter((l) => !isEmptyLine(l));
+
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set(client ? [client.id] : []));
   const toggleExpanded = (lineId) =>
@@ -360,6 +376,30 @@ export default function ClientDetail() {
 
   const submitAddService = async () => {
     if (!addingService) return;
+    // Filling in the still-empty line a plain customer creation always
+    // leaves behind (see isEmptyLine above) rather than creating a second
+    // row next to it — that one has no tag of its own and needs none, it's
+    // the account's only line until a real second one is added.
+    if (emptyLine) {
+      setServiceBusy(true);
+      try {
+        const updated = await api.updateSubscriber(emptyLine.id, {
+          plan_id: serviceForm.planId || null,
+          router_id: serviceForm.routerId || null,
+          pppoe_user: serviceForm.pppoeUser || null,
+          pppoe_pass: serviceForm.pppoePass || null,
+          static_ip: serviceForm.staticIp || null,
+        });
+        store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
+        store.toast(`Service added to ${addingService.account_code}`);
+        setAddingService(null);
+      } catch (e) {
+        store.toast(`Could not add service: ${e.message}`);
+      } finally {
+        setServiceBusy(false);
+      }
+      return;
+    }
     if (!serviceForm.lineLabel.trim()) return store.toast('Give this line a tag — "Shop", "Flat 3" — to tell it apart from the others');
     setServiceBusy(true);
     try {
@@ -540,11 +580,12 @@ export default function ClientDetail() {
       {tab === 'services' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0 4px' }}>
-            <span style={{ fontSize: 13, fontWeight: 600 }}>Services ({siblings.length})</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Services ({visibleSiblings.length})</span>
             <Button variant="primary" onClick={openAddService}>+ Add service</Button>
           </div>
           <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
-            {siblings.map((line) => {
+            {!visibleSiblings.length && <Empty>No service configured yet — press "+ Add service" to set up a plan, router and credentials.</Empty>}
+            {visibleSiblings.map((line) => {
               const p = planById[line.plan_id];
               const isOpen = expanded.has(line.id);
               const showPass = revealed.has(line.id);
@@ -1046,9 +1087,14 @@ export default function ClientDetail() {
       >
         {addingService && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Line tag" span={2} hint={`Told apart from ${addingService.name}'s other line(s) — "Shop", "Flat 3"`}>
-              <Input value={serviceForm.lineLabel} onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))} autoFocus />
-            </Field>
+            {/* No tag needed when this is filling in the account's own still-
+                empty line (see emptyLine/isEmptyLine above) — there is only
+                one line to tell apart from nothing yet. */}
+            {!emptyLine && (
+              <Field label="Line tag" span={2} hint={`Told apart from ${addingService.name}'s other line(s) — "Shop", "Flat 3"`}>
+                <Input value={serviceForm.lineLabel} onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))} autoFocus />
+              </Field>
+            )}
             <Field label="Plan">
               <Select
                 value={serviceForm.planId}
