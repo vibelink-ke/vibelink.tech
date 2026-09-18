@@ -35,11 +35,26 @@ const asTag = (t) => {
   };
 };
 
+/**
+ * Composer presets. Only entries carrying a `key` correspond to a real,
+ * separately-stored system template (backend/src/sms.js's DEFAULTS,
+ * editable in Settings → Message templates) — "Save as template" is
+ * offered only for those.
+ *
+ * This used to key the save directly off the display label ("Reminder"),
+ * which is not the same string as the backend's own key ("reminder") —
+ * saving silently wrote to a slot nothing ever reads at send time, so the
+ * button's own claim ("used automatically from now on") was false. "Blank
+ * message" and "Promo" still have no backend key on purpose: saving
+ * "Blank message" as the 'custom' template — the wrapper every one-off
+ * send is rendered through — would replace it with that one message's
+ * exact text, breaking every future free-text send silently.
+ */
 const TEMPLATES = {
-  'Blank message': '',
-  Reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
-  Outage: 'Outage at {site}. Engineers are on it, ETA {eta}. Sorry for the trouble.',
-  Promo: 'Refer a neighbour and get 5 free days. Reply YES for your code.',
+  'Blank message': { key: null, body: '' },
+  Reminder: { key: 'reminder', body: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.' },
+  Outage: { key: 'outage', body: 'Outage at {site}. Engineers are on it, ETA {eta}. Sorry for the trouble.' },
+  Promo: { key: null, body: 'Refer a neighbour and get 5 free days. Reply YES for your code.' },
 };
 
 export default function Messaging() {
@@ -98,7 +113,8 @@ export default function Messaging() {
 
   const pickTemplate = (e) => {
     const t = e.target.value;
-    setSms((s) => ({ ...s, template: t, body: saved[t] ?? TEMPLATES[t] ?? s.body }));
+    const key = TEMPLATES[t]?.key;
+    setSms((s) => ({ ...s, template: t, body: (key && saved[key]) ?? TEMPLATES[t]?.body ?? s.body }));
   };
 
   const action = useAction();
@@ -122,9 +138,11 @@ export default function Messaging() {
   }, []);
 
   const saveTemplate = async () => {
+    const key = TEMPLATES[sms.template]?.key;
+    if (!key) return; // button is hidden for presets with no real template behind them
     try {
-      await api.saveSmsTemplates({ ...saved, [sms.template]: sms.body });
-      setSaved((v) => ({ ...v, [sms.template]: sms.body }));
+      await api.saveSmsTemplates({ ...saved, [key]: sms.body });
+      setSaved((v) => ({ ...v, [key]: sms.body }));
       store.toast(`Saved the "${sms.template}" wording`);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
@@ -282,15 +300,19 @@ export default function Messaging() {
           </details>
         )}
 
-        {/* Saving the wording, so it is theirs rather than ours. */}
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Button onClick={saveTemplate} disabled={busy}>
-            Save as the "{sms.template}" template
-          </Button>
-          <span style={{ fontSize: 12, color: color.muted }}>
-            Used automatically for {sms.template} messages from now on.
-          </span>
-        </div>
+        {/* Saving the wording, so it is theirs rather than ours — only offered
+            for a preset that is actually a system template (see TEMPLATES'
+            own comment on why "Blank message"/"Promo" are not). */}
+        {TEMPLATES[sms.template]?.key && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Button onClick={saveTemplate} disabled={busy}>
+              Save as the "{sms.template}" template
+            </Button>
+            <span style={{ fontSize: 12, color: color.muted }}>
+              Used automatically for {sms.template} messages from now on — also editable under Settings → Message templates.
+            </span>
+          </div>
+        )}
 
         <div
           style={{

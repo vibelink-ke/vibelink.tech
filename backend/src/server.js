@@ -533,7 +533,7 @@ app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
   if (!who) return res.json(generic);
 
   const { rows: [acct] } = await pool.query(
-    `select st.id, st.email, st.phone, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
+    `select st.id, st.name, st.email, st.phone, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
      join tenants t on t.id = st.tenant_id
      where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
   if (!acct) return res.json(generic);
@@ -548,9 +548,9 @@ app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
 
   if (acct.email) {
     const email = await import('./email.js');
-    email.sendSystem(acct.tenant_id, acct.email, `Reset your ${brand} password`,
-      `Reset your password: ${link}\n\nThis link expires in 30 minutes and works once. `
-      + 'If you did not request this, ignore it.').catch(() => {});
+    const t = await email.template(acct.tenant_id, 'password_reset');
+    const vars = { company: brand, name: acct.name ?? '', link };
+    email.sendSystem(acct.tenant_id, acct.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
   }
   if (acct.phone) {
     const sms = await import('./sms.js');
@@ -630,7 +630,7 @@ app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
   if (!who) return res.json(generic);
 
   const { rows: [acct] } = await pool.query(
-    `select st.id, st.email, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
+    `select st.id, st.name, st.email, st.tenant_id, t.subdomain, t.name as tenant_name from staff st
      join tenants t on t.id = st.tenant_id
      where lower(st.email) = lower($1) or lower(st.username) = lower($1)`, [who]);
   if (!acct?.email) return res.json(generic);
@@ -641,9 +641,9 @@ app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
   const brand = acct.tenant_name || 'Vibelink';
 
   const email = await import('./email.js');
-  email.sendSystem(acct.tenant_id, acct.email, `Your ${brand} sign-in link`,
-    `Sign in: ${link}\n\nThis link expires in 15 minutes and works once. `
-    + 'If you did not request this, ignore it.').catch(() => {});
+  const t = await email.template(acct.tenant_id, 'magic_link');
+  const vars = { company: brand, name: acct.name ?? '', link };
+  email.sendSystem(acct.tenant_id, acct.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
   auth.pruneLoginTokens();
   res.json(generic);
 }));
@@ -2242,8 +2242,9 @@ app.post('/portal/recover', loginLimiter, wrap(async (req, res) => {
   sms.send(req.tenant.id, s.phone, 'custom', { body }).catch(() => {});
   if (s.email) {
     const email = await import('./email.js');
-    email.send(req.tenant.id, s.email, 'Your account login details',
-      `Account number: ${s.account_code}\nPassword: ${password}`).catch(() => {});
+    const t = await email.template(req.tenant.id, 'customer_credentials');
+    const vars = { company: req.tenant.name ?? '', account: s.account_code, password };
+    email.send(req.tenant.id, s.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
   }
 
   res.json(generic);
@@ -8968,8 +8969,9 @@ app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) 
       { body: `You've been added to ${brand}'s team. Set up your login: ${link} (valid 3 days)` }).catch(() => {});
     if (s.email) {
       const email = await import('./email.js');
-      await email.sendSystem(req.tenant.id, s.email, `You've been invited to ${brand}`,
-        `Set up your login: ${link}\n\nThis link expires in 3 days. If this wasn't expected, ignore it.`).catch(() => {});
+      const t = await email.template(req.tenant.id, 'staff_invite');
+      const vars = { company: brand, name: s.name ?? '', link };
+      await email.sendSystem(req.tenant.id, s.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
     }
   }).catch(() => {});
 
@@ -9613,6 +9615,31 @@ app.put('/api/sms/templates', requirePermission('settings.edit'), wrap(async (re
 app.get('/api/sms/placeholders', wrap(async (_req, res) => {
   const { PLACEHOLDERS } = await import('./sms.js');
   res.json(PLACEHOLDERS);
+}));
+
+/** Same idea as /api/sms/templates above, for the system emails email.js sends. */
+app.get('/api/email/templates', wrap(async (req, res) => {
+  const { DEFAULTS, PLACEHOLDERS } = await import('./email.js');
+  const { rows } = await pool.query(
+    'select templates from tenant_email_config where tenant_id=$1', [req.tenant.id]);
+  res.json({
+    defaults: DEFAULTS,
+    templates: rows[0]?.templates ?? {},
+    placeholders: PLACEHOLDERS,
+  });
+}));
+
+app.put('/api/email/templates', requirePermission('settings.edit'), wrap(async (req, res) => {
+  const templates = req.body?.templates;
+  if (!templates || typeof templates !== 'object') {
+    return res.status(400).json({ error: 'Nothing to save' });
+  }
+  const { rowCount } = await pool.query(
+    'update tenant_email_config set templates=$2 where tenant_id=$1', [req.tenant.id, templates]);
+  if (!rowCount) {
+    return res.status(400).json({ error: 'Add an email gateway first — templates are stored against it.' });
+  }
+  res.json({ ok: true, templates });
 }));
 
 // ── tenants and platform billing (owner screens) ──

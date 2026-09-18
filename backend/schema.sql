@@ -2306,3 +2306,9 @@ alter table staff add column if not exists photo_data text;
 -- as easily as an ex-employee's badge stops mattering the moment they leave.
 -- The verify page checks both independently rather than conflating them.
 alter table hr_profiles add column if not exists badge_expires_at date;
+
+-- Editable wording for the system emails (password reset, magic-link
+-- sign-in, customer credentials, staff invite) — same idea as
+-- tenant_sms_config.templates, a per-key JSON override merged over
+-- email.js's own DEFAULTS.
+alter table tenant_email_config add column if not exists templates jsonb not null default '{}'::jsonb;

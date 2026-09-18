@@ -4,6 +4,7 @@ import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import Gateways from './settings/Gateways';
+import Templates from './settings/Templates';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
 
 const CURRENCIES = ['KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS — Tanzanian shilling', 'USD — US dollar'];
@@ -573,12 +574,14 @@ export default function Settings() {
           { id: 'sms', label: 'SMS gateways' },
           { id: 'whatsapp', label: 'WhatsApp' },
           { id: 'smtp', label: 'Email' },
+          { id: 'templates', label: 'Message templates' },
           { id: 'prefs', label: 'Preferences' },
           { id: 'account', label: 'My account' },
         ]}
       />
 
       {tab === 'gateways' && <Gateways />}
+      {tab === 'templates' && <Templates />}
 
       {/* Your own login, not the business. Neither could be changed from inside
           the product: a mistyped name at signup was permanent, and anyone who

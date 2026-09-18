@@ -151,6 +151,8 @@ export const api = {
   saveEmailGateway: (cfg) => put('/api/email/gateway', cfg),
   deleteEmailGateway: () => del('/api/email/gateway'),
   sendTestEmail: (to) => post('/api/email/test', { to }),
+  emailTemplates: () => get('/api/email/templates'),
+  saveEmailTemplates: (templates) => put('/api/email/templates', { templates }),
   emailHistory: () => get('/api/email/history'),
 
   // ── support ──

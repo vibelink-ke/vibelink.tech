@@ -147,3 +147,53 @@ export async function sendSystem(tenantId, to, subject, body) {
 export function missingFields(c = {}) {
   return FIELDS.filter((f) => f.required && !String(c[f.key] ?? '').trim()).map((f) => f.label);
 }
+
+/**
+ * The four system emails this app actually sends, editable per tenant —
+ * same idea as sms.js's DEFAULTS/PLACEHOLDERS, kept as its own copy rather
+ * than shared: an email has a subject an SMS does not, and the two channels
+ * should be free to drift in wording without one screen's edit silently
+ * changing the other's.
+ *
+ * {link} carries the actual reset/sign-in/invite token in three of these —
+ * removing it from a saved template does not fail the send, since an
+ * operator gets to decide what belongs in their own wording, but it does
+ * mean the recipient has no way to act on the email. The Settings screen
+ * flags that rather than the backend refusing to save it.
+ */
+export const DEFAULTS = {
+  password_reset: {
+    subject: 'Reset your {company} password',
+    body: 'Reset your password: {link}\n\nThis link expires in 30 minutes and works once. If you did not request this, ignore it.',
+  },
+  magic_link: {
+    subject: 'Your {company} sign-in link',
+    body: 'Sign in: {link}\n\nThis link expires in 15 minutes and works once. If you did not request this, ignore it.',
+  },
+  customer_credentials: {
+    subject: 'Your account login details',
+    body: 'Account number: {account}\nPassword: {password}',
+  },
+  staff_invite: {
+    subject: "You've been invited to {company}",
+    body: 'Set up your login: {link}\n\nThis link expires in 3 days. If this wasn\'t expected, ignore it.',
+  },
+};
+
+export const PLACEHOLDERS = [
+  { token: 'company',  desc: 'Your company name' },
+  { token: 'name',     desc: "The recipient's name (blank for the two account-recovery emails, which are looked up by identifier)" },
+  { token: 'link',     desc: 'The actual reset, sign-in or invite link — the email has no working action without it' },
+  { token: 'account',  desc: "The customer's account number" },
+  { token: 'password', desc: 'A freshly generated password' },
+];
+
+const render = (tpl, vars) => String(tpl ?? '').replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
+export const fill = (tpl, vars) => render(tpl, vars);
+
+/** A template merged over its default — an override may set just the subject or just the body. */
+export async function template(tenantId, key) {
+  const { rows: [row] } = await pool.query(
+    'select templates from tenant_email_config where tenant_id=$1', [tenantId]);
+  return { ...DEFAULTS[key], ...(row?.templates?.[key] ?? {}) };
+}
