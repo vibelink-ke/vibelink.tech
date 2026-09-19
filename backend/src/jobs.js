@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
+import { fmtNairobi } from './nairobi-time.js';
 import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
@@ -282,7 +283,7 @@ async function renewFromWallet() {
         await c.query(
           `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
            values ($1,$2,$3,'system','Auto-renewed from wallet',$4)`,
-          [tenant_id, due.id, account_code, `Renewed to ${new Date(r.expires).toLocaleString('en-KE')} using the account's pooled wallet — KES ${r.balance} remaining`]);
+          [tenant_id, due.id, account_code, `Renewed to ${fmtNairobi(r.expires)} using the account's pooled wallet — KES ${r.balance} remaining`]);
       }
     });
   }
@@ -622,7 +623,7 @@ async function remind() {
       and s.tenant_id in (${enabledTenants})`, ['remind']);
   for (const s of rows) {
     await send(s.tenant_id, s.phone, 'reminder',
-      { name: s.name.split(' ')[0], expires: new Date(s.expires_at).toLocaleString('en-KE'), account: s.account_code });
+      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code });
   }
 }
 

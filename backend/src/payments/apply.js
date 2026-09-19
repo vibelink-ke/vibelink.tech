@@ -1,6 +1,7 @@
 import { withTenant, pool } from '../db.js';
 import { activateSubscriber, issueVoucherAccess } from '../radius.js';
 import { send } from '../sms.js';
+import { fmtNairobi } from '../nairobi-time.js';
 
 /**
  * PPPoE billing cycles land on a shared midnight rather than whatever minute
@@ -194,7 +195,7 @@ export async function applyPayment(tenantId, tx) {
     // like a jumble of numbers in a text message. A guest needs a day and a
     // time, not a timezone name.
     const expires = v.expires_at
-      ? new Date(v.expires_at).toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short' })
+      ? fmtNairobi(v.expires_at, { dateStyle: 'medium', timeStyle: 'short' })
       : '';
     await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link });
     return { paymentId, applied: true, voucher: v };

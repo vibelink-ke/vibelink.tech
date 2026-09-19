@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { pool } from './db.js';
+import { fmtNairobiDate } from './nairobi-time.js';
 
 /**
  * SMS gateways. Each tenant picks a primary in Settings -> SMS; the rest act as failover
@@ -217,7 +218,7 @@ export function subscriberVars(s, org = {}) {
     plan: s.plan_title ?? '',
     price: s.plan_price == null ? '' : String(Number(s.plan_price)),
     speed: s.rate_down ? `${mbps(s.rate_down)}/${mbps(s.rate_up)} Mbps` : '',
-    expires: s.expires_at ? new Date(s.expires_at).toLocaleDateString('en-KE') : '',
+    expires: s.expires_at ? fmtNairobiDate(s.expires_at) : '',
     days_left: days == null ? '' : String(Math.max(0, days)),
     status: s.status ?? '',
     balance: s.credit == null ? '' : String(Number(s.credit)),
