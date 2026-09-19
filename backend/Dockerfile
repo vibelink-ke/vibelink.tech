@@ -25,6 +25,11 @@ RUN apk add --no-cache postgresql16-client wireguard-tools iproute2 libcap \
     && setcap cap_net_admin+eip "$(command -v wg)" \
     && setcap cap_net_admin+eip "$(command -v ip)"
 
+# Where the nightly database dump is kept (compose mounts a volume here).
+# Created and owned by the unprivileged user now, because a new named volume
+# copies the ownership of the directory it is mounted over.
+RUN mkdir -p /backups && chown node:node /backups
+
 # Dependencies as their own layer, so editing source does not reinstall them.
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev

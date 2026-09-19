@@ -142,6 +142,9 @@ services:
       # Read-only: the API only needs to see which tunnels are up and on what
       # address. Anything that can write here could redirect a router.
       - ovpn-run:/run/openvpn:ro
+      # Nightly database dumps (backend/src/backup.js). Kept on this server so a
+      # backup exists with no outside account; R2 adds an off-site copy.
+      - db-backups:/backups
       # The WireGuard server config, which is rendered from wg_peers by
       # scripts/wg-sync.mjs. It has to be mounted here rather than only on the
       # wireguard container: the database lives on this side, the file is read
@@ -294,6 +297,7 @@ services:
 
 volumes:
   billing-pgdata:
+  db-backups:         # nightly pg_dump files, see scripts/restore-backup.sh
   ovpn-run:           # openvpn status file, shared read-only with the API
   billing-ovpn-pki:   # the tunnel CA; losing it means re-onboarding every router
   caddy-data:
