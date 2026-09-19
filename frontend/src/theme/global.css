@@ -26,17 +26,23 @@ a:hover {
 }
 
 /*
- * Dark mode, as the mockup does it: the palette is authored light-only and the
- * whole tree is inverted, then media is inverted back so photos stay correct.
- * Keeping this rather than authoring a second palette preserves the design 1:1.
+ * Dark mode: the palette is authored light-only and the whole tree is inverted,
+ * then media is inverted back so photos stay correct.
+ *
+ * A full invert(1) made pure-black cards on a near-black page — no edge between
+ * them — and left grey text (which sits near mid-grey either way) hard to read.
+ * Inverting 90% keeps cards a step off the page and the borders visible, and
+ * the text a soft off-white instead of glare; brightness lifts the dimmest
+ * greys. Media and .no-invert (things drawn dark on purpose, like the licence
+ * tile) are fully inverted back, which lands them close to their real colours.
  */
 html.om-dark-root,
 html.om-dark-root body {
-  background: #0e1412;
+  background: #262a29;
 }
 
 .om-dark {
-  filter: invert(1) hue-rotate(180deg);
+  filter: invert(0.9) hue-rotate(180deg) brightness(1.18);
 }
 .om-dark img,
 .om-dark video,

@@ -487,7 +487,7 @@ export default function Dashboard() {
         {/* Licence standing. The invoice card is deliberately absent most of the
             month: it appeared permanently at KES 0, which trained everyone to
             ignore the one place that will later say they owe money. */}
-        <div style={{ ...card, background: '#0f1a17', borderColor: '#0f1a17', color: '#e6ece8', gap: 10 }}>
+        <div className="no-invert" style={{ ...card, background: '#0f1a17', borderColor: '#0f1a17', color: '#e6ece8', gap: 10 }}>
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Licence</span>
           {licence?.licenceEnds ? (
             <>
