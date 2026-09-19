@@ -148,6 +148,13 @@ const SERVICES = [
    + 'all month.'],
 ];
 
+/** Captured from the real app against fabricated data — no customer's details. */
+const SCREENSHOTS = [
+  ['/screens/dashboard.png', 'Dashboard', 'today\'s collections, who is online, and the last seven days by payment channel.'],
+  ['/screens/clients.png', 'Clients', 'every PPPoE customer, their status and when they last connected.'],
+  ['/screens/routers.png', 'Routers', 'each MikroTik, whether it is up, and one click to reconfigure it.'],
+];
+
 const STEPS = [
   ['Register', 'Pick your name and your subdomain. Takes a minute.'],
   ['Add a router', 'Paste one line into your MikroTik. It dials in on its own.'],
@@ -370,6 +377,35 @@ export default function Landing({ onRegister }) {
           </div>
         </Section>
       </div>
+
+      <Section style={{ padding: '52px 22px 20px' }}>
+        <h2 style={{ fontSize: 22, margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: color.green, display: 'inline-block' }} />
+          The product, as it looks
+        </h2>
+        <p style={{ color: color.inkSoft, maxWidth: 620, margin: '0 0 24px', fontSize: 15 }}>
+          Real screens from the app, shown with sample data.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 18 }}>
+          {SCREENSHOTS.map(([src, title, caption], i) => (
+            <Reveal key={src} delay={i * 80} style={i === 0 ? { gridColumn: '1 / -1' } : undefined}>
+              <figure style={{ margin: 0 }}>
+                <img
+                  src={src} alt={`${title} screen`} loading="lazy" width="1440" height="900"
+                  style={{
+                    display: 'block', width: '100%', height: 'auto',
+                    border: `1px solid ${color.line}`, borderRadius: radius.md,
+                    boxShadow: '0 14px 30px -18px rgba(20, 30, 25, .35)',
+                  }}
+                />
+                <figcaption style={{ marginTop: 10, fontSize: 13.5, color: color.inkSoft }}>
+                  <strong style={{ color: color.ink }}>{title}</strong> — {caption}
+                </figcaption>
+              </figure>
+            </Reveal>
+          ))}
+        </div>
+      </Section>
 
       <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
         <Section style={{ padding: '40px 22px' }}>
