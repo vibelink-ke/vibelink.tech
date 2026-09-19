@@ -96,6 +96,9 @@ export default function App() {
   // Browser tab shows the tenant's own company, so someone running two ISPs in
   // two tabs can tell them apart.
   useEffect(() => {
+    // The marketing page keeps the descriptive title from index.html — it is
+    // what search results show.
+    if (isPlatformHost()) return;
     document.title = session?.company ? `${session.company} · Vibelink` : 'Vibelink';
   }, [session?.company]);
 

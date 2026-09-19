@@ -28,6 +28,28 @@
 
 	encode gzip zstd
 
+	# Only the marketing site (the apex) should turn up in search results. Every
+	# other name here is one ISP's own sign-in page, and indexing those would
+	# put tenants' login screens in Google under our brand.
+	@tenant not host {$ROOT_DOMAIN} www.{$ROOT_DOMAIN}
+	header @tenant X-Robots-Tag "noindex, nofollow"
+
+	@apex host {$ROOT_DOMAIN} www.{$ROOT_DOMAIN}
+	handle /robots.txt {
+		respond @apex <<TXT
+			User-agent: *
+			Allow: /
+			Disallow: /api/
+			Disallow: /portal/
+
+			Sitemap: https://{$ROOT_DOMAIN}/sitemap.xml
+			TXT 200
+		respond <<TXT
+			User-agent: *
+			Disallow: /
+			TXT 200
+	}
+
 	# Everything the backend owns. /internal is deliberately absent: the TLS gate
 	# must not be reachable from outside.
 	#

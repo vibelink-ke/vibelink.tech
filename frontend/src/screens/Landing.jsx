@@ -209,6 +209,17 @@ function Reveal({ children, delay = 0, style }) {
 }
 
 export default function Landing({ onRegister }) {
+  // Set here rather than in index.html: that file is served to every tenant's
+  // sign-in page too, and a canonical pointing them at the marketing page
+  // would tell Google those pages are duplicates of it.
+  useEffect(() => {
+    const link = document.createElement('link');
+    link.rel = 'canonical';
+    link.href = `https://${window.location.hostname.replace(/^www\./, '')}/`;
+    document.head.appendChild(link);
+    return () => link.remove();
+  }, []);
+
   return (
     <div style={{
       minHeight: '100vh', background: color.pageBg, color: color.ink,
