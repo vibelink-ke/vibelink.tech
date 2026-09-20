@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import useLicence from '../app/useLicence';
 import PasswordHelper from '../ui/PasswordHelper';
 import { passwordProblem } from '../lib/password';
 import Gateways from './settings/Gateways';
@@ -262,6 +263,8 @@ function NotificationsCard({ store }) {
 export default function Settings() {
   const store = useStore();
   const [params] = useSearchParams();
+  const navigate = useNavigate();
+  const lic = useLicence();
   const [tab, setTab] = useState(params.get('tab') ?? 'general');
 
   const [faviconVersion, setFaviconVersion] = useState(0);
@@ -669,17 +672,38 @@ export default function Settings() {
             </div>
           </Card>
 
-          <Card title="Licence">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: color.muted }}>Status</span>
-                <Badge tone="unused">Not activated</Badge>
+          <Card
+            title="Licence"
+            actions={store.session?.perms?.['billing.view'] ? <Button size="sm" onClick={() => navigate('/licence')}>Billing</Button> : null}
+          >
+            {!lic ? (
+              <div style={{ fontSize: 13, color: color.muted }}>Checking…</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, fontSize: 13 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: color.muted }}>Status</span>
+                  <Badge tone={lic.readOnly ? 'expired' : lic.trial ? 'unused' : 'active'}>
+                    {lic.readOnly ? 'Expired' : lic.trial ? 'Free trial' : 'Active'}
+                  </Badge>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: color.muted }}>{lic.readOnly ? 'Expired on' : 'Expires'}</span>
+                  <span style={{ fontFamily: font.mono }}>{lic.licenceEnds ? new Date(lic.licenceEnds).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : 'No end date'}</span>
+                </div>
+                {lic.daysLeft != null && !lic.readOnly && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: color.muted }}>Days left</span>
+                    <span style={{ fontFamily: font.mono }}>{lic.daysLeft}</span>
+                  </div>
+                )}
+                {Number(lic.amountDue) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: color.muted }}>Due now</span>
+                    <span style={{ fontFamily: font.mono, color: color.rust, fontWeight: 600 }}>KES {Number(lic.amountDue).toLocaleString('en-KE')}</span>
+                  </div>
+                )}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: color.muted }}>Expires</span>
-                <span style={{ fontFamily: font.mono }}>—</span>
-              </div>
-            </div>
+            )}
           </Card>
         </div>
       )}
