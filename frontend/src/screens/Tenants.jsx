@@ -85,6 +85,8 @@ export default function Tenants() {
   const [assigning, setAssigning] = useState(null);   // tenant id currently being re-saved
   const [relaySources, setRelaySources] = useState([]); // sibling deployments relaying through us
   const [assigningSource, setAssigningSource] = useState(null);
+  // Narrowing a long list of tenants: by state, where they run, how they are charged, licence.
+  const [tf, setTf] = useState({ status: 'all', hosting: 'all', charge: 'all', licence: 'all' });
   const [upstream, setUpstream] = useState(null);        // { totals, byProvider } across every tenant's routers
 
   const loadUpstream = async () => {
@@ -245,6 +247,20 @@ export default function Tenants() {
   };
 
   const byStatus = (s) => tenants.filter((t) => t.status === s).length;
+
+  // Expired = read-only or past its end date; soon = ends within two weeks.
+  const licenceState = (t) => {
+    const end = t.licence_ends ? new Date(t.licence_ends).getTime() : null;
+    if (t.status === 'readonly' || (end != null && end < new Date().setHours(0, 0, 0, 0))) return 'expired';
+    if (end != null && (end - Date.now()) / 86400000 <= 14) return 'soon';
+    return 'ok';
+  };
+  const shownTenants = tenants.filter((t) =>
+    (tf.status === 'all' || t.status === tf.status)
+    && (tf.hosting === 'all' || (tf.hosting === 'self') === (t.hosting === 'self'))
+    && (tf.charge === 'all' || (tf.charge === 'flat') === (t.flat_monthly_fee != null))
+    && (tf.licence === 'all' || licenceState(t) === tf.licence));
+  const filtering = Object.values(tf).some((v) => v !== 'all');
   const isSelf = (t) => t.subdomain === store.session?.subdomain;
 
   const saveEdit = async () => {
@@ -526,11 +542,40 @@ export default function Tenants() {
         </Card>
       )}
 
-      <Card title="Tenants">
+      <Card title="Tenants" subtitle={filtering ? `${shownTenants.length} of ${tenants.length} match` : `${tenants.length} in total — search by name, subdomain, billing ID, phone or status`}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end', paddingBottom: 12 }}>
+          <Field label="Status">
+            <Select value={tf.status} onChange={(e) => setTf((x) => ({ ...x, status: e.target.value }))} options={[
+              { value: 'all', label: 'All statuses' }, { value: 'active', label: 'Active' }, { value: 'trial', label: 'Trial' },
+              { value: 'readonly', label: 'Expired (locked)' }, { value: 'suspended', label: 'Suspended' },
+            ]} />
+          </Field>
+          <Field label="Licence">
+            <Select value={tf.licence} onChange={(e) => setTf((x) => ({ ...x, licence: e.target.value }))} options={[
+              { value: 'all', label: 'Any licence' }, { value: 'expired', label: 'Expired' },
+              { value: 'soon', label: 'Ends within 14 days' }, { value: 'ok', label: 'Running' },
+            ]} />
+          </Field>
+          <Field label="Runs on">
+            <Select value={tf.hosting} onChange={(e) => setTf((x) => ({ ...x, hosting: e.target.value }))} options={[
+              { value: 'all', label: 'Anywhere' }, { value: 'platform', label: 'Our platform' }, { value: 'self', label: 'Their own server' },
+            ]} />
+          </Field>
+          <Field label="Charged">
+            <Select value={tf.charge} onChange={(e) => setTf((x) => ({ ...x, charge: e.target.value }))} options={[
+              { value: 'all', label: 'Any way' }, { value: 'usage', label: 'By usage' }, { value: 'flat', label: 'Flat monthly fee' },
+            ]} />
+          </Field>
+          {filtering && (
+            <div>
+              <Button onClick={() => setTf({ status: 'all', hosting: 'all', charge: 'all', licence: 'all' })}>Clear filters</Button>
+            </div>
+          )}
+        </div>
         <Table
           rowKey={(t) => t.id}
-          empty="No tenants yet — onboard your first ISP"
-          rows={tenants}
+          empty={filtering ? 'No tenants match these filters' : 'No tenants yet — onboard your first ISP'}
+          rows={shownTenants}
           columns={[
             { key: 'name', label: 'ISP', render: (t) => <span style={{ fontWeight: 600 }}>{t.name}</span> },
             { key: 'subdomain', label: 'Subdomain', render: (t) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{t.subdomain}</span> },
