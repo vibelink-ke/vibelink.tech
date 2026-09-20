@@ -10538,8 +10538,11 @@ app.put('/api/email/templates', requirePermission('settings.edit'), wrap(async (
 // ── tenants and platform billing (owner screens) ──
 // Hiding these in the sidebar is not access control: every tenant's revenue is
 // behind them, so the routes check the session themselves.
-const superAdminOnly = (req, res, next) =>
-  req.session?.is_super_admin ? next() : res.status(403).json({ error: 'platform owner only' });
+// A function declaration, not a const: routes registered further up the file use it, and a const would not
+// exist yet when they are registered.
+function superAdminOnly(req, res, next) {
+  return req.session?.is_super_admin ? next() : res.status(403).json({ error: 'platform owner only' });
+}
 
 /**
  * Safaricom's B2C tariff, editable rather than hardcoded — see schema.sql's
