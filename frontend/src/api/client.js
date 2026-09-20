@@ -284,6 +284,7 @@ export const api = {
   // ── network ──
   routers: () => get('/api/routers'),
   network: () => get('/api/network'),
+  mapConfig: () => get('/api/map-config'),
   createNetNode: (b) => post('/api/network/nodes', b),
   updateNetNode: (id, b) => patch(`/api/network/nodes/${id}`, b),
   deleteNetNode: (id) => del(`/api/network/nodes/${id}`),

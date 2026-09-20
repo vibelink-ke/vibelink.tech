@@ -36,12 +36,15 @@ const STATUS_COLOUR = {
 };
 
 /**
- * Satellite imagery is real photographs down to about zoom 19 in towns (less in the
- * countryside). Past that the tiles are simply stretched, so you can still zoom in —
- * it just gets softer — but the map never asks the server for pictures that do not exist.
+ * Free Esri imagery has gaps: where a zoom level has no photograph it serves a grey
+ * "Map data not yet available" square. So before drawing, the map asks which is the
+ * closest zoom that really exists at the spot being looked at (a real tile is well over
+ * 3 KB, the grey one about 2.5 KB) and stretches the last real level beyond that.
+ * A keyed provider (see /api/map-config) needs none of this.
  */
-const SAT_NATIVE_ZOOM = 19;
+const ESRI_IMAGERY = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 const SAT_MAX_ZOOM = 21;
+const REAL_TILE_BYTES = 3000;
 
 const FIBRE = '#1f6fd1';
 const WIRELESS = '#8a4fd0';
@@ -241,30 +244,67 @@ export default function MapScreen() {
     setBase(b);
     try { localStorage.setItem('vibelink:map-base', b); } catch { /* not remembered */ }
   };
+  // A keyed satellite provider, when the server has one; otherwise the free imagery.
+  const [mapCfg, setMapCfg] = useState(null);
+  useEffect(() => { api.mapConfig().then(setMapCfg).catch(() => setMapCfg({ satellite: null })); }, []);
   const tilesRef = useRef([]);
   useEffect(() => {
-    if (!map.current) return;
+    if (!map.current) return undefined;
     tilesRef.current.forEach((t) => t.remove());
     map.current.setMaxZoom(base === 'satellite' ? SAT_MAX_ZOOM : 19);
-    const layers = base === 'satellite'
-      ? [
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_NATIVE_ZOOM,
+    const sat = mapCfg?.satellite;
+    const labels = () => L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: SAT_MAX_ZOOM, maxNativeZoom: 16,
+    });
+    let layers;
+    if (base !== 'satellite') {
+      layers = [L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })];
+    } else if (sat) {
+      layers = [L.tileLayer(sat.url, { maxZoom: SAT_MAX_ZOOM, maxNativeZoom: sat.maxNativeZoom ?? 20, attribution: sat.attribution }), ...(sat.labels ? [labels()] : [])];
+    } else {
+      layers = [
+        L.tileLayer(ESRI_IMAGERY, {
+          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: 19,
           attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
         }),
-        // Place names and roads over the imagery, so it still says where things are.
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_NATIVE_ZOOM,
-        }),
-      ]
-      : [L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })];
+        labels(),   // place names over the imagery, so it still says where things are
+      ];
+    }
     layers.forEach((t, i) => {
       t.on('tileerror', () => setTilesFailed(true));
       t.addTo(map.current);
       if (i === 0) t.bringToBack();
     });
     tilesRef.current = layers;
-  }, [base]);
+
+    // Free imagery only: find the closest zoom that has a real photograph here, now and
+    // whenever the map is moved somewhere else.
+    if (base !== 'satellite' || sat) return undefined;
+    let timer;
+    const seen = new Map();
+    const probe = async () => {
+      const m = map.current;
+      if (!m) return;
+      const c = m.getCenter();
+      for (let z = 19; z >= 13; z--) {
+        const p = m.project(c, z).divideBy(256).floor();
+        const url = ESRI_IMAGERY.replace('{z}', z).replace('{y}', p.y).replace('{x}', p.x);
+        let real = seen.get(url);
+        if (real === undefined) {
+          try { real = (await (await fetch(url)).blob()).size > REAL_TILE_BYTES; } catch { return; }
+          seen.set(url, real);
+        }
+        if (real) {
+          if (layers[0].options.maxNativeZoom !== z) { layers[0].options.maxNativeZoom = z; layers[0].redraw(); }
+          return;
+        }
+      }
+    };
+    const soon = () => { clearTimeout(timer); timer = setTimeout(probe, 600); };
+    probe();
+    map.current.on('moveend', soon);
+    return () => { clearTimeout(timer); map.current?.off('moveend', soon); };
+  }, [base, mapCfg]);
 
   // Scroll-to-zoom is on for looking around, and off while editing so the page below the
   // map (the forms, the lists) can still be scrolled to. The buttons and pinch still zoom.
@@ -596,7 +636,7 @@ export default function MapScreen() {
             <Button size="sm" variant={base === 'satellite' ? 'primary' : undefined} onClick={() => chooseBase('satellite')}>Satellite</Button>
             {base === 'satellite' && (
               <span style={{ fontSize: 12, color: color.muted }}>
-                Soft or grey up close? That is all the imagery there is at that spot — zoom out a step.
+                {mapCfg?.satellite ? `Imagery by ${mapCfg.satellite.provider === 'mapbox' ? 'Mapbox' : 'MapTiler'}` : 'Soft up close? That is all the imagery there is at that spot.'}
               </span>
             )}
           </div>

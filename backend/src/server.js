@@ -7283,6 +7283,35 @@ app.delete('/api/network/links/:id', requirePermission('network.edit'), wrap(asy
   res.json({ ok: true });
 }));
 
+/**
+ * Where the map's satellite pictures come from. Free Esri imagery is the default, but
+ * it has gaps and stops early in places; set MAPBOX_TOKEN or MAPTILER_KEY on the server
+ * and the map uses that provider instead. These are the public, browser-side kinds of
+ * key (Mapbox "pk." tokens, MapTiler keys) — meant to be seen by the page, and best
+ * restricted to the site's own address in the provider's dashboard.
+ */
+app.get('/api/map-config', wrap(async (_req, res) => {
+  const mapbox = String(process.env.MAPBOX_TOKEN ?? '').trim();
+  const maptiler = String(process.env.MAPTILER_KEY ?? '').trim();
+  if (mapbox.startsWith('pk.')) {
+    return res.json({ satellite: {
+      provider: 'mapbox',
+      url: `https://api.mapbox.com/styles/v1/mapbox/satellite-streets-v12/tiles/256/{z}/{x}/{y}@2x?access_token=${encodeURIComponent(mapbox)}`,
+      attribution: '&copy; Mapbox &copy; Maxar &copy; OpenStreetMap',
+      maxNativeZoom: 20, labels: false,
+    } });
+  }
+  if (maptiler) {
+    return res.json({ satellite: {
+      provider: 'maptiler',
+      url: `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${encodeURIComponent(maptiler)}`,
+      attribution: '&copy; MapTiler &copy; OpenStreetMap contributors',
+      maxNativeZoom: 20, labels: true,
+    } });
+  }
+  res.json({ satellite: null });
+}));
+
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
   res.json(rows);
