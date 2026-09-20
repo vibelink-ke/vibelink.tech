@@ -7151,7 +7151,8 @@ app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, r
  * and links between them. A link end is 'n:<node id>' or 'r:<router id>'.
  */
 const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station'];
-const NET_REF = /^[nr]:[0-9a-fA-F-]{36}$/;
+// 'n:<node id>', 'r:<router id>', or 'p:<lat>,<lng>' — open ground where a cable starts or stops.
+const NET_REF = /^(?:[nr]:[0-9a-fA-F-]{36}|p:-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?)$/;
 const netDetails = (d) => {
   const out = {};
   if (d && typeof d === 'object' && !Array.isArray(d)) {
@@ -7244,6 +7245,11 @@ app.post('/api/network/links', requirePermission('network.edit'), wrap(async (re
   // Both ends must be this tenant's own.
   for (const ref of [from, to]) {
     const [type, id] = ref.split(':');
+    if (type === 'p') {
+      const [la, ln] = id.split(',').map(Number);
+      if (netCoord(la, 90) === null || netCoord(ln, 180) === null) return res.status(400).json({ error: 'That is not a place on the map.' });
+      continue;
+    }
     const { rowCount } = await pool.query(
       `select 1 from ${type === 'n' ? 'network_nodes' : 'routers'} where tenant_id=$1 and id=$2`, [req.tenant.id, id]);
     if (!rowCount) return res.status(400).json({ error: 'One end of that link no longer exists.' });

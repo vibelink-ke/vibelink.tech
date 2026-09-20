@@ -172,6 +172,11 @@ export default function MapScreen() {
   /** [lat, lng] for a link end: 'n:<id>' is a drawn node, 'r:<id>' a router. */
   const posOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
+    // 'p:<lat>,<lng>' — a free point on the map, where a cable simply starts or stops.
+    if (kind === 'p') {
+      const [la, ln] = String(id ?? '').split(',').map(Number);
+      return Number.isFinite(la) && Number.isFinite(ln) ? [la, ln] : null;
+    }
     if (kind === 'n') {
       const n = net.nodes.find((x) => x.id === id);
       return n ? [Number(n.lat), Number(n.lng)] : null;
@@ -182,6 +187,7 @@ export default function MapScreen() {
 
   const nameOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
+    if (kind === 'p') return 'a point on the map';
     if (kind === 'n') return net.nodes.find((x) => x.id === id)?.name ?? 'removed';
     return routers.find((x) => x.id === id)?.name ?? 'removed';
   }, [net.nodes, routers]);
@@ -214,8 +220,13 @@ export default function MapScreen() {
       if (!t) return;
       if (t.type === 'node') {
         setNodeForm({ kind: t.kind, lat: e.latlng.lat, lng: e.latlng.lng, name: '', details: {}, watchRouterId: '' });
-      } else if (t.type === 'link' && t.from) {
-        setTool((cur) => (cur && cur.type === 'link' ? { ...cur, path: [...cur.path, [e.latlng.lat, e.latlng.lng]] } : cur));
+      } else if (t.type === 'link') {
+        const pt = [e.latlng.lat, e.latlng.lng];
+        setTool((cur) => {
+          if (!cur || cur.type !== 'link') return cur;
+          if (cur.from) return { ...cur, path: [...cur.path, pt] };
+          return { ...cur, from: `p:${pt[0].toFixed(6)},${pt[1].toFixed(6)}` };   // starts on open ground
+        });
       }
     });
     return () => { map.current?.remove(); map.current = null; };
@@ -262,7 +273,12 @@ export default function MapScreen() {
       // The cable being drawn right now.
       if (editMode && tool?.type === 'link' && tool.from) {
         const start = posOf(tool.from);
-        if (start) L.polyline([start, ...tool.path], { color: '#e08a00', weight: 3, dashArray: '2 8' }).addTo(layer.current);
+        if (start) {
+          L.polyline([start, ...tool.path], { color: '#e08a00', weight: 3, dashArray: '2 8', interactive: false }).addTo(layer.current);
+          for (const p of [start, ...tool.path]) {
+            L.circleMarker(p, { radius: 5, color: '#e08a00', weight: 2, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(layer.current);
+          }
+        }
       }
 
       for (const n of net.nodes) {
@@ -272,7 +288,7 @@ export default function MapScreen() {
         const m = L.marker([Number(n.lat), Number(n.lng)], {
           icon: badge(k.letter, down ? color.rust : k.fill, tool?.from === ref ? '#e08a00' : '#fff', down ? 'vl-pulse' : ''),
           draggable: editMode && !tool,
-          zIndexOffset: down ? 1000 : 0,
+          zIndexOffset: down ? 1500 : 800,
         }).addTo(layer.current);
         m.bindTooltip(`${esc(n.name)} · ${k.label}${down ? ` · OFFLINE since ${esc(ago(n.offline_since))}` : n.status === 'up' ? ' · online' : ''}`);
         m.on('click', (e) => {
@@ -316,7 +332,7 @@ export default function MapScreen() {
         const fill = live
           ? (c.online ? color.green : '#9aa39c')
           : (STATUS_COLOUR[c.status] ?? color.muted);
-        L.marker([c._lat, c._lng], { icon: dot(fill, '#fff') })
+        L.marker([c._lat, c._lng], { icon: dot(fill, '#fff'), interactive: !(editMode && tool), zIndexOffset: -200 })
           .bindPopup(
             `<strong>${esc(c.name)}</strong><br>${esc(c.account_code)}<br>`
             + `${esc(c.location)}<br>${esc(c.status)}`)
@@ -430,10 +446,24 @@ export default function MapScreen() {
     </Field>
   ));
 
+  const finishCable = () => {
+    if (!tool || tool.type !== 'link' || !tool.from) return;
+    if (!tool.path.length) return store.toast('Click at least one more point along the route first');
+    const last = tool.path[tool.path.length - 1];
+    setLinkForm({
+      kind: tool.kind, from: tool.from, to: `p:${last[0].toFixed(6)},${last[1].toFixed(6)}`,
+      path: tool.path.slice(0, -1), label: '', details: {},
+    });
+  };
+  const undoPoint = () => setTool((cur) => {
+    if (!cur || cur.type !== 'link') return cur;
+    return cur.path.length ? { ...cur, path: cur.path.slice(0, -1) } : { ...cur, from: null };
+  });
+
   const toolHint = !tool ? null
     : tool.type === 'node' ? `Click the map where the ${lc(KINDS[tool.kind].label)} is.`
-      : !tool.from ? 'Click the first end — a node you placed, or a router.'
-        : 'Click points on the map to follow the route, then click the other end to finish.';
+      : !tool.from ? 'Click the map where the cable starts — or click a node or router to start from it.'
+        : `Click along the route (${tool.path.length} point${tool.path.length === 1 ? '' : 's'} so far). Click a node or router to end on it, or press Finish to end at the last point.`;
 
   return (
     <Screen
@@ -502,7 +532,15 @@ export default function MapScreen() {
             {toolHint && (
               <div style={{ fontSize: 13, color: color.amberInk, background: color.amberBg, borderRadius: radius.md, padding: '8px 11px', display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap' }}>
                 <span>{toolHint}</span>
-                <Button size="sm" onClick={() => setTool(null)}>Cancel</Button>
+                <span style={{ display: 'inline-flex', gap: 8 }}>
+                  {tool?.type === 'link' && tool.from && (
+                    <>
+                      <Button size="sm" onClick={undoPoint}>Undo last point</Button>
+                      <Button size="sm" variant="primary" onClick={finishCable}>Finish</Button>
+                    </>
+                  )}
+                  <Button size="sm" onClick={() => setTool(null)}>Cancel</Button>
+                </span>
               </div>
             )}
           </div>
