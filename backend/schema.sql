@@ -2611,3 +2611,13 @@ create table if not exists network_links (
   created_at timestamptz not null default now()
 );
 create index if not exists network_links_tenant on network_links (tenant_id);
+
+-- A drawn radio or device with an IP address can be watched: the router named here
+-- pings it every minute. Two missed pings in a row mark it down, and the owner is
+-- told once if it stays down.
+alter table network_nodes add column if not exists watch_router_id uuid references routers on delete set null;
+alter table network_nodes add column if not exists status text not null default 'unknown';   -- unknown | up | down
+alter table network_nodes add column if not exists last_seen timestamptz;
+alter table network_nodes add column if not exists offline_since timestamptz;
+alter table network_nodes add column if not exists offline_notified boolean not null default false;
+alter table network_nodes add column if not exists ping_fails int not null default 0;

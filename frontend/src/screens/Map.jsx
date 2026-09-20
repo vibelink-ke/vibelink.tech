@@ -4,7 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Button, Card, Empty, Field, Input, Modal, Screen } from '../ui/primitives';
+import { Button, Card, Empty, Field, Input, Modal, Screen, Select } from '../ui/primitives';
 
 /**
  * Where the customers, towers and the network between them actually are.
@@ -21,7 +21,7 @@ import { Button, Card, Empty, Field, Input, Modal, Screen } from '../ui/primitiv
  *
  * Three things live here:
  *   - customers and routers, from the locations saved when each was added
- *   - which routers (hotspot or PPPoE) have gone offline, and since when
+ *   - which routers (hotspot or PPPoE) and which watched radios have gone offline, and since when
  *   - the operator's own network, drawn by hand: fibre (OLT, splitters, closures,
  *     drops and the cable between them) and wireless (each access point, backhaul
  *     radio and station, and the links between them)
@@ -67,9 +67,9 @@ const dot = (fill, ring, extra = '') => L.divIcon({
   iconAnchor: [7, 7],
 });
 
-const badge = (letter, fill, ring = '#fff') => L.divIcon({
+const badge = (letter, fill, ring = '#fff', extra = '') => L.divIcon({
   className: '',
-  html: `<span style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;
+  html: `<span class="${extra}" style="display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;
           background:${fill};border:2px solid ${ring};color:#fff;font:700 11px/1 sans-serif;
           box-shadow:0 0 0 1px rgba(0,0,0,.2)">${letter}</span>`,
   iconSize: [22, 22],
@@ -167,6 +167,7 @@ export default function MapScreen() {
   );
   const missing = clients.length - placed.length;
   const offline = routers.filter((r) => r.status === 'down');
+  const offlineRadios = net.nodes.filter((n) => n.status === 'down');
 
   /** [lat, lng] for a link end: 'n:<id>' is a drawn node, 'r:<id>' a router. */
   const posOf = useCallback((ref) => {
@@ -187,8 +188,9 @@ export default function MapScreen() {
 
   const isDown = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
-    return kind === 'r' && routers.find((x) => x.id === id)?.status === 'down';
-  }, [routers]);
+    if (kind === 'r') return routers.find((x) => x.id === id)?.status === 'down';
+    return net.nodes.find((x) => x.id === id)?.status === 'down';
+  }, [routers, net.nodes]);
 
   useEffect(() => {
     if (!holder.current || map.current) return;
@@ -211,7 +213,7 @@ export default function MapScreen() {
       const t = toolRef.current;
       if (!t) return;
       if (t.type === 'node') {
-        setNodeForm({ kind: t.kind, lat: e.latlng.lat, lng: e.latlng.lng, name: '', details: {} });
+        setNodeForm({ kind: t.kind, lat: e.latlng.lat, lng: e.latlng.lng, name: '', details: {}, watchRouterId: '' });
       } else if (t.type === 'link' && t.from) {
         setTool((cur) => (cur && cur.type === 'link' ? { ...cur, path: [...cur.path, [e.latlng.lat, e.latlng.lng]] } : cur));
       }
@@ -266,11 +268,13 @@ export default function MapScreen() {
       for (const n of net.nodes) {
         const k = KINDS[n.kind] ?? KINDS.closure;
         const ref = `n:${n.id}`;
+        const down = n.status === 'down';
         const m = L.marker([Number(n.lat), Number(n.lng)], {
-          icon: badge(k.letter, k.fill, tool?.from === ref ? '#e08a00' : '#fff'),
+          icon: badge(k.letter, down ? color.rust : k.fill, tool?.from === ref ? '#e08a00' : '#fff', down ? 'vl-pulse' : ''),
           draggable: editMode && !tool,
+          zIndexOffset: down ? 1000 : 0,
         }).addTo(layer.current);
-        m.bindTooltip(`${esc(n.name)} · ${k.label}`);
+        m.bindTooltip(`${esc(n.name)} · ${k.label}${down ? ` · OFFLINE since ${esc(ago(n.offline_since))}` : n.status === 'up' ? ' · online' : ''}`);
         m.on('click', (e) => {
           L.DomEvent.stopPropagation(e);
           if (!endpointClick(ref) && !toolRef.current) setSelected({ type: 'node', id: n.id });
@@ -336,7 +340,7 @@ export default function MapScreen() {
     if (!nodeForm.name.trim()) return store.toast('Give it a name');
     setBusy(true);
     try {
-      await api.createNetNode({ kind: nodeForm.kind, name: nodeForm.name.trim(), lat: nodeForm.lat, lng: nodeForm.lng, details: nodeForm.details });
+      await api.createNetNode({ kind: nodeForm.kind, name: nodeForm.name.trim(), lat: nodeForm.lat, lng: nodeForm.lng, details: nodeForm.details, watchRouterId: nodeForm.watchRouterId || null });
       setNodeForm(null);
       await loadNet();
     } catch (e) {
@@ -366,13 +370,13 @@ export default function MapScreen() {
   const [edit, setEdit] = useState(null);
   useEffect(() => {
     if (!sel) { setEdit(null); return; }
-    setEdit({ name: sel.name ?? '', label: sel.label ?? '', details: { ...(sel.details ?? {}) } });
+    setEdit({ name: sel.name ?? '', label: sel.label ?? '', details: { ...(sel.details ?? {}) }, watchRouterId: sel.watch_router_id ?? '' });
   }, [selected?.id, selected?.type]);    // eslint-disable-line react-hooks/exhaustive-deps
 
   const saveSelected = async () => {
     setBusy(true);
     try {
-      if (selected.type === 'node') await api.updateNetNode(selected.id, { name: edit.name.trim(), details: edit.details });
+      if (selected.type === 'node') await api.updateNetNode(selected.id, { name: edit.name.trim(), details: edit.details, watchRouterId: edit.watchRouterId || null });
       else await api.updateNetLink(selected.id, { label: edit.label.trim(), details: edit.details });
       await loadNet();
       store.toast('Saved');
@@ -404,6 +408,21 @@ export default function MapScreen() {
     if (lat === null || lng === null) return store.toast('That router has no location saved yet');
     map.current?.flyTo([lat, lng], 16);
   };
+
+  // A radio with an IP address can be watched: the router chosen here pings it every minute.
+  const hasIp = (kind) => (KINDS[kind]?.fields ?? []).some(([k]) => k === 'ip');
+  const watchSelect = (kind, value, onChange) => hasIp(kind) && (
+    <Field label="Watched from" hint="The router that pings this IP every minute — pick the one on the same network. Leave it as Not watched to skip.">
+      <Select
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        options={[{ value: '', label: 'Not watched' }, ...routers.map((r) => ({ value: r.id, label: r.name }))]}
+      />
+    </Field>
+  );
+  const statusOf = (n) => (n.status === 'down' ? `offline since ${ago(n.offline_since)}`
+    : n.status === 'up' ? `online (last answered ${ago(n.last_seen)})`
+      : n.watch_router_id ? 'waiting for the first check' : 'not watched');
 
   const fieldsFor = (list, values, setValues) => list.map(([key, label]) => (
     <Field key={key} label={label}>
@@ -443,12 +462,12 @@ export default function MapScreen() {
     >
       <style>{'@keyframes vlpulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.7)}100%{box-shadow:0 0 0 16px rgba(192,57,43,0)}}.vl-pulse{animation:vlpulse 1.4s infinite}'}</style>
 
-      {offline.length > 0 && (
+      {offline.length + offlineRadios.length > 0 && (
         <div style={{
           fontSize: 13, color: color.rust, background: color.rustBg, border: `1px solid ${color.rust}`,
           borderRadius: radius.md, padding: '10px 13px', marginBottom: 12, fontWeight: 600,
         }}>
-          {offline.length} device{offline.length === 1 ? '' : 's'} offline: {offline.map((r) => r.name).join(', ')}
+          {offline.length + offlineRadios.length} device{offline.length + offlineRadios.length === 1 ? '' : 's'} offline: {[...offline, ...offlineRadios].map((r) => r.name).join(', ')}
         </div>
       )}
 
@@ -529,6 +548,12 @@ export default function MapScreen() {
               <>
                 <Field label="Name"><Input value={edit.name} disabled={!canEdit} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
                 {fieldsFor(KINDS[sel.kind]?.fields ?? [], edit.details, (d) => setEdit({ ...edit, details: d }))}
+                {watchSelect(sel.kind, edit.watchRouterId, (v) => setEdit({ ...edit, watchRouterId: v }))}
+                {hasIp(sel.kind) && (
+                  <div style={{ fontSize: 13, color: sel.status === 'down' ? color.rust : color.muted, alignSelf: 'end', paddingBottom: 10 }}>
+                    Status: <b>{statusOf(sel)}</b>
+                  </div>
+                )}
               </>
             ) : (
               <>
@@ -546,8 +571,8 @@ export default function MapScreen() {
         </Card>
       )}
 
-      <Card title="Devices offline" subtitle="Routers that stopped answering — hotspot and PPPoE — and since when">
-        {offline.length === 0 ? (
+      <Card title="Devices offline" subtitle="Routers (hotspot and PPPoE) and watched radios that stopped answering, and since when">
+        {offline.length === 0 && offlineRadios.length === 0 ? (
           <Empty text="Everything is answering" />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -562,6 +587,19 @@ export default function MapScreen() {
                 <span style={{ fontSize: 12.5, color: color.rust }}>offline {ago(r.offline_since ?? r.last_seen)}</span>
                 <span style={{ marginLeft: 'auto' }}>
                   <Button size="sm" onClick={() => fly(r)}>Show on map</Button>
+                </span>
+              </div>
+            ))}
+            {offlineRadios.map((n) => (
+              <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderTop: `1px solid ${color.line}`, flexWrap: 'wrap' }}>
+                <b style={{ color: color.rust }}>●</b>
+                <span style={{ fontWeight: 600 }}>{n.name}</span>
+                <span style={{ fontSize: 12.5, color: color.muted }}>
+                  {KINDS[n.kind]?.label ?? 'Radio'}{n.details?.ip ? ` · ${n.details.ip}` : ''}
+                </span>
+                <span style={{ fontSize: 12.5, color: color.rust }}>offline {ago(n.offline_since)}</span>
+                <span style={{ marginLeft: 'auto' }}>
+                  <Button size="sm" onClick={() => { map.current?.flyTo([Number(n.lat), Number(n.lng)], 17); setSelected({ type: 'node', id: n.id }); }}>Show on map</Button>
                 </span>
               </div>
             ))}
@@ -609,6 +647,7 @@ export default function MapScreen() {
           <div style={{ display: 'grid', gap: 12 }}>
             <Field label="Name"><Input value={nodeForm.name} autoFocus onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })} placeholder="e.g. Kilimani OLT, Mast 3, Pole 14" /></Field>
             {fieldsFor(KINDS[nodeForm.kind].fields, nodeForm.details, (d) => setNodeForm({ ...nodeForm, details: d }))}
+            {watchSelect(nodeForm.kind, nodeForm.watchRouterId, (v) => setNodeForm({ ...nodeForm, watchRouterId: v }))}
           </div>
         )}
       </Modal>

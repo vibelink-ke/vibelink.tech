@@ -59,6 +59,7 @@ export function startJobs() {
   cron.schedule('0 8,12,18 * * *', safely('autoCharge', autoCharge));
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
+  cron.schedule('*/1 * * * *', safely('watchRadios', watchRadios));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('0 2 * * *', safely('settleTenants', settleTenants));
@@ -804,6 +805,83 @@ async function watchdog() {
       await notifyOwner(r.tenant_id,
         `${r.name} (${String(r.host).split('/')[0]}) has been unreachable for ${OFFLINE_MINUTES} minutes. `
         + 'Customers on it are offline.');
+    }
+  }
+}
+
+/**
+ * Ping every drawn radio that has an IP and a router to watch it from. The router
+ * does the pinging (radios sit on the operator's own network, which only the router
+ * can reach). Two misses in a row mark a radio down; the owner is told once after
+ * it has been down for OFFLINE_MINUTES, and again when it is back.
+ */
+async function watchRadios() {
+  const { rows } = await pool.query(
+    `select n.id, n.tenant_id, n.name, n.details->>'ip' as ip, n.status, n.offline_since, n.offline_notified, n.ping_fails,
+            r.id as router_id, r.host, r.api_port, r.status as router_status, r.service_user, r.service_password_enc
+       from network_nodes n join routers r on r.id = n.watch_router_id
+      where coalesce(n.details->>'ip', '') <> '' and n.tenant_id in (${enabledTenants})`, ['watchRadios']);
+  if (!rows.length) return;
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const byRouter = new Map();
+  for (const n of rows) {
+    if (!byRouter.has(n.router_id)) byRouter.set(n.router_id, []);
+    byRouter.get(n.router_id).push(n);
+  }
+
+  for (const nodes of byRouter.values()) {
+    const r = nodes[0];
+    // A router that is itself down (or that we hold no login for) cannot say anything
+    // about what is behind it — that is "not known", not "down".
+    if (r.router_status !== 'up' || !r.service_user || !r.service_password_enc) {
+      await pool.query(
+        `update network_nodes set status='unknown', ping_fails=0 where id = any($1::uuid[]) and status <> 'unknown'`,
+        [nodes.map((n) => n.id)]);
+      continue;
+    }
+    let conn;
+    try {
+      const password = secrets.decrypt(r.service_password_enc);
+      if (!password) continue;
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password });
+
+      const CHUNK = 10;
+      for (let i = 0; i < nodes.length; i += CHUNK) {
+        const results = await Promise.all(nodes.slice(i, i + CHUNK).map(async (n) => {
+          // Only a plain IPv4 address goes to the router.
+          if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(n.ip).trim())) return [n, null];
+          try { return [n, await ros.pingHost(conn, String(n.ip).trim(), 2)]; } catch { return [n, null]; }
+        }));
+        for (const [n, res] of results) {
+          if (res === null) continue;
+          if (res.received > 0) {
+            await pool.query(
+              `update network_nodes set status='up', last_seen=now(), offline_since=null, offline_notified=false, ping_fails=0 where id=$1`, [n.id]);
+            if (n.offline_notified) {
+              await notifyOwner(n.tenant_id, `${n.name} (${n.ip}) is back online.`, { url: '/map' });
+            }
+            continue;
+          }
+          const fails = Number(n.ping_fails) + 1;
+          if (fails < 2) {
+            await pool.query('update network_nodes set ping_fails=$2 where id=$1', [n.id, fails]);
+            continue;
+          }
+          await pool.query(
+            `update network_nodes set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()) where id=$1`, [n.id, fails]);
+          const since = n.offline_since ? new Date(n.offline_since) : new Date();
+          if (!n.offline_notified && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
+            await pool.query('update network_nodes set offline_notified=true where id=$1', [n.id]);
+            await notifyOwner(n.tenant_id, `${n.name} (${n.ip}) has stopped answering. Anything served through it may be offline.`, { url: '/map' });
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('watchRadios: router', r.router_id, '—', e.message);
+    } finally {
+      if (conn) ros.close(conn);
     }
   }
 }

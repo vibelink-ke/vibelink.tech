@@ -7161,13 +7161,14 @@ const netDetails = (d) => {
   }
   return out;
 };
+const NET_NODE_COLS = 'id, kind, name, lat::float8 as lat, lng::float8 as lng, details, status, offline_since, last_seen, watch_router_id';
 const netCoord = (v, max) => { const n = Number(v); return Number.isFinite(n) && Math.abs(n) <= max ? n : null; };
 const netPath = (p) => (Array.isArray(p) ? p.slice(0, 500) : [])
   .map((pt) => [netCoord(pt?.[0], 90), netCoord(pt?.[1], 180)]).filter(([a, b]) => a !== null && b !== null);
 
 app.get('/api/network', requirePermission('network.view'), wrap(async (req, res) => {
   const { rows: nodes } = await pool.query(
-    'select id, kind, name, lat::float8 as lat, lng::float8 as lng, details from network_nodes where tenant_id=$1 order by created_at', [req.tenant.id]);
+    `select ${NET_NODE_COLS} from network_nodes where tenant_id=$1 order by created_at`, [req.tenant.id]);
   const { rows: links } = await pool.query(
     'select id, kind, from_ref, to_ref, path, label, details from network_links where tenant_id=$1 order by created_at', [req.tenant.id]);
   res.json({ nodes, links });
@@ -7180,10 +7181,15 @@ app.post('/api/network/nodes', requirePermission('network.edit'), wrap(async (re
   if (!NET_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of node.' });
   if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Give it a name.' });
   if (lat === null || lng === null) return res.status(400).json({ error: 'A location on the map is needed.' });
+  let watch = req.body?.watchRouterId || null;
+  if (watch) {
+    const { rowCount } = await pool.query('select 1 from routers where tenant_id=$1 and id=$2', [req.tenant.id, watch]);
+    if (!rowCount) watch = null;
+  }
   const { rows: [n] } = await pool.query(
-    `insert into network_nodes (tenant_id, kind, name, lat, lng, details) values ($1,$2,$3,$4,$5,$6)
-     returning id, kind, name, lat::float8 as lat, lng::float8 as lng, details`,
-    [req.tenant.id, kind, String(name).trim().slice(0, 120), lat, lng, netDetails(req.body?.details)]);
+    `insert into network_nodes (tenant_id, kind, name, lat, lng, details, watch_router_id) values ($1,$2,$3,$4,$5,$6,$7)
+     returning ${NET_NODE_COLS}`,
+    [req.tenant.id, kind, String(name).trim().slice(0, 120), lat, lng, netDetails(req.body?.details), watch]);
   res.status(201).json(n);
 }));
 
@@ -7201,11 +7207,22 @@ app.patch('/api/network/nodes/:id', requirePermission('network.edit'), wrap(asyn
     if (lat === null || lng === null) return res.status(400).json({ error: 'That is not a place on the map.' });
     add('lat', lat); add('lng', lng);
   }
+  const rewatch = req.body?.details !== undefined || req.body?.watchRouterId !== undefined;
   if (req.body?.details !== undefined) add('details', netDetails(req.body.details));
+  if (req.body?.watchRouterId !== undefined) {
+    let watch = req.body.watchRouterId || null;
+    if (watch) {
+      const { rowCount } = await pool.query('select 1 from routers where tenant_id=$1 and id=$2', [req.tenant.id, watch]);
+      if (!rowCount) watch = null;
+    }
+    add('watch_router_id', watch);
+  }
+  // A different address or watcher starts the count again.
+  if (rewatch) sets.push("status='unknown'", 'ping_fails=0', 'offline_since=null', 'offline_notified=false');
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   const { rows: [n] } = await pool.query(
     `update network_nodes set ${sets.join(', ')} where tenant_id=$1 and id=$2
-     returning id, kind, name, lat::float8 as lat, lng::float8 as lng, details`,
+     returning ${NET_NODE_COLS}`,
     [req.tenant.id, req.params.id, ...vals]);
   if (!n) return res.status(404).json({ error: 'not found' });
   res.json(n);
@@ -9189,14 +9206,29 @@ app.delete('/api/tariffs/:id', requirePermission('tariffs.delete'), wrap(async (
  * `since` — the start of what has been counted so far.
  */
 app.get('/api/usage/24h', wrap(async (req, res) => {
-  const { rows: [t] } = await pool.query(
-    `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out,
-            coalesce(sum(hotspot_bytes), 0) as hotspot, min(bucket) as since
-       from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'`, [req.tenant.id]);
-  const { rows: hours } = await pool.query(
-    `select date_trunc('hour', bucket) as hour, sum(bytes_in + bytes_out) as bytes
-       from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'
-      group by 1 order by 1`, [req.tenant.id]);
+  let t = { bytes_in: 0, bytes_out: 0, hotspot: 0, since: null };
+  let hours = [];
+  try {
+    try {
+      ({ rows: [t] } = await pool.query(
+        `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out,
+                coalesce(sum(hotspot_bytes), 0) as hotspot, min(bucket) as since
+           from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'`, [req.tenant.id]));
+    } catch (e) {
+      if (e.code !== '42703') throw e;
+      // hotspot_bytes is not there yet — the migration has not run since it was added.
+      ({ rows: [t] } = await pool.query(
+        `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out,
+                0 as hotspot, min(bucket) as since
+           from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'`, [req.tenant.id]));
+    }
+    ({ rows: hours } = await pool.query(
+      `select date_trunc('hour', bucket) as hour, sum(bytes_in + bytes_out) as bytes
+         from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'
+        group by 1 order by 1`, [req.tenant.id]));
+  } catch (e) {
+    if (e.code !== '42P01') throw e;        // table not created yet: nothing counted
+  }
   res.json({
     bytes_in: Number(t.bytes_in), bytes_out: Number(t.bytes_out),
     total: Number(t.bytes_in) + Number(t.bytes_out), hotspot: Number(t.hotspot), since: t.since,
