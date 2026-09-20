@@ -18,6 +18,11 @@ export default function UpdateAvailableBanner() {
   const [available, setAvailable] = useState(false);
   const [latest, setLatest] = useState(null);
   const myVersion = useRef(null);
+  // The newest version seen, and the one the user said "Later" to. Without the
+  // second, every tab switch re-ran the check, saw the same new version, and
+  // put the banner straight back.
+  const newest = useRef(null);
+  const dismissed = useRef(null);
 
   useEffect(() => {
     let stopped = false;
@@ -29,8 +34,9 @@ export default function UpdateAvailableBanner() {
         if (myVersion.current === null) {
           myVersion.current = version;
         } else if (version !== myVersion.current && !stopped) {
+          newest.current = version;
           setLatest(changelog ?? null);
-          setAvailable(true);
+          if (version !== dismissed.current) setAvailable(true);
         }
       } catch {
         /* offline or mid-deploy — the next tick retries */
@@ -74,7 +80,7 @@ export default function UpdateAvailableBanner() {
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 }}>
         <button
           type="button"
-          onClick={() => setAvailable(false)}
+          onClick={() => { dismissed.current = newest.current; setAvailable(false); }}
           style={{
             border: 'none', borderRadius: radius.md, cursor: 'pointer',
             background: 'transparent', color: 'rgba(255,255,255,.7)', fontSize: 13, padding: '7px 10px',

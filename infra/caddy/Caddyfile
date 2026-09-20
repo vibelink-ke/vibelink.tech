@@ -115,6 +115,13 @@
 	# routes survive a refresh.
 	handle {
 		root * /srv
+		# Fixed-name files (index.html, sw.js, version.json) must be re-checked every
+		# time, or a browser keeps showing the previous deploy after "Update now".
+		# Hashed files under /assets never change, so they are kept for good.
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@shell not path /assets/*
+		header @shell Cache-Control "no-cache"
 		try_files {path} /index.html
 		file_server
 	}

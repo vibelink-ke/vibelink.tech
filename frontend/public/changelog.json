@@ -24,5 +24,15 @@
       "Columns reordered to A/C No, Client name, Wallet, Email, Service, Phone, Registered, Status.",
       "Row actions are now a single \"Actions ▾\" dropdown: View, Services, Edit client, Delete client."
     ]
+  },
+  {
+    "date": "2026-09-20",
+    "title": "Expenses with suppliers, monthly bills and profit & loss; clearer client status",
+    "items": [
+      "Expenses: monthly bills that add themselves to the log before they are due, suppliers with payment details, and paid payroll recorded automatically.",
+      "New Profit & loss tab: PPPoE and hotspot income against paid expenses, month by month.",
+      "Clients: the package name, a coloured online/offline dot and days left. Clients blocked for 4 months become dormant, and are deleted after 5.",
+      "Settings → Message templates, staff ID badges with expiry, and staff password reset."
+    ]
   }
 ]
