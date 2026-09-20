@@ -1206,7 +1206,30 @@ const SETTLEMENT_READY_SQL = `(
   (t.settlement_method='bank' and t.settlement_bank_paybill is not null and t.settlement_account_number is not null)
 )`;
 
+/**
+ * Send one payout — and never leave it able to be sent twice.
+ *
+ * The row is taken off the pending list (marked 'processing') BEFORE the call to Safaricom. If the
+ * process dies mid-call, the row is left 'processing' with no result: it shows up under "Payouts
+ * awaiting Safaricom" for a person to settle, instead of quietly going out again on the next run and
+ * paying the tenant twice. If the call fails cleanly the row goes back to be paid again.
+ */
 async function payoutRow(row, ownerTenantId) {
+  const { rowCount } = await pool.query(
+    "update settlements set status='processing', sent_at=now() where id=$1 and status='pending'", [row.settlement_id]);
+  const claimed = rowCount > 0;
+  try {
+    return await sendPayout(row, ownerTenantId);
+  } catch (e) {
+    if (claimed) {
+      await cancelPayout(row.settlement_id, { by: 'system', note: `Not sent (${String(e.message).slice(0, 140)}) — put back to be paid again` })
+        .catch((err) => console.error('payoutRow: could not put the payout back', row.settlement_id, err.message));
+    }
+    throw e;
+  }
+}
+
+async function sendPayout(row, ownerTenantId) {
   const { b2cFee } = await import('./db.js');
   const fee = row.settlement_fee_mode === 'tiered' ? await b2cFee(row.amount) : 0;
   const net = Number(row.amount) - fee;
@@ -1243,7 +1266,7 @@ async function payoutRow(row, ownerTenantId) {
  * tenant may only do it after a while (minAgeMinutes) and the screens warn, and the platform owner can
  * instead mark it paid with the receipt.
  */
-export async function cancelPayout(id, { tenantId = null, by = 'system', minAgeMinutes = 0 } = {}) {
+export async function cancelPayout(id, { tenantId = null, by = 'system', minAgeMinutes = 0, note: givenNote = null } = {}) {
   const c = await pool.connect();
   try {
     await c.query('begin');
@@ -1257,7 +1280,7 @@ export async function cancelPayout(id, { tenantId = null, by = 'system', minAgeM
     if (minAgeMinutes && Date.now() - since < minAgeMinutes * 60000) {
       throw Object.assign(new Error(`It was sent moments ago — Safaricom normally answers within a minute or two. Wait ${minAgeMinutes} minutes before cancelling.`), { status: 400 });
     }
-    const note = `Cancelled by ${by} on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC — Safaricom never confirmed it`;
+    const note = givenNote ?? `Cancelled by ${by} on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC — Safaricom never confirmed it`;
     const { rows: [pend] } = await c.query("select id from settlements where tenant_id=$1 and status='pending' for update", [s.tenant_id]);
     if (pend) {
       await c.query('update settlements set amount = amount + $2 where id=$1', [pend.id, s.amount]);
@@ -1298,49 +1321,83 @@ async function watchStuckPayouts() {
  * Pays each tenant what has been collected for them, once a day at THEIR time (settlement_time,
  * Nairobi, midnight unless they chose another), or on Mondays for weekly tenants; never for manual.
  *
- * Runs every minute. A tenant is "claimed" for the day first — settlement_last_run is set in one
- * atomic update — so it can only ever run once a day, a missed hour catches up as soon as the server
- * is back, and two overlapping runs cannot pay the same tenant twice. A payment collected after
- * their time simply goes out the next day.
+ * Runs every minute. A tenant's day is marked done (settlement_last_run) only AFTER their payout has
+ * been dealt with, so nothing that interrupts a run — a deploy, a restart, a crash — can cost them
+ * the day: whoever was not reached is simply still due on the next minute. What "dealt with" means:
+ *   - paid out (queued with Safaricom), or nothing to pay / under the minimum: done for the day;
+ *   - held because the licence has lapsed or there is nowhere to send it: NOT done — it goes out the
+ *     moment they renew or set a destination, as the screens promise;
+ *   - the payment failed: NOT done, retried after an hour, and the platform owner is told once.
+ * Payouts are marked 'processing' before they are sent (payoutRow), and only one run works at a time,
+ * so retrying can never pay the same money twice.
  */
+let settling = false;
+
 export async function settleTenants() {
-  const local = "(now() at time zone 'Africa/Nairobi')";
-  const { rows: due } = await pool.query(
-    `update tenants t set settlement_last_run = ${local}::date
-      where t.platform_collect_enabled
-        and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and extract(dow from ${local}) = 1))
-        and t.settlement_time <= ${local}::time
-        and (t.settlement_last_run is null or t.settlement_last_run < ${local}::date)
-      returning t.id`);
-  if (!due.length) return;
+  if (settling) return;          // the previous minute's run is still working
+  settling = true;
+  try {
+    const local = "(now() at time zone 'Africa/Nairobi')";
+    const { rows: due } = await pool.query(
+      `select t.id, t.name, (t.settlement_retry_at is not null) as retried from tenants t
+        where t.platform_collect_enabled
+          and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and extract(dow from ${local}) = 1))
+          and t.settlement_time <= ${local}::time
+          and (t.settlement_last_run is null or t.settlement_last_run < ${local}::date)
+          and (t.settlement_retry_at is null or t.settlement_retry_at <= now())`);
+    if (!due.length) return;
+    const dueIds = due.map((d) => d.id);
 
-  const { rows } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
-       from settlements s join tenants t on t.id = s.tenant_id
-      where s.status='pending' and s.amount >= $1
-        and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}
-        -- Paused while the licence has lapsed: what they collect keeps building up
-        -- and is paid out once they renew.
-        and t.status not in ('readonly', 'suspended')
-        and (t.licence_ends is null or t.licence_ends >= current_date)
-        -- only the tenants whose payout time has come today (claimed above)
-        and s.tenant_id = any($2::uuid[])`,
-    [SETTLEMENT_MIN_KES, due.map((d) => d.id)]);
-  if (!rows.length) return;
+    const { rows: owing } = await pool.query(
+      "select distinct tenant_id from settlements where status='pending' and amount >= $1 and tenant_id = any($2::uuid[])",
+      [SETTLEMENT_MIN_KES, dueIds]);
 
-  const ownerTenantId = await platformOwnerTenantId();
-  if (!ownerTenantId) {
-    console.warn('settleTenants: no platform-owner tenant found — nothing paid out');
-    return;
-  }
+    const { rows } = await pool.query(
+      `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
+         from settlements s join tenants t on t.id = s.tenant_id
+        where s.status='pending' and s.amount >= $1
+          and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}
+          -- Paused while the licence has lapsed: what they collect keeps building up
+          -- and is paid out once they renew.
+          and t.status not in ('readonly', 'suspended')
+          and (t.licence_ends is null or t.licence_ends >= current_date)
+          and s.tenant_id = any($2::uuid[])`,
+      [SETTLEMENT_MIN_KES, dueIds]);
 
-  for (const r of rows) {
-    try {
-      const { conversationId, fee, net } = await payoutRow(r, ownerTenantId);
-      console.log('settleTenants: queued payout', r.name, `KES ${net} (fee KES ${fee})`, conversationId);
-    } catch (e) {
-      console.error('settleTenants:', r.name, e.message);
+    // Owing something but not payable right now (licence lapsed, no destination): leave them due.
+    const payable = new Set(rows.map((r) => r.tenant_id));
+    const held = new Set(owing.map((o) => o.tenant_id).filter((id) => !payable.has(id)));
+    const failed = new Set();
+
+    if (rows.length) {
+      const ownerTenantId = await platformOwnerTenantId();
+      const retried = new Set(due.filter((d) => d.retried).map((d) => d.id));
+      for (const r of rows) {
+        try {
+          if (!ownerTenantId) throw new Error('no platform-owner tenant found');
+          const { conversationId, fee, net } = await payoutRow(r, ownerTenantId);
+          await pool.query('update tenants set settlement_retry_at=null where id=$1', [r.tenant_id]);
+          console.log('settleTenants: queued payout', r.name, `KES ${net} (fee KES ${fee})`, conversationId);
+        } catch (e) {
+          failed.add(r.tenant_id);
+          console.error('settleTenants:', r.name, e.message);
+          await pool.query("update tenants set settlement_retry_at = now() + interval '1 hour' where id=$1", [r.tenant_id]);
+          // Told once, on the first failure — then it quietly retries every hour until it works.
+          if (!retried.has(r.tenant_id) && ownerTenantId) {
+            await notifyOwner(ownerTenantId,
+              `The payout to ${r.name} could not be sent: ${String(e.message).slice(0, 160)}. It will be retried every hour.`,
+              { url: '/tenants', title: 'Payout failed' }).catch(() => {});
+          }
+        }
+      }
     }
+
+    const done = dueIds.filter((id) => !failed.has(id) && !held.has(id));
+    if (done.length) {
+      await pool.query(`update tenants set settlement_last_run = ${local}::date where id = any($1::uuid[])`, [done]);
+    }
+  } finally {
+    settling = false;
   }
 }
 

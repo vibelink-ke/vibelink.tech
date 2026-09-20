@@ -2716,19 +2716,12 @@ alter table smartolt_config add column if not exists unconfigured_at timestamptz
 alter table tenants add column if not exists settlement_time time not null default '00:00';
 alter table tenants add column if not exists settlement_last_run date;
 
--- Existing tenants start from today: their first payout at the new schedule is the next payout time,
--- not a surprise one the moment this is applied.
-do $$
-begin
-  if not exists (select 1 from schema_flags where name = 'settlement_time_initial') then
-    update tenants set settlement_last_run = (now() at time zone 'Africa/Nairobi')::date where settlement_last_run is null;
-    insert into schema_flags (name) values ('settlement_time_initial');
-  end if;
-end $$;
-
 -- A payout sent to Safaricom waits for their result. If it never comes it can be cancelled (put back
 -- to be paid again) or marked paid by hand; 'cancelled' rows keep the record. sent_at is when it was
 -- sent, stuck_notified stops the same stuck payout being reported over and over.
 alter table settlements add column if not exists note text;
 alter table settlements add column if not exists sent_at timestamptz;
 alter table settlements add column if not exists stuck_notified boolean not null default false;
+
+-- A payout that failed is retried after this time (an hour), not every minute.
+alter table tenants add column if not exists settlement_retry_at timestamptz;
