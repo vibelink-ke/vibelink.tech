@@ -45,7 +45,7 @@ export const color = {
   sideFooterName: '#161d19',
 
   // dark-root page colour (see darkMode note in global.css)
-  darkRoot: '#0e1412',
+  darkRoot: '#1b2436',
 };
 
 export const font = {

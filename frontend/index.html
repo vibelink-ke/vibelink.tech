@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="manifest" href="/manifest.json" />
-    <meta name="theme-color" content="#0b0f0d" />
+    <meta name="theme-color" content="#1b2436" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -52,6 +52,12 @@
     </script>
   </head>
   <body>
+    <!-- Dark mode's blue tint (see theme/global.css). Zero size, never shown. -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+      <filter id="om-blue" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0.90 0 0 0 0   0 0.96 0.02 0 0   0.02 0.04 1 0 0.055   0 0 0 1 0" />
+      </filter>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
