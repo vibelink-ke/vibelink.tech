@@ -384,36 +384,73 @@ export function StoreProvider({ children }) {
   }, [toast]);
 
   /**
-   * Sign out after six minutes with nobody at the keyboard.
+   * Sign out after six minutes with nobody using it.
    *
    * This screen is usually open on a shared machine at a shop counter, and it
    * shows every customer's phone number and can cut anyone off. Walking away
-   * from it should not leave that open to whoever sits down next.
+   * from it should not leave that open to whoever picks it up next.
    *
    * Real activity only: a keystroke, a click, a scroll, a touch. The periodic
    * refresh above deliberately does not count — a tab left open on a shelf
    * would otherwise keep itself signed in forever, which is the exact case
    * this is for.
+   *
+   * A phone is the harder case. Locking the screen or switching to another app
+   * freezes the page's timers, so a plain countdown never fires — the person
+   * comes back an hour later and is still signed in. So the last moment of
+   * activity is written down (in localStorage, so it also survives the browser
+   * being closed and reopened), and compared with the clock whenever the page
+   * wakes: on returning to it, on opening it, and on a slow tick while it is
+   * showing.
    */
   useEffect(() => {
     if (!session || session.licenceExpired) return undefined;
 
-    let timer;
-    const arm = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
+    const LIMIT = 6 * 60 * 1000;
+    const KEY = 'vibelink:last-active';
+    const read = () => { try { return Number(localStorage.getItem(KEY)) || 0; } catch { return 0; } };
+    const write = (t) => { try { localStorage.setItem(KEY, String(t)); } catch { /* private mode */ } };
+
+    let signedOut = false;
+    const check = () => {
+      if (signedOut) return;
+      const last = read();
+      if (last && Date.now() - last > LIMIT) {
+        signedOut = true;
+        write(0);
         signOut('Signed out after 6 minutes of inactivity');
-      }, 6 * 60 * 1000);
+      }
     };
 
-    const events = ['mousedown', 'keydown', 'wheel', 'touchstart', 'scroll'];
+    // Opened (or reopened) after being away longer than the limit: sign out before anything shows.
+    check();
+    if (signedOut) return undefined;
+    write(Date.now());
+
+    // Written at most every few seconds: a scroll fires constantly and storage is not free.
+    let lastWrite = Date.now();
+    const touch = () => {
+      const now = Date.now();
+      if (now - lastWrite > 3000) { lastWrite = now; write(now); }
+    };
+    const wake = () => { if (document.visibilityState === 'visible') check(); };
+
+    const events = ['pointerdown', 'mousedown', 'keydown', 'wheel', 'touchstart', 'touchmove', 'scroll', 'click'];
     // passive: these fire constantly during a scroll and must never delay it.
-    for (const e of events) window.addEventListener(e, arm, { passive: true });
-    arm();
+    for (const e of events) window.addEventListener(e, touch, { passive: true, capture: true });
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    window.addEventListener('pageshow', wake);
+    const tick = setInterval(check, 15000);
 
     return () => {
-      clearTimeout(timer);
-      for (const e of events) window.removeEventListener(e, arm);
+      // Signed out (or the session changed): the next sign-in starts fresh.
+      write(0);
+      clearInterval(tick);
+      for (const e of events) window.removeEventListener(e, touch, { capture: true });
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('pageshow', wake);
     };
   }, [session, signOut]);
 
