@@ -4,7 +4,7 @@ import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
-import { parseCsv } from '../lib/csv';
+import { parseCsv, downloadCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 import { useTable, TableToolbar, TableFooter } from '../ui/paging';
@@ -308,6 +308,28 @@ export default function Clients() {
 
   const action = useAction();
 
+  /**
+   * Export the clients as a CSV. The first six columns are exactly what Bulk import CSV
+   * reads, so the file can be edited and imported straight back in. Whatever is ticked is
+   * exported; with nothing ticked, everything the current filter shows. PPPoE passwords
+   * are never included.
+   */
+  const exportCsv = () => {
+    const rows = count > 0 ? selectedClients() : visible;
+    if (!rows.length) return store.toast('No clients to export');
+    const stamp = new Date().toISOString().slice(0, 10);
+    const n = downloadCsv(`clients-${stamp}.csv`, [
+      ['name', 'phone', 'account_code', 'plan', 'service', 'static_ip',
+        'phone_alt', 'email', 'status', 'expires_at', 'router', 'location', 'line_label', 'created_at'],
+      ...rows.map((c) => [
+        c.name, c.phone, c.account_code, planTitle(c) ?? '', c.service ?? 'pppoe', c.static_ip ?? '',
+        c.phone_alt ?? '', c.email ?? '', c.dormant_at ? 'dormant' : c.status, c.expires_at ? new Date(c.expires_at).toISOString().slice(0, 10) : '',
+        c.router_name ?? '', c.location ?? '', c.line_label ?? '', c.created_at ? new Date(c.created_at).toISOString().slice(0, 10) : '',
+      ]),
+    ]);
+    store.toast(`Exported ${n} client${n === 1 ? '' : 's'}`);
+  };
+
   /** CSV import. Expected headers: name, phone, account_code, plan, static_ip. */
   const importCsv = () => {
     const picker = document.createElement('input');
@@ -440,6 +462,9 @@ export default function Clients() {
             title="See when every line runs out, by month"
           >
             {view === 'list' ? 'Expiry calendar' : 'Back to list'}
+          </Button>
+          <Button onClick={exportCsv} title={count > 0 ? 'Export the ticked clients' : 'Export every client the current filter shows'}>
+            {count > 0 ? `Export ${count} selected` : 'Export CSV'}
           </Button>
           <Button onClick={importCsv} title="CSV headers: name, phone, account_code, plan, service, static_ip">
             Bulk import CSV
