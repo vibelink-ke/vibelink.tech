@@ -166,7 +166,9 @@ export default function Licence() {
               Only changes made in this dashboard are paused — you can still view everything.
               <b> Your customers and hotspot visitors are not affected:</b> they keep connecting, paying and getting
               their service as normal.
-              {data.trialEnded ? ' To carry on, contact us and we will activate your account.' : ' Pay below to switch the dashboard back on straight away.'}
+              {data.trialEnded
+                ? ` Pay KES ${kes(data.activation?.fee)} below to activate your licence for ${data.activation?.days ?? 30} days.`
+                : ' Pay below to switch the dashboard back on straight away.'}
             </span>
           ) : data.trial ? (
             <span style={{ fontSize: 13.5, color: color.muted }}>
@@ -185,8 +187,8 @@ export default function Licence() {
           {expired && (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
               {data.trialEnded && (
-                <a href={`mailto:${SALES_EMAIL}?subject=Activate my account`} style={{ textDecoration: 'none' }}>
-                  <Button variant="primary">Contact us to activate</Button>
+                <a href={`mailto:${SALES_EMAIL}?subject=Help activating my account`} style={{ textDecoration: 'none' }}>
+                  <Button>Need help? Contact us</Button>
                 </a>
               )}
               <Button
@@ -203,12 +205,12 @@ export default function Licence() {
       </Card>
 
       <Grid min={200} gap={14}>
-        <Stat label="Due now" value={`KES ${kes(data.amountDue)}`} tone={data.amountDue > 0 ? color.rust : undefined} />
+        <Stat label={data.trialEnded ? 'Activation fee' : 'Due now'} value={`KES ${kes(data.amountDue)}`} tone={data.amountDue > 0 ? color.rust : undefined} />
         <Stat label="Credit on account" value={`KES ${kes(data.credit)}`} hint={data.credit > 0 ? 'settles your next statement' : undefined} />
         <Stat label="Your reference" value={data.billingRef ?? '—'} />
       </Grid>
 
-      {canPay && !data.trial && !data.trialEnded && (
+      {canPay && !data.trial && (
         <Grid min={320} gap={14}>
           <Card title="Pay with an M-Pesa prompt" subtitle="We send a prompt to your phone — approve it with your PIN. Your licence updates as soon as it is paid.">
             {data.canPrompt ? (
@@ -216,7 +218,7 @@ export default function Licence() {
                 <Field label="M-Pesa number">
                   <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07xx xxx xxx" autoComplete="tel" disabled={busy} />
                 </Field>
-                <Field label="Amount (KES)" hint={data.amountDue > 0 ? 'What is due now — change it to pay part, or ahead' : 'Nothing is due — enter an amount to pay ahead'}>
+                <Field label="Amount (KES)" hint={data.trialEnded ? 'The activation fee' : data.amountDue > 0 ? 'What is due now — change it to pay part, or ahead' : 'Nothing is due — enter an amount to pay ahead'}>
                   <Input type="number" min="10" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
                 </Field>
                 <div>

@@ -7,7 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { generateDueBills } from './bills.js';
-import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId } from './charges.js';
+import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -4874,6 +4874,7 @@ app.get('/api/licence', wrap(async (req, res) => {
     readOnly,
     trial: row?.status === 'trial' && !readOnly,
     trialEnded: readOnly && !row?.converted_at,
+    activationFee: readOnly && !row?.converted_at ? ACTIVATION_FEE : null,
     licenceEnds: row?.licence_ends ?? null,
     daysLeft,
     // Invoicing belongs to WHMCS. All this reports is how long the licence has

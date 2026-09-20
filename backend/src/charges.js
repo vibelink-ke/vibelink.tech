@@ -39,6 +39,15 @@ export function previousMonthKey(key) {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
+/**
+ * What a tenant pays to switch on their licence once the free trial has ended,
+ * and how long that buys. A one-off, separate from the monthly statements (which
+ * start with the first full month after activation). Set TENANT_ACTIVATION_FEE
+ * in the environment to change the amount; 500 by default.
+ */
+export const ACTIVATION_FEE = Number(process.env.TENANT_ACTIVATION_FEE ?? 500);
+export const ACTIVATION_DAYS = 30;
+
 // Tenants that pay: activated ones (converted_at), not the platform owner's own
 // tenant and not the public demo. A trial is never invoiced, and a tenant's first
 // statement is the first full month after it was activated — nothing for the
@@ -173,6 +182,29 @@ async function allocateCredit(c, tenantId) {
 }
 
 /**
+ * A tenant that has never been activated (still on, or past, the free trial) is
+ * activated once their credit covers the activation fee: it is taken from the
+ * credit, they become a paying customer, and the licence runs for
+ * ACTIVATION_DAYS from today or the end of the trial, whichever is later.
+ * Anything beyond the fee stays as credit. A suspended tenant is not switched
+ * back on by paying — that is the platform owner's decision.
+ * Must run inside the payment's transaction.
+ */
+async function activateIfPaid(c, tenantId) {
+  const { rows: [t] } = await c.query('select billing_credit, converted_at from tenants where id = $1 for update', [tenantId]);
+  if (!t || t.converted_at) return false;
+  if (Number(t.billing_credit) + 0.005 < ACTIVATION_FEE) return false;
+  await c.query(
+    `update tenants
+        set billing_credit = billing_credit - $2,
+            converted_at = now(),
+            status = case when status = 'suspended' then status else 'active' end,
+            licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date
+      where id = $1`, [tenantId, ACTIVATION_FEE, ACTIVATION_DAYS]);
+  return true;
+}
+
+/**
  * Record money received from a tenant and apply it. Safe to call twice with the
  * same reference (a retried callback): the second call does nothing.
  */
@@ -189,9 +221,10 @@ export async function applyTenantPayment(tenantId, amount, { method, reference =
        returning id`, [tenantId, value, method, reference, phone]);
     if (!receipt) { await c.query('rollback'); return { duplicate: true }; }
     await c.query('update tenants set billing_credit = billing_credit + $2 where id = $1', [tenantId, value]);
+    const activated = await activateIfPaid(c, tenantId);
     const result = await allocateCredit(c, tenantId);
     await c.query('commit');
-    return { duplicate: false, ...result };
+    return { duplicate: false, activated, ...result };
   } catch (e) {
     await c.query('rollback').catch(() => {});
     throw e;
@@ -242,6 +275,7 @@ export async function billingSummary(tenantId) {
   const paybill = await platformPaybill();
   const lapsed = ['active', 'trial'].includes(t?.status) && !!t?.licence_lapsed;
   const readOnly = t?.status === 'readonly' || lapsed;
+  const trialEnded = readOnly && !t?.converted_at;
   return {
     tenant: t?.name ?? null,
     status: t?.status ?? 'active',
@@ -249,14 +283,16 @@ export async function billingSummary(tenantId) {
     trial: t?.status === 'trial' && !readOnly,
     // Expired without ever having been a paying customer: nothing has been
     // invoiced, so there is nothing to pay — they are activated by the platform.
-    trialEnded: readOnly && !t?.converted_at,
+    trialEnded,
+    // After the trial, activating costs a set amount; nothing has been invoiced.
+    activation: trialEnded ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS } : null,
     // Money collected for them is held, not paid out, until the licence is renewed.
     payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,
     daysLeft: t?.days_left == null ? null : Number(t.days_left),
     billingRef: t?.billing_ref ?? null,
     credit,
-    amountDue: Math.max(0, owed - credit),
+    amountDue: trialEnded ? Math.max(0, ACTIVATION_FEE - credit) : Math.max(0, owed - credit),
     statements: statements.slice(0, 12),
     paybill,
     canPrompt: !!paybill,

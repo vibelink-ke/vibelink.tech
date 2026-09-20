@@ -58,7 +58,7 @@ export default function LicenceBanner() {
     }}>
       <span>
         {expired
-          ? <><b>{lic.trialEnded ? 'Your free trial has ended.' : 'Your licence has expired.'}</b> The dashboard is view-only until it is renewed. Your customers and hotspot visitors are not affected.</>
+          ? <><b>{lic.trialEnded ? 'Your free trial has ended.' : 'Your licence has expired.'}</b>{lic.trialEnded && lic.activationFee ? ` Pay KES ${Number(lic.activationFee).toLocaleString('en-KE')} to activate it.` : ' The dashboard is view-only until it is renewed.'} Your customers and hotspot visitors are not affected.</>
           : trialEnding
             ? <><b>Your free trial ends in {lic.daysLeft} day{lic.daysLeft === 1 ? '' : 's'}.</b> You are not charged during the trial.</>
             : <><b>Your licence runs out in {lic.daysLeft} day{lic.daysLeft === 1 ? '' : 's'}.</b> Pay before then to keep the dashboard fully working.</>}
@@ -73,7 +73,7 @@ export default function LicenceBanner() {
             background: tone.fg, color: '#fff',
           }}
         >
-          {trialEnding ? 'See options' : 'Pay now'}
+          {trialEnding ? 'See options' : lic.trialEnded ? 'Activate' : 'Pay now'}
         </button>
       )}
     </div>
