@@ -113,6 +113,7 @@ export default function ProfitLoss() {
 
           <Card title="Month by month">
             <Table
+          toolbar="never"
               rowKey={(r) => r.month}
               empty="No income or expenses in this period"
               rows={[...tableRows, { month: 'total', total: true, ...totals }]}
@@ -136,6 +137,7 @@ export default function ProfitLoss() {
 
           <Card title="Where the money went">
             <Table
+          toolbar="never"
               rowKey={(r) => r.category}
               empty="No paid expenses in this period"
               rows={categoryRows}

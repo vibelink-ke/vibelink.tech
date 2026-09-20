@@ -222,6 +222,7 @@ export default function Licence() {
 
       <Card title="Monthly statements">
         <Table
+          toolbar="never"
           rowKey={(s) => s.id}
           empty="No statements yet — the first is drawn on the 1st of next month"
           rows={data.statements}

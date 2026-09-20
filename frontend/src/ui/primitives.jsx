@@ -137,10 +137,10 @@ export const Dot = ({ on = true }) => (
 /**
  * Table. `columns` is [{ key, label, align, width, render }].
  * Scrolls inside its own container so the page never scrolls sideways.
- * Long lists come in batches (20 / 50 / 100) with a search box; `select` adds a
+ * Every list comes in batches (20 / 50 / 100) with a search box (toolbar="never" for a short report table); `select` adds a
  * tickable first column ({ selected: Set, setSelected, id: (row) => id }).
  */
-export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, i) => i, onRowClick, select, toolbar = 'auto' }) {
+export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, i) => i, onRowClick, select, toolbar = 'always' }) {
   const t = useTable(rows);
   if (!rows?.length) return <Empty>{empty}</Empty>;
 
@@ -181,12 +181,12 @@ export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, 
 
   return (
     <div>
-      <TableToolbar
+      {toolbar !== 'never' && <TableToolbar
         t={t}
         total={rows.length}
-        always={toolbar === 'always'}
+        always
         extra={select ? <SelectionHint t={t} selected={select.selected} setSelected={select.setSelected} ids={(list) => list.map(select.id)} /> : null}
-      />
+      />}
       {!t.filtered.length ? (
         <Empty>Nothing matches your search</Empty>
       ) : (
@@ -242,7 +242,7 @@ export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, 
           </table>
         </div>
       )}
-      <TableFooter t={t} total={rows.length} />
+      <TableFooter t={t} total={rows.length} always={toolbar !== 'never'} />
     </div>
   );
 }

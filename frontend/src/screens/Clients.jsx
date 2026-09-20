@@ -696,7 +696,7 @@ export default function Clients() {
           </table>
         )}
         {visibleAccounts.length > 0 && !t.filtered.length && <Empty>No clients match your search</Empty>}
-        <TableFooter t={t} total={visibleAccounts.length} />
+        <TableFooter t={t} total={visibleAccounts.length} always />
       </div>
       )}
 

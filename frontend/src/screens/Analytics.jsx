@@ -114,6 +114,7 @@ export default function Analytics() {
 
       <Card title="Tickets by priority">
         <Table
+          toolbar="never"
           rowKey={(r) => r.priority}
           empty="No tickets to analyse"
           rows={['critical', 'high', 'medium', 'low']

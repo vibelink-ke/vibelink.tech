@@ -103,9 +103,9 @@ const pageBtn = (on, disabled) => ({
 });
 
 /** "Showing 1 to 20 of 240 entries" and the way to the other batches. */
-export function TableFooter({ t, total }) {
+export function TableFooter({ t, total, always = false }) {
   if (!t.filtered.length) return null;
-  if (t.pages <= 1 && total <= PAGE_SIZES[0] && !t.query) return null;
+  if (!always && t.pages <= 1 && total <= PAGE_SIZES[0] && !t.query) return null;
   // A window of page numbers around the current one, always with the first and last.
   const nums = [];
   for (let n = 1; n <= t.pages; n++) {
