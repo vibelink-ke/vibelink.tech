@@ -7,7 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { generateDueBills } from './bills.js';
-import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE } from './charges.js';
+import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -4916,7 +4916,7 @@ async function openRouter(ros, { host, port, login, body }) {
  */
 app.get('/api/licence', wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(`
-    select t.status, t.licence_ends, t.converted_at, t.billing_credit,
+    select t.status, t.licence_ends, t.converted_at, t.billing_credit, t.flat_monthly_fee,
            (t.licence_ends - current_date) as days_left,
            (t.licence_ends is not null and t.licence_ends < current_date) as lapsed,
            (select coalesce(sum(c.total), 0) from tenant_charges c
@@ -4933,14 +4933,14 @@ app.get('/api/licence', wrap(async (req, res) => {
   // A paying tenant locked out with no statement to pay reinstates with the activation fee too.
   const reinstate = readOnly && !!row?.converted_at && Number(row?.owed ?? 0) === 0;
   const amountDue = trialEnded || reinstate
-    ? Math.max(0, ACTIVATION_FEE - credit)
+    ? Math.max(0, (reinstate ? reinstateFee(row?.flat_monthly_fee) : ACTIVATION_FEE) - credit)
     : Math.max(0, Number(row?.owed ?? 0) - credit);
   res.json({
     status: row?.status ?? 'active',
     readOnly,
     trial: row?.status === 'trial' && !readOnly,
     trialEnded,
-    activationFee: trialEnded ? ACTIVATION_FEE : null,
+    activationFee: trialEnded ? ACTIVATION_FEE : reinstate ? reinstateFee(row?.flat_monthly_fee) : null,
     amountDue,
     licenceEnds: row?.licence_ends ?? null,
     daysLeft,

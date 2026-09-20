@@ -49,6 +49,13 @@ export const ACTIVATION_FEE = Number(process.env.TENANT_ACTIVATION_FEE ?? 500);
 export const ACTIVATION_DAYS = 30;
 
 /**
+ * What a paying tenant pays to switch a lapsed licence back on when they have no
+ * statement to pay: their own flat monthly fee if they have one, else the
+ * activation fee.
+ */
+export const reinstateFee = (flat) => (Number(flat) > 0 ? Number(flat) : ACTIVATION_FEE);
+
+/**
  * The date an activation runs to: the end of the month after next, in Nairobi.
  * (See activateIfPaid — the first statement is due on the 1st of that month.)
  */
@@ -193,12 +200,12 @@ async function allocateCredit(c, tenantId) {
   // ended before the first statement was drawn) has no statement for a payment to
   // settle, so paying would renew nothing. They reinstate with the activation fee.
   const { rows: [s] } = await c.query(
-    `select status, converted_at, billing_credit,
+    `select status, converted_at, billing_credit, flat_monthly_fee,
             (licence_ends is not null and licence_ends < current_date) as lapsed,
             (select count(*) from tenant_charges where tenant_id = $1 and status in ('open', 'invoiced')) as open_count
        from tenants where id = $1`, [tenantId]);
   if (s?.converted_at && s.status !== 'suspended' && Number(s.open_count) === 0
-      && (s.lapsed || s.status === 'readonly') && Number(s.billing_credit) + 0.005 >= ACTIVATION_FEE) {
+      && (s.lapsed || s.status === 'readonly') && Number(s.billing_credit) + 0.005 >= reinstateFee(s.flat_monthly_fee)) {
     await c.query(
       `update tenants
           set billing_credit = billing_credit - $2,
@@ -206,8 +213,8 @@ async function allocateCredit(c, tenantId) {
               licence_ends = greatest(
                 (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date,
                 (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
-        where id = $1`, [tenantId, ACTIVATION_FEE, ACTIVATION_DAYS]);
-    credit = Number(s.billing_credit) - ACTIVATION_FEE;
+        where id = $1`, [tenantId, reinstateFee(s.flat_monthly_fee), ACTIVATION_DAYS]);
+    credit = Number(s.billing_credit) - reinstateFee(s.flat_monthly_fee);
   }
   return { paid, credit: Math.max(0, credit) };
 }
@@ -296,7 +303,7 @@ export async function settleAllFromCredit() {
 /** Everything the Licence & billing page shows for one tenant. */
 export async function billingSummary(tenantId) {
   const { rows: [t] } = await pool.query(
-    `select name, status, licence_ends, billing_ref, billing_credit, converted_at,
+    `select name, status, licence_ends, billing_ref, billing_credit, converted_at, flat_monthly_fee,
             (licence_ends - current_date) as days_left,
             (licence_ends is not null and licence_ends < current_date) as licence_lapsed
        from tenants where id = $1`, [tenantId]);
@@ -323,14 +330,14 @@ export async function billingSummary(tenantId) {
     // invoiced, so there is nothing to pay — they are activated by the platform.
     trialEnded,
     // After the trial, activating costs a set amount; nothing has been invoiced.
-    activation: trialEnded || reinstate ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS, until: activationUntil() } : null,
+    activation: trialEnded || reinstate ? { fee: reinstate ? reinstateFee(t.flat_monthly_fee) : ACTIVATION_FEE, days: ACTIVATION_DAYS, until: activationUntil() } : null,
     // Money collected for them is held, not paid out, until the licence is renewed.
     payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,
     daysLeft: t?.days_left == null ? null : Number(t.days_left),
     billingRef: t?.billing_ref ?? null,
     credit,
-    amountDue: trialEnded || reinstate ? Math.max(0, ACTIVATION_FEE - credit) : Math.max(0, owed - credit),
+    amountDue: trialEnded || reinstate ? Math.max(0, (reinstate ? reinstateFee(t.flat_monthly_fee) : ACTIVATION_FEE) - credit) : Math.max(0, owed - credit),
     statements: statements.slice(0, 12),
     paybill,
     canPrompt: !!paybill,
