@@ -18,7 +18,14 @@ export default function useLicence() {
     check();
     const id = setInterval(check, 30 * 60 * 1000);
     document.addEventListener('visibilitychange', check);
-    return () => { live = false; clearInterval(id); document.removeEventListener('visibilitychange', check); };
+    // The billing page announces a payment so the banner does not wait for the next check.
+    window.addEventListener('vibelink:licence-changed', check);
+    return () => {
+      live = false;
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', check);
+      window.removeEventListener('vibelink:licence-changed', check);
+    };
   }, [store.session]);
 
   return lic;

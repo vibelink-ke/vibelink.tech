@@ -212,6 +212,9 @@ export const publicSession = async (s) => ({
         Object.entries(await loadPermissions(s.tenant_id)).map(([k, byRole]) => [k, !!byRole[s.role]])
       ),
   platformCollectEnabled: s.platform_collect_enabled,
+  // Known the moment they sign in, so an expired tenant lands on the licence page
+  // rather than on a dashboard that then redirects.
+  licenceExpired: s.tenant_status === 'readonly',
   settlementMethod: s.settlement_method,
   settlementFrequency: s.settlement_frequency,
   settlementPhone: s.settlement_phone,

@@ -8,7 +8,7 @@ import AuthGate from './app/AuthGate';
 import ResetPassword from './app/ResetPassword';
 import AcceptInvite from './app/AcceptInvite';
 import { isPlatformHost } from './app/host';
-import LicenceBanner from './app/LicenceBanner';
+import LicenceBanner, { VIEW_ONLY_KEY } from './app/LicenceBanner';
 import CustomerPortal from './screens/CustomerPortal';
 import VerifyStaff from './screens/VerifyStaff';
 import { useMediaQuery } from './app/useMediaQuery';
@@ -75,7 +75,10 @@ export default function App() {
   // that same URL — the operator asked to sign in, not to stay put.
   const signInToDashboard = (s, message) => {
     signIn(s, message);
-    navigate('/', { replace: true });
+    // An expired licence is the first thing they see. Any earlier choice to look
+    // around read-only is forgotten, so every sign-in starts on the licence page.
+    try { sessionStorage.removeItem(VIEW_ONLY_KEY); } catch { /* nothing to clear */ }
+    navigate(s?.licenceExpired ? '/licence' : '/', { replace: true });
   };
 
   /**

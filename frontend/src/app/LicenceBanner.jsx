@@ -17,6 +17,9 @@ const viewOnlyChosen = () => { try { return sessionStorage.getItem(VIEW_ONLY_KEY
  *     banner below on every screen.
  *  2. A line across the top when the licence has expired or is about to.
  *
+ * Everyone signed in gets the expired page, not just the owner: staff who cannot
+ * pay are told to ask the owner, and can still look around read-only.
+ *
  * Only the dashboard is affected by an expired licence. Customers and hotspot
  * visitors are not, and the wording says so, because that is the first thing
  * anyone wonders. Only someone allowed to see billing is redirected or offered
@@ -29,12 +32,13 @@ export default function LicenceBanner() {
   const lic = useLicence();
   const canPay = !!store.session?.perms?.['billing.view'];
 
-  const expired = !!lic?.readOnly;
+  // The session already says so at sign-in; the licence lookup takes over once it arrives.
+  const expired = !!(lic ? lic.readOnly : store.session?.licenceExpired);
 
   // The expired page, until they choose to view the dashboard read-only.
   useEffect(() => {
-    if (expired && canPay && pathname !== '/licence' && !viewOnlyChosen()) navigate('/licence', { replace: true });
-  }, [expired, canPay, pathname, navigate]);
+    if (expired && pathname !== '/licence' && !viewOnlyChosen()) navigate('/licence', { replace: true });
+  }, [expired, pathname, navigate]);
 
   // The Licence page says all of this itself.
   if (!lic || pathname === '/licence') return null;

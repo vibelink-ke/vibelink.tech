@@ -45,6 +45,7 @@ export default function Licence() {
   const store = useStore();
   const navigate = useNavigate();
   const canPay = !!store.session?.perms?.['billing.pay'];
+  const canView = !!store.session?.perms?.['billing.view'];
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [phone, setPhone] = useState('');
@@ -54,10 +55,11 @@ export default function Licence() {
 
   const load = async () => {
     try {
-      const d = await api.billing();
+      const d = canView ? await api.billing() : await api.licence();
       setData(d);
       setAmount((a) => (a === '' && d.amountDue > 0 ? String(Math.round(d.amountDue)) : a));
       setError(null);
+      window.dispatchEvent(new Event('vibelink:licence-changed'));
       return d;
     } catch (e) {
       setError(e.message);
@@ -106,6 +108,36 @@ export default function Licence() {
   if (!data) return <Screen title="Licence & billing"><p style={{ color: color.muted }}>Loading…</p></Screen>;
 
   const expired = data.readOnly;
+  if (!canView) {
+    return (
+      <Screen title="Licence">
+        <Card>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <span style={{ fontSize: 20, fontWeight: 700, color: expired ? color.rust : GAIN }}>
+              {expired ? (data.trialEnded ? 'The free trial has ended' : 'The licence has expired') : 'The licence is active'}
+            </span>
+            <span style={{ fontSize: 13.5, color: color.inkSoft }}>
+              {expired
+                ? 'Changes in this dashboard are paused until it is renewed. Customers and hotspot visitors are not affected. Please ask the account owner to renew it.'
+                : 'Nothing to do here.'}
+            </span>
+            {expired && (
+              <div>
+                <Button
+                  onClick={() => {
+                    try { sessionStorage.setItem(VIEW_ONLY_KEY, '1'); } catch { /* the banner still appears */ }
+                    navigate('/');
+                  }}
+                >
+                  View the dashboard (read-only)
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+      </Screen>
+    );
+  }
   const busy = state.kind === 'sending' || state.kind === 'waiting';
 
   return (
