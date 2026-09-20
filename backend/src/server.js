@@ -9067,7 +9067,8 @@ app.delete('/api/tariffs/:id', requirePermission('tariffs.delete'), wrap(async (
  */
 app.get('/api/usage/24h', wrap(async (req, res) => {
   const { rows: [t] } = await pool.query(
-    `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out, min(bucket) as since
+    `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out,
+            coalesce(sum(hotspot_bytes), 0) as hotspot, min(bucket) as since
        from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'`, [req.tenant.id]);
   const { rows: hours } = await pool.query(
     `select date_trunc('hour', bucket) as hour, sum(bytes_in + bytes_out) as bytes
@@ -9075,7 +9076,7 @@ app.get('/api/usage/24h', wrap(async (req, res) => {
       group by 1 order by 1`, [req.tenant.id]);
   res.json({
     bytes_in: Number(t.bytes_in), bytes_out: Number(t.bytes_out),
-    total: Number(t.bytes_in) + Number(t.bytes_out), since: t.since,
+    total: Number(t.bytes_in) + Number(t.bytes_out), hotspot: Number(t.hotspot), since: t.since,
     hours: hours.map((h) => ({ hour: h.hour, bytes: Number(h.bytes) })),
   });
 }));

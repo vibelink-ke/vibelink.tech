@@ -685,6 +685,8 @@ create table if not exists usage_buckets (
   bytes_out bigint not null default 0,
   primary key (tenant_id, bucket)
 );
+-- Of which hotspot (a session that is not PPP), so the two can be told apart.
+alter table usage_buckets add column if not exists hotspot_bytes bigint not null default 0;
 -- Voucher and PPPoE usage is read by username.
 create index if not exists radacct_username on radacct (username);
 
@@ -714,13 +716,15 @@ begin
       v_out := coalesce(new.acctoutputoctets, 0);
     end if;
     if v_in > 0 or v_out > 0 then
-      insert into usage_buckets (tenant_id, bucket, bytes_in, bytes_out)
+      insert into usage_buckets (tenant_id, bucket, bytes_in, bytes_out, hotspot_bytes)
       values (v_tenant,
               date_trunc('hour', now()) + (floor(extract(minute from now()) / 5)::int * 5) * interval '1 minute',
-              v_in, v_out)
+              v_in, v_out,
+              case when coalesce(new.framedprotocol, '') = 'PPP' then 0 else v_in + v_out end)
       on conflict (tenant_id, bucket) do update
-        set bytes_in  = usage_buckets.bytes_in  + excluded.bytes_in,
-            bytes_out = usage_buckets.bytes_out + excluded.bytes_out;
+        set bytes_in      = usage_buckets.bytes_in  + excluded.bytes_in,
+            bytes_out     = usage_buckets.bytes_out + excluded.bytes_out,
+            hotspot_bytes = usage_buckets.hotspot_bytes + excluded.hotspot_bytes;
     end if;
   exception when others then
     null;

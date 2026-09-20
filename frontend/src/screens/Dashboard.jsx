@@ -324,7 +324,7 @@ export default function Dashboard() {
           value={usage ? fmtBytes(usage.total) : '—'}
           hint={!usage ? 'counting…'
             : !usage.total ? 'nothing recorded yet'
-              : `${fmtBytes(usage.bytes_out)} down · ${fmtBytes(usage.bytes_in)} up${
+              : `${fmtBytes(usage.hotspot ?? 0)} hotspot · ${fmtBytes(usage.total - (usage.hotspot ?? 0))} PPPoE${
                 usage.since && new Date(usage.since) > new Date(Date.now() - 23.5 * 3600 * 1000)
                   ? ` · since ${new Date(usage.since).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}`
                   : ''}`}

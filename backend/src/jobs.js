@@ -911,6 +911,13 @@ export async function healRouters() {
 
       conn = await ros.connect({ host, port: r.api_port ?? 8728, user: r.service_user, password });
 
+      // Hotspot usage is only as current as the router's accounting interval. A router
+      // set up with a slower one (or none) reports a visitor's data late, so bring every
+      // hotspot router to the current interval. Writes nothing when it already matches.
+      if (r.role === 'both' || r.role === 'hotspot') {
+        await ros.applyHotspot(conn).catch((e) => console.warn('healRouters: hotspot accounting interval on', r.name, '—', e.message));
+      }
+
       const coaPort = Number(process.env.RADIUS_COA_PORT ?? 3799);
       const { ok } = await ros.radiusCheck(conn, { serverIp: SERVER_IP, secret: r.secret, coaPort });
       if (ok) continue;
