@@ -198,7 +198,8 @@ async function allocateCredit(c, tenantId) {
 
   // A paying tenant whose licence ran out with nothing left to pay (their activation
   // ended before the first statement was drawn) has no statement for a payment to
-  // settle, so paying would renew nothing. They reinstate with the activation fee.
+  // settle, so paying would renew nothing. They reinstate for one month with their
+  // flat monthly fee (or the activation fee if they have none).
   const { rows: [s] } = await c.query(
     `select status, converted_at, billing_credit, flat_monthly_fee,
             (licence_ends is not null and licence_ends < current_date) as lapsed,
@@ -210,10 +211,10 @@ async function allocateCredit(c, tenantId) {
       `update tenants
           set billing_credit = billing_credit - $2,
               status = 'active',
-              licence_ends = greatest(
-                (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date,
-                (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
-        where id = $1`, [tenantId, reinstateFee(s.flat_monthly_fee), ACTIVATION_DAYS]);
+              -- One month from today: their monthly statements are already being drawn and
+              -- each one they pay adds a month. Only a first activation needs the longer cover.
+              licence_ends = (current_date + interval '1 month')::date
+        where id = $1`, [tenantId, reinstateFee(s.flat_monthly_fee)]);
     credit = Number(s.billing_credit) - reinstateFee(s.flat_monthly_fee);
   }
   return { paid, credit: Math.max(0, credit) };
