@@ -2482,3 +2482,27 @@ create index if not exists tenant_payments_tenant_idx on tenant_payments (tenant
 -- Money paid beyond what is currently owed; it settles the next statement.
 alter table tenants add column if not exists billing_credit numeric(12,2) not null default 0;
 alter table tenant_charges add column if not exists paid_at timestamptz;
+
+-- ─────────────── trials are free; paying starts when a tenant is activated ───────────────
+-- converted_at: when a tenant became a paying customer (activated by the platform
+-- owner, or paid a statement). A tenant without one is on trial or was never
+-- activated, and is never invoiced. jobs.js / charges.js read it.
+alter table tenants add column if not exists converted_at timestamptz;
+
+do $$
+begin
+  -- Tenants already live before this existed are paying customers.
+  if not exists (select 1 from schema_flags where name = 'tenants_converted_backfill') then
+    update tenants set converted_at = coalesce(created_at, now())
+     where status in ('active', 'readonly') and converted_at is null;
+    insert into schema_flags (name) values ('tenants_converted_backfill');
+  end if;
+
+  -- The trial is 14 days. A trial already running gets 14 days from now rather
+  -- than from when it began, so nobody is locked out the night this is applied.
+  if not exists (select 1 from schema_flags where name = 'trial_14_days') then
+    update tenants set licence_ends = current_date + 14
+     where status = 'trial' and (licence_ends is null or licence_ends > current_date + 14);
+    insert into schema_flags (name) values ('trial_14_days');
+  end if;
+end $$;

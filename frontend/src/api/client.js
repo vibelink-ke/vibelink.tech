@@ -292,6 +292,7 @@ export const api = {
   billingPay: (body) => post('/api/billing/pay', body),
   billingPayStatus: (checkoutId) => get(`/api/billing/pay/${checkoutId}`),
   tenantLicence: (id, days) => post(`/api/tenants/${id}/licence`, { days }),
+  tenantActivate: (id, days) => post(`/api/tenants/${id}/activate`, { days }),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
   detectRouterUpstream: (id) => post(`/api/routers/${id}/detect-upstream`, {}),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),

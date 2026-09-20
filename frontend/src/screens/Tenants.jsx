@@ -681,9 +681,16 @@ export default function Tenants() {
             <KV k="Licence ends" v={viewing.licence_ends ? new Date(viewing.licence_ends).toLocaleDateString('en-KE') : 'No end date'} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 0' }}>
               <span style={{ fontSize: 12, color: color.muted }}>
-                Each monthly statement they pay adds a month automatically. Use these to give more time, take it back, or switch a lapsed tenant on now.
+                A trial is never invoiced. <b>Activate</b> makes them a paying customer — billing starts with the first full month after today. Each statement they pay adds a month; the buttons below only change how long they have, and never start billing.
               </span>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <Button
+                  variant="primary"
+                  onClick={() => changeLicence(() => api.tenantActivate(viewing.id, 30), 'Activated for 30 days')}
+                  disabled={licenceBusy}
+                >
+                  Activate — 30 days
+                </Button>
                 <Button onClick={() => addLicenceDays(30)} disabled={licenceBusy}>+30 days</Button>
                 <Button onClick={() => addLicenceDays(90)} disabled={licenceBusy}>+90 days</Button>
                 <Button onClick={() => addLicenceDays(365)} disabled={licenceBusy}>+1 year</Button>

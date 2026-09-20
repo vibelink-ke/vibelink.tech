@@ -4858,7 +4858,7 @@ async function openRouter(ros, { host, port, login, body }) {
  */
 app.get('/api/licence', wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(`
-    select t.status, t.licence_ends,
+    select t.status, t.licence_ends, t.converted_at,
            (t.licence_ends - current_date) as days_left
       from tenants t where t.id = $1`, [req.tenant.id]);
 
@@ -4866,6 +4866,8 @@ app.get('/api/licence', wrap(async (req, res) => {
   res.json({
     status: row?.status ?? 'active',
     readOnly: row?.status === 'readonly',
+    trial: row?.status === 'trial',
+    trialEnded: row?.status === 'readonly' && !row?.converted_at,
     licenceEnds: row?.licence_ends ?? null,
     daysLeft,
     // Invoicing belongs to WHMCS. All this reports is how long the licence has
@@ -10390,6 +10392,26 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const { rows: [t] } = await pool.query(
     `update tenants set ${sets.map((k, i) => `${k}=$${i + 2}`).join(', ')} where id=$1 returning *`,
     [req.params.id, ...sets.map((k) => req.body[k])]);
+  if (!t) return res.status(404).json({ error: 'not found' });
+  res.json(t);
+}));
+
+/**
+ * Turn a tenant into a paying customer: active, with a licence for this many
+ * days (30 by default). This is what ends a trial and starts the billing clock —
+ * their first statement is the first full month after today. Adding days or
+ * setting a date (below) changes how long they have, but never starts billing.
+ */
+app.post('/api/tenants/:id/activate', superAdminOnly, wrap(async (req, res) => {
+  const days = Number(req.body?.days ?? 30);
+  if (!Number.isFinite(days) || days < 1 || days > 3650) {
+    return res.status(400).json({ error: 'days must be between 1 and 3650' });
+  }
+  const { rows: [t] } = await pool.query(
+    `update tenants set status = 'active', converted_at = coalesce(converted_at, now()),
+            licence_ends = greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' days')::interval
+      where id = $1 returning id, name, status, licence_ends, converted_at`,
+    [req.params.id, days]);
   if (!t) return res.status(404).json({ error: 'not found' });
   res.json(t);
 }));

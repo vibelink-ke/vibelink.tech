@@ -1,9 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { VIEW_ONLY_KEY } from '../app/LicenceBanner';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Empty, Field, Grid, Input, Screen, Stat, Table } from '../ui/primitives';
 
+const SALES_EMAIL = 'sales@vibelink.co.ke';
 const STATUS_TONE = { open: 'pending', invoiced: 'default', paid: 'active', waived: 'default' };
 const GAIN = '#0f7a5f';
 
@@ -40,6 +43,7 @@ function CopyBox({ label, value }) {
  */
 export default function Licence() {
   const store = useStore();
+  const navigate = useNavigate();
   const canPay = !!store.session?.perms?.['billing.pay'];
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -110,24 +114,58 @@ export default function Licence() {
       subtitle="Your licence, what is owed for the platform, and how to pay it."
     >
       <Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ fontSize: 20, fontWeight: 700, color: expired ? color.rust : GAIN }}>
-            {expired
-              ? `Licence expired${data.licenceEnds ? ` on ${dateLabel(data.licenceEnds)}` : ''}`
-              : data.licenceEnds
-                ? `Active until ${dateLabel(data.licenceEnds)}${data.daysLeft != null ? ` · ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'} left` : ''}`
-                : 'Active'}
+            {data.trialEnded
+              ? 'Your free trial has ended'
+              : expired
+                ? `Licence expired${data.licenceEnds ? ` on ${dateLabel(data.licenceEnds)}` : ''}`
+                : data.trial
+                  ? `Free trial${data.daysLeft != null ? ` · ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'} left` : ''}`
+                  : data.licenceEnds
+                    ? `Active until ${dateLabel(data.licenceEnds)}${data.daysLeft != null ? ` · ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'} left` : ''}`
+                    : 'Active'}
           </span>
           {expired ? (
             <span style={{ fontSize: 13.5, color: color.inkSoft }}>
+              {data.trialEnded
+                ? 'You were not charged for the trial. '
+                : ''}
               Only changes made in this dashboard are paused — you can still view everything.
               <b> Your customers and hotspot visitors are not affected:</b> they keep connecting, paying and getting
-              their service as normal. Pay below to switch the dashboard back on straight away.
+              their service as normal.
+              {data.trialEnded ? ' To carry on, contact us and we will activate your account.' : ' Pay below to switch the dashboard back on straight away.'}
+            </span>
+          ) : data.trial ? (
+            <span style={{ fontSize: 13.5, color: color.muted }}>
+              Nothing is charged during the trial. When it ends the dashboard becomes view-only until your account is activated — your customers are never affected.
             </span>
           ) : (
             <span style={{ fontSize: 13.5, color: color.muted }}>
               Each monthly statement you pay extends your licence by a month.
             </span>
+          )}
+          {expired && data.payoutsPaused && (
+            <span style={{ fontSize: 13.5, color: color.amberInk, background: color.amberBg, borderRadius: 6, padding: '8px 10px' }}>
+              <b>Payouts are paused.</b> Money collected for you is safe and keeps building up — it is released as soon as you renew.
+            </span>
+          )}
+          {expired && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+              {data.trialEnded && (
+                <a href={`mailto:${SALES_EMAIL}?subject=Activate my account`} style={{ textDecoration: 'none' }}>
+                  <Button variant="primary">Contact us to activate</Button>
+                </a>
+              )}
+              <Button
+                onClick={() => {
+                  try { sessionStorage.setItem(VIEW_ONLY_KEY, '1'); } catch { /* the banner still appears */ }
+                  navigate('/');
+                }}
+              >
+                View the dashboard (read-only)
+              </Button>
+            </div>
           )}
         </div>
       </Card>
@@ -138,7 +176,7 @@ export default function Licence() {
         <Stat label="Your reference" value={data.billingRef ?? '—'} />
       </Grid>
 
-      {canPay && (
+      {canPay && !data.trial && !data.trialEnded && (
         <Grid min={320} gap={14}>
           <Card title="Pay with an M-Pesa prompt" subtitle="We send a prompt to your phone — approve it with your PIN. Your licence updates as soon as it is paid.">
             {data.canPrompt ? (
@@ -179,7 +217,7 @@ export default function Licence() {
         </Grid>
       )}
 
-      {expired && data.amountDue === 0 && (
+      {expired && !data.trialEnded && data.amountDue === 0 && (
         <Card>
           <span style={{ fontSize: 13.5, color: color.inkSoft }}>
             Nothing is outstanding yet. Your monthly statement is drawn on the 1st, and paying it renews your licence.

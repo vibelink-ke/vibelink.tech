@@ -42,7 +42,9 @@
       "New Licence & billing page: see what is owed, pay with an M-Pesa prompt to your own phone, or pay to the paybill with your reference.",
       "If a licence expires, only the dashboard becomes view-only — customers and hotspot visitors are never affected.",
       "Payouts are paid in full (no commission deducted), daily, weekly or manual — choose under Settings → Gateways.",
-      "Platform fees are billed monthly instead: 3% of hotspot sales plus KES 16 per active PPPoE client."
+      "Platform fees are billed monthly instead: 3% of hotspot sales plus KES 16 per active PPPoE client.",
+      "The free trial is 14 days and is never invoiced.",
+      "An expired licence now opens a dedicated page with the ways to pay. Payouts pause until it is renewed and are released afterwards."
     ]
   }
 ]

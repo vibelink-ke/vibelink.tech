@@ -190,7 +190,7 @@ export default function SaasRevenue() {
           <Card title={`Charges — ${monthLabel(month)}`}>
             <Table
               rowKey={(r) => r.tenant_id}
-              empty="No billable tenants this month (trials, the demo and your own tenant are not charged)"
+              empty="No billable tenants this month (trials, tenants not yet activated, the demo and your own tenant are not charged)"
               rows={rows}
               columns={[
                 {
@@ -233,7 +233,8 @@ export default function SaasRevenue() {
             />
             <p style={{ margin: '12px 0 0', fontSize: 12.5, color: color.muted }}>
               Hotspot sales are voucher payments received in the month. An active PPPoE client is a PPPoE line with
-              status active when the statement is drawn. Trials, the demo tenant and your own tenant are not charged.
+              status active when the statement is drawn. Trials are never charged, and a tenant's first statement is the first
+              full month after you activate them. The demo tenant and your own tenant are not charged.
             </p>
           </Card>
         </>

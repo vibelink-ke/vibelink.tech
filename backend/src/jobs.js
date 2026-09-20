@@ -1114,6 +1114,10 @@ export async function settleTenants() {
        from settlements s join tenants t on t.id = s.tenant_id
       where s.status='pending' and s.amount >= $1
         and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}
+        -- Paused while the licence has lapsed: what they collect keeps building up
+        -- and is paid out once they renew.
+        and t.status not in ('readonly', 'suspended')
+        and (t.licence_ends is null or t.licence_ends >= current_date)
         -- each tenant's own schedule: daily every night, weekly on Mondays, and
         -- 'manual' never here (only their own "Request payout")
         and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and $2::boolean))`,
@@ -1176,11 +1180,17 @@ async function generateMonthlyCharges() {
  */
 export async function payoutTenantNow(tenantId, requestedAmount) {
   const { rows: [row] } = await pool.query(
-    `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
+    `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode,
+            t.status as tenant_status, (t.licence_ends is not null and t.licence_ends < current_date) as licence_lapsed
        from settlements s join tenants t on t.id = s.tenant_id
       where s.tenant_id=$1 and s.status='pending'`,
     [tenantId]);
   if (!row) throw Object.assign(new Error('Nothing pending to settle.'), { status: 400 });
+  if (['readonly', 'suspended'].includes(row.tenant_status) || row.licence_lapsed) {
+    throw Object.assign(new Error(
+      'Payouts are paused until your licence is renewed. The money collected for you is safe and keeps building up — renew under Licence & billing and it is released.'),
+    { status: 402 });
+  }
 
   const pending = Number(row.amount);
   const amount = requestedAmount == null ? pending : Number(requestedAmount);

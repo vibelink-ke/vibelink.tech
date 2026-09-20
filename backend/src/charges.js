@@ -39,10 +39,13 @@ export function previousMonthKey(key) {
   return m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
 }
 
-// Tenants that pay: live ones, not the platform owner's own tenant and not the
-// public demo. Trials are free until they are switched to active.
+// Tenants that pay: activated ones (converted_at), not the platform owner's own
+// tenant and not the public demo. A trial is never invoiced, and a tenant's first
+// statement is the first full month after it was activated — nothing for the
+// month it converted in, which was partly free.
 const BILLABLE = `
   t.status in ('active', 'readonly')
+  and t.converted_at is not null and t.converted_at < $1::timestamptz
   and t.subdomain <> 'demo'
   and t.id is distinct from (select tenant_id from staff where is_super_admin and tenant_id is not null limit 1)`;
 
@@ -221,8 +224,9 @@ export async function settleAllFromCredit() {
 /** Everything the Licence & billing page shows for one tenant. */
 export async function billingSummary(tenantId) {
   const { rows: [t] } = await pool.query(
-    `select name, status, licence_ends, billing_ref, billing_credit,
-            (licence_ends - current_date) as days_left
+    `select name, status, licence_ends, billing_ref, billing_credit, converted_at,
+            (licence_ends - current_date) as days_left,
+            (licence_ends is not null and licence_ends < current_date) as licence_lapsed
        from tenants where id = $1`, [tenantId]);
   const { rows: statements } = await pool.query(
     `select id, to_char(month, 'YYYY-MM') as month, hotspot_revenue, hotspot_pct, hotspot_fee,
@@ -237,6 +241,12 @@ export async function billingSummary(tenantId) {
     tenant: t?.name ?? null,
     status: t?.status ?? 'active',
     readOnly: t?.status === 'readonly',
+    trial: t?.status === 'trial',
+    // Expired without ever having been a paying customer: nothing has been
+    // invoiced, so there is nothing to pay — they are activated by the platform.
+    trialEnded: t?.status === 'readonly' && !t?.converted_at,
+    // Money collected for them is held, not paid out, until the licence is renewed.
+    payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,
     daysLeft: t?.days_left == null ? null : Number(t.days_left),
     billingRef: t?.billing_ref ?? null,
