@@ -2506,3 +2506,11 @@ begin
     insert into schema_flags (name) values ('trial_14_days');
   end if;
 end $$;
+
+-- A tenant can be charged a flat monthly amount instead of by usage. Null means
+-- by usage (hotspot % + a rate per active PPPoE client). When set, the statement
+-- is that amount and the usage figures are recorded but not charged.
+alter table tenants add column if not exists flat_monthly_fee numeric(12,2);
+alter table tenants drop constraint if exists tenants_flat_fee_check;
+alter table tenants add constraint tenants_flat_fee_check check (flat_monthly_fee is null or flat_monthly_fee >= 0);
+alter table tenant_charges add column if not exists flat_fee numeric(12,2) not null default 0;

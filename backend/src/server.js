@@ -2071,7 +2071,9 @@ app.use(async (req, res, next) => {
   const session = await auth.readSession(auth.sessionToken(req));
   if (session) {
     req.session = session;
-    const { rows: [t] } = await pool.query('select * from tenants where id=$1', [session.tenant_id]);
+    const { rows: [t] } = await pool.query(
+      'select *, (licence_ends is not null and licence_ends < current_date) as licence_lapsed from tenants where id=$1',
+      [session.tenant_id]);
     req.tenant = t;
   }
   if (!req.tenant) req.tenant = await tenantByHost(req.hostname);
@@ -2090,7 +2092,8 @@ app.use(async (req, res, next) => {
    * The captive portal and webhooks are exempt: their customers are not the ones
    * in arrears, and a payment arriving is what lifts this.
    */
-  if (req.tenant.status === 'readonly'
+  if ((req.tenant.status === 'readonly'
+        || (['active', 'trial'].includes(req.tenant.status) && req.tenant.licence_lapsed))
       && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
       && !req.path.startsWith('/portal/')
       && !req.path.startsWith('/api/billing/')) {
@@ -4859,15 +4862,18 @@ async function openRouter(ros, { host, port, login, body }) {
 app.get('/api/licence', wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(`
     select t.status, t.licence_ends, t.converted_at,
-           (t.licence_ends - current_date) as days_left
+           (t.licence_ends - current_date) as days_left,
+           (t.licence_ends is not null and t.licence_ends < current_date) as lapsed
       from tenants t where t.id = $1`, [req.tenant.id]);
 
   const daysLeft = row?.days_left == null ? null : Number(row.days_left);
+  // Expired the day the date passes, not whenever the nightly job next runs.
+  const readOnly = row?.status === 'readonly' || (['active', 'trial'].includes(row?.status) && !!row?.lapsed);
   res.json({
     status: row?.status ?? 'active',
-    readOnly: row?.status === 'readonly',
-    trial: row?.status === 'trial',
-    trialEnded: row?.status === 'readonly' && !row?.converted_at,
+    readOnly,
+    trial: row?.status === 'trial' && !readOnly,
+    trialEnded: readOnly && !row?.converted_at,
     licenceEnds: row?.licence_ends ?? null,
     daysLeft,
     // Invoicing belongs to WHMCS. All this reports is how long the licence has
@@ -10247,12 +10253,18 @@ app.post('/api/platform/restart', superAdminOnly, wrap(async (_req, res) => {
 }));
 
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
-  const { name, subdomain, planType = 'flat', planAmount, revsharePct, supportPhone } = req.body;
+  const { name, subdomain, hotspotCommissionPct = 3, pppoeClientRate = 16, flatMonthlyFee = null, supportPhone } = req.body;
   if (!name || !subdomain) return res.status(400).json({ error: 'name and subdomain are required' });
+  const pct = Number(hotspotCommissionPct);
+  const rate = Number(pppoeClientRate);
+  if (!(pct >= 0 && pct <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
+  if (!(rate >= 0)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
+  const flat = flatMonthlyFee === null || flatMonthlyFee === '' ? null : Number(flatMonthlyFee);
+  if (flat !== null && !(flat >= 0)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });
   const { rows: [t] } = await pool.query(
-    `insert into tenants (name, subdomain, plan_type, plan_amount, revshare_pct, support_phone)
+    `insert into tenants (name, subdomain, hotspot_commission_pct, pppoe_client_rate, flat_monthly_fee, support_phone)
      values ($1,$2,$3,$4,$5,$6) returning *`,
-    [name, subdomain, planType, planAmount ?? null, revsharePct ?? null, supportPhone ?? null]);
+    [name, subdomain, pct, rate, flat, supportPhone ?? null]);
 
   // Starter help articles, so a new ISP is not answering the same four
   // questions from an empty page. Non-fatal: failing to seed content must not
@@ -10374,7 +10386,7 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
-                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency'];
+                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'flat_monthly_fee'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   // What the platform charges this tenant, and how often it pays them out.
@@ -10385,6 +10397,11 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   if ('pppoe_client_rate' in req.body) {
     const v = Number(req.body.pppoe_client_rate);
     if (!(v >= 0 && v <= 100000)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
+  }
+  // null puts a tenant back on usage-based charging; a number is a flat monthly fee.
+  if ('flat_monthly_fee' in req.body && req.body.flat_monthly_fee !== null) {
+    const v = Number(req.body.flat_monthly_fee);
+    if (!(v >= 0 && v <= 10000000)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });
   }
   if ('settlement_frequency' in req.body && !['daily', 'weekly', 'manual'].includes(req.body.settlement_frequency)) {
     return res.status(400).json({ error: 'Settlement frequency must be daily, weekly or manual.' });
@@ -11154,7 +11171,7 @@ const AUTOMATION_JOBS = [
   { job: 'enforceFup', name: 'Fair-use enforcement', cron: '*/15 * * * *', detail: 'Totals session bytes against each cap, warns, then throttles' },
   { job: 'watchdog', name: 'Router watchdog', cron: '*/1 * * * *', detail: 'Pings every NAS and flags the ones that stop answering' },
   { job: 'ownerBrief', name: 'Owner brief', cron: '0 20 * * *', detail: 'Evening SMS: collected, new clients, routers down' },
-  { job: 'expireTenantLicences', name: 'Tenant licences', cron: '0 7 * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
+  { job: 'expireTenantLicences', name: 'Tenant licences', cron: '*/10 * * * *', detail: 'Read-only once the licence date passes; full access again when it is extended' },
   { job: 'lockNewPppoeMacs', name: 'PPPoE MAC lock', cron: '*/5 * * * *', detail: 'Locks a fresh line to the first router it actually dials in from' },
   /**
    * Two jobs that have been running all along without appearing here.

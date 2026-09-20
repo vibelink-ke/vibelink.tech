@@ -269,6 +269,9 @@ export default function Licence() {
             { key: 'hf', label: `Hotspot fee`, align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13 }}>KES {kes(s.hotspot_fee)} <span style={{ color: color.muted }}>({Number(s.hotspot_pct)}%)</span></span> },
             { key: 'act', label: 'Active PPPoE', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13 }}>{s.pppoe_active}</span> },
             { key: 'pf', label: 'PPPoE fee', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13 }}>KES {kes(s.pppoe_fee)} <span style={{ color: color.muted }}>(@{Number(s.pppoe_rate)})</span></span> },
+            ...(data.statements.some((s) => Number(s.flat_fee) > 0)
+              ? [{ key: 'flat', label: 'Flat fee', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13 }}>{Number(s.flat_fee) > 0 ? `KES ${kes(s.flat_fee)}` : '—'}</span> }]
+              : []),
             { key: 'total', label: 'Total', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13, fontWeight: 700 }}>KES {kes(s.total)}</span> },
             {
               key: 'status', label: 'Status',

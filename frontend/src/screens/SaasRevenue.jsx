@@ -32,11 +32,11 @@ const money = { fontFamily: font.mono, fontSize: 13 };
 
 function downloadCsv(month, rows) {
   const head = ['Tenant', 'Reference', 'Month', 'Hotspot revenue', 'Hotspot %', 'Hotspot fee',
-    'Active PPPoE clients', 'Rate per client', 'PPPoE fee', 'Total', 'Status'];
+    'Active PPPoE clients', 'Rate per client', 'PPPoE fee', 'Flat fee', 'Total', 'Status'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = rows.map((r) => [
     r.name, r.billing_ref, month, r.hotspot_revenue, r.hotspot_pct, r.hotspot_fee,
-    r.pppoe_active, r.pppoe_rate, r.pppoe_fee, r.total, r.live ? 'estimate' : r.status,
+    r.pppoe_active, r.pppoe_rate, r.pppoe_fee, r.flat_fee ?? 0, r.total, r.live ? 'estimate' : r.status,
   ].map(cell).join(','));
   const blob = new Blob([[head.map(cell).join(','), ...lines].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -119,6 +119,8 @@ export default function SaasRevenue() {
     const t = tenants.find((x) => x.id === r.tenant_id) ?? {};
     setEditing({
       id: r.tenant_id, name: r.name,
+      charge_mode: t.flat_monthly_fee != null ? 'flat' : 'usage',
+      flat_monthly_fee: t.flat_monthly_fee ?? '',
       hotspot_commission_pct: t.hotspot_commission_pct ?? r.hotspot_pct ?? 3,
       pppoe_client_rate: t.pppoe_client_rate ?? r.pppoe_rate ?? 16,
       settlement_frequency: t.settlement_frequency ?? 'daily',
@@ -128,12 +130,16 @@ export default function SaasRevenue() {
   const saveRates = async () => {
     const pct = Number(editing.hotspot_commission_pct);
     const rate = Number(editing.pppoe_client_rate);
-    if (!(pct >= 0 && pct <= 100)) return store.toast('The hotspot percentage must be between 0 and 100');
-    if (!(rate >= 0)) return store.toast('The per-client rate must be zero or more');
+    const flat = editing.charge_mode === 'flat' ? Number(editing.flat_monthly_fee) : null;
+    if (flat === null && !(pct >= 0 && pct <= 100)) return store.toast('The hotspot percentage must be between 0 and 100');
+    if (flat === null && !(rate >= 0)) return store.toast('The per-client rate must be zero or more');
+    if (flat !== null && !(flat >= 0)) return store.toast('Enter the flat monthly fee');
     setBusy(true);
     try {
       const updated = await api.updateTenant(editing.id, {
-        hotspot_commission_pct: pct, pppoe_client_rate: rate, settlement_frequency: editing.settlement_frequency,
+        ...(flat === null ? { hotspot_commission_pct: pct, pppoe_client_rate: rate } : {}),
+        flat_monthly_fee: flat,
+        settlement_frequency: editing.settlement_frequency,
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
       store.toast(`${editing.name}'s rates saved`);
@@ -208,6 +214,9 @@ export default function SaasRevenue() {
                 { key: 'act', label: 'Active PPPoE', align: 'right', render: (r) => <span style={money}>{r.pppoe_active}</span> },
                 { key: 'rate', label: 'Rate', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>KES {Number(r.pppoe_rate)}</span> },
                 { key: 'pf', label: 'PPPoE fee', align: 'right', render: (r) => <span style={money}>KES {kes(r.pppoe_fee)}</span> },
+                ...(rows.some((r) => Number(r.flat_fee) > 0)
+                  ? [{ key: 'flat', label: 'Flat fee', align: 'right', render: (r) => <span style={money}>{Number(r.flat_fee) > 0 ? `KES ${kes(r.flat_fee)}` : '—'}</span> }]
+                  : []),
                 { key: 'total', label: 'Total', align: 'right', render: (r) => <span style={{ ...money, fontWeight: 700 }}>KES {kes(r.total)}</span> },
                 {
                   key: 'status', label: 'Status',
@@ -253,12 +262,30 @@ export default function SaasRevenue() {
       >
         {editing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="Hotspot commission (%)" hint="Of their hotspot sales each month. Standard is 3.">
-              <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={set('hotspot_commission_pct')} />
+            <Field label="How are they charged?" span={2}>
+              <Select
+                value={editing.charge_mode}
+                onChange={set('charge_mode')}
+                options={[
+                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
+                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
+                ]}
+              />
             </Field>
-            <Field label="Per active PPPoE client (KES)" hint="Each month. Standard is 16.">
-              <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={set('pppoe_client_rate')} />
-            </Field>
+            {editing.charge_mode === 'flat' ? (
+              <Field label="Flat monthly fee (KES)" span={2} hint="The same every month, whatever their usage.">
+                <Input type="number" step="1" min="0" value={editing.flat_monthly_fee} onChange={set('flat_monthly_fee')} />
+              </Field>
+            ) : (
+              <>
+                <Field label="Hotspot commission (%)" hint="Of their hotspot sales each month. Standard is 3.">
+                  <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={set('hotspot_commission_pct')} />
+                </Field>
+                <Field label="Per active PPPoE client (KES)" hint="Each month. Standard is 16.">
+                  <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={set('pppoe_client_rate')} />
+                </Field>
+              </>
+            )}
             <Field label="Payout schedule" span={2} hint="How often what we collect for them is paid out — always in full.">
               <Select value={editing.settlement_frequency} onChange={set('settlement_frequency')} options={FREQUENCIES} />
             </Field>

@@ -69,7 +69,7 @@ export function startJobs() {
   // invoices and chase them; two systems invoicing the same customer is how
   // someone gets billed twice and suspended over an invoice they already paid
   // elsewhere. Only licence_ends remains — WHMCS moves it, this acts on it.
-  cron.schedule('0 7 * * *',  safely('expireTenantLicences', expireTenantLicences));
+  cron.schedule('*/10 * * * *', safely('expireTenantLicences', expireTenantLicences));
   cron.schedule('*/5 * * * *', safely('lockNewPppoeMacs', lockNewPppoeMacs));
   cron.schedule('*/5 * * * *', safely('checkSlaBreaches', checkSlaBreaches));
   // 3am local — after the day's invoicing/charging runs, before the 6am invoice

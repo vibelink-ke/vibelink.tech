@@ -53,6 +53,7 @@ export async function readSession(token) {
     `select s.token, s.tenant_id, st.id as staff_id, st.name, st.email, st.username,
             st.role, st.is_super_admin,
             t.name as company, t.subdomain, t.status as tenant_status,
+            (t.licence_ends is not null and t.licence_ends < current_date) as licence_lapsed,
             t.platform_collect_enabled, t.settlement_method, t.settlement_frequency, t.settlement_phone,
             t.settlement_till, t.settlement_bank_name, t.settlement_bank_paybill, t.settlement_account_number
      from admin_sessions s
@@ -214,7 +215,10 @@ export const publicSession = async (s) => ({
   platformCollectEnabled: s.platform_collect_enabled,
   // Known the moment they sign in, so an expired tenant lands on the licence page
   // rather than on a dashboard that then redirects.
-  licenceExpired: s.tenant_status === 'readonly',
+  // Judged from the date itself, not only the stored status: the status is updated
+  // by a job, and an expired licence must not wait for it.
+  licenceExpired: s.tenant_status === 'readonly'
+    || (['active', 'trial'].includes(s.tenant_status) && !!s.licence_lapsed),
   settlementMethod: s.settlement_method,
   settlementFrequency: s.settlement_frequency,
   settlementPhone: s.settlement_phone,

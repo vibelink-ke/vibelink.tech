@@ -4,12 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { name: '', subdomain: '', planType: 'flat', planAmount: '', revsharePct: '', supportPhone: '' };
-const PLAN_TYPES = [
-  { value: 'flat', label: 'Flat monthly fee' },
-  { value: 'per_device', label: 'Per active device' },
-  { value: 'revshare', label: 'Revenue share' },
-];
+const BLANK = { name: '', subdomain: '', chargeMode: 'usage', hotspotCommissionPct: '3', pppoeClientRate: '16', flatMonthlyFee: '', supportPhone: '' };
 
 export default function Tenants() {
   const store = useStore();
@@ -218,9 +213,9 @@ export default function Tenants() {
       const created = await api.createTenant({
         name: f.name,
         subdomain: f.subdomain,
-        planType: f.planType,
-        planAmount: f.planAmount ? Number(f.planAmount) : null,
-        revsharePct: f.revsharePct ? Number(f.revsharePct) : null,
+        hotspotCommissionPct: Number(f.hotspotCommissionPct),
+        pppoeClientRate: Number(f.pppoeClientRate),
+        flatMonthlyFee: f.chargeMode === 'flat' ? Number(f.flatMonthlyFee) : null,
         supportPhone: f.supportPhone || null,
       });
       store.setCollection('tenants', (ts) => [created, ...ts]);
@@ -241,14 +236,12 @@ export default function Tenants() {
     try {
       const updated = await api.updateTenant(editing.id, {
         status: editing.status,
-        plan_type: editing.plan_type,
-        plan_amount: editing.plan_amount === '' ? null : Number(editing.plan_amount),
-        revshare_pct: editing.revshare_pct === '' ? null : Number(editing.revshare_pct),
         support_phone: editing.support_phone || null,
         platform_collect_enabled: !!editing.platform_collect_enabled,
         settlement_phone: editing.settlement_phone || null,
         hotspot_commission_pct: Number(editing.hotspot_commission_pct),
         pppoe_client_rate: Number(editing.pppoe_client_rate),
+        flat_monthly_fee: editing.charge_mode === 'flat' ? Number(editing.flat_monthly_fee) : null,
         settlement_frequency: editing.settlement_frequency,
         settlement_fee_mode: editing.settlement_fee_mode,
       });
@@ -536,16 +529,17 @@ export default function Tenants() {
                 <span style={{ fontFamily: font.mono, fontSize: 12 }}>{t.billing_ref ?? '—'}</span>
               ),
             },
-            { key: 'plan_type', label: 'Plan', render: (t) => t.planType ?? t.plan_type ?? '—' },
             {
-              key: 'amount',
-              label: 'Rate',
-              align: 'right',
-              render: (t) => {
-                const type = t.planType ?? t.plan_type;
-                if (type === 'revshare') return `${t.revsharePct ?? t.revshare_pct ?? 0}%`;
-                return `KES ${kes(t.planAmount ?? t.plan_amount)}`;
-              },
+              key: 'hotspot_pct', label: 'Hotspot %', align: 'right',
+              render: (t) => (t.flat_monthly_fee != null
+                ? <span style={{ fontFamily: font.mono }}>Flat</span>
+                : <span style={{ fontFamily: font.mono }}>{Number(t.hotspot_commission_pct ?? 3)}%</span>),
+            },
+            {
+              key: 'pppoe_rate', label: 'Per PPPoE client', align: 'right',
+              render: (t) => (t.flat_monthly_fee != null
+                ? <span style={{ fontFamily: font.mono }}>KES {kes(t.flat_monthly_fee)} / month</span>
+                : <span style={{ fontFamily: font.mono }}>KES {Number(t.pppoe_client_rate ?? 16)}</span>),
             },
             { key: 'devices', label: 'Active', align: 'right', render: (t) => <span style={{ fontFamily: font.mono }}>{t.devices ?? 0}</span> },
             {
@@ -583,12 +577,11 @@ export default function Tenants() {
                     onClick={() =>
                       setEditing({
                         ...t,
-                        plan_type: t.plan_type ?? 'flat',
-                        plan_amount: t.plan_amount ?? '',
-                        revshare_pct: t.revshare_pct ?? '',
                         support_phone: t.support_phone ?? '',
                         platform_collect_enabled: t.platform_collect_enabled ?? false,
                         settlement_phone: t.settlement_phone ?? '',
+                        charge_mode: t.flat_monthly_fee != null ? 'flat' : 'usage',
+                        flat_monthly_fee: t.flat_monthly_fee ?? '',
                         hotspot_commission_pct: t.hotspot_commission_pct ?? 3,
                         pppoe_client_rate: t.pppoe_client_rate ?? 16,
                         settlement_frequency: t.settlement_frequency ?? 'daily',
@@ -647,17 +640,29 @@ export default function Tenants() {
           <Field label="Support phone">
             <Input value={f.supportPhone} onChange={set('supportPhone')} />
           </Field>
-          <Field label="Billing model">
-            <Select value={f.planType} onChange={set('planType')} options={PLAN_TYPES} />
+          <Field label="How are they charged?" span={2}>
+            <Select
+              value={f.chargeMode}
+              onChange={set('chargeMode')}
+              options={[
+                { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
+                { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
+              ]}
+            />
           </Field>
-          {f.planType === 'revshare' ? (
-            <Field label="Revenue share (%)" hint="Capped at KES 120,000/month">
-              <Input value={f.revsharePct} onChange={set('revsharePct')} type="number" step="0.1" />
+          {f.chargeMode === 'flat' ? (
+            <Field label="Flat monthly fee (KES)" span={2} hint="The same every month, whatever their usage">
+              <Input value={f.flatMonthlyFee} onChange={set('flatMonthlyFee')} type="number" min="0" />
             </Field>
           ) : (
-            <Field label={f.planType === 'per_device' ? 'Per device (KES)' : 'Monthly fee (KES)'}>
-              <Input value={f.planAmount} onChange={set('planAmount')} type="number" />
-            </Field>
+            <>
+              <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly. Standard is 3.">
+                <Input value={f.hotspotCommissionPct} onChange={set('hotspotCommissionPct')} type="number" step="0.1" min="0" max="100" />
+              </Field>
+              <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active client. Standard is 16.">
+                <Input value={f.pppoeClientRate} onChange={set('pppoeClientRate')} type="number" min="0" />
+              </Field>
+            </>
           )}
         </div>
       </Modal>
@@ -667,11 +672,14 @@ export default function Tenants() {
           <>
             <KV k="Portal" v={`${viewing.subdomain}.vibelink.tech`} />
             <KV k="Status" v={viewing.status} />
-            <KV k="Billing model" v={viewing.plan_type ?? '—'} />
-            <KV
-              k="Rate"
-              v={viewing.plan_type === 'revshare' ? `${viewing.revshare_pct ?? 0}%` : `KES ${kes(viewing.plan_amount)}`}
-            />
+            {viewing.flat_monthly_fee != null ? (
+              <KV k="Charged" v={`Flat KES ${kes(viewing.flat_monthly_fee)} per month`} />
+            ) : (
+              <>
+                <KV k="Hotspot commission" v={`${Number(viewing.hotspot_commission_pct ?? 3)}% of hotspot sales`} />
+                <KV k="PPPoE" v={`KES ${Number(viewing.pppoe_client_rate ?? 16)} per active client`} />
+              </>
+            )}
             <KV k="Active devices" v={viewing.devices ?? 0} />
             <KV k="Collected this month" v={`KES ${kes(viewing.collected)}`} />
             <KV k="Currency" v={viewing.currency ?? 'KES'} />
@@ -731,31 +739,41 @@ export default function Tenants() {
                 options={['trial', 'active', 'readonly', 'suspended']}
               />
             </Field>
-            <Field label="Billing model">
-              <Select
-                value={editing.plan_type}
-                onChange={(e) => setEditing((s) => ({ ...s, plan_type: e.target.value }))}
-                options={PLAN_TYPES}
-              />
-            </Field>
-            {editing.plan_type === 'revshare' ? (
-              <Field label="Revenue share (%)" hint="Capped at KES 120,000/month">
-                <Input type="number" step="0.1" value={editing.revshare_pct} onChange={(e) => setEditing((s) => ({ ...s, revshare_pct: e.target.value }))} />
-              </Field>
-            ) : (
-              <Field label={editing.plan_type === 'per_device' ? 'Per device (KES)' : 'Monthly fee (KES)'}>
-                <Input type="number" value={editing.plan_amount} onChange={(e) => setEditing((s) => ({ ...s, plan_amount: e.target.value }))} />
-              </Field>
-            )}
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
             </Field>
-            <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly">
-              <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, hotspot_commission_pct: e.target.value }))} />
+            <Field label="How is this tenant charged?" span={2} hint="Choose one. Either way, payouts to them are never reduced.">
+              <Select
+                value={editing.charge_mode}
+                onChange={(e) => setEditing((s) => ({ ...s, charge_mode: e.target.value }))}
+                options={[
+                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
+                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
+                ]}
+              />
             </Field>
-            <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active line">
-              <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={(e) => setEditing((s) => ({ ...s, pppoe_client_rate: e.target.value }))} />
-            </Field>
+            {editing.charge_mode === 'flat' ? (
+              <Field label="Flat monthly fee (KES)" span={2} hint="The same amount every month, whatever their usage. The hotspot % and per-client rate do not apply.">
+                <Input type="number" step="1" min="0" value={editing.flat_monthly_fee} onChange={(e) => setEditing((s) => ({ ...s, flat_monthly_fee: e.target.value }))} />
+              </Field>
+            ) : (
+              <>
+                <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+                  By usage, a tenant pays <b>both</b> charges added together: a percentage of their hotspot sales, plus a fixed amount for each active
+                  PPPoE client. Set one to 0 if it should not apply. For example, KES 100,000 of hotspot sales at 3% and 300 active clients at KES 16
+                  is KES 3,000 + KES 4,800 = KES 7,800.
+                </p>
+                <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly. Standard is 3.">
+                  <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, hotspot_commission_pct: e.target.value }))} />
+                </Field>
+                <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active line. Standard is 16.">
+                  <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={(e) => setEditing((s) => ({ ...s, pppoe_client_rate: e.target.value }))} />
+                </Field>
+              </>
+            )}
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+              Changes apply to this month and after; statements already drawn keep the amounts they were drawn at.
+            </p>
             <Field label="Platform collects on their behalf" span={2} hint="For a tenant with no payment gateway of their own: customers pay into our own paybill, and we pay it out to them in full on their schedule">
               <Select
                 value={editing.platform_collect_enabled ? 'yes' : 'no'}

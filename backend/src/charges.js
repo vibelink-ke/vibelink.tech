@@ -52,10 +52,13 @@ const BILLABLE = `
 const FIGURES = `
   select t.id as tenant_id, t.name, t.subdomain, t.billing_ref,
          h.revenue as hotspot_revenue, t.hotspot_commission_pct as hotspot_pct,
-         round(h.revenue * t.hotspot_commission_pct / 100, 2) as hotspot_fee,
+         -- A flat-rate tenant is charged the flat amount only; the usage is still
+         -- recorded (revenue, active clients) so the statement shows what it covered.
+         case when t.flat_monthly_fee is null then round(h.revenue * t.hotspot_commission_pct / 100, 2) else 0 end as hotspot_fee,
          p.active as pppoe_active, t.pppoe_client_rate as pppoe_rate,
-         p.active * t.pppoe_client_rate as pppoe_fee,
-         round(h.revenue * t.hotspot_commission_pct / 100, 2) + p.active * t.pppoe_client_rate as total
+         case when t.flat_monthly_fee is null then p.active * t.pppoe_client_rate else 0 end as pppoe_fee,
+         coalesce(t.flat_monthly_fee, 0) as flat_fee,
+         coalesce(t.flat_monthly_fee, round(h.revenue * t.hotspot_commission_pct / 100, 2) + p.active * t.pppoe_client_rate) as total
     from tenants t
    cross join lateral (
      select coalesce(sum(pay.amount), 0) as revenue from payments pay
@@ -102,9 +105,9 @@ export async function snapshotCharges(key) {
   const w = monthWindow(key);
   const { rows } = await pool.query(
     `insert into tenant_charges (tenant_id, month, hotspot_revenue, hotspot_pct, hotspot_fee,
-                                 pppoe_active, pppoe_rate, pppoe_fee, total)
+                                 pppoe_active, pppoe_rate, pppoe_fee, flat_fee, total)
      select f.tenant_id, $3::date, f.hotspot_revenue, f.hotspot_pct, f.hotspot_fee,
-            f.pppoe_active, f.pppoe_rate, f.pppoe_fee, f.total
+            f.pppoe_active, f.pppoe_rate, f.pppoe_fee, f.flat_fee, f.total
        from (${FIGURES}) f
      on conflict (tenant_id, month) do nothing
      returning id`,
@@ -230,21 +233,23 @@ export async function billingSummary(tenantId) {
        from tenants where id = $1`, [tenantId]);
   const { rows: statements } = await pool.query(
     `select id, to_char(month, 'YYYY-MM') as month, hotspot_revenue, hotspot_pct, hotspot_fee,
-            pppoe_active, pppoe_rate, pppoe_fee, total, status, paid_at
+            pppoe_active, pppoe_rate, pppoe_fee, flat_fee, total, status, paid_at
        from tenant_charges where tenant_id = $1 order by month desc`, [tenantId]);
   const owed = statements
     .filter((s) => s.status === 'open' || s.status === 'invoiced')
     .reduce((n, s) => n + Number(s.total), 0);
   const credit = Number(t?.billing_credit ?? 0);
   const paybill = await platformPaybill();
+  const lapsed = ['active', 'trial'].includes(t?.status) && !!t?.licence_lapsed;
+  const readOnly = t?.status === 'readonly' || lapsed;
   return {
     tenant: t?.name ?? null,
     status: t?.status ?? 'active',
-    readOnly: t?.status === 'readonly',
-    trial: t?.status === 'trial',
+    readOnly,
+    trial: t?.status === 'trial' && !readOnly,
     // Expired without ever having been a paying customer: nothing has been
     // invoiced, so there is nothing to pay — they are activated by the platform.
-    trialEnded: t?.status === 'readonly' && !t?.converted_at,
+    trialEnded: readOnly && !t?.converted_at,
     // Money collected for them is held, not paid out, until the licence is renewed.
     payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,
