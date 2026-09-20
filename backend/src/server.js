@@ -10339,7 +10339,7 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
      values ($1,$2,$3,$4,$5,$6,$7,
              case when $7 = 'self' then 'active' else 'trial' end,
              case when $7 = 'self' then now() end,
-             case when $7 = 'self' then current_date + 30 end)
+             case when $7 = 'self' then (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date end)
      returning *`,
     [name, subdomain, pct, rate, flat, supportPhone ?? null, hosting]);
 
@@ -10536,7 +10536,11 @@ app.post('/api/tenants/:id/activate', superAdminOnly, wrap(async (req, res) => {
   }
   const { rows: [t] } = await pool.query(
     `update tenants set status = 'active', converted_at = coalesce(converted_at, now()),
-            licence_ends = greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' days')::interval
+            -- The days asked for, but never short of the end of the month after next, so the
+            -- first statement (due on the 1st of that month) does not arrive after the licence ends.
+            licence_ends = greatest(
+              (greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' days')::interval)::date,
+              (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
       where id = $1 returning id, name, status, licence_ends, converted_at`,
     [req.params.id, days]);
   if (!t) return res.status(404).json({ error: 'not found' });

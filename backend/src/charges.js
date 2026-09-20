@@ -48,6 +48,16 @@ export function previousMonthKey(key) {
 export const ACTIVATION_FEE = Number(process.env.TENANT_ACTIVATION_FEE ?? 500);
 export const ACTIVATION_DAYS = 30;
 
+/**
+ * The date an activation runs to: the end of the month after next, in Nairobi.
+ * (See activateIfPaid — the first statement is due on the 1st of that month.)
+ */
+export function activationUntil(now = Date.now()) {
+  const d = new Date(now + 3 * 3600 * 1000);
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 3, 0));
+  return last.toISOString().slice(0, 10);
+}
+
 // Tenants that pay: activated ones (converted_at), not the platform owner's own
 // tenant and not the public demo. A trial is never invoiced, and a tenant's first
 // statement is the first full month after it was activated — nothing for the
@@ -199,7 +209,12 @@ async function activateIfPaid(c, tenantId) {
         set billing_credit = billing_credit - $2,
             converted_at = now(),
             status = case when status = 'suspended' then status else 'active' end,
-            licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date
+            -- At least ACTIVATION_DAYS, and never short of the end of the month after next:
+            -- the first statement is for the first full month after activation and is drawn
+            -- on the 1st of the month after that, so the licence must reach it.
+            licence_ends = greatest(
+              (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date,
+              (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
       where id = $1`, [tenantId, ACTIVATION_FEE, ACTIVATION_DAYS]);
   return true;
 }
@@ -285,7 +300,7 @@ export async function billingSummary(tenantId) {
     // invoiced, so there is nothing to pay — they are activated by the platform.
     trialEnded,
     // After the trial, activating costs a set amount; nothing has been invoiced.
-    activation: trialEnded ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS } : null,
+    activation: trialEnded ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS, until: activationUntil() } : null,
     // Money collected for them is held, not paid out, until the licence is renewed.
     payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,

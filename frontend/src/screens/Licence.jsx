@@ -154,7 +154,7 @@ export default function Licence() {
               <b> Your customers and hotspot visitors are not affected:</b> they keep connecting, paying and getting
               their service as normal.
               {data.trialEnded
-                ? ` Pay KES ${kes(data.activation?.fee)} below to activate your licence for ${data.activation?.days ?? 30} days.`
+                ? ` Pay KES ${kes(data.activation?.fee)} below to activate your licence${data.activation?.until ? ` until ${dateLabel(data.activation.until)}` : ''}.`
                 : ' Pay below to switch the dashboard back on straight away.'}
             </span>
           ) : data.trial ? (
