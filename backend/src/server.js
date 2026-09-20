@@ -3830,6 +3830,84 @@ app.get('/api/expenses/:id/receipt', requirePermission('expenses.view'), wrap(as
   res.type(row.receipt_mime).send(row.receipt_data);
 }));
 
+// ── profit and loss ─────────────────────────
+/**
+ * Money in against money out, month by month, on a cash basis: income is what
+ * was actually received (applied payments, split the way the Dashboard splits
+ * it — PPPoE is a payment on a client's account, hotspot is a voucher sale),
+ * and expenses count when they are PAID, not when they were logged. An
+ * unpaid bill is shown separately as still to come rather than dragging a
+ * month's profit down before the money has left.
+ *
+ * Months are Nairobi months. Nairobi has no daylight saving, so a month
+ * starts at 00:00 at a fixed +03:00.
+ */
+app.get('/api/reports/profit-loss', requirePermission('profitloss.view'), wrap(async (req, res) => {
+  const count = Math.min(Math.max(parseInt(req.query.months, 10) || 6, 1), 24);
+
+  // The last `count` Nairobi months, oldest first.
+  const nowNairobi = new Date(Date.now() + 3 * 3600 * 1000);
+  let y = nowNairobi.getUTCFullYear();
+  let m = nowNairobi.getUTCMonth();   // 0-based
+  const months = [];
+  for (let i = 0; i < count; i++) {
+    months.unshift(`${y}-${String(m + 1).padStart(2, '0')}`);
+    m -= 1;
+    if (m < 0) { m = 11; y -= 1; }
+  }
+  const startsAt = `${months[0]}-01T00:00:00+03:00`;
+  const [ly, lm] = months[months.length - 1].split('-').map(Number);
+  const endsAt = `${lm === 12 ? ly + 1 : ly}-${String(lm === 12 ? 1 : lm + 1).padStart(2, '0')}-01T00:00:00+03:00`;
+
+  const { rows: income } = await pool.query(
+    `select to_char(p.received_at at time zone 'Africa/Nairobi', 'YYYY-MM') as month,
+            coalesce(sum(p.amount) filter (where p.voucher_id is null and p.subscriber_id is not null), 0) as pppoe,
+            coalesce(sum(p.amount) filter (where p.voucher_id is not null), 0) as hotspot,
+            coalesce(sum(p.amount) filter (where p.voucher_id is null and p.subscriber_id is null), 0) as other
+       from payments p
+      where p.tenant_id = $1 and p.status = 'applied'
+        and p.received_at >= $2 and p.received_at < $3
+      group by 1`,
+    [req.tenant.id, startsAt, endsAt]);
+
+  const { rows: spent } = await pool.query(
+    `select to_char(coalesce(e.paid_at, e.created_at) at time zone 'Africa/Nairobi', 'YYYY-MM') as month,
+            e.category, sum(e.amount) as amount
+       from expenses e
+      where e.tenant_id = $1 and e.status = 'paid'
+        and coalesce(e.paid_at, e.created_at) >= $2 and coalesce(e.paid_at, e.created_at) < $3
+      group by 1, 2`,
+    [req.tenant.id, startsAt, endsAt]);
+
+  const { rows: [owed] } = await pool.query(
+    `select coalesce(sum(amount), 0) as amount, count(*)::int as n
+       from expenses where tenant_id = $1 and status in ('pending','approved')`, [req.tenant.id]);
+
+  const incomeBy = Object.fromEntries(income.map((r) => [r.month, r]));
+  const categories = new Set();
+  const spendBy = {};
+  for (const r of spent) {
+    categories.add(r.category);
+    (spendBy[r.month] ??= {})[r.category] = Number(r.amount);
+  }
+
+  const rows = months.map((month) => {
+    const i = incomeBy[month] ?? {};
+    const pppoe = Number(i.pppoe ?? 0);
+    const hotspot = Number(i.hotspot ?? 0);
+    const other = Number(i.other ?? 0);
+    const byCategory = spendBy[month] ?? {};
+    const expenses = Object.values(byCategory).reduce((n, v) => n + v, 0);
+    const total = pppoe + hotspot + other;
+    return { month, pppoe, hotspot, other, income: total, expenses, profit: total - expenses, byCategory };
+  });
+
+  res.json({
+    months, rows, categories: [...categories].sort(),
+    stillToPay: { amount: Number(owed.amount), count: owed.n },
+  });
+}));
+
 // ── suppliers ───────────────────────────────
 // Who the business pays. Totals come from the expense log, so a supplier's
 // "outstanding" is what has been logged against them but not yet paid.

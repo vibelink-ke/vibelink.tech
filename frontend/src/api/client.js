@@ -195,6 +195,7 @@ export const api = {
   createBill: (b) => post('/api/bills', b),
   updateBill: (id, b) => put(`/api/bills/${id}`, b),
   deleteBill: (id) => del(`/api/bills/${id}`),
+  profitLoss: (months) => get(`/api/reports/profit-loss?months=${months ?? 6}`),
 
   // ── HR & payroll ──
   hrProfiles: () => get('/api/hr/profiles'),

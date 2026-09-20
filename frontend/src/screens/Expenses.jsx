@@ -6,6 +6,7 @@ import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 import Bills from './expenses/Bills';
 import Suppliers from './expenses/Suppliers';
+import ProfitLoss from './expenses/ProfitLoss';
 
 const CATEGORIES = ['Fuel', 'Equipment', 'Rent', 'Utilities', 'Salaries', 'Marketing', 'Repairs', 'Other'];
 
@@ -149,7 +150,8 @@ export default function Expenses() {
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {[['log', 'Expenses'], ...(perms['bills.view'] ? [['bills', 'Monthly bills']] : []),
-          ...(perms['suppliers.view'] ? [['suppliers', 'Suppliers']] : [])].map(([key, label]) => (
+          ...(perms['suppliers.view'] ? [['suppliers', 'Suppliers']] : []),
+          ...(perms['profitloss.view'] ? [['pnl', 'Profit & loss']] : [])].map(([key, label]) => (
           <Button key={key} variant={tab === key ? 'primary' : undefined} onClick={() => setTab(key)}>{label}</Button>
         ))}
       </div>
@@ -160,6 +162,8 @@ export default function Expenses() {
       {tab === 'suppliers' && (
         <Suppliers suppliers={suppliers} reload={loadSuppliers} categories={CATEGORIES} canEdit={!!perms['suppliers.edit']} />
       )}
+
+      {tab === 'pnl' && perms['profitloss.view'] && <ProfitLoss />}
 
       {tab === 'log' && (<>
       <Grid min={200} gap={14}>
