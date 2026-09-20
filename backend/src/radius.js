@@ -94,7 +94,7 @@ export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
     seen.add(name);
     await ros.ensureHotspotUserProfile(conn, {
       name,
-      sharedUsers: hs?.multi_device ? 3 : 1,
+      sharedUsers: (hs?.multi_device ?? true) ? 3 : 1,
       idleSeconds: hs?.idle_timeout_sec ?? 1200,
       bindMac: hs?.bind_mac ?? true,
       cookieMinutes: durationMin,

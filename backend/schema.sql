@@ -2392,3 +2392,8 @@ select po.tenant_id, 'Salaries',
   ) r on true
  where po.status = 'paid' and po.amount - coalesce(r.amt, 0) > 0
 on conflict (payout_id) where payout_id is not null do nothing;
+
+-- Several devices per hotspot code is now the default: a guest with a phone and
+-- a laptop should not have to think about it. Only the default for tenants
+-- that have not chosen — a tenant's saved setting is not touched.
+alter table hotspot_settings alter column multi_device set default true;

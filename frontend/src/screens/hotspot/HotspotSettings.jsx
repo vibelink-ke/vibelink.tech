@@ -38,7 +38,7 @@ const DEFAULTS = {
   code_length: 6,
   sms_voucher: true,
   auto_login: true,
-  multi_device: false,
+  multi_device: true,
   template: 'sleek',
   banner_headline: '',
   banner_subtext: '',

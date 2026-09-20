@@ -1688,7 +1688,7 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
    * offer more devices than the router will actually let authenticate at
    * once, in either case.
    */
-  const limit = hs?.multi_device ? 3 : 1;
+  const limit = (hs?.multi_device ?? true) ? 3 : 1;
   // taken already counts voucher.mac when the device-picker flow set one;
   // a typed-code voucher never does, so a live session with no mac means an
   // ordinary phone is already using this code's one slot uncounted above.
@@ -1732,7 +1732,7 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   // Same limit as the list above: 3 slots when sharing is on, 1 when it's
   // not — a single-device code registering its one device through the MAC
   // picker instead of typing it in, not an extra device beyond what was paid for.
-  const limit = hs?.multi_device ? 3 : 1;
+  const limit = (hs?.multi_device ?? true) ? 3 : 1;
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
   // Reserves a slot for the voucher's own original device — but only when
@@ -1818,7 +1818,7 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
    * on. Multi-device vouchers are left alone: sharing a code across
    * several devices is the point there, not a hole to close.
    */
-  if (!hs?.multi_device) {
+  if (!(hs?.multi_device ?? true)) {
     const { forgetVoucherAccess } = await import('./radius.js');
     await forgetVoucherAccess(pool, [found.voucher.code], tenant.id).catch(() => {});
   }
@@ -5173,8 +5173,9 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
     // bundle length safely.
     const { ensureHotspotProfiles } = await import('./radius.js');
     await tryStep('hotspot user profiles', () => ensureHotspotProfiles(conn, pool, tenantId, hs), 40000);
-    done.push(`sessions use hs-cookie-<N> (${hs?.multi_device ? 3 : 1} device`
-      + `${hs?.multi_device ? 's' : ''} per code, `
+    const multiDevice = hs?.multi_device ?? true;
+    done.push(`sessions use hs-cookie-<N> (${multiDevice ? 3 : 1} device`
+      + `${multiDevice ? 's' : ''} per code, `
       + `${hs?.bind_mac ?? true ? 'device remembered' : 'code required each time'})`);
 
     // Masquerade, stated as its own step rather than buried inside building the
