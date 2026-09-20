@@ -62,6 +62,55 @@ export async function accrueSettlement(tenantId, amount) {
 }
 
 /**
+ * A paid payroll payout is money out of the business, so it belongs in the
+ * expense log — salary, commission and bonus lines together, as one paid
+ * "Salaries" entry for that staff member and run.
+ *
+ * Two things it deliberately does not do twice:
+ *  - Reimbursement lines are not added: each one already IS an expense (that is
+ *    how it got onto the run). Those are marked paid instead, which they were
+ *    never flipped to before.
+ *  - A payout already recorded (a replayed webhook, the backfill in schema.sql)
+ *    is skipped, by the unique payout_id.
+ *
+ * Called from settleStaffCommissionsForPayout, which both payout channels —
+ * the manual mark-paid and the M-Pesa result webhook — already call the moment
+ * a payout turns paid.
+ */
+export async function recordPayoutAsExpense(payoutId) {
+  const { rows: [p] } = await pool.query(
+    `select po.tenant_id, po.run_id, po.staff_id, po.amount, po.paid_at, po.reference,
+            s.name as staff_name,
+            to_char(pr.period_start, 'DD Mon YYYY') as period_start,
+            to_char(pr.period_end, 'DD Mon YYYY') as period_end
+       from payroll_payouts po
+       join staff s on s.id = po.staff_id
+       join payroll_runs pr on pr.id = po.run_id
+      where po.id = $1 and po.status = 'paid'`, [payoutId]);
+  if (!p) return;
+
+  const { rows: reimbursements } = await pool.query(
+    "select source_id, amount from payroll_items where run_id=$1 and staff_id=$2 and type='expense_reimbursement'",
+    [p.run_id, p.staff_id]);
+  const reimbursed = reimbursements.reduce((n, r) => n + Number(r.amount), 0);
+  const expenseIds = reimbursements.map((r) => r.source_id).filter(Boolean);
+  if (expenseIds.length) {
+    await pool.query(
+      "update expenses set status='paid', paid_at=coalesce(paid_at, now()) where id = any($1::uuid[]) and tenant_id=$2 and status='approved'",
+      [expenseIds, p.tenant_id]);
+  }
+
+  const amount = Number(p.amount) - reimbursed;
+  if (!(amount > 0)) return;
+  await pool.query(
+    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, status, paid_at, payout_id, reference)
+     values ($1, 'Salaries', $2, $3, $4, $5, 'paid', coalesce($6, now()), $7, $8)
+     on conflict (payout_id) where payout_id is not null do nothing`,
+    [p.tenant_id, `Payroll ${p.period_start} – ${p.period_end}`, amount, p.staff_name, p.staff_id,
+      p.paid_at, payoutId, p.reference]);
+}
+
+/**
  * A payroll payout can bundle salary, commission and bonus lines together
  * for one staff member — once that payout is actually paid, whichever
  * referral_commissions rows fed its commission lines (payroll_items.type=
@@ -72,6 +121,9 @@ export async function accrueSettlement(tenantId, amount) {
  * import cycle — apply.js already sits below both.
  */
 export async function settleStaffCommissionsForPayout(payoutId) {
+  // Bookkeeping must never stand between a paid payout and its commissions
+  // being settled, so a failure here is logged and the rest carries on.
+  try { await recordPayoutAsExpense(payoutId); } catch (e) { console.error('recordPayoutAsExpense', payoutId, e.message); }
   const { rows: [payout] } = await pool.query(
     'select run_id, staff_id from payroll_payouts where id=$1', [payoutId]);
   if (!payout) return;

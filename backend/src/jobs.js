@@ -2,7 +2,8 @@ import cron from 'node-cron';
 import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
-import { fmtNairobi } from './nairobi-time.js';
+import { fmtNairobi, fmtNairobiDate } from './nairobi-time.js';
+import { generateDueBills } from './bills.js';
 import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles, forgetSubscriberCredentials } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
@@ -75,6 +76,7 @@ export function startJobs() {
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
   cron.schedule('0 4 * * *', safely('dormantSweep', dormantSweep));
+  cron.schedule('15 6 * * *', safely('generateMonthlyBills', generateMonthlyBills));
   cron.schedule('*/1 * * * *', safely('pollWireguardStatus', pollWireguardStatus));
   // The sales-demo tenant ("demo" subdomain) is the real app on real data —
   // nothing about it is a mock — so whatever a prospect clicks, edits or
@@ -722,6 +724,28 @@ async function dormantSweep() {
     await notifyOwner(tenantId,
       `${n} dormant client${n === 1 ? '' : 's'} deleted (blocked over 5 months).`,
       { url: '/clients', title: 'Dormant clients' });
+  }
+}
+
+/**
+ * Monthly bills: create this month's entry for each recurring bill that is
+ * within three days of its due day (see bills.js), and tell the owner once per
+ * run which ones are coming due.
+ */
+async function generateMonthlyBills() {
+  const made = await generateDueBills();
+  const byTenant = new Map();
+  for (const b of made) {
+    if (!byTenant.has(b.tenant_id)) byTenant.set(b.tenant_id, []);
+    byTenant.get(b.tenant_id).push(b);
+  }
+  for (const [tenantId, list] of byTenant) {
+    const shown = list.slice(0, 4).map((b) =>
+      `${b.description} KES ${Number(b.amount).toLocaleString('en-KE')} (due ${fmtNairobiDate(`${b.due_date}T00:00:00Z`)})`);
+    const more = list.length > shown.length ? ` and ${list.length - shown.length} more` : '';
+    await notifyOwner(tenantId,
+      `${list.length} monthly bill${list.length === 1 ? '' : 's'} coming due: ${shown.join('; ')}${more}. Approve them under Expenses.`,
+      { url: '/expenses', title: 'Bills due' });
   }
 }
 

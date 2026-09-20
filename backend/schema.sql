@@ -2322,3 +2322,73 @@ alter table subscribers add column if not exists blocked_since timestamptz;
 alter table subscribers add column if not exists dormant_at timestamptz;
 create index if not exists subscribers_blocked_since_idx
   on subscribers (tenant_id, blocked_since) where blocked_since is not null;
+
+-- ─────────────── suppliers, monthly bills, payroll as expense ───────────────
+-- A supplier is who money is paid to for the business (fuel, rent, bandwidth,
+-- equipment). Expenses can name one; archived rather than deleted once it has
+-- history.
+create table if not exists suppliers (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references tenants on delete cascade,
+  name         text not null,
+  category     text,
+  contact_name text,
+  phone        text,
+  email        text,
+  paybill      text,          -- how to pay them: M-Pesa paybill or till
+  till_number  text,
+  account_ref  text,          -- the account number to quote on that paybill
+  kra_pin      text,
+  notes        text,
+  active       boolean not null default true,
+  created_at   timestamptz not null default now()
+);
+create unique index if not exists suppliers_tenant_name_idx on suppliers (tenant_id, lower(name));
+
+-- A bill that comes round every month (rent, internet upstream, tower lease).
+-- jobs.js's generateMonthlyBills turns each active one into a pending expense
+-- a few days before it is due; approving and paying that entry is the same
+-- flow as any other expense.
+create table if not exists recurring_bills (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references tenants on delete cascade,
+  name         text not null,
+  category     text not null,
+  supplier_id  uuid references suppliers on delete set null,
+  amount       numeric(12,2) not null,
+  day_of_month int not null default 1,
+  notes        text,
+  active       boolean not null default true,
+  created_at   timestamptz not null default now(),
+  constraint recurring_bills_day_valid check (day_of_month between 1 and 31)
+);
+create index if not exists recurring_bills_tenant_idx on recurring_bills (tenant_id);
+
+alter table expenses add column if not exists supplier_id uuid references suppliers on delete set null;
+alter table expenses add column if not exists recurring_bill_id uuid references recurring_bills on delete set null;
+alter table expenses add column if not exists bill_month date;
+alter table expenses add column if not exists due_date date;
+alter table expenses add column if not exists reference text;
+-- The payroll payout an expense was recorded from, so a replayed webhook or a
+-- second run of the backfill below cannot record it twice.
+alter table expenses add column if not exists payout_id uuid references payroll_payouts on delete set null;
+create unique index if not exists expenses_bill_month_idx
+  on expenses (recurring_bill_id, bill_month) where recurring_bill_id is not null;
+create unique index if not exists expenses_payout_idx
+  on expenses (payout_id) where payout_id is not null;
+
+-- Payroll already paid before this existed, recorded as expenses. Reimbursement
+-- lines are left out: those are expenses of their own already. Safe to re-run.
+insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, status, paid_at, payout_id, reference)
+select po.tenant_id, 'Salaries',
+       'Payroll ' || to_char(pr.period_start, 'DD Mon YYYY') || ' – ' || to_char(pr.period_end, 'DD Mon YYYY'),
+       po.amount - coalesce(r.amt, 0), s.name, po.staff_id, 'paid', coalesce(po.paid_at, now()), po.id, po.reference
+  from payroll_payouts po
+  join payroll_runs pr on pr.id = po.run_id
+  join staff s on s.id = po.staff_id
+  left join lateral (
+    select sum(pi.amount) as amt from payroll_items pi
+     where pi.run_id = po.run_id and pi.staff_id = po.staff_id and pi.type = 'expense_reimbursement'
+  ) r on true
+ where po.status = 'paid' and po.amount - coalesce(r.amt, 0) > 0
+on conflict (payout_id) where payout_id is not null do nothing;

@@ -1,13 +1,40 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
+import Bills from './expenses/Bills';
+import Suppliers from './expenses/Suppliers';
 
 const CATEGORIES = ['Fuel', 'Equipment', 'Rent', 'Utilities', 'Salaries', 'Marketing', 'Repairs', 'Other'];
 
-const blank = () => ({ category: 'Fuel', description: '', amount: '', paidTo: '', staffId: '', receiptFile: null });
+const blank = () => ({
+  category: 'Fuel', description: '', amount: '', paidTo: '', staffId: '', receiptFile: null,
+  supplierId: '', dueDate: '', reference: '',
+});
+
+/** Small label on an expense that was not typed in by hand. */
+const Tag = ({ children }) => (
+  <span style={{
+    marginLeft: 8, padding: '1px 7px', borderRadius: 999, fontSize: 10.5, fontWeight: 700,
+    background: color.tileBg, color: color.muted, letterSpacing: '.03em',
+  }}>{children}</span>
+);
+
+/** Due date, in red once it has passed and the expense is still unpaid. */
+function DueDate({ e }) {
+  const day = String(e.due_date).slice(0, 10);
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+  const overdue = day < today && !['paid', 'rejected'].includes(e.status);
+  const label = new Date(`${day}T00:00:00Z`).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  return (
+    <span style={{ color: overdue ? color.rust : color.ink, fontWeight: overdue ? 700 : 400 }}>
+      {label}{overdue && <span style={{ fontSize: 11, marginLeft: 6 }}>overdue</span>}
+    </span>
+  );
+}
+
 
 const STATUS_TONE = { pending: 'pending', approved: 'default', paid: 'active', rejected: 'suspended' };
 
@@ -32,6 +59,15 @@ export default function Expenses() {
   const [form, setForm] = useState(null);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('all');
+  // Expenses, Monthly bills and Suppliers share this screen; a tab only shows for someone who may see it.
+  const [tab, setTab] = useState('log');
+  const perms = store.session?.perms ?? {};
+  const [suppliers, setSuppliers] = useState([]);
+  const loadSuppliers = async () => {
+    if (!perms['suppliers.view']) return;
+    try { setSuppliers(await api.suppliers()); } catch { setSuppliers([]); }
+  };
+  useEffect(() => { loadSuppliers(); }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target?.value ?? e }));
 
@@ -46,6 +82,7 @@ export default function Expenses() {
       const created = await api.createExpense({
         category: form.category, description: form.description || undefined,
         amount, paidTo: form.paidTo || undefined, staffId: form.staffId || undefined,
+        supplierId: form.supplierId || undefined, dueDate: form.dueDate || undefined, reference: form.reference || undefined,
       });
       if (form.receiptFile) {
         try {
@@ -110,6 +147,21 @@ export default function Expenses() {
       subtitle="Fuel, rent, equipment, staff reimbursements — every shilling spent, logged before it's paid."
       actions={<Button variant="primary" onClick={() => setForm(blank())}>+ Log expense</Button>}
     >
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {[['log', 'Expenses'], ...(perms['bills.view'] ? [['bills', 'Monthly bills']] : []),
+          ...(perms['suppliers.view'] ? [['suppliers', 'Suppliers']] : [])].map(([key, label]) => (
+          <Button key={key} variant={tab === key ? 'primary' : undefined} onClick={() => setTab(key)}>{label}</Button>
+        ))}
+      </div>
+
+      {tab === 'bills' && (
+        <Bills categories={CATEGORIES} suppliers={suppliers} canEdit={!!perms['bills.edit']} />
+      )}
+      {tab === 'suppliers' && (
+        <Suppliers suppliers={suppliers} reload={loadSuppliers} categories={CATEGORIES} canEdit={!!perms['suppliers.edit']} />
+      )}
+
+      {tab === 'log' && (<>
       <Grid min={200} gap={14}>
         <Stat label="Awaiting approval" value={`KES ${totalPending.toLocaleString('en-KE')}`} />
         <Stat label="Approved, unpaid" value={`KES ${totalApproved.toLocaleString('en-KE')}`} />
@@ -141,7 +193,7 @@ export default function Expenses() {
               key: 'category', label: 'Category',
               render: (e) => (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 600 }}>{e.category}</span>
+                  <span style={{ fontWeight: 600 }}>{e.category}{e.payout_id && <Tag>Payroll</Tag>}{e.recurring_bill_id && <Tag>Monthly bill</Tag>}</span>
                   {e.description && <span style={{ fontSize: 11.5, color: color.muted }}>{e.description}</span>}
                 </div>
               ),
@@ -155,6 +207,10 @@ export default function Expenses() {
             {
               key: 'amount', label: 'Amount', align: 'right',
               render: (e) => <span style={{ fontFamily: font.mono }}>KES {Number(e.amount).toLocaleString('en-KE')}</span>,
+            },
+            {
+              key: 'due', label: 'Due',
+              render: (e) => (e.due_date ? <DueDate e={e} /> : <span style={{ color: color.muted }}>—</span>),
             },
             { key: 'status', label: 'Status', render: (e) => <Badge tone={STATUS_TONE[e.status]}>{e.status}</Badge> },
             {
@@ -205,6 +261,23 @@ export default function Expenses() {
             <Field label="Paid to" span={2} hint="Vendor or person's name">
               <Input value={form.paidTo} onChange={set('paidTo')} placeholder="e.g. Total fuel station" />
             </Field>
+            <Field label="Supplier" hint="Optional — fills in Paid to and adds to their totals">
+              <Select
+                value={form.supplierId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  const sp = suppliers.find((x) => x.id === id);
+                  setForm((s) => ({ ...s, supplierId: id, paidTo: s.paidTo || sp?.name || '' }));
+                }}
+                options={[{ value: '', label: 'None' }, ...suppliers.filter((s) => s.active).map((s) => ({ value: s.id, label: s.name }))]}
+              />
+            </Field>
+            <Field label="Due date" hint="Optional — for a bill still to be paid">
+              <Input type="date" value={form.dueDate} onChange={set('dueDate')} />
+            </Field>
+            <Field label="Reference" span={2} hint="The supplier's invoice or receipt number">
+              <Input value={form.reference} onChange={set('reference')} placeholder="e.g. INV-2041" />
+            </Field>
             <Field label="Staff member" span={2} hint="Only if this is a reimbursement to one of your own staff">
               <Select
                 value={form.staffId}
@@ -225,6 +298,7 @@ export default function Expenses() {
           </div>
         )}
       </Modal>
+      </>)}
     </Screen>
   );
 }

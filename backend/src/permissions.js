@@ -135,6 +135,13 @@ export const DEFAULT_PERMISSIONS = {
   // as payments.apply, not expenses.edit — a cashier can log a fuel receipt,
   // only an owner signs off on it actually getting paid.
   'expenses.approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // Suppliers and monthly bills sit beside the expense log and follow it:
+  // the same people who can log an expense can manage who they pay and what
+  // recurs. Approving and paying what a bill produces is still expenses.approve.
+  'suppliers.view': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'suppliers.edit': { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'bills.view':     { owner: true, cashier: true,  technician: false, support: false, sales: false },
+  'bills.edit':     { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
   'hr.view': { owner: true, cashier: false, technician: false, support: false, sales: false },
   'hr.edit': { owner: true, cashier: false, technician: false, support: false, sales: false },
@@ -208,6 +215,10 @@ export const PERMISSION_META = [
   { key: 'expenses.view',    page: 'Expenses', action: 'View' },
   { key: 'expenses.edit',    page: 'Expenses', action: 'Create / edit' },
   { key: 'expenses.approve', page: 'Expenses', action: 'Approve for payment' },
+  { key: 'suppliers.view',   page: 'Suppliers', action: 'View' },
+  { key: 'suppliers.edit',   page: 'Suppliers', action: 'Create / edit' },
+  { key: 'bills.view',       page: 'Monthly bills', action: 'View' },
+  { key: 'bills.edit',       page: 'Monthly bills', action: 'Create / edit' },
   { key: 'hr.view', page: 'HR', action: 'View staff pay/employment details' },
   { key: 'hr.edit', page: 'HR', action: 'Edit staff pay/employment details' },
   { key: 'payroll.create',  page: 'HR', action: 'Draft a payroll run' },

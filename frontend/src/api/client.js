@@ -186,6 +186,15 @@ export const api = {
   approveExpense: (id) => post(`/api/expenses/${id}/approve`, {}),
   markExpensePaid: (id) => post(`/api/expenses/${id}/mark-paid`, {}),
   uploadExpenseReceipt: (id, dataUrl) => put(`/api/expenses/${id}/receipt`, { dataUrl }),
+  // ── suppliers and monthly bills ──
+  suppliers: () => get('/api/suppliers'),
+  createSupplier: (s) => post('/api/suppliers', s),
+  updateSupplier: (id, s) => put(`/api/suppliers/${id}`, s),
+  deleteSupplier: (id) => del(`/api/suppliers/${id}`),
+  bills: () => get('/api/bills'),
+  createBill: (b) => post('/api/bills', b),
+  updateBill: (id, b) => put(`/api/bills/${id}`, b),
+  deleteBill: (id) => del(`/api/bills/${id}`),
 
   // ── HR & payroll ──
   hrProfiles: () => get('/api/hr/profiles'),

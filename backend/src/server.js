@@ -6,6 +6,7 @@ import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
+import { generateDueBills } from './bills.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
 import { router as bank } from './payments/bankstk.js';
@@ -3717,11 +3718,15 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
     `select e.id, e.tenant_id, e.category, e.description, e.amount, e.paid_to, e.staff_id,
             e.status, e.created_by, e.approved_by, e.paid_at, e.created_at,
             (e.receipt_data is not null) as has_receipt,
-            cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name
+            e.supplier_id, e.recurring_bill_id, e.payout_id, e.reference,
+            to_char(e.due_date, 'YYYY-MM-DD') as due_date,
+            cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name,
+            sup.name as supplier_name
        from expenses e
        left join staff cs on cs.id = e.created_by
        left join staff ap on ap.id = e.approved_by
        left join staff sf on sf.id = e.staff_id
+       left join suppliers sup on sup.id = e.supplier_id
       where e.tenant_id=$1 ${status ? 'and e.status=$2' : ''}
       order by e.created_at desc`,
     status ? [req.tenant.id, status] : [req.tenant.id]);
@@ -3729,18 +3734,27 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
 }));
 
 app.post('/api/expenses', requirePermission('expenses.edit'), wrap(async (req, res) => {
-  const { category, description, amount, paidTo, staffId } = req.body ?? {};
+  const { category, description, amount, paidTo, staffId, supplierId, dueDate, reference } = req.body ?? {};
   const value = Number(amount);
   if (!category || !(value > 0)) return res.status(400).json({ error: 'category and a positive amount are required' });
   if (staffId) {
     const { rowCount } = await pool.query('select 1 from staff where id=$1 and tenant_id=$2', [staffId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
   }
+  let supplierName = null;
+  if (supplierId) {
+    const { rows: [sp] } = await pool.query('select name from suppliers where id=$1 and tenant_id=$2', [supplierId, req.tenant.id]);
+    if (!sp) return res.status(404).json({ error: 'No such supplier' });
+    supplierName = sp.name;
+  }
+  const due = /^\d{4}-\d{2}-\d{2}$/.test(String(dueDate ?? '')) ? dueDate : null;
   const { rows: [e] } = await pool.query(
-    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7)
-     returning id, tenant_id, category, description, amount, paid_to, staff_id, status, created_by, approved_by, paid_at, created_at`,
-    [req.tenant.id, String(category).trim(), description || null, value, paidTo || null, staffId || null, req.session?.staff_id ?? null]);
+    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by, supplier_id, due_date, reference)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     returning id, tenant_id, category, description, amount, paid_to, staff_id, status, created_by, approved_by, paid_at, created_at,
+               supplier_id, reference, to_char(due_date, 'YYYY-MM-DD') as due_date`,
+    [req.tenant.id, String(category).trim(), description || null, value, paidTo || supplierName || null, staffId || null,
+      req.session?.staff_id ?? null, supplierId || null, due, cleanText(reference)]);
   res.json(e);
 }));
 
@@ -3814,6 +3828,143 @@ app.get('/api/expenses/:id/receipt', requirePermission('expenses.view'), wrap(as
     'select receipt_data, receipt_mime from expenses where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!row?.receipt_mime) return res.status(404).end();
   res.type(row.receipt_mime).send(row.receipt_data);
+}));
+
+// ── suppliers ───────────────────────────────
+// Who the business pays. Totals come from the expense log, so a supplier's
+// "outstanding" is what has been logged against them but not yet paid.
+const SUPPLIER_FIELDS = ['name', 'category', 'contactName', 'phone', 'email', 'paybill', 'tillNumber', 'accountRef', 'kraPin', 'notes'];
+const cleanText = (v) => (v == null ? null : (String(v).trim() || null));
+
+app.get('/api/suppliers', requirePermission('suppliers.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select sp.*, x.paid_total, x.outstanding, x.expense_count, x.last_paid_at
+       from suppliers sp
+       left join lateral (
+         select coalesce(sum(e.amount) filter (where e.status = 'paid'), 0) as paid_total,
+                coalesce(sum(e.amount) filter (where e.status in ('pending','approved')), 0) as outstanding,
+                count(*)::int as expense_count,
+                max(e.paid_at) as last_paid_at
+           from expenses e where e.supplier_id = sp.id) x on true
+      where sp.tenant_id = $1
+      order by sp.active desc, lower(sp.name)`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/suppliers', requirePermission('suppliers.edit'), wrap(async (req, res) => {
+  const b = req.body ?? {};
+  const name = cleanText(b.name);
+  if (!name) return res.status(400).json({ error: 'A supplier needs a name' });
+  try {
+    const { rows: [s] } = await pool.query(
+      `insert into suppliers (tenant_id, name, category, contact_name, phone, email, paybill, till_number, account_ref, kra_pin, notes)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning *`,
+      [req.tenant.id, name, cleanText(b.category), cleanText(b.contactName), cleanText(b.phone), cleanText(b.email),
+        cleanText(b.paybill), cleanText(b.tillNumber), cleanText(b.accountRef), cleanText(b.kraPin), cleanText(b.notes)]);
+    res.json(s);
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'You already have a supplier with that name' });
+    throw e;
+  }
+}));
+
+app.put('/api/suppliers/:id', requirePermission('suppliers.edit'), wrap(async (req, res) => {
+  const b = req.body ?? {};
+  const name = cleanText(b.name);
+  if (!name) return res.status(400).json({ error: 'A supplier needs a name' });
+  try {
+    const { rows: [s] } = await pool.query(
+      `update suppliers set name=$3, category=$4, contact_name=$5, phone=$6, email=$7, paybill=$8,
+              till_number=$9, account_ref=$10, kra_pin=$11, notes=$12, active=coalesce($13, active)
+        where id=$1 and tenant_id=$2 returning *`,
+      [req.params.id, req.tenant.id, name, cleanText(b.category), cleanText(b.contactName), cleanText(b.phone),
+        cleanText(b.email), cleanText(b.paybill), cleanText(b.tillNumber), cleanText(b.accountRef),
+        cleanText(b.kraPin), cleanText(b.notes), typeof b.active === 'boolean' ? b.active : null]);
+    if (!s) return res.status(404).json({ error: 'No such supplier' });
+    res.json(s);
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'You already have a supplier with that name' });
+    throw e;
+  }
+}));
+
+app.delete('/api/suppliers/:id', requirePermission('suppliers.edit'), wrap(async (req, res) => {
+  const { rows: [used] } = await pool.query(
+    'select count(*)::int as n from expenses where supplier_id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (used.n > 0) {
+    return res.status(409).json({ error: `This supplier has ${used.n} expense${used.n === 1 ? '' : 's'} on record — archive it instead of deleting it.` });
+  }
+  const { rowCount } = await pool.query('delete from suppliers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such supplier' });
+  res.json({ ok: true });
+}));
+
+// ── monthly bills ───────────────────────────
+// Recurring templates; the daily job (bills.js) turns each into that month's
+// pending expense. Deleting one leaves the expenses it already produced.
+async function readBillBody(req, res) {
+  const b = req.body ?? {};
+  const name = cleanText(b.name);
+  const category = cleanText(b.category);
+  const amount = Number(b.amount);
+  const day = Number(b.dayOfMonth);
+  if (!name || !category) { res.status(400).json({ error: 'A bill needs a name and a category' }); return null; }
+  if (!(amount > 0)) { res.status(400).json({ error: 'Enter a positive amount' }); return null; }
+  if (!Number.isInteger(day) || day < 1 || day > 31) { res.status(400).json({ error: 'Day of month must be 1 to 31' }); return null; }
+  if (b.supplierId) {
+    const { rowCount } = await pool.query('select 1 from suppliers where id=$1 and tenant_id=$2', [b.supplierId, req.tenant.id]);
+    if (!rowCount) { res.status(404).json({ error: 'No such supplier' }); return null; }
+  }
+  return { name, category, amount, day, supplierId: b.supplierId || null, notes: cleanText(b.notes) };
+}
+
+app.get('/api/bills', requirePermission('bills.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select b.*, sp.name as supplier_name,
+            (select max(e.bill_month) from expenses e where e.recurring_bill_id = b.id) as last_month
+       from recurring_bills b
+       left join suppliers sp on sp.id = b.supplier_id
+      where b.tenant_id = $1
+      order by b.active desc, b.day_of_month, lower(b.name)`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/bills', requirePermission('bills.edit'), wrap(async (req, res) => {
+  const v = await readBillBody(req, res);
+  if (!v) return;
+  const { rows: [bill] } = await pool.query(
+    `insert into recurring_bills (tenant_id, name, category, supplier_id, amount, day_of_month, notes)
+     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
+    [req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes]);
+  // If it is already within three days of its due day this month, the entry
+  // should be there now rather than after tomorrow morning's job.
+  const made = await generateDueBills({ tenantId: req.tenant.id });
+  res.json({ ...bill, generated: made.length });
+}));
+
+app.put('/api/bills/:id', requirePermission('bills.edit'), wrap(async (req, res) => {
+  // Pausing sends only { active }, so the full-body checks apply to edits only.
+  if (Object.keys(req.body ?? {}).length === 1 && typeof req.body.active === 'boolean') {
+    const { rows: [bill] } = await pool.query(
+      'update recurring_bills set active=$3 where id=$1 and tenant_id=$2 returning *',
+      [req.params.id, req.tenant.id, req.body.active]);
+    if (!bill) return res.status(404).json({ error: 'No such bill' });
+    return res.json(bill);
+  }
+  const v = await readBillBody(req, res);
+  if (!v) return;
+  const { rows: [bill] } = await pool.query(
+    `update recurring_bills set name=$3, category=$4, supplier_id=$5, amount=$6, day_of_month=$7, notes=$8
+      where id=$1 and tenant_id=$2 returning *`,
+    [req.params.id, req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes]);
+  if (!bill) return res.status(404).json({ error: 'No such bill' });
+  res.json(bill);
+}));
+
+app.delete('/api/bills/:id', requirePermission('bills.edit'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query('delete from recurring_bills where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such bill' });
+  res.json({ ok: true });
 }));
 
 // ── HR ──────────────────────────────────────
@@ -10795,6 +10946,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'dbBackup', name: 'Database backup', cron: '0 3 * * *', system: true, detail: 'Nightly pg_dump to R2 — daily kept a week, Sunday\'s kept two months' },
   { job: 'dormantSweep', name: 'Dormant clients', cron: '0 4 * * *', detail: 'Marks a client dormant after 4 months blocked, then deletes them past 5 months and 30 days after the notice — never one with wallet credit or an unpaid invoice' },
+  { job: 'generateMonthlyBills', name: 'Monthly bills', cron: '15 6 * * *', detail: 'Adds each active monthly bill to the expense log three days before it is due, and texts the owner which are coming up' },
   { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
   { job: 'checkSlaBreaches', name: 'SLA breach alerts', cron: '*/5 * * * *', detail: 'Texts whoever an SLA policy names to escalate to (or the owner) the moment a ticket passes its resolve-by time' },
   { job: 'enforceHotspotDataCaps', name: 'Hotspot data caps', cron: '*/15 * * * *', detail: 'Tracks usage against a plan’s data cap and cuts a voucher off the moment it’s hit' },
