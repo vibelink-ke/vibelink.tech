@@ -69,6 +69,7 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
+  cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
   cron.schedule('0 1 * * *', safely('generateMonthlyCharges', generateMonthlyCharges));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
@@ -1230,9 +1231,67 @@ async function payoutRow(row, ownerTenantId) {
   // with "queued", not a result; b2c-result (daraja.js) is what
   // actually confirms it, matched back to this row by conversation_id.
   await pool.query(
-    "update settlements set status='processing', conversation_id=$2, fee=$3 where id=$1",
+    "update settlements set status='processing', conversation_id=$2, fee=$3, sent_at=now(), stuck_notified=false where id=$1",
     [row.settlement_id, conversationId, fee]);
   return { conversationId, fee, net };
+}
+
+/**
+ * Take a payout back that Safaricom never confirmed. Safaricom cannot be told to stop a payout it has
+ * accepted, so this only changes OUR record: the money goes back to the tenant's pending balance (or is
+ * merged into it) to be paid again. If the money did in fact reach them, doing this pays it twice — so a
+ * tenant may only do it after a while (minAgeMinutes) and the screens warn, and the platform owner can
+ * instead mark it paid with the receipt.
+ */
+export async function cancelPayout(id, { tenantId = null, by = 'system', minAgeMinutes = 0 } = {}) {
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const { rows: [s] } = await c.query(
+      `select * from settlements where id=$1 ${tenantId ? 'and tenant_id=$2' : ''} for update`, tenantId ? [id, tenantId] : [id]);
+    if (!s) throw Object.assign(new Error('No such payout.'), { status: 404 });
+    if (s.status !== 'processing') {
+      throw Object.assign(new Error('Only a payout still waiting for Safaricom can be cancelled.'), { status: 400 });
+    }
+    const since = new Date(s.sent_at ?? s.created_at).getTime();
+    if (minAgeMinutes && Date.now() - since < minAgeMinutes * 60000) {
+      throw Object.assign(new Error(`It was sent moments ago — Safaricom normally answers within a minute or two. Wait ${minAgeMinutes} minutes before cancelling.`), { status: 400 });
+    }
+    const note = `Cancelled by ${by} on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC — Safaricom never confirmed it`;
+    const { rows: [pend] } = await c.query("select id from settlements where tenant_id=$1 and status='pending' for update", [s.tenant_id]);
+    if (pend) {
+      await c.query('update settlements set amount = amount + $2 where id=$1', [pend.id, s.amount]);
+      await c.query("update settlements set status='cancelled', conversation_id=null, fee=0, note=$2 where id=$1", [s.id, note]);
+    } else {
+      await c.query("update settlements set status='pending', conversation_id=null, fee=0, sent_at=null, note=$2 where id=$1", [s.id, note]);
+    }
+    await c.query('commit');
+    return { amount: Number(s.amount) };
+  } catch (e) {
+    await c.query('rollback').catch(() => {});
+    throw e;
+  } finally {
+    c.release();
+  }
+}
+
+/** The platform owner is told when a payout has been waiting on Safaricom for hours (once each). */
+async function watchStuckPayouts() {
+  const { rows } = await pool.query(
+    `select s.id, s.amount, t.name, coalesce(s.sent_at, s.created_at) as since
+       from settlements s join tenants t on t.id = s.tenant_id
+      where s.status='processing' and not s.stuck_notified
+        and coalesce(s.sent_at, s.created_at) < now() - interval '3 hours'`);
+  if (!rows.length) return;
+  const owner = await platformOwnerTenantId();
+  if (!owner) return;
+  for (const r of rows) {
+    const hours = Math.floor((Date.now() - new Date(r.since)) / 3600000);
+    await notifyOwner(owner,
+      `Payout of KES ${Number(r.amount).toLocaleString('en-KE')} to ${r.name} has had no result from Safaricom for ${hours} hours. Check it under ISP tenants → Payouts awaiting Safaricom.`,
+      { url: '/tenants', title: 'Payout not confirmed' });
+    await pool.query('update settlements set stuck_notified=true where id=$1', [r.id]);
+  }
 }
 
 /**

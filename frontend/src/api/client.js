@@ -99,6 +99,10 @@ export const api = {
   reconcileStatement: (text) => post('/api/payments/reconcile', { text }),
   settlements: () => get('/api/settlements'),
   requestSettlementPayout: (amount) => post('/api/settlements/payout', amount != null ? { amount } : {}),
+  cancelSettlement: (id) => post(`/api/settlements/${id}/cancel`, {}),
+  inFlightSettlements: () => get('/api/platform/settlements/in-flight'),
+  platformCancelSettlement: (id) => post(`/api/platform/settlements/${id}/cancel`, {}),
+  platformMarkSettlementPaid: (id, receipt) => post(`/api/platform/settlements/${id}/mark-paid`, { receipt }),
 
   // ── catalogue ──
   tariffs: () => get('/api/tariffs'),

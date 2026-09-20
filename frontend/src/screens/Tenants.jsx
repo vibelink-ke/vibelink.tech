@@ -87,6 +87,10 @@ export default function Tenants() {
   const [assigningSource, setAssigningSource] = useState(null);
   // Narrowing a long list of tenants: by state, where they run, how they are charged, licence.
   const [tf, setTf] = useState({ status: 'all', hosting: 'all', charge: 'all', licence: 'all' });
+  // Payouts sent to Safaricom that have not been confirmed — to mark paid or take back.
+  const [inflight, setInflight] = useState([]);
+  const loadInflight = () => api.inFlightSettlements().then(setInflight).catch(() => {});
+  useEffect(() => { loadInflight(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const [upstream, setUpstream] = useState(null);        // { totals, byProvider } across every tenant's routers
 
   const loadUpstream = async () => {
@@ -536,6 +540,52 @@ export default function Tenants() {
                       ...gateways.map((g) => ({ value: g.id, label: g.name })),
                     ]}
                   />
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
+      {inflight.length > 0 && (
+        <Card
+          title="Payouts awaiting Safaricom"
+          subtitle="Sent, but no result has come back. Check the M-Pesa portal: if the money reached them, mark it paid with the receipt; if it did not, cancel it so it is paid again."
+        >
+          <Table
+            rowKey={(r) => r.id}
+            toolbar="never"
+            rows={inflight}
+            columns={[
+              { key: 'tenant', label: 'Tenant', render: (r) => <span style={{ fontWeight: 600 }}>{r.tenant}</span> },
+              { key: 'amount', label: 'Amount', align: 'right', render: (r) => `KES ${kes(r.amount)}` },
+              { key: 'phone', label: 'To', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12.5 }}>{r.settlement_phone ?? '—'}</span> },
+              { key: 'since', label: 'Sent', render: (r) => new Date(r.since).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) },
+              {
+                key: 'act', label: '', align: 'right',
+                render: (r) => (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        const receipt = window.prompt(`M-Pesa receipt number for the KES ${kes(r.amount)} sent to ${r.tenant}:`);
+                        if (!receipt) return;
+                        try { await api.platformMarkSettlementPaid(r.id, receipt); store.toast('Marked paid'); loadInflight(); } catch (e) { store.toast(e.message); }
+                      }}
+                    >
+                      Mark paid
+                    </Button>
+                    <Button
+                      size="sm"
+                      style={{ color: color.rust }}
+                      onClick={async () => {
+                        if (!window.confirm(`Cancel the KES ${kes(r.amount)} payout to ${r.tenant}?\n\nOnly if the money did NOT reach them — otherwise it will be paid a second time.`)) return;
+                        try { await api.platformCancelSettlement(r.id); store.toast('Cancelled — it goes out again on their next payout'); loadInflight(); } catch (e) { store.toast(e.message); }
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </span>
                 ),
               },
             ]}

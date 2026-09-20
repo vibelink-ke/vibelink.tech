@@ -9252,6 +9252,44 @@ app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req,
   res.json(rows);
 }));
 
+/** Cancel a payout Safaricom never confirmed: it goes back to be paid again. Only after 15 minutes. */
+app.post('/api/settlements/:id/cancel', requirePermission('payments.request_payout'), wrap(async (req, res) => {
+  const { cancelPayout } = await import('./jobs.js');
+  try {
+    const r = await cancelPayout(req.params.id, { tenantId: req.tenant.id, by: req.session?.name ?? 'staff', minAgeMinutes: 15 });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(e.status ?? 500).json({ error: e.message }); }
+}));
+
+/** Payouts sent to Safaricom that have not been confirmed, across every tenant. */
+app.get('/api/platform/settlements/in-flight', superAdminOnly, wrap(async (_req, res) => {
+  const { rows } = await pool.query(
+    `select s.id, s.tenant_id, t.name as tenant, s.amount, s.fee, s.method, s.conversation_id,
+            coalesce(s.sent_at, s.created_at) as since, t.settlement_phone
+       from settlements s join tenants t on t.id = s.tenant_id
+      where s.status='processing' order by 6`);
+  res.json(rows);
+}));
+
+app.post('/api/platform/settlements/:id/cancel', superAdminOnly, wrap(async (req, res) => {
+  const { cancelPayout } = await import('./jobs.js');
+  try {
+    const r = await cancelPayout(req.params.id, { by: req.session?.name ?? 'platform owner' });
+    res.json({ ok: true, ...r });
+  } catch (e) { res.status(e.status ?? 500).json({ error: e.message }); }
+}));
+
+/** It did reach the tenant (seen in the M-Pesa portal): record it as paid, with the receipt. */
+app.post('/api/platform/settlements/:id/mark-paid', superAdminOnly, wrap(async (req, res) => {
+  const receipt = String(req.body?.receipt ?? '').trim();
+  if (!receipt) return res.status(400).json({ error: 'Enter the M-Pesa receipt number.' });
+  const { rowCount } = await pool.query(
+    `update settlements set status='paid', settled_at=now(), reference=$2, note=$3 where id=$1 and status='processing'`,
+    [req.params.id, receipt, `Marked paid by ${req.session?.name ?? 'platform owner'} — confirmed in the M-Pesa portal`]);
+  if (!rowCount) return res.status(400).json({ error: 'That payout is not waiting any more.' });
+  res.json({ ok: true });
+}));
+
 /**
  * On-demand payout, instead of waiting for the 2am settleTenants sweep — see
  * jobs.js's payoutTenantNow for the actual B2C call and its failure modes

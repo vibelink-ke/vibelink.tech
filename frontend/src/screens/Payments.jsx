@@ -64,6 +64,19 @@ export default function Payments() {
   const pendingRowAmount = Number(pendingRow?.amount ?? 0);
   const hasPendingPayout = !!pendingRow;
   const [payoutBusy, setPayoutBusy] = useState(false);
+  // A payout Safaricom has not confirmed after a quarter of an hour can be taken back.
+  const cancelPayout = async (row) => {
+    if (!window.confirm(
+      `Cancel this payout of KES ${kes(row.amount)}?\n\nSafaricom accepted it but never confirmed it. Cancelling puts the money back to be paid again — `
+      + 'so only do this if it has NOT reached your phone. If it already arrived, cancelling would let it be paid a second time.')) return;
+    try {
+      await api.cancelSettlement(row.id);
+      api.settlements().then((l) => store.setCollection('settlements', l)).catch(() => {});
+      store.toast('Payout cancelled — the money is back in your pending balance');
+    } catch (e) {
+      store.toast(e.message);
+    }
+  };
   // Blank means "the whole pending balance" — most tenants just want that,
   // so this is opt-in rather than pre-filled with a number they'd have to
   // clear first.
@@ -373,7 +386,7 @@ export default function Payments() {
           {TABS.map((t) => {
             const on = t.id === tab;
             const n = t.id === 'unmatched' ? unmatched.length : t.id === 'invoices' ? openInvoices.length
-              : t.id === 'settlements' ? settlements.filter((s) => s.status !== 'paid').length || null : null;
+              : t.id === 'settlements' ? settlements.filter((s) => s.status !== 'paid' && s.status !== 'cancelled').length || null : null;
             return (
               <div
                 key={t.id}
@@ -597,11 +610,25 @@ export default function Payments() {
                   key: 'net', label: 'Net paid', align: 'right',
                   render: (r) => <strong>{money(Number(r.amount) - Number(r.fee ?? 0))}</strong>,
                 },
-                { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+                {
+                  key: 'status', label: 'Status',
+                  render: (r) => (
+                    <div>
+                      <Badge tone={r.status}>{r.status}</Badge>
+                      {r.note && <div style={{ fontSize: 11.5, color: color.muted, maxWidth: 240, marginTop: 3 }}>{r.note}</div>}
+                    </div>
+                  ),
+                },
                 { key: 'method', label: 'Method', render: (r) => r.method ?? '—' },
                 { key: 'reference', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.reference ?? '—'}</span> },
                 { key: 'created_at', label: 'Accrued since', render: (r) => when(r.created_at) },
                 { key: 'settled_at', label: 'Paid out', render: (r) => when(r.settled_at) },
+                {
+                  key: 'cancel', label: '', align: 'right',
+                  render: (r) => (r.status === 'processing' && Date.now() - new Date(r.sent_at ?? r.created_at).getTime() > 15 * 60000
+                    ? <Button size="sm" onClick={() => cancelPayout(r)} style={{ color: color.rust }}>Cancel</Button>
+                    : null),
+                },
               ]}
               />
             </>

@@ -2725,3 +2725,10 @@ begin
     insert into schema_flags (name) values ('settlement_time_initial');
   end if;
 end $$;
+
+-- A payout sent to Safaricom waits for their result. If it never comes it can be cancelled (put back
+-- to be paid again) or marked paid by hand; 'cancelled' rows keep the record. sent_at is when it was
+-- sent, stuck_notified stops the same stuck payout being reported over and over.
+alter table settlements add column if not exists note text;
+alter table settlements add column if not exists sent_at timestamptz;
+alter table settlements add column if not exists stuck_notified boolean not null default false;
