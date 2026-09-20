@@ -43,14 +43,6 @@ export default function Vouchers() {
   );
 
   const set = (k) => (e) => setFilter((s) => ({ ...s, [k]: e.target.value }));
-  const allSelected = visible.length > 0 && visible.every((v) => selected.has(v.id));
-
-  const toggle = (id) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      n.has(id) ? n.delete(id) : n.add(id);
-      return n;
-    });
 
   const expiredCount = vouchers.filter((v) => v.status === 'expired').length;
 
@@ -77,6 +69,29 @@ export default function Vouchers() {
     const sent = results.filter((r) => r.status === 'fulfilled').length;
     const skipped = picked.length - withPhone.length;
     store.toast(`Resent ${sent} code(s)${skipped ? `, ${skipped} had no phone number` : ''}`);
+  };
+
+  /** Give the selected codes extra time — after an outage, say. Only codes whose clock has started can be extended. */
+  const compensate = async () => {
+    const picked = visible.filter((v) => selected.has(v.id));
+    if (!picked.length) return store.toast('Select at least one voucher first');
+    const raw = window.prompt(`Extra time to add to ${picked.length} voucher(s), in hours:`, '1');
+    if (raw === null) return;
+    const hours = Number(raw);
+    if (!Number.isFinite(hours) || hours <= 0) return store.toast('Enter a positive number of hours');
+    try {
+      const out = await api.compensateVouchers(picked.map((v) => v.id), hours);
+      store.setCollection('vouchers', (vs) =>
+        vs.map((v) => {
+          const hit = out.rows?.find((r) => r.id === v.id);
+          return hit ? { ...v, status: hit.status, expires_at: hit.expires_at } : v;
+        })
+      );
+      store.toast(`Added ${hours} hour(s) to ${out.compensated} voucher(s)${out.skipped ? `, ${out.skipped} not started yet` : ''}`);
+      setSelected(new Set());
+    } catch (e) {
+      store.toast(`Could not compensate: ${e.message}`);
+    }
   };
 
   const generate = async () => {
@@ -157,6 +172,7 @@ export default function Vouchers() {
         >
           <span style={{ fontSize: 13, color: '#4a524c' }}>{selected.size} selected</span>
           <Button size="sm" onClick={resendSms}>Resend SMS</Button>
+          <Button size="sm" onClick={compensate}>Compensate</Button>
           <Button
             size="sm"
             style={{ background: color.rust, borderColor: color.rust, color: '#fff', fontWeight: 600 }}
@@ -202,15 +218,9 @@ export default function Vouchers() {
           rowKey={(v) => v.id}
           empty="No vouchers issued yet — they are created when a hotspot payment lands"
           rows={visible}
+          toolbar="always"
+          select={{ selected, setSelected, id: (v) => v.id }}
           columns={[
-            {
-              key: 'sel',
-              label: '',
-              width: 26,
-              render: (v) => (
-                <input type="checkbox" checked={selected.has(v.id)} onChange={() => toggle(v.id)} aria-label={`Select ${v.code}`} style={{ cursor: 'pointer' }} />
-              ),
-            },
             { key: 'code', label: 'Code', render: (v) => <span style={{ fontFamily: font.mono, fontWeight: 500 }}>{v.code}</span> },
             { key: 'phone', label: 'Phone', render: (v) => v.phone ?? '—' },
             {

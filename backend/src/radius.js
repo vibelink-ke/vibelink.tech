@@ -972,6 +972,32 @@ export async function expireVoucherNow(c, tenantId, code) {
 }
 
 /**
+ * Give vouchers extra time — a compensation after an outage. Only a voucher whose
+ * clock has started (it has an expiry) can be extended; one still waiting for its
+ * first login has nothing to add to. The time is added to whichever is later, its
+ * expiry or now, so an expired code comes back for exactly the time given.
+ * Expiration in RADIUS moves with it (that is what actually admits the next login),
+ * including the device's own MAC login when it has one.
+ */
+export async function extendVouchers(c, tenantId, ids, minutes) {
+  const { rows } = await c.query(
+    `update vouchers
+        set expires_at = greatest(expires_at, now()) + ($3 || ' minutes')::interval,
+            status = 'in_use'
+      where tenant_id = $1 and id = any($2::uuid[]) and expires_at is not null
+      returning id, code, mac, status, expires_at`,
+    [tenantId, ids, String(minutes)]);
+  for (const v of rows) {
+    await c.query(
+      `insert into radcheck (tenant_id, username, attribute, op, value) values ($1,$2,'Expiration',':=',$3)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [tenantId, v.code, radiusDate(v.expires_at)]);
+    if (v.mac) await ensureMacRadiusLogin(c, tenantId, v.code);
+  }
+  return { compensated: rows.length, skipped: ids.length - rows.length, rows };
+}
+
+/**
  * Disconnect whatever is live right now. Rewriting Expiration only stops
  * the *next* login attempt — a session already connected when a data cap is
  * hit would otherwise keep flowing until RouterOS's own Session-Timeout

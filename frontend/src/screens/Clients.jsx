@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
+import { useTable, TableToolbar, TableFooter } from '../ui/paging';
 
 // KopoKopo is hotspot-only by policy (db kopokopo_hotspot_only constraint) —
 // it can't actually charge a PPPoE customer, so it's not offered here.
@@ -225,7 +226,14 @@ export default function Clients() {
     }));
   }, [visible]);
 
-  const allSelected = visible.length > 0 && visible.every((c) => selected.has(c.id));
+  // Batches of 20 / 50 / 100, and a search over account, name, phone, email and package.
+  const accountText = (a) =>
+    [a.primary.account_code, a.primary.name, a.primary.phone, a.primary.email, ...a.lines.map((l) => planTitle(l))]
+      .filter(Boolean).join(' ');
+  const t = useTable(visibleAccounts, accountText);
+  const pageAccounts = t.pageRows;
+  const lineIds = (accts) => accts.flatMap((a) => a.lines.map((l) => l.id));
+  const allSelected = pageAccounts.length > 0 && pageAccounts.every((a) => selected.has(a.primary.id));
 
   const toggle = (id) =>
     setSelected((s) => {
@@ -234,11 +242,11 @@ export default function Clients() {
       return n;
     });
 
+  // The header box ticks the batch on screen; "Select all N" in the bar below reaches every match.
   const toggleAll = () =>
     setSelected((s) => {
-      if (allSelected) return new Set();
       const n = new Set(s);
-      visible.forEach((c) => n.add(c.id));
+      lineIds(pageAccounts).forEach((id) => (allSelected ? n.delete(id) : n.add(id)));
       return n;
     });
 
@@ -491,6 +499,10 @@ export default function Clients() {
           }}
         >
           <span style={{ fontSize: 13, color: '#4a524c' }}>{count} selected</span>
+          {count < lineIds(t.filtered).length && (
+            <Button size="sm" onClick={() => setSelected(new Set(lineIds(t.filtered)))}>Select all {t.filtered.length}</Button>
+          )}
+          <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
           <Button size="sm" onClick={bulkPause}>Pause / resume</Button>
           <Button size="sm" onClick={bulkSms}>Send SMS</Button>
           <Button size="sm" onClick={bulkCompensate}>Compensate</Button>
@@ -514,6 +526,7 @@ export default function Clients() {
 
       {view === 'list' && (
       <div style={{ background: '#fff', border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 8px' }} className="scroll-x">
+        <TableToolbar t={t} total={visibleAccounts.length} always />
         {visibleAccounts.length === 0 ? (
           <Empty action={<Button variant="primary" onClick={() => navigate('/clients/new')}>+ Add your first client</Button>}>
             {clients.length === 0 ? 'No clients yet' : `No ${filter} clients`}
@@ -537,7 +550,7 @@ export default function Clients() {
               </tr>
             </thead>
             <tbody>
-              {visibleAccounts.map(({ primary: c, lines }) => {
+              {pageAccounts.map(({ primary: c, lines }) => {
                 const multi = lines.length > 1;
                 return (
                   <tr key={c.account_code}>
@@ -682,6 +695,8 @@ export default function Clients() {
             </tbody>
           </table>
         )}
+        {visibleAccounts.length > 0 && !t.filtered.length && <Empty>No clients match your search</Empty>}
+        <TableFooter t={t} total={visibleAccounts.length} />
       </div>
       )}
 

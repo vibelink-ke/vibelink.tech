@@ -46,6 +46,7 @@ export const DEFAULT_PERMISSIONS = {
   'hotspot.edit':     { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'hotspot.vouchers': { owner: true, cashier: true,  technician: true,  support: false, sales: false },
   'hotspot.delete':   { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  'hotspot.compensate': { owner: true, cashier: false, technician: false, support: false, sales: false },
 
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -183,6 +184,7 @@ export const PERMISSION_META = [
   { key: 'hotspot.edit',     page: 'Hotspot', action: 'Edit settings' },
   { key: 'hotspot.vouchers', page: 'Hotspot', action: 'Generate vouchers' },
   { key: 'hotspot.delete',   page: 'Hotspot', action: 'Delete / void vouchers' },
+  { key: 'hotspot.compensate', page: 'Hotspot', action: 'Compensate vouchers (add time)' },
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },

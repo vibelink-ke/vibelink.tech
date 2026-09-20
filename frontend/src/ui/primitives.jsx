@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { color, font, radius, toneFor } from '../theme/tokens';
+import { useTable, TableToolbar, TableFooter, SelectionHint } from './paging';
 
 /* ── layout ───────────────────────────────────────────────── */
 
@@ -136,60 +137,112 @@ export const Dot = ({ on = true }) => (
 /**
  * Table. `columns` is [{ key, label, align, width, render }].
  * Scrolls inside its own container so the page never scrolls sideways.
+ * Long lists come in batches (20 / 50 / 100) with a search box; `select` adds a
+ * tickable first column ({ selected: Set, setSelected, id: (row) => id }).
  */
-export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, i) => i, onRowClick }) {
+export function Table({ columns, rows, empty = 'Nothing here yet', rowKey = (_, i) => i, onRowClick, select, toolbar = 'auto' }) {
+  const t = useTable(rows);
   if (!rows?.length) return <Empty>{empty}</Empty>;
+
+  // A tickable first column: the header box ticks the batch on screen; "Select all N"
+  // (in the toolbar) reaches past it to every match.
+  const pageIds = select ? t.pageRows.map(select.id) : [];
+  const pagePicked = pageIds.length > 0 && pageIds.every((id) => select.selected.has(id));
+  const togglePage = () => {
+    const n = new Set(select.selected);
+    pageIds.forEach((id) => (pagePicked ? n.delete(id) : n.add(id)));
+    select.setSelected(n);
+  };
+  const cols = select
+    ? [
+        {
+          key: '__select',
+          label: <input type="checkbox" checked={pagePicked} onChange={togglePage} aria-label="Select this page" style={{ cursor: 'pointer' }} />,
+          width: 26,
+          render: (r) => (
+            <input
+              type="checkbox"
+              checked={select.selected.has(select.id(r))}
+              onChange={() => {
+                const n = new Set(select.selected);
+                const id = select.id(r);
+                n.has(id) ? n.delete(id) : n.add(id);
+                select.setSelected(n);
+              }}
+              onClick={(e) => e.stopPropagation()}
+              aria-label="Select row"
+              style={{ cursor: 'pointer' }}
+            />
+          ),
+        },
+        ...columns,
+      ]
+    : columns;
+
   return (
-    <div className="scroll-x">
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-        <thead>
-          <tr>
-            {columns.map((c) => (
-              <th
-                key={c.key}
-                style={{
-                  textAlign: c.align ?? 'left',
-                  padding: '8px 10px',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  letterSpacing: '.04em',
-                  textTransform: 'uppercase',
-                  color: color.muted,
-                  borderBottom: `1px solid ${color.line}`,
-                  whiteSpace: 'nowrap',
-                  width: c.width,
-                }}
-              >
-                {c.label}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr
-              key={rowKey(r, i)}
-              onClick={onRowClick ? () => onRowClick(r) : undefined}
-              style={{ cursor: onRowClick ? 'pointer' : 'default' }}
-            >
-              {columns.map((c) => (
-                <td
-                  key={c.key}
-                  style={{
-                    textAlign: c.align ?? 'left',
-                    padding: '10px',
-                    borderBottom: `1px solid ${color.line}`,
-                    color: color.ink,
-                    verticalAlign: 'middle',
-                  }}
+    <div>
+      <TableToolbar
+        t={t}
+        total={rows.length}
+        always={toolbar === 'always'}
+        extra={select ? <SelectionHint t={t} selected={select.selected} setSelected={select.setSelected} ids={(list) => list.map(select.id)} /> : null}
+      />
+      {!t.filtered.length ? (
+        <Empty>Nothing matches your search</Empty>
+      ) : (
+        <div className="scroll-x">
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr>
+                {cols.map((c) => (
+                  <th
+                    key={c.key}
+                    style={{
+                      textAlign: c.align ?? 'left',
+                      padding: '8px 10px',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: '.04em',
+                      textTransform: 'uppercase',
+                      color: color.muted,
+                      borderBottom: `1px solid ${color.line}`,
+                      whiteSpace: 'nowrap',
+                      width: c.width,
+                    }}
+                  >
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {t.pageRows.map((r, i) => (
+                <tr
+                  key={rowKey(r, i)}
+                  onClick={onRowClick ? () => onRowClick(r) : undefined}
+                  style={{ cursor: onRowClick ? 'pointer' : 'default' }}
                 >
-                  {c.render ? c.render(r, i) : r[c.key]}
-                </td>
+                  {cols.map((c) => (
+                    <td
+                      key={c.key}
+                      style={{
+                        textAlign: c.align ?? 'left',
+                        padding: '10px',
+                        borderBottom: `1px solid ${color.line}`,
+                        color: color.ink,
+                        verticalAlign: 'middle',
+                      }}
+                    >
+                      {c.render ? c.render(r, i) : r[c.key]}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <TableFooter t={t} total={rows.length} />
     </div>
   );
 }

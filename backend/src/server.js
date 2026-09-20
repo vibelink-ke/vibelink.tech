@@ -9198,6 +9198,18 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
   res.json({ deleted: rowCount, revoked });
 }));
 
+/** Extra time for the selected vouchers (after an outage). */
+app.post('/api/vouchers/compensate', requirePermission('hotspot.compensate'), wrap(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 5000) : [];
+  const hours = Number(req.body?.hours);
+  if (!ids.length) return res.status(400).json({ error: 'no vouchers selected' });
+  if (!(hours > 0) || hours > 24 * 365) return res.status(400).json({ error: 'hours must be a positive number' });
+  const { extendVouchers } = await import('./radius.js');
+  const { withTenant } = await import('./db.js');
+  const out = await withTenant(req.tenant.id, (c) => extendVouchers(c, req.tenant.id, ids, Math.round(hours * 60)));
+  res.json(out);
+}));
+
 app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { rows: doomed } = await pool.query(
     "select id, code, mac from vouchers where tenant_id=$1 and status='expired'", [req.tenant.id]);
