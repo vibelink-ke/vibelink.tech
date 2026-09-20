@@ -2568,3 +2568,17 @@ alter table tenants add constraint tenants_hosting_check check (hosting in ('pla
 alter table tenants add column if not exists instance_key_hash text;
 alter table tenants add column if not exists instance_last_seen timestamptz;
 create unique index if not exists tenants_instance_key_idx on tenants (instance_key_hash) where instance_key_hash is not null;
+
+-- ─────────────── Safaricom's B2C fee comes out of the payout ───────────────
+-- Every tenant's payout now has Safaricom's B2C charge deducted automatically
+-- (the tariff in b2c_fee_tiers), instead of the platform absorbing it. Existing
+-- tenants are switched once; the platform owner can still set a tenant back to
+-- 'commission_only' from Edit tenant.
+alter table tenants alter column settlement_fee_mode set default 'tiered';
+do $$
+begin
+  if not exists (select 1 from schema_flags where name = 'b2c_fee_deducted_default') then
+    update tenants set settlement_fee_mode = 'tiered' where settlement_fee_mode = 'commission_only';
+    insert into schema_flags (name) values ('b2c_fee_deducted_default');
+  end if;
+end $$;

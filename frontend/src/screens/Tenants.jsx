@@ -649,7 +649,7 @@ export default function Tenants() {
                         hotspot_commission_pct: t.hotspot_commission_pct ?? 3,
                         pppoe_client_rate: t.pppoe_client_rate ?? 16,
                         settlement_frequency: t.settlement_frequency ?? 'daily',
-                        settlement_fee_mode: t.settlement_fee_mode ?? 'commission_only',
+                        settlement_fee_mode: t.settlement_fee_mode ?? 'tiered',
                       })
                     }
                     style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
@@ -916,7 +916,7 @@ export default function Tenants() {
                     onChange={(e) => setEditing((s) => ({ ...s, settlement_fee_mode: e.target.value }))}
                     options={[
                       { value: 'commission_only', label: 'Platform absorbs it' },
-                      { value: 'tiered', label: "Deduct from the tenant's payout (Safaricom's tariff)" },
+                      { value: 'tiered', label: "Deduct from the tenant's payout — automatic (Safaricom's tariff)" },
                     ]}
                   />
                 </Field>
