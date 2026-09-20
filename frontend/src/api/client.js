@@ -290,6 +290,7 @@ export const api = {
   smartoltTest: (b) => post('/api/smartolt/test', b),
   smartoltSync: () => post('/api/smartolt/sync', {}),
   smartoltOverview: () => get('/api/smartolt/overview'),
+  smartoltSummary: () => get('/api/smartolt/summary'),
   smartoltOnus: () => get('/api/smartolt/onus'),
   smartoltOnuFor: (id) => get(`/api/smartolt/onu-for/${id}`),
   smartoltOnuAction: (ext, action) => post(`/api/smartolt/onus/${encodeURIComponent(ext)}/action`, { action }),

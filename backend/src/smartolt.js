@@ -161,6 +161,8 @@ async function syncOnus(cfg) {
          offline_since = case when excluded.status = 'online' then null
                               when smartolt_onus.status = 'online' or smartolt_onus.offline_since is null then now()
                               else smartolt_onus.offline_since end,
+         los_polls = case when excluded.status = 'los' then smartolt_onus.los_polls + 1 else 0 end,
+         los_notified = case when excluded.status = 'los' then smartolt_onus.los_notified else false end,
          status=excluded.status`,
       [cfg.tenant_id, o.external_id, o.sn, o.name, o.olt_id, o.olt_name, o.board, o.port, o.onu_no, o.onu_type,
         o.zone, o.odb, o.address, o.lat, o.lng, o.status, o.signal_class, o.signal_dbm, o.distance_m, o.admin_status,
@@ -185,6 +187,8 @@ async function syncStatuses(cfg) {
     const { rowCount } = await pool.query(
       `update smartolt_onus set
           offline_since = case when $3 = 'online' then null when status = 'online' or offline_since is null then now() else offline_since end,
+          los_polls = case when $3 = 'los' then los_polls + 1 else 0 end,
+          los_notified = case when $3 = 'los' then los_notified else false end,
           status=$3, signal_dbm=coalesce($4, signal_dbm), signal_class=coalesce($5, signal_class), updated_at=now()
         where tenant_id=$1 and external_id=$2`, [cfg.tenant_id, id, status, dbm, cls]);
     n += rowCount;
@@ -226,10 +230,92 @@ export async function syncTenant(tenantId, mode = 'statuses') {
       await setState(tenantId, { last_statuses_at: new Date(), last_error: null });
     }
     await evaluateOutages(tenantId).catch((e) => console.warn('smartolt outages', e.message));
+    await handleLos(tenantId).catch((e) => console.warn('smartolt los', e.message));
+    // ONUs waiting to be authorised: a separate call whose failure must not spoil the sync
+    await syncUnconfigured(cfg).catch((e) => console.warn('smartolt unconfigured', e.message));
     return { olts, onus };
   } catch (e) {
     await setState(tenantId, { last_error: String(e.message).slice(0, 400), last_error_at: new Date() }).catch(() => {});
     throw e;
+  }
+}
+
+// ── waiting to be authorised ────────────────────────────────────────────────
+
+/** Keep a copy of the ONUs SmartOLT has discovered but not configured, so the dashboard can count them. */
+async function syncUnconfigured(cfg) {
+  const rows = (await unconfiguredFor(cfg)).filter((r) => r.sn);
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    await c.query('delete from smartolt_unconfigured where tenant_id=$1', [cfg.tenant_id]);
+    for (const r of rows) {
+      await c.query(
+        `insert into smartolt_unconfigured (tenant_id, sn, olt_id, olt_name, board, port, pon_type, onu_type)
+         values ($1,$2,$3,$4,$5,$6,$7,$8) on conflict (tenant_id, sn) do nothing`,
+        [cfg.tenant_id, r.sn, r.olt_id, r.olt_name, r.board, r.port, r.pon_type, r.onu_type]);
+    }
+    await c.query('update smartolt_config set unconfigured_at=now() where tenant_id=$1', [cfg.tenant_id]);
+    await c.query('commit');
+  } catch (e) {
+    await c.query('rollback').catch(() => {});
+    throw e;
+  } finally {
+    c.release();
+  }
+}
+
+// ── LOS: no light ───────────────────────────────────────────────────────────
+
+/**
+ * An ONU reporting LOS (loss of signal — no light arriving) is a cut or unplugged fibre or a dead
+ * ONU, and the customer is down. Two checks in a row (so a blip does not count) send the owner a
+ * message and raise a high-priority ticket, once per episode. When most ONUs on the same PON port
+ * or OLT are down the outage alert already says so, so single tickets are held back until that is
+ * over — a cut trunk should be one job, not forty tickets.
+ */
+async function handleLos(tenantId) {
+  const { rows } = await pool.query(
+    `select n.external_id, n.sn, n.name, n.olt_id, n.olt_name, n.board, n.port, n.subscriber_id,
+            s.name as client_name, s.account_code
+       from smartolt_onus n left join subscribers s on s.id = n.subscriber_id
+      where n.tenant_id=$1 and n.status='los' and n.los_polls >= 2 and not n.los_notified`, [tenantId]);
+  if (!rows.length) return;
+  const { notifyOwner } = await import('./jobs.js');
+
+  for (const o of rows) {
+    const { rows: [g] } = await pool.query(
+      `select count(*)::int as total, count(*) filter (where status <> 'online')::int as down
+         from smartolt_onus where tenant_id=$1 and olt_id is not distinct from $2 and board is not distinct from $3 and port is not distinct from $4`,
+      [tenantId, o.olt_id, o.board, o.port]);
+    if (g.total >= 4 && g.down / g.total >= 0.75) continue;   // covered by the outage alert
+
+    const label = o.client_name ? `${o.client_name} (${o.name ?? o.sn})` : (o.name ?? o.sn);
+    const where = `${o.olt_name ?? 'OLT'} port ${o.board ?? '?'}/${o.port ?? '?'}`;
+
+    // one open LOS ticket per client at a time
+    const { rows: [open] } = await pool.query(
+      `select number from tickets where tenant_id=$1 and subscriber_id is not distinct from $2 and subject like 'ONU on LOS%' and status <> 'resolved' limit 1`,
+      [tenantId, o.subscriber_id]);
+    let number = open?.number ?? null;
+    if (!open) {
+      const { rows: [policy] } = await pool.query(
+        `select id, resolve_mins from sla_policies where tenant_id=$1 and priority='high' and coalesce(enabled, true) order by resolve_mins asc limit 1`, [tenantId]);
+      const { rows: [t] } = await pool.query(
+        `insert into tickets (tenant_id, number, subject, subscriber_id, priority, description, source, sla_policy_id, due_at)
+         values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'high', $4, 'smartolt', $5, $6) returning number`,
+        [tenantId, `ONU on LOS — ${label}`, o.subscriber_id,
+          `SmartOLT reports loss of signal (no light) on ONU ${o.sn ?? o.name} at ${where}. Likely a cut or unplugged fibre, or a dead ONU. The client is offline until it is fixed.`,
+          policy?.id ?? null, policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null]).catch(async () => ({
+          // older schemas may lack a column: raise it plainly rather than not at all
+          rows: [(await pool.query(
+            `insert into tickets (tenant_id, number, subject, subscriber_id, priority)
+             values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'high') returning number`,
+            [tenantId, `ONU on LOS — ${label}`, o.subscriber_id])).rows[0]] }));
+      number = t?.number ?? null;
+    }
+    await pool.query('update smartolt_onus set los_notified=true where tenant_id=$1 and external_id=$2', [tenantId, o.external_id]);
+    await notifyOwner(tenantId, `${label} has lost light (LOS) at ${where}${number ? ` — ticket ${number}` : ''}.`, { url: '/support', title: 'ONU on LOS' });
   }
 }
 
@@ -301,9 +387,7 @@ export async function onuAction(tenantId, externalId, action) {
   return body;
 }
 
-export async function unconfiguredOnus(tenantId) {
-  const cfg = await loadConfig(tenantId);
-  if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
+async function unconfiguredFor(cfg) {
   return list(await call(cfg, 'GET', '/onu/unconfigured_onus')).map((o) => ({
     sn: text(first(o, 'sn', 'serial_number')),
     olt_id: text(first(o, 'olt_id')),
@@ -314,6 +398,12 @@ export async function unconfiguredOnus(tenantId) {
     onu_type: text(first(o, 'onu_type', 'onu_type_name')),
     raw: o,
   }));
+}
+
+export async function unconfiguredOnus(tenantId) {
+  const cfg = await loadConfig(tenantId);
+  if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
+  return unconfiguredFor(cfg);
 }
 
 const LOOKUPS = {

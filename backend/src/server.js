@@ -7410,6 +7410,18 @@ app.get('/api/smartolt/overview', requirePermission('smartolt.view'), wrap(async
   res.json({ totals: tot, olts, longOffline, weak, alerts });
 }));
 
+app.get('/api/smartolt/summary', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query('select enabled from smartolt_config where tenant_id=$1', [req.tenant.id]);
+  if (!c?.enabled) return res.json({ enabled: false });
+  const { rows: [n] } = await pool.query(
+    `select count(*)::int as total, count(*) filter (where status='online')::int as online,
+            count(*) filter (where status='los')::int as los, count(*) filter (where status='offline')::int as offline,
+            count(*) filter (where status='power_fail')::int as power_fail
+       from smartolt_onus where tenant_id=$1`, [req.tenant.id]);
+  const { rows: [w] } = await pool.query('select count(*)::int as waiting from smartolt_unconfigured where tenant_id=$1', [req.tenant.id]);
+  res.json({ enabled: true, ...n, waiting: w.waiting });
+}));
+
 app.get('/api/smartolt/onus', requirePermission('smartolt.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select n.external_id, n.sn, n.name, n.olt_id, n.olt_name, n.board, n.port, n.onu_no, n.onu_type, n.zone, n.odb, n.status,

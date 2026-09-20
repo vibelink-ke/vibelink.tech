@@ -2691,3 +2691,21 @@ create table if not exists smartolt_alerts (
 );
 -- The serial number of a client's ONU, so it can be tied to the one SmartOLT reports.
 alter table subscribers add column if not exists onu_sn text;
+
+-- LOS handling: an ONU with no light for two checks in a row raises one ticket and one message per episode.
+alter table smartolt_onus add column if not exists los_polls int not null default 0;
+alter table smartolt_onus add column if not exists los_notified boolean not null default false;
+-- ONUs SmartOLT has found but nobody has authorised yet, kept so the dashboard can say how many.
+create table if not exists smartolt_unconfigured (
+  tenant_id uuid not null references tenants on delete cascade,
+  sn        text not null,
+  olt_id    text,
+  olt_name  text,
+  board     text,
+  port      text,
+  pon_type  text,
+  onu_type  text,
+  seen_at   timestamptz not null default now(),
+  primary key (tenant_id, sn)
+);
+alter table smartolt_config add column if not exists unconfigured_at timestamptz;

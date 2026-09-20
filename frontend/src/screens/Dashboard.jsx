@@ -67,6 +67,17 @@ export default function Dashboard() {
     const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
     return () => clearInterval(id);
   }, []);
+  // SmartOLT (only for tenants who have it): ONUs waiting to be authorised, and ONUs with no light.
+  const { session: soSession } = useStore();   // (the main `store` below is declared after this)
+  const smartoltOn = !!soSession?.features?.smartolt && !!soSession?.perms?.['smartolt.view'];
+  const [so, setSo] = useState(null);
+  useEffect(() => {
+    if (!smartoltOn) return undefined;
+    const load = () => api.smartoltSummary().then(setSo).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, [smartoltOn]);
   const [runs, setRuns] = useState(null);
   useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
   // Null until the first answer, so "reading" and "nothing ran" stay distinct.
@@ -317,6 +328,24 @@ export default function Dashboard() {
           value={active.length}
           hint="paid & valid — online or not"
         />
+        {so?.enabled && (
+          <>
+            <Tile
+              label="ONUS WAITING"
+              value={so.waiting}
+              valueColor={so.waiting ? color.amberInk : undefined}
+              hint={so.waiting ? 'found by SmartOLT, to authorise →' : 'nothing waiting to be authorised'}
+              onClick={() => navigate('/smartolt?tab=authorise')}
+            />
+            <Tile
+              label="ONUS ON LOS"
+              value={so.los}
+              valueColor={so.los ? color.rust : undefined}
+              hint={so.los ? `no light${so.offline ? ` · ${so.offline} more offline` : ''} →` : `${so.online} of ${so.total} online`}
+              onClick={() => navigate('/smartolt?tab=onus&show=los')}
+            />
+          </>
+        )}
         {/* Counted from the growth of every accounting session, so it is what actually
             moved, not an estimate. The first day shows when counting began. */}
         <Tile

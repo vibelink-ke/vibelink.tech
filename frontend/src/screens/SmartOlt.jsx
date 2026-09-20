@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -51,7 +51,9 @@ export default function SmartOlt() {
   const store = useStore();
   const navigate = useNavigate();
   const canManage = !!store.session?.perms?.['smartolt.manage'];
-  const [tab, setTab] = useState('overview');
+  // The dashboard tiles link straight to a tab (?tab=authorise) and a filter (?show=los).
+  const [params] = useSearchParams();
+  const [tab, setTab] = useState(params.get('tab') || 'overview');
   const [st, setSt] = useState(null);
 
   const loadStatus = useCallback(() => api.smartoltStatus().then(setSt).catch(() => setSt({ configured: false })), []);
@@ -66,6 +68,8 @@ export default function SmartOlt() {
     { id: 'onus', label: 'ONUs' },
     ...(canManage ? [{ id: 'authorise', label: 'Authorise' }, { id: 'connection', label: 'Connection' }] : []),
   ];
+
+  const shownTab = tabs.some((t) => t.id === tab) ? tab : 'overview';
 
   if (st && !st.configured) {
     return (
@@ -85,11 +89,11 @@ export default function SmartOlt() {
           Last problem talking to SmartOLT ({ago(st.last_error_at)}): {st.last_error}
         </div>
       )}
-      <Tabs value={tab} onChange={setTab} tabs={tabs} />
-      {tab === 'overview' && <Overview navigate={navigate} />}
-      {tab === 'onus' && <Onus canManage={canManage} navigate={navigate} />}
-      {tab === 'authorise' && canManage && <Authorise />}
-      {tab === 'connection' && canManage && <Connection st={st} reload={loadStatus} />}
+      <Tabs value={shownTab} onChange={setTab} tabs={tabs} />
+      {shownTab === 'overview' && <Overview navigate={navigate} />}
+      {shownTab === 'onus' && <Onus canManage={canManage} navigate={navigate} initialShow={params.get('show')} />}
+      {shownTab === 'authorise' && canManage && <Authorise />}
+      {shownTab === 'connection' && canManage && <Connection st={st} reload={loadStatus} />}
     </Screen>
   );
 }
@@ -198,10 +202,10 @@ function ClientPicker({ onPick }) {
   );
 }
 
-function Onus({ canManage, navigate }) {
+function Onus({ canManage, navigate, initialShow }) {
   const store = useStore();
   const [rows, setRows] = useState(null);
-  const [status, setStatus] = useState('all');
+  const [status, setStatus] = useState(initialShow || 'all');
   const [olt, setOlt] = useState('all');
   const [busy, setBusy] = useState(null);
   const [linking, setLinking] = useState(null);

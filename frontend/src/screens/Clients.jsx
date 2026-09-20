@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -7,6 +7,7 @@ import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import { exportTable } from '../lib/export';
 import ExportMenu from '../ui/ExportMenu';
+import { Signal, StatusBadge } from './SmartOlt';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 import { useTable, TableToolbar, TableFooter } from '../ui/paging';
@@ -187,6 +188,19 @@ export default function Clients() {
   const [selected, setSelected] = useState(() => new Set());
   const [editing, setEditing] = useState(null);
   const actionMenu = useActionMenu();
+
+  // For tenants with SmartOLT: each client's ONU (signal, or LOS/offline), one column in the list.
+  const soOn = !!store.session?.features?.smartolt && !!store.session?.perms?.['smartolt.view'];
+  const [onuBy, setOnuBy] = useState(() => new Map());
+  useEffect(() => {
+    if (!soOn) return undefined;
+    const load = () => api.smartoltOnus()
+      .then((rows) => setOnuBy(new Map(rows.filter((r) => r.client_id).map((r) => [r.client_id, r]))))
+      .catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, [soOn]);
 
   const clients = store.clients ?? [];
 
@@ -571,6 +585,7 @@ export default function Clients() {
                 <th style={th}>WALLET</th>
                 <th style={th}>EMAIL</th>
                 <th style={th}>SERVICE</th>
+                {soOn && <th style={th}>SIGNAL</th>}
                 <th style={th}>PHONE</th>
                 <th style={th}>REGISTERED</th>
                 <th style={th}>STATUS</th>
@@ -659,6 +674,17 @@ export default function Clients() {
                         );
                       })()}
                     </td>
+                    {soOn && (() => {
+                      // The ONU of any line on this account.
+                      const onu = lines.map((l) => onuBy.get(l.id)).find(Boolean);
+                      return (
+                        <td style={td}>
+                          {!onu ? <span style={{ color: color.muted }}>—</span>
+                            : onu.status !== 'online' ? <StatusBadge status={onu.status} />
+                              : <Signal dbm={onu.signal_dbm} cls={onu.signal_class} />}
+                        </td>
+                      );
+                    })()}
                     <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5, color: '#4a524c' }}>
                       {c.phone}
                     </td>
