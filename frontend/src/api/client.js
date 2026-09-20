@@ -283,6 +283,8 @@ export const api = {
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),
   radiusCheck: (id) => post(`/api/routers/${id}/radius-check`, {}),
   hotspotCheck: (id) => post(`/api/routers/${id}/hotspot-check`, {}),
+  routerCleanupPreview: (id) => post(`/api/routers/${id}/cleanup-preview`, {}),
+  routerCleanupApply: (id, keys) => post(`/api/routers/${id}/cleanup-apply`, { keys }),
   pushHotspot: (id, opts = {}) => post(`/api/routers/${id}/hotspot`, opts),
   routerTunnels: () => get('/api/routers/tunnels'),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),

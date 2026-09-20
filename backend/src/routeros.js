@@ -2563,3 +2563,130 @@ export async function pingHost(conn, address, count = 4) {
 }
 
 export const close = (conn) => { try { conn.close(); } catch { /* already gone */ } };
+
+/**
+ * Leftovers from a previous billing system.
+ *
+ * A router taken over from another billing system still carries that system's
+ * firewall rules, NAT, mangle marks and walled-garden entries. They fight ours:
+ * a stale "unpaid" drop rule cuts off a customer who has paid, a second
+ * masquerade hides who is who, and an old walled garden lets guests reach
+ * places we did not allow.
+ *
+ * This is deliberately a scan-then-confirm pair rather than a wipe. The
+ * operator's own rules — port forwards, the router's protection, the default
+ * config — look exactly like a previous system's to anything that has not been
+ * told which is which, so the scan only *proposes* rows and the caller shows
+ * them before anything is removed.
+ *
+ * Never proposed, whatever the comment says:
+ *  - anything we manage ourselves (the tag) or the router manages (dynamic);
+ *  - MikroTik's own default config ("defconf");
+ *  - chain=input. Those rules protect the router itself and can be the very
+ *    rule that lets our tunnel reach its API — removing one is how a router
+ *    ends up locked out of its own management.
+ */
+const LEGACY_STRONG = /mikhmon|splynx|nuxbill|uisp|ucrm|powerisp|radiusdesk|sas4|isp[ _-]?billing|mikrotik[ _-]?billing|billing|unpaid|overdue|expired|suspend|debt|voucher|radius/i;
+const LEGACY_WEAK = /hotspot|pppoe|captive|portal|redirect|block|disabled|no[ _-]?pay|walled|\bisp\b/i;
+
+const LEGACY_MENUS = [
+  ['/ip/firewall/filter', 'Firewall filter', true],
+  ['/ip/firewall/nat', 'NAT', true],
+  ['/ip/firewall/mangle', 'Mangle', true],
+  ['/ip/firewall/raw', 'Raw', true],
+  ['/ip/hotspot/walled-garden', 'Walled garden (hosts)', false],
+  ['/ip/hotspot/walled-garden/ip', 'Walled garden (addresses)', false],
+];
+
+function describeRule(row) {
+  const parts = [];
+  for (const k of ['chain', 'action', 'protocol', 'src-address', 'dst-address', 'dst-host', 'dst-port',
+    'in-interface', 'out-interface', 'src-address-list', 'dst-address-list', 'address-list']) {
+    if (row[k] !== undefined && row[k] !== '') parts.push(`${k}=${row[k]}`);
+  }
+  const text = parts.join(' ') || '(no fields)';
+  const c = row.comment ? ` — "${row.comment}"` : '';
+  return (text + c).slice(0, 220);
+}
+
+/** Read every candidate; nothing is changed. */
+export async function findLegacyRules(conn) {
+  const items = [];
+  for (const [menu, section, isFirewall] of LEGACY_MENUS) {
+    let rows;
+    try {
+      rows = await conn.write(`${menu}/print`, []);
+    } catch {
+      continue;   // e.g. no /ip/firewall/raw on an older RouterOS
+    }
+    for (const row of rows) {
+      if (isManaged(row) || isDynamic(row)) continue;
+      const comment = String(row.comment ?? '');
+      if (/^defconf/i.test(comment)) continue;
+      if (isFirewall && String(row.chain) === 'input') continue;
+
+      let why;
+      let strong;
+      if (!isFirewall) {
+        // The walled garden is wholly ours to manage: anything in it that we
+        // did not put there is an old system's allow-list.
+        why = 'Not created by Vibelink — the walled garden is managed entirely from here';
+        strong = true;
+      } else {
+        const text = [comment, row['address-list'], row['src-address-list'], row['dst-address-list'],
+          row['new-connection-mark'], row['new-packet-mark'], row['new-routing-mark'], row['jump-target']]
+          .filter(Boolean).join(' ');
+        const hit = LEGACY_STRONG.exec(text);
+        const weak = hit ? null : LEGACY_WEAK.exec(text);
+        if (!hit && !weak) continue;
+        why = hit ? `Looks like a billing system's rule ("${hit[0]}")` : `Might be an old rule ("${weak[0]}") — check before removing`;
+        strong = !!hit;
+        // A masquerade that is not ours may be the only thing giving the LAN
+        // internet; ours covers the subscriber pools, not the operator's own
+        // network. Never pre-selected.
+        if (menu === '/ip/firewall/nat' && String(row.action) === 'masquerade') {
+          strong = false;
+          why += ' — a masquerade: removing it can cut internet for a network Vibelink does not cover';
+        }
+      }
+      items.push({ key: `${menu}|${idOf(row)}`, menu, id: idOf(row), section, summary: describeRule(row), why, strong });
+    }
+  }
+  return items;
+}
+
+/**
+ * Remove the chosen rows, after saving a backup of the router's configuration
+ * on the router itself. If the backup cannot be confirmed nothing is removed:
+ * a cleanup that cannot be undone is not one to start.
+ *
+ * Only keys the scan itself returns are honoured — the caller's list is a
+ * selection from it, never a path or an id we would act on unchecked.
+ */
+export async function removeLegacyRules(conn, keys) {
+  const found = await findLegacyRules(conn);
+  const chosen = found.filter((i) => keys.includes(i.key));
+  if (!chosen.length) return { backup: null, removed: 0, failed: [] };
+
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const name = `vibelink-before-cleanup-${stamp}`;
+  await conn.write('/export', [`=file=${name}`]);
+  await sleep(1500);
+  const files = await conn.write('/file/print', []);
+  if (!files.some((f) => String(f.name).startsWith(name))) {
+    throw new Error('Could not save a backup of the router configuration, so nothing was removed.');
+  }
+
+  let removed = 0;
+  const failed = [];
+  for (const item of chosen) {
+    try {
+      await conn.write(`${item.menu}/remove`, [`=.id=${item.id}`]);
+      removed += 1;
+    } catch (e) {
+      failed.push({ summary: item.summary, error: String(e.message ?? e) });
+    }
+    await sleep(40);
+  }
+  return { backup: `${name}.rsc`, removed, failed };
+}

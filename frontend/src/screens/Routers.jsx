@@ -839,6 +839,8 @@ export default function Routers() {
    * search somewhere else entirely.
    */
   const [radiusReport, setRadiusReport] = useState(null);
+  // Old rules left by a previous billing system: what the scan found and what is ticked.
+  const [cleanup, setCleanup] = useState(null);
   const [showCredentials, setShowCredentials] = useState(false);
   const checkRadius = async (r) => {
     setRadiusReport({ router: r, kind: 'RADIUS', state: 'running' });
@@ -866,6 +868,30 @@ export default function Routers() {
       setRadiusReport({ router: r, kind: 'Hotspot', state: 'done', ...res });
     } catch (e) {
       setRadiusReport({ router: r, kind: 'Hotspot', state: 'done', error: e.message, ...(e.body ?? {}) });
+    }
+  };
+
+  const openCleanup = async (r) => {
+    setCleanup({ router: r, state: 'loading', items: [], picked: {} });
+    try {
+      const { items } = await api.routerCleanupPreview(r.id);
+      // Only the confident matches start ticked; the "might be" ones are shown
+      // but left for the operator to choose.
+      setCleanup({ router: r, state: 'ready', items, picked: Object.fromEntries(items.filter((i) => i.strong).map((i) => [i.key, true])) });
+    } catch (e) {
+      setCleanup({ router: r, state: 'error', items: [], picked: {}, error: e.message });
+    }
+  };
+
+  const applyCleanup = async () => {
+    const keys = Object.keys(cleanup.picked).filter((k) => cleanup.picked[k]);
+    if (!keys.length) return;
+    setCleanup((c) => ({ ...c, state: 'removing' }));
+    try {
+      const out = await api.routerCleanupApply(cleanup.router.id, keys);
+      setCleanup((c) => ({ ...c, state: 'done', result: out }));
+    } catch (e) {
+      setCleanup((c) => ({ ...c, state: 'error', error: e.message }));
     }
   };
 
@@ -1313,6 +1339,12 @@ Revoke anyway?`
                     >
                       Check hotspot
                     </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); openCleanup(r); }}
+                      title="Find and remove firewall, NAT and walled-garden rules left by a previous billing system"
+                    >
+                      Clean up old rules
+                    </MenuItem>
                   </ActionMenu>
                   <Button onClick={() => removeRouter(r)}>Delete</Button>
                 </div>
@@ -1321,6 +1353,78 @@ Revoke anyway?`
           ]}
         />
       </Card>
+
+      <Modal
+        open={!!cleanup}
+        title={`Clean up old rules — ${cleanup?.router?.name ?? ''}`}
+        onClose={() => setCleanup(null)}
+        footer={
+          <>
+            <Button onClick={() => setCleanup(null)}>{cleanup?.state === 'done' ? 'Close' : 'Cancel'}</Button>
+            {cleanup?.state === 'ready' && (
+              <Button
+                variant="primary"
+                onClick={applyCleanup}
+                disabled={!Object.values(cleanup.picked).some(Boolean)}
+              >
+                Remove {Object.values(cleanup.picked).filter(Boolean).length} selected
+              </Button>
+            )}
+          </>
+        }
+      >
+        {cleanup?.state === 'loading' && <p>Reading the router…</p>}
+        {cleanup?.state === 'removing' && <p>Saving a backup on the router, then removing…</p>}
+        {cleanup?.state === 'error' && <p style={{ color: color.rust }}>{cleanup.error}</p>}
+        {cleanup?.state === 'done' && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <p style={{ margin: 0 }}>
+              Removed {cleanup.result.removed} rule{cleanup.result.removed === 1 ? '' : 's'}.
+              {cleanup.result.backup && <> A backup of the previous configuration is on the router as <b>{cleanup.result.backup}</b> (Files).</>}
+            </p>
+            {cleanup.result.failed?.length > 0 && (
+              <p style={{ margin: 0, color: color.rust }}>
+                {cleanup.result.failed.length} could not be removed: {cleanup.result.failed.map((f) => f.error).join('; ')}
+              </p>
+            )}
+            <p style={{ margin: 0, color: color.muted, fontSize: 13 }}>Press Configure to re-apply Vibelink's own rules.</p>
+          </div>
+        )}
+        {cleanup?.state === 'ready' && (
+          cleanup.items.length === 0
+            ? <p>No leftover rules found. Nothing from a previous billing system was recognised on this router.</p>
+            : (
+              <div style={{ display: 'grid', gap: 10 }}>
+                <p style={{ margin: 0, color: color.inkSoft, fontSize: 13.5 }}>
+                  Tick what should go. A backup of the router's configuration is saved on the router first, and
+                  nothing is removed if that fails. Rules that protect the router itself (the input chain) and
+                  MikroTik's defaults are never listed.
+                </p>
+                {cleanup.items.map((i) => (
+                  <label
+                    key={i.key}
+                    style={{
+                      display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 10px',
+                      border: `1px solid ${color.line}`, borderRadius: radius.sm, cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!cleanup.picked[i.key]}
+                      onChange={(e) => setCleanup((c) => ({ ...c, picked: { ...c.picked, [i.key]: e.target.checked } }))}
+                      style={{ marginTop: 3 }}
+                    />
+                    <span style={{ minWidth: 0 }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.05em', color: color.muted }}>{i.section.toUpperCase()}</span>
+                      <span style={{ display: 'block', fontFamily: font.mono, fontSize: 12, wordBreak: 'break-word' }}>{i.summary}</span>
+                      <span style={{ display: 'block', fontSize: 12.5, color: i.strong ? color.inkSoft : color.amberInk }}>{i.why}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )
+        )}
+      </Modal>
 
       {/* Step 0 — the two things the script cannot guess */}
       <Modal

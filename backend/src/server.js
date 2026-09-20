@@ -5051,6 +5051,65 @@ app.post('/api/routers/:id/hotspot', requirePermission('routers.configure'), wra
  * router, so this reports them all at once instead of the operator and I
  * eliminating them one round trip at a time.
  */
+/**
+ * Leftovers from a previous billing system on this router — read-only preview.
+ * See routeros.js's findLegacyRules for what is and is never proposed.
+ */
+app.post('/api/routers/:id/cleanup-preview', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const items = await step('scan for old rules', () => ros.findLegacyRules(conn), 40000);
+    res.json({ items });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/** Remove the rows the operator ticked in the preview, after a backup on the router. */
+app.post('/api/routers/:id/cleanup-apply', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const keys = Array.isArray(req.body?.keys) ? req.body.keys.filter((k) => typeof k === 'string').slice(0, 500) : [];
+  if (!keys.length) return res.status(400).json({ error: 'Nothing was selected.' });
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const out = await step('remove old rules', () => ros.removeLegacyRules(conn, keys), 120000);
+    console.log(`cleanup: ${req.tenant.id} router ${r.id} removed ${out.removed}, failed ${out.failed.length}, backup ${out.backup}`);
+    res.json(out);
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/api/routers/:id/hotspot-check', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -5721,6 +5780,25 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
         // subscriber and then drop the session a second later.
         await pool.query('update routers set pppoe_pool=$2 where id=$1',
           [r.id, confPool?.cidr ?? null]);
+
+        // Masquerade for every pool this router can hand out, not only the one
+        // the PPPoE server above is built from. A second pool otherwise gives
+        // subscribers an address, a gateway and DNS — and no internet, which
+        // looks nothing like a missing NAT rule.
+        const { rows: natPools } = await pool.query(
+          `select cidr from ip_pools
+            where tenant_id=$1 and purpose='normal' and (router_id = $2 or router_id is null)`,
+          [req.tenant.id, r.id]);
+        for (const p of natPools) {
+          if (String(p.cidr) === String(confPool?.cidr)) continue;   // applyPppoeServer did this one
+          if (tunnelConflict(p.cidr, req.tenant.tunnel_subnet, SERVER_IP)) continue;   // never NAT the tunnel range
+          try {
+            const n = await ros.applyNat(conn, { subnet: p.cidr });
+            if (n.created) done.push(`masquerade added for pool ${p.cidr}`);
+          } catch (e) {
+            done.push(`could not add masquerade for pool ${p.cidr}: ${e.message}`);
+          }
+        }
 
         // The expired-customers range — auto-created for this router if it
         // does not already have one (ensureExpiredPool covers both a
