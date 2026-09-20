@@ -664,7 +664,10 @@ export async function smsBalance(tenantId, { force = false } = {}) {
   if (!force && hit && Date.now() - hit.at < 5 * 60_000) return hit.value;
 
   const { rows: [g] } = await pool.query(
-    'select provider, credentials from tenant_sms_config where tenant_id=$1 and enabled order by priority limit 1',
+    // WhatsApp (twilio_whatsapp) is not an SMS gateway: it has no SMS balance, and picking it here
+    // made the top-bar chip read 0 while the platform's fallback balance was covering every send.
+    `select provider, credentials from tenant_sms_config
+      where tenant_id=$1 and enabled and provider <> 'twilio_whatsapp' order by priority limit 1`,
     [tenantId]);
 
   let value;
