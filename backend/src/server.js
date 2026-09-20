@@ -4930,7 +4930,9 @@ app.get('/api/licence', wrap(async (req, res) => {
   const credit = Number(row?.billing_credit ?? 0);
   // What they actually need to pay now: the activation fee after a trial, otherwise
   // their unpaid statements, less anything already paid ahead.
-  const amountDue = trialEnded
+  // A paying tenant locked out with no statement to pay reinstates with the activation fee too.
+  const reinstate = readOnly && !!row?.converted_at && Number(row?.owed ?? 0) === 0;
+  const amountDue = trialEnded || reinstate
     ? Math.max(0, ACTIVATION_FEE - credit)
     : Math.max(0, Number(row?.owed ?? 0) - credit);
   res.json({

@@ -1299,4 +1299,9 @@ export async function expireTenantLicences() {
     update tenants set status='active'
      where status='readonly'
        and (licence_ends is null or licence_ends >= current_date)`);
+
+  // Money already paid that has not renewed anything yet (a payment that arrived
+  // before there was a statement or reinstatement to settle it) is applied now.
+  const { settleAllFromCredit } = await import('./charges.js');
+  await settleAllFromCredit();
 }

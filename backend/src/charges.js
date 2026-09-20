@@ -188,6 +188,27 @@ async function allocateCredit(c, tenantId) {
         set billing_credit = $2,
             status = case when status = 'readonly' and licence_ends >= current_date then 'active' else status end
       where id = $1`, [tenantId, Math.max(0, credit)]);
+
+  // A paying tenant whose licence ran out with nothing left to pay (their activation
+  // ended before the first statement was drawn) has no statement for a payment to
+  // settle, so paying would renew nothing. They reinstate with the activation fee.
+  const { rows: [s] } = await c.query(
+    `select status, converted_at, billing_credit,
+            (licence_ends is not null and licence_ends < current_date) as lapsed,
+            (select count(*) from tenant_charges where tenant_id = $1 and status in ('open', 'invoiced')) as open_count
+       from tenants where id = $1`, [tenantId]);
+  if (s?.converted_at && s.status !== 'suspended' && Number(s.open_count) === 0
+      && (s.lapsed || s.status === 'readonly') && Number(s.billing_credit) + 0.005 >= ACTIVATION_FEE) {
+    await c.query(
+      `update tenants
+          set billing_credit = billing_credit - $2,
+              status = 'active',
+              licence_ends = greatest(
+                (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date,
+                (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
+        where id = $1`, [tenantId, ACTIVATION_FEE, ACTIVATION_DAYS]);
+    credit = Number(s.billing_credit) - ACTIVATION_FEE;
+  }
   return { paid, credit: Math.max(0, credit) };
 }
 
@@ -291,6 +312,8 @@ export async function billingSummary(tenantId) {
   const lapsed = ['active', 'trial'].includes(t?.status) && !!t?.licence_lapsed;
   const readOnly = t?.status === 'readonly' || lapsed;
   const trialEnded = readOnly && !t?.converted_at;
+  // A paying tenant locked out with no statement to pay reinstates with the activation fee.
+  const reinstate = readOnly && !!t?.converted_at && owed === 0;
   return {
     tenant: t?.name ?? null,
     status: t?.status ?? 'active',
@@ -300,14 +323,14 @@ export async function billingSummary(tenantId) {
     // invoiced, so there is nothing to pay — they are activated by the platform.
     trialEnded,
     // After the trial, activating costs a set amount; nothing has been invoiced.
-    activation: trialEnded ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS, until: activationUntil() } : null,
+    activation: trialEnded || reinstate ? { fee: ACTIVATION_FEE, days: ACTIVATION_DAYS, until: activationUntil() } : null,
     // Money collected for them is held, not paid out, until the licence is renewed.
     payoutsPaused: ['readonly', 'suspended'].includes(t?.status) || !!t?.licence_lapsed,
     licenceEnds: t?.licence_ends ?? null,
     daysLeft: t?.days_left == null ? null : Number(t.days_left),
     billingRef: t?.billing_ref ?? null,
     credit,
-    amountDue: trialEnded ? Math.max(0, ACTIVATION_FEE - credit) : Math.max(0, owed - credit),
+    amountDue: trialEnded || reinstate ? Math.max(0, ACTIVATION_FEE - credit) : Math.max(0, owed - credit),
     statements: statements.slice(0, 12),
     paybill,
     canPrompt: !!paybill,
