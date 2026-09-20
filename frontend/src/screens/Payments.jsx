@@ -3,7 +3,8 @@ import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
-import { downloadCsv } from '../lib/csv';
+import { exportTable } from '../lib/export';
+import ExportMenu from '../ui/ExportMenu';
 import { Badge, Button, Empty, Field, Input, Modal, Screen, Select, Table, Textarea } from '../ui/primitives';
 
 const TABS = [
@@ -276,12 +277,12 @@ export default function Payments() {
     }
   };
 
-  const exportReport = () => {
+  const exportReport = async (format = 'csv') => {
     const rows = [
       ['code', 'amount', 'payer_name', 'payer_phone', 'typed_account', 'channel', 'status', 'received_at'],
       ...all.map((p) => [p.provider_ref, p.amount, p.payer_name, p.payer_phone, p.raw_account, p.provider, p.status, p.received_at]),
     ];
-    const n = downloadCsv(`mpesa-report-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    const n = await exportTable(format, 'mpesa-report', rows, { title: 'M-Pesa report' });
     store.toast(n ? `Exported ${n} transaction(s)` : 'Nothing to export yet');
   };
 
@@ -320,7 +321,7 @@ export default function Payments() {
             Record payment
           </Button>
           <Button onClick={() => setReconcileText('')}>Reconcile statement</Button>
-          <Button onClick={exportReport}>Export M-Pesa report</Button>
+          <ExportMenu onExport={exportReport} label="Export M-Pesa report" />
         </>
       }
     >
@@ -528,7 +529,7 @@ export default function Payments() {
             <Empty
               action={
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <Button onClick={exportReport}>Export CSV</Button>
+                  <ExportMenu onExport={exportReport} />
                   <Button variant="primary" onClick={() => setReconcileText('')}>Paste statement</Button>
                 </div>
               }

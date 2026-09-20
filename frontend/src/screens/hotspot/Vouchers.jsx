@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
-import { downloadCsv } from '../../lib/csv';
+import { exportTable } from '../../lib/export';
+import ExportMenu from '../../ui/ExportMenu';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
 const STATUSES = ['All status', 'unused', 'in_use', 'expired', 'compensated'];
@@ -63,12 +64,12 @@ export default function Vouchers() {
   const [gen, setGen] = useState(null); // { planId, count, batch } when the modal is open
   const [busy, setBusy] = useState(false);
 
-  const exportCsv = () => {
+  const exportCsv = async (format = 'csv') => {
     const rows = [
       ['code', 'phone', 'plan', 'mpesa_ref', 'batch', 'device_label', 'device_mac', 'online', 'status', 'data_used_mb', 'starts_at', 'expires_at', 'created_at'],
       ...visible.map((v) => [v.code, v.phone, v.plan_title, v.mpesa_ref, v.batch, v.device_label, v.device_mac, v.online, v.status, v.data_used_mb, v.starts_at, v.expires_at, v.created_at]),
     ];
-    const n = downloadCsv(`vouchers-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    const n = await exportTable(format, 'vouchers', rows, { title: 'Vouchers', subtitle: `${visible.length} of ${vouchers.length}` });
     store.toast(n ? `Exported ${n} voucher(s)` : 'Nothing to export');
   };
 
@@ -131,7 +132,7 @@ export default function Vouchers() {
     <Screen
       actions={
         <>
-          <Button onClick={exportCsv}>Export CSV</Button>
+          <ExportMenu onExport={exportCsv} />
           <Button variant="primary" onClick={() => setGen({ planId: '', count: 10, batch: '' })}>
             + Generate batch
           </Button>

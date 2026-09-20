@@ -4,7 +4,9 @@ import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
-import { parseCsv, downloadCsv } from '../lib/csv';
+import { parseCsv } from '../lib/csv';
+import { exportTable } from '../lib/export';
+import ExportMenu from '../ui/ExportMenu';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 import { useTable, TableToolbar, TableFooter } from '../ui/paging';
@@ -314,11 +316,10 @@ export default function Clients() {
    * exported; with nothing ticked, everything the current filter shows. PPPoE passwords
    * are never included.
    */
-  const exportCsv = () => {
+  const exportCsv = async (format = 'csv') => {
     const rows = count > 0 ? selectedClients() : visible;
     if (!rows.length) return store.toast('No clients to export');
-    const stamp = new Date().toISOString().slice(0, 10);
-    const n = downloadCsv(`clients-${stamp}.csv`, [
+    const n = await exportTable(format, 'clients', [
       ['name', 'phone', 'account_code', 'plan', 'service', 'static_ip',
         'phone_alt', 'email', 'status', 'expires_at', 'router', 'location', 'line_label', 'created_at'],
       ...rows.map((c) => [
@@ -326,7 +327,7 @@ export default function Clients() {
         c.phone_alt ?? '', c.email ?? '', c.dormant_at ? 'dormant' : c.status, c.expires_at ? new Date(c.expires_at).toISOString().slice(0, 10) : '',
         c.router_name ?? '', c.location ?? '', c.line_label ?? '', c.created_at ? new Date(c.created_at).toISOString().slice(0, 10) : '',
       ]),
-    ]);
+    ], { title: 'Clients', subtitle: count > 0 ? `${count} selected` : `showing: ${filter}` });
     store.toast(`Exported ${n} client${n === 1 ? '' : 's'}`);
   };
 
@@ -463,9 +464,11 @@ export default function Clients() {
           >
             {view === 'list' ? 'Expiry calendar' : 'Back to list'}
           </Button>
-          <Button onClick={exportCsv} title={count > 0 ? 'Export the ticked clients' : 'Export every client the current filter shows'}>
-            {count > 0 ? `Export ${count} selected` : 'Export CSV'}
-          </Button>
+          <ExportMenu
+            onExport={exportCsv}
+            label={count > 0 ? `Export ${count} selected` : 'Export'}
+            title={count > 0 ? 'Export the ticked clients' : 'Export every client the current filter shows'}
+          />
           <Button onClick={importCsv} title="CSV headers: name, phone, account_code, plan, service, static_ip">
             Bulk import CSV
           </Button>
