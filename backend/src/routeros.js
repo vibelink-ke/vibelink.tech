@@ -2270,25 +2270,46 @@ function parseRouterOSDuration(s) {
  */
 export async function hotspotSessionRemaining(conn) {
   try {
-    const [servers, active] = await Promise.all([
-      conn.write('/ip/hotspot/print', []),
-      conn.write('/ip/hotspot/active/print', []),
-    ]);
-    const server = servers[0];
-    if (!server?.profile) return new Map();
-
-    const profiles = await conn.write('/ip/hotspot/user/profile/print', []);
-    const profile = profiles.find((p) => p.name === server.profile);
-    const limitSeconds = parseRouterOSDuration(profile?.['session-timeout']);
-    if (!limitSeconds) return new Map();
-
+    const active = await conn.write('/ip/hotspot/active/print', []);
     const out = new Map();
+
+    /*
+     * The router's own answer first.
+     *
+     * Every active hotspot row carries session-time-left — the time the
+     * router itself will still allow this login, whatever profile or RADIUS
+     * Session-Timeout set it. It is the authoritative number, and it needs no
+     * guessing about which profile applies. The calculation below used to be
+     * the only source, and it looked the hotspot *server* profile's name up
+     * among the *user* profiles — two different lists on RouterOS — so on a
+     * router whose server profile is not also a user profile (the normal
+     * arrangement) it found nothing and every guest came out "unknown".
+     */
     for (const row of active) {
       const mac = String(row['mac-address'] ?? '').trim().toUpperCase();
       if (!mac) continue;
+      const left = parseRouterOSDuration(row['session-time-left']);
+      if (left != null) out.set(mac, Math.max(0, Math.floor(left / 60)));
+    }
+    if (out.size === active.filter((r) => r['mac-address']).length) return out;
+
+    // A row with no session-time-left (an untimed login) falls back to the
+    // server's own profile timeout, when there is one.
+    const [servers, profiles] = await Promise.all([
+      conn.write('/ip/hotspot/print', []),
+      conn.write('/ip/hotspot/user/profile/print', []),
+    ]);
+    const server = servers[0];
+    const profile = profiles.find((p) => p.name === server?.profile)
+      ?? profiles.find((p) => p.name === 'default');
+    const limitSeconds = parseRouterOSDuration(profile?.['session-timeout']);
+    if (!limitSeconds) return out;
+
+    for (const row of active) {
+      const mac = String(row['mac-address'] ?? '').trim().toUpperCase();
+      if (!mac || out.has(mac)) continue;
       const usedSeconds = parseRouterOSDuration(row.uptime) ?? 0;
-      const remainingMinutes = Math.max(0, Math.floor((limitSeconds - usedSeconds) / 60));
-      out.set(mac, remainingMinutes);
+      out.set(mac, Math.max(0, Math.floor((limitSeconds - usedSeconds) / 60)));
     }
     return out;
   } catch {
