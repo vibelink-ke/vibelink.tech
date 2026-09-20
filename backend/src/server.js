@@ -7327,7 +7327,7 @@ app.get('/api/smartolt/status', requirePermission('smartolt.view'), wrap(async (
   res.json({
     configured: true, enabled: c.enabled, subdomain: c.subdomain, key_last4: c.api_key_last4, auto_disable: c.auto_disable,
     last_statuses_at: c.last_statuses_at, last_details_at: c.last_details_at, last_error: c.last_error, last_error_at: c.last_error_at,
-    onus: n.total, online: n.online,
+    onus: n.total, online: n.online, sample_onu: c.sample_onu ?? null,
   });
 }));
 

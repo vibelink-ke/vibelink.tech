@@ -93,6 +93,24 @@ export function normStatus(v) {
   return s.trim() || 'unknown';
 }
 
+/** Metres from the OLT. SmartOLT may name it a few ways and write it "1250", "1250m" or "1.25 km". */
+const distanceM = (o) => {
+  for (const k of ['distance', 'onu_distance', 'distance_m', 'ont_distance', 'distance_km']) {
+    const raw = o?.[k];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const n = num(raw);
+    if (n === null) continue;
+    return /km/i.test(String(raw)) || k === 'distance_km' ? Math.round(n * 1000) : n;
+  }
+  return null;
+};
+
+/** What one ONU looks like as SmartOLT sends it, with anything secret hidden — shown on the Connection tab to see field names. */
+const sampleOf = (o) => Object.fromEntries(Object.entries(o ?? {}).slice(0, 60).map(([k, v]) => [
+  k,
+  /pass|secret|token|key/i.test(k) ? '••••' : (typeof v === 'object' && v !== null ? JSON.stringify(v).slice(0, 60) : String(v ?? '').slice(0, 60)),
+]));
+
 const normOnu = (o) => ({
   external_id: text(first(o, 'unique_external_id', 'external_id', 'onu_external_id', 'id')),
   sn: text(first(o, 'sn', 'serial_number', 'serial')),
@@ -111,7 +129,7 @@ const normOnu = (o) => ({
   status: normStatus(first(o, 'status', 'onu_status')),
   signal_class: text(first(o, 'signal', 'signal_quality')),
   signal_dbm: num(first(o, 'signal_1310', 'rx_power', 'signal_dbm')),
-  distance_m: num(first(o, 'distance', 'onu_distance')),
+  distance_m: distanceM(o),
   admin_status: String(first(o, 'administrative_status', 'admin_status') ?? '').toLowerCase() || null,
   authorized_at: first(o, 'authorization_date', 'authorized_at'),
   // The PPPoE login configured on the ONU's WAN, when SmartOLT holds one.
@@ -146,7 +164,11 @@ async function syncOlts(cfg) {
 /** The full ONU list. Heavy and rate limited on SmartOLT's side, so this is hourly. */
 async function syncOnus(cfg) {
   const started = new Date();
-  const onus = list(await call(cfg, 'GET', '/onu/get_all_onus_details')).map(normOnu).filter((o) => o.external_id);
+  const rawOnus = list(await call(cfg, 'GET', '/onu/get_all_onus_details'));
+  const onus = rawOnus.map(normOnu).filter((o) => o.external_id);
+  if (rawOnus[0]) {
+    await pool.query('update smartolt_config set sample_onu=$2 where tenant_id=$1', [cfg.tenant_id, JSON.stringify(sampleOf(rawOnus[0]))]).catch(() => {});
+  }
   for (const o of onus) {
     await pool.query(
       `insert into smartolt_onus (tenant_id, external_id, sn, name, olt_id, olt_name, board, port, onu_no, onu_type,
@@ -186,13 +208,14 @@ async function syncStatuses(cfg) {
     const status = normStatus(first(r, 'status', 'onu_status'));
     const dbm = num(first(r, 'signal_1310', 'rx_power', 'signal_dbm'));
     const cls = text(first(r, 'signal', 'signal_quality'));
+    const dist = distanceM(r);
     const { rowCount } = await pool.query(
       `update smartolt_onus set
           offline_since = case when $3 = 'online' then null when status = 'online' or offline_since is null then now() else offline_since end,
           los_polls = case when $3 = 'los' then los_polls + 1 else 0 end,
           los_notified = case when $3 = 'los' then los_notified else false end,
-          status=$3, signal_dbm=coalesce($4, signal_dbm), signal_class=coalesce($5, signal_class), updated_at=now()
-        where tenant_id=$1 and external_id=$2`, [cfg.tenant_id, id, status, dbm, cls]);
+          status=$3, signal_dbm=coalesce($4, signal_dbm), signal_class=coalesce($5, signal_class), distance_m=coalesce($6, distance_m), updated_at=now()
+        where tenant_id=$1 and external_id=$2`, [cfg.tenant_id, id, status, dbm, cls, dist]);
     n += rowCount;
   }
   return n;

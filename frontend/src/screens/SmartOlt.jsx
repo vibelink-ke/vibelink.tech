@@ -34,6 +34,9 @@ const ago = (iso) => {
 /** GPON receive power: better than -25 is comfortable, worse than -27 is a fault waiting to happen. */
 const signalColor = (dbm) => (dbm == null ? color.muted : dbm < -27 ? color.rust : dbm < -25 ? color.amberInk : color.green);
 
+/** 950 -> "950 m", 1250 -> "1.25 km" */
+export const fmtDistance = (m) => (m == null ? '—' : m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
+
 export function StatusBadge({ status }) {
   const s = statusOf(status);
   return <Badge tone={s.tone}>{s.label}</Badge>;
@@ -168,7 +171,7 @@ function Overview({ navigate }) {
               { key: 'name', label: 'ONU', render: (r) => <span style={{ fontWeight: 600 }}>{r.name ?? r.sn}</span> },
               { key: 'client', label: 'Client', render: clientLink },
               { key: 'sig', label: 'Signal', align: 'right', render: (r) => <Signal dbm={r.signal_dbm != null ? Number(r.signal_dbm) : null} cls={r.signal_class} /> },
-              { key: 'dist', label: 'Distance', align: 'right', render: (r) => (r.distance_m != null ? `${Math.round(r.distance_m)} m` : '—') },
+              { key: 'dist', label: 'Distance', align: 'right', render: (r) => fmtDistance(r.distance_m) },
             ]}
           />
         </Card>
@@ -302,7 +305,7 @@ function Onus({ canManage, navigate, initialShow }) {
             { key: 'where', label: 'OLT · port', render: (r) => <span style={{ fontSize: 12.5 }}>{r.olt_name ?? '—'}<span style={{ color: color.muted }}> · {r.board ?? '?'}/{r.port ?? '?'}{r.onu_no ? `/${r.onu_no}` : ''}</span></span> },
             { key: 'status', label: 'State', render: (r) => (<div><StatusBadge status={r.status} />{r.status !== 'online' && r.offline_since && <div style={{ fontSize: 11.5, color: color.muted }}>{ago(r.offline_since)}</div>}</div>) },
             { key: 'sig', label: 'Signal', align: 'right', render: (r) => <Signal dbm={r.signal_dbm} cls={r.signal_class} /> },
-            { key: 'dist', label: 'Distance', align: 'right', render: (r) => (r.distance_m != null ? `${Math.round(r.distance_m)} m` : '—') },
+            { key: 'dist', label: 'Distance', align: 'right', render: (r) => fmtDistance(r.distance_m) },
             { key: 'client', label: 'Client', render: (r) => (r.client_id ? <a onClick={() => navigate(`/clients/${r.client_id}`)} style={{ color: color.green, cursor: 'pointer', fontWeight: 600 }}>{r.client_name}</a> : <span style={{ color: color.muted }}>not linked</span>) },
             { key: 'admin', label: 'Port', render: (r) => (r.admin_status === 'disabled' ? <Badge tone={{ bg: color.amberBg, fg: color.amberInk }}>{r.disabled_by_us ? 'off · unpaid' : 'disabled'}</Badge> : <span style={{ color: color.muted }}>on</span>) },
             ...(canManage ? [{
@@ -516,6 +519,18 @@ function Connection({ st, reload }) {
           </div>
         )}
       </Card>
+      {st?.configured && st.sample_onu && (
+        <Card title="What SmartOLT sends for an ONU" subtitle="One ONU, exactly as received (secrets hidden) — if a value you expect is missing here, SmartOLT is not sending it under that name">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: '4px 16px', fontSize: 12.5 }}>
+            {Object.entries(st.sample_onu).map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', gap: 6, overflow: 'hidden' }}>
+                <span style={{ color: color.muted, fontFamily: font.mono }}>{k}</span>
+                <span style={{ fontFamily: font.mono, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v === '' ? '—' : v}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {st?.configured && (
         <Card title="Status">
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, fontSize: 13 }}>

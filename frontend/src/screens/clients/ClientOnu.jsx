@@ -3,7 +3,7 @@ import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Empty, Field, Input } from '../../ui/primitives';
-import { Signal, StatusBadge } from '../SmartOlt';
+import { Signal, StatusBadge, fmtDistance } from '../SmartOlt';
 
 /**
  * A client's ONU, from SmartOLT: is it online, how good is the light, where on the OLT it sits, and
@@ -80,7 +80,7 @@ export default function ClientOnu({ client }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14, fontSize: 13 }}>
             <div><div style={{ color: color.muted, fontSize: 12 }}>Serial</div><span style={{ fontFamily: font.mono }}>{o.sn ?? '—'}</span></div>
             <div><div style={{ color: color.muted, fontSize: 12 }}>Signal</div><Signal dbm={o.signal_dbm} cls={o.signal_class} /></div>
-            <div><div style={{ color: color.muted, fontSize: 12 }}>Distance</div>{o.distance_m != null ? `${Math.round(o.distance_m)} m` : '—'}</div>
+            <div><div style={{ color: color.muted, fontSize: 12 }}>Distance</div>{fmtDistance(o.distance_m)}</div>
             <div><div style={{ color: color.muted, fontSize: 12 }}>OLT · port</div>{o.olt_name ?? '—'} · {o.board ?? '?'}/{o.port ?? '?'}{o.onu_no ? `/${o.onu_no}` : ''}</div>
             <div><div style={{ color: color.muted, fontSize: 12 }}>Model</div>{o.onu_type ?? '—'}</div>
             <div><div style={{ color: color.muted, fontSize: 12 }}>Zone</div>{o.zone ?? '—'}</div>
