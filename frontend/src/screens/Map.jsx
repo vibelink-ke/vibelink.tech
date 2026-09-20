@@ -35,8 +35,13 @@ const STATUS_COLOUR = {
   suspended: color.rust,
 };
 
-/** The closest zoom at which satellite imagery is still sharp. */
-const SAT_MAX_ZOOM = 18;
+/**
+ * Satellite imagery is real photographs down to about zoom 19 in towns (less in the
+ * countryside). Past that the tiles are simply stretched, so you can still zoom in —
+ * it just gets softer — but the map never asks the server for pictures that do not exist.
+ */
+const SAT_NATIVE_ZOOM = 19;
+const SAT_MAX_ZOOM = 21;
 
 const FIBRE = '#1f6fd1';
 const WIRELESS = '#8a4fd0';
@@ -240,17 +245,16 @@ export default function MapScreen() {
   useEffect(() => {
     if (!map.current) return;
     tilesRef.current.forEach((t) => t.remove());
-    // Zooming further than the imagery goes only blurs it, so the map stops there.
     map.current.setMaxZoom(base === 'satellite' ? SAT_MAX_ZOOM : 19);
     const layers = base === 'satellite'
       ? [
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_MAX_ZOOM,
+          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_NATIVE_ZOOM,
           attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
         }),
         // Place names and roads over the imagery, so it still says where things are.
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_MAX_ZOOM,
+          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_NATIVE_ZOOM,
         }),
       ]
       : [L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })];
@@ -592,7 +596,7 @@ export default function MapScreen() {
             <Button size="sm" variant={base === 'satellite' ? 'primary' : undefined} onClick={() => chooseBase('satellite')}>Satellite</Button>
             {base === 'satellite' && (
               <span style={{ fontSize: 12, color: color.muted }}>
-                Grey squares mean there is no imagery that close here — zoom out a step.
+                Soft or grey up close? That is all the imagery there is at that spot — zoom out a step.
               </span>
             )}
           </div>
