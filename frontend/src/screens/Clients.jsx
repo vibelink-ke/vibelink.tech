@@ -72,19 +72,72 @@ const STATUS_DOT = {
 };
 
 /**
- * What this line is doing right now, not what it owes.
+ * Two separate questions, shown separately:
+ *   STATE      — is the account paid up: Active, Grace, Expired, Paused, Suspended.
+ *   CONNECTION — is the line up right now, and is it allowed to be.
  *
- * STATUS is router/service state — online, or how long since it was last
- * seen — with one override: suspended and paused both mean the operator
- * has blocked the line from connecting at all, which matters more than
- * whatever its connectivity happens to read at that instant.
+ * They used to be one word, so an expired customer who was still online read
+ * "Online" and looked fine. Colour carries the connection at a glance: green
+ * online, grey offline, red blocked — and a split red/green dot for the case
+ * that needs attention, a line that is blocked or expired but still connected.
+ * (Green here is the status green, not the brand blue.)
  */
-function presence(c) {
-  if (c.status === 'suspended' || c.status === 'paused') {
-    return { label: 'Blocked', colour: color.rust, weight: 700, note: c.status };
+const ONLINE_GREEN = '#0f7a5f';
+
+const STATE_PILL = {
+  active: { bg: '#e2ebe5', fg: ONLINE_GREEN, label: 'Active' },
+  grace: { bg: color.amberBg, fg: color.amberInk, label: 'Grace period' },
+  expired: { bg: '#fbe9df', fg: '#c05a2e', label: 'Expired' },
+  paused: { bg: color.amberBg, fg: color.amberInk, label: 'Paused' },
+  suspended: { bg: color.rustBg, fg: color.rust, label: 'Suspended' },
+};
+
+const isBlocked = (c) => c.status === 'suspended' || c.status === 'paused';
+
+/** kind: online | offline | blocked | split (blocked or expired, yet still connected). */
+function connection(c) {
+  const online = !!c.online;
+  const blocked = isBlocked(c);
+  if (online && (blocked || c.status === 'expired')) {
+    return { kind: 'split', label: blocked ? 'Online · blocked' : 'Online · expired', colour: color.rust, weight: 700 };
   }
-  if (c.online) return { label: 'Online', colour: color.green, weight: 600, note: 'connected now' };
-  return { label: seenAgo(c.last_seen), colour: color.muted, weight: 500, note: null };
+  if (blocked) return { kind: 'blocked', label: 'Blocked', colour: color.rust, weight: 700 };
+  if (online) return { kind: 'online', label: 'Online', colour: ONLINE_GREEN, weight: 600 };
+  const seen = seenAgo(c.last_seen);
+  return { kind: 'offline', label: seen === 'never seen' ? 'Offline · never seen' : `Offline · ${seen}`, colour: color.muted, weight: 500 };
+}
+
+const DOT_FILL = {
+  online: ONLINE_GREEN,
+  offline: color.mutedSoft,
+  blocked: color.rust,
+  split: `linear-gradient(90deg, ${color.rust} 50%, ${ONLINE_GREEN} 50%)`,
+};
+
+function ConnDot({ kind }) {
+  return (
+    <span style={{ width: 9, height: 9, borderRadius: radius.pill, flexShrink: 0, background: DOT_FILL[kind] }} />
+  );
+}
+
+/** "expires in 5d" / "expired 3d ago" — only where it says something the state does not. */
+function expiryNote(c) {
+  if (isBlocked(c) || !c.expires_at) return null;
+  const days = Math.round((new Date(c.expires_at).getTime() - Date.now()) / 86400000);
+  if (c.status === 'expired' || days < 0) return days === 0 ? 'expired today' : `expired ${Math.abs(days)}d ago`;
+  return days === 0 ? 'expires today' : `expires in ${days}d`;
+}
+
+function StatePill({ status, count }) {
+  const p = STATE_PILL[status] ?? { bg: color.tileBg, fg: color.neutralInk, label: status ?? '—' };
+  return (
+    <span style={{
+      display: 'inline-flex', padding: '2px 9px', borderRadius: radius.pill, fontSize: 11.5,
+      fontWeight: 700, background: p.bg, color: p.fg,
+    }}>
+      {count ? `${count} ` : ''}{p.label}
+    </span>
+  );
 }
 
 /** "3m ago", "2d ago" — a duration reads faster than a timestamp in a table. */
@@ -123,6 +176,14 @@ export default function Clients() {
   const actionMenu = useActionMenu();
 
   const clients = store.clients ?? [];
+
+  // Client rows carry plan_id, not the package name; the plans list is already
+  // loaded for the whole app.
+  const planTitleById = useMemo(
+    () => new Map((store.plans ?? []).map((p) => [p.id, p.title])),
+    [store.plans]
+  );
+  const planTitle = (line) => planTitleById.get(line.plan_id) ?? line.plan_title ?? null;
 
   const counts = useMemo(
     () =>
@@ -509,12 +570,17 @@ export default function Clients() {
                           on its own row. */}
                       <span
                         onClick={() => navigate(`/clients/${c.id}?tab=services`)}
+                        title={multi
+                          ? lines.map((l) => planTitle(l) ?? 'no package').join(', ')
+                          : 'Open this account\'s services'}
                         style={{
                           display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
                           fontSize: 11.5, fontWeight: 600, background: color.tileBg, color: color.green, cursor: 'pointer',
                         }}
                       >
-                        {lines.length} service{lines.length === 1 ? '' : 's'}
+                        {multi
+                          ? `${lines.length} services`
+                          : (planTitle(c) ?? '1 service')}
                       </span>
                     </td>
                     <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5, color: '#4a524c' }}>
@@ -525,25 +591,44 @@ export default function Clients() {
                     </td>
                     <td style={td}>
                       {multi ? (() => {
-                        const blocked = lines.filter((l) => l.status === 'suspended' || l.status === 'paused').length;
-                        const online = lines.filter((l) => l.online).length;
-                        return (
-                          <span style={{ fontSize: 12.5, color: color.muted }}>
-                            {online} online{blocked ? `, ${blocked} blocked` : ''}
-                          </span>
-                        );
-                      })() : (() => {
-                        const p = presence(c);
+                        // A multi-service account: the state of each line counted,
+                        // and how many are up, down or blocked.
+                        const byState = {};
+                        const byConn = {};
+                        for (const l of lines) {
+                          byState[l.status] = (byState[l.status] ?? 0) + 1;
+                          const k = connection(l).kind;
+                          byConn[k] = (byConn[k] ?? 0) + 1;
+                        }
+                        const LABEL = { online: 'online', offline: 'offline', blocked: 'blocked', split: 'blocked but online' };
                         return (
                           <>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
-                                           fontSize: 13, fontWeight: p.weight, color: p.colour }}>
-                              <span style={{ width: 7, height: 7, borderRadius: radius.pill, background: p.colour }} />
-                              {p.label}
+                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                              {Object.entries(byState).map(([s, n]) => <StatePill key={s} status={s} count={n} />)}
+                            </div>
+                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 5 }}>
+                              {['online', 'split', 'blocked', 'offline'].filter((k) => byConn[k]).map((k) => (
+                                <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: color.muted }}>
+                                  <ConnDot kind={k} />{byConn[k]} {LABEL[k]}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        );
+                      })() : (() => {
+                        const conn = connection(c);
+                        const note = expiryNote(c);
+                        return (
+                          <>
+                            <StatePill status={c.status} />
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5,
+                                           fontSize: 12.5, fontWeight: conn.weight, color: conn.colour }}>
+                              <ConnDot kind={conn.kind} />
+                              {conn.label}
                             </span>
-                            {p.note && (
+                            {note && (
                               <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 2 }}>
-                                {p.note}
+                                {note}
                               </span>
                             )}
                           </>
