@@ -274,6 +274,7 @@ export default function Tenants() {
         pppoe_client_rate: Number(editing.pppoe_client_rate),
         flat_monthly_fee: editing.charge_mode === 'flat' ? Number(editing.flat_monthly_fee) : null,
         settlement_frequency: editing.settlement_frequency,
+        settlement_time: editing.settlement_time || '00:00',
         settlement_fee_mode: editing.settlement_fee_mode,
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
@@ -649,6 +650,7 @@ export default function Tenants() {
                         hotspot_commission_pct: t.hotspot_commission_pct ?? 3,
                         pppoe_client_rate: t.pppoe_client_rate ?? 16,
                         settlement_frequency: t.settlement_frequency ?? 'daily',
+                        settlement_time: String(t.settlement_time ?? '00:00').slice(0, 5),
                         settlement_fee_mode: t.settlement_fee_mode ?? 'tiered',
                       })
                     }
@@ -906,6 +908,11 @@ export default function Tenants() {
                     ]}
                   />
                 </Field>
+                {editing.settlement_frequency !== 'manual' && (
+                  <Field label="Payout time" hint="Nairobi time — midnight unless the tenant chose another">
+                    <Input type="time" value={editing.settlement_time} onChange={(e) => setEditing((s) => ({ ...s, settlement_time: e.target.value }))} />
+                  </Field>
+                )}
                 <Field
                   label="Safaricom's B2C fee"
                   span={2}

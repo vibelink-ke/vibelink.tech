@@ -250,6 +250,7 @@ export const api = {
   setGatewayPlatformCollect: (id, on) => post(`/api/payment-gateways/${id}/platform-collect`, { on }),
   updateSettlementMethod: (body) => patch('/api/settings/settlement-method', body),
   updateSettlementFrequency: (frequency) => patch('/api/settings/settlement-frequency', { frequency }),
+  updateSettlementTime: (time) => patch('/api/settings/settlement-time', { time }),
   getB2cFeeTiers: () => get('/api/platform/b2c-fee-tiers'),
   saveB2cFeeTiers: (tiers) => put('/api/platform/b2c-fee-tiers', { tiers }),
   gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),

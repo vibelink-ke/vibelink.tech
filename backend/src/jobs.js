@@ -67,7 +67,8 @@ export function startJobs() {
   cron.schedule('* * * * *', safely('smartoltEnforce', () => import('./smartolt.js').then((m) => m.enforceOnus())));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
-  cron.schedule('0 2 * * *', safely('settleTenants', settleTenants));
+  // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
+  cron.schedule('* * * * *', safely('settleTenants', settleTenants));
   cron.schedule('0 1 * * *', safely('generateMonthlyCharges', generateMonthlyCharges));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
@@ -1234,7 +1235,26 @@ async function payoutRow(row, ownerTenantId) {
   return { conversationId, fee, net };
 }
 
+/**
+ * Pays each tenant what has been collected for them, once a day at THEIR time (settlement_time,
+ * Nairobi, midnight unless they chose another), or on Mondays for weekly tenants; never for manual.
+ *
+ * Runs every minute. A tenant is "claimed" for the day first — settlement_last_run is set in one
+ * atomic update — so it can only ever run once a day, a missed hour catches up as soon as the server
+ * is back, and two overlapping runs cannot pay the same tenant twice. A payment collected after
+ * their time simply goes out the next day.
+ */
 export async function settleTenants() {
+  const local = "(now() at time zone 'Africa/Nairobi')";
+  const { rows: due } = await pool.query(
+    `update tenants t set settlement_last_run = ${local}::date
+      where t.platform_collect_enabled
+        and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and extract(dow from ${local}) = 1))
+        and t.settlement_time <= ${local}::time
+        and (t.settlement_last_run is null or t.settlement_last_run < ${local}::date)
+      returning t.id`);
+  if (!due.length) return;
+
   const { rows } = await pool.query(
     `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
@@ -1244,10 +1264,9 @@ export async function settleTenants() {
         -- and is paid out once they renew.
         and t.status not in ('readonly', 'suspended')
         and (t.licence_ends is null or t.licence_ends >= current_date)
-        -- each tenant's own schedule: daily every night, weekly on Mondays, and
-        -- 'manual' never here (only their own "Request payout")
-        and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and $2::boolean))`,
-    [SETTLEMENT_MIN_KES, new Date(Date.now() + 3 * 3600 * 1000).getUTCDay() === 1]);
+        -- only the tenants whose payout time has come today (claimed above)
+        and s.tenant_id = any($2::uuid[])`,
+    [SETTLEMENT_MIN_KES, due.map((d) => d.id)]);
   if (!rows.length) return;
 
   const ownerTenantId = await platformOwnerTenantId();

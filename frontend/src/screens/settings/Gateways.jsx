@@ -288,6 +288,7 @@ export default function Gateways() {
   const [settlementAccountNumber, setSettlementAccountNumber] = useState(store.session?.settlementAccountNumber ?? '');
   const [settlementBusy, setSettlementBusy] = useState(false);
   const [settlementFrequency, setSettlementFrequency] = useState(store.session?.settlementFrequency ?? 'daily');
+  const [settlementTime, setSettlementTime] = useState(store.session?.settlementTime ?? '00:00');
   const saveSettlementMethod = async () => {
     setSettlementBusy(true);
     try {
@@ -296,9 +297,10 @@ export default function Gateways() {
         : { method: 'bank', bankName: settlementBankName, bankPaybill: settlementBankPaybill, accountNumber: settlementAccountNumber };
       await api.updateSettlementMethod(body);
       await api.updateSettlementFrequency(settlementFrequency);
+      await api.updateSettlementTime(settlementTime || '00:00');
       store.signIn({
         ...store.session,
-        settlementMethod, settlementFrequency, settlementPhone, settlementTill,
+        settlementMethod, settlementFrequency, settlementTime: settlementTime || '00:00', settlementPhone, settlementTill,
         settlementBankName, settlementBankPaybill, settlementAccountNumber,
       });
       store.toast('Settlement details saved');
@@ -371,12 +373,18 @@ export default function Gateways() {
                 value={settlementFrequency}
                 onChange={(e) => setSettlementFrequency(e.target.value)}
                 options={[
-                  { value: 'daily', label: 'Daily — every night' },
-                  { value: 'weekly', label: 'Weekly — Mondays' },
+                  { value: 'daily', label: 'Daily — at the payout time below' },
+                  { value: 'weekly', label: 'Weekly — Mondays, at the payout time below' },
                   { value: 'manual', label: 'Manual — only when I request it' },
                 ]}
               />
             </Field>
+
+            {settlementFrequency !== 'manual' && (
+              <Field label="Payout time" hint="Nairobi time. Midnight (00:00) unless you choose another. Money collected after this time goes out at the same time the next day.">
+                <Input type="time" value={settlementTime} onChange={(e) => setSettlementTime(e.target.value)} />
+              </Field>
+            )}
 
             <Field label="Payout method">
               <Select

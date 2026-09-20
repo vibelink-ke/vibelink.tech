@@ -2709,3 +2709,19 @@ create table if not exists smartolt_unconfigured (
   primary key (tenant_id, sn)
 );
 alter table smartolt_config add column if not exists unconfigured_at timestamptz;
+
+-- What time of day (Nairobi) a tenant's payout goes out, and the day it last did.
+-- Midnight unless the tenant chooses otherwise; settlement_last_run stops a tenant being paid
+-- twice in one day, and lets a run that was missed (server down at the hour) catch up.
+alter table tenants add column if not exists settlement_time time not null default '00:00';
+alter table tenants add column if not exists settlement_last_run date;
+
+-- Existing tenants start from today: their first payout at the new schedule is the next payout time,
+-- not a surprise one the moment this is applied.
+do $$
+begin
+  if not exists (select 1 from schema_flags where name = 'settlement_time_initial') then
+    update tenants set settlement_last_run = (now() at time zone 'Africa/Nairobi')::date where settlement_last_run is null;
+    insert into schema_flags (name) values ('settlement_time_initial');
+  end if;
+end $$;

@@ -10957,7 +10957,7 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
-                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'flat_monthly_fee'];
+                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'settlement_time', 'flat_monthly_fee'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   // What the platform charges this tenant, and how often it pays them out.
@@ -10973,6 +10973,9 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   if ('flat_monthly_fee' in req.body && req.body.flat_monthly_fee !== null) {
     const v = Number(req.body.flat_monthly_fee);
     if (!(v >= 0 && v <= 10000000)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });
+  }
+  if ('settlement_time' in req.body && !/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(String(req.body.settlement_time))) {
+    return res.status(400).json({ error: 'Payout time must look like 00:00 or 06:30.' });
   }
   if ('settlement_frequency' in req.body && !['daily', 'weekly', 'manual'].includes(req.body.settlement_frequency)) {
     return res.status(400).json({ error: 'Settlement frequency must be daily, weekly or manual.' });
@@ -11686,6 +11689,16 @@ app.patch('/api/settings/settlement-frequency', requirePermission('payments.edit
   res.json({ settlementFrequency: frequency });
 }));
 
+/** What time of day (Nairobi) this tenant's payout goes out — midnight unless they choose. */
+app.patch('/api/settings/settlement-time', requirePermission('payments.edit'), wrap(async (req, res) => {
+  const time = String(req.body?.time ?? '');
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+    return res.status(400).json({ error: 'Choose a time like 00:00 or 06:30.' });
+  }
+  await pool.query('update tenants set settlement_time=$2 where id=$1', [req.tenant.id, time]);
+  res.json({ settlementTime: time });
+}));
+
 /**
  * Only meaningful on the platform-owner's own tenant — daraja.js's
  * resolveConfig() only ever looks this up against whichever tenant the
@@ -11763,7 +11776,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
-  { job: 'settleTenants', name: 'Platform settlement payout', cron: '0 2 * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, on their own schedule: daily every night, weekly on Mondays, or only when they request it' },
+  { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },
   { job: 'generateMonthlyCharges', name: 'Tenant monthly statements', cron: '0 1 * * *', detail: 'Once a month has ended, works out each tenant\'s charge — a percentage of hotspot revenue plus a rate per active PPPoE client — and tells the platform owner' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
   /**
