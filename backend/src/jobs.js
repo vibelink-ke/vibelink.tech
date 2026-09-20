@@ -82,6 +82,7 @@ export function startJobs() {
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
+  cron.schedule('45 3 * * *', safely('dataRetention', dataRetention));
   cron.schedule('0 4 * * *', safely('dormantSweep', dormantSweep));
   cron.schedule('15 6 * * *', safely('generateMonthlyBills', generateMonthlyBills));
   cron.schedule('*/1 * * * *', safely('pollWireguardStatus', pollWireguardStatus));
@@ -386,6 +387,35 @@ export async function expireAndSuspend() {
     `update vouchers set status='expired'
      where status='in_use' and expires_at < now() and tenant_id in (${enabledTenants})`,
     ['expireAndSuspend']);
+}
+
+/**
+ * Old data that nothing reads any more, cleared once a day so the database does not grow for ever.
+ *
+ *   login attempts (radpostauth)   30 days   — every RADIUS login try, good or bad; only useful for
+ *                                              working out a recent "why can't they log in"
+ *   finished accounting records    180 days  — radacct and the sessions copied from it. A voucher's or a
+ *                                              client's usage is read from these, so six months of history stays
+ *   job run log                    7 days
+ *
+ * Only finished sessions are ever removed, and the delete goes in slices so a big table never holds a
+ * lock for long. Live sessions, clients, payments, tickets and messages are not touched here.
+ */
+async function dataRetention() {
+  const purge = async (label, table, where) => {
+    let total = 0;
+    for (let i = 0; i < 40; i++) {
+      const { rowCount } = await pool.query(
+        `delete from ${table} where ctid in (select ctid from ${table} where ${where} limit 20000)`);
+      total += rowCount;
+      if (rowCount < 20000) break;
+    }
+    if (total) console.log(`dataRetention: removed ${total} ${label}`);
+  };
+  await purge('login attempts', 'radpostauth', "authdate < now() - interval '30 days'");
+  await purge('finished accounting records', 'radacct', "acctstoptime is not null and acctstoptime < now() - interval '180 days'");
+  await purge('finished sessions', 'sessions', "stopped_at is not null and stopped_at < now() - interval '180 days'");
+  await purge('old job runs', 'job_runs', "ran_at < now() - interval '7 days'");
 }
 
 /**
