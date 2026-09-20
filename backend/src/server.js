@@ -7,7 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { generateDueBills } from './bills.js';
-import { currentMonthKey, chargesFor, snapshotCharges, monthWindow } from './charges.js';
+import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -460,8 +460,11 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
   try {
     await c.query('begin');
     ({ rows: [tenant] } = await c.query(
-      `insert into tenants (name, subdomain, status, support_phone) values ($1,$2,'trial',$3) returning *`,
-      [company, sub, phone ?? null]));
+      // A new sign-up gets a trial that ends. TENANT_TRIAL_DAYS sets how long (14 by
+      // default); 0 leaves it open-ended, as sign-ups were before this existed.
+      `insert into tenants (name, subdomain, status, support_phone, licence_ends)
+       values ($1,$2,'trial',$3, case when $4::int > 0 then current_date + $4::int end) returning *`,
+      [company, sub, phone ?? null, Number(process.env.TENANT_TRIAL_DAYS ?? 14)]));
     ({ rows: [staff] } = await c.query(
       `insert into staff (tenant_id, name, phone, email, username, role, password_hash)
        values ($1,$2,$3,$4,$5,'owner',$6) returning *`,
@@ -2089,9 +2092,10 @@ app.use(async (req, res, next) => {
    */
   if (req.tenant.status === 'readonly'
       && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
-      && !req.path.startsWith('/portal/')) {
+      && !req.path.startsWith('/portal/')
+      && !req.path.startsWith('/api/billing/')) {
     return res.status(402).json({
-      error: 'Your account is read-only until the platform invoice is paid. You can still view everything.',
+      error: 'Your licence has expired, so the account is view-only. Pay under Licence & billing to switch it back on — your customers and hotspot visitors are not affected.',
       readOnly: true,
     });
   }
@@ -10264,6 +10268,61 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
     .catch((e) => console.error('platform_admin seed', t.id, e.message));
 
   res.json(t);
+}));
+
+// ── the tenant's own licence and billing ────
+/**
+ * A tenant paying the platform: what is owed, and two ways to pay it —
+ * the platform paybill quoting the tenant's reference (matched in the C2B
+ * webhook), or an M-Pesa prompt they send to their own phone from here.
+ *
+ * These stay open when the licence has expired: that is exactly when they are
+ * needed. They are staff-only, and touch nothing a customer or hotspot
+ * visitor uses — those routes are separate and are never restricted by a
+ * licence.
+ */
+app.get('/api/billing', requirePermission('billing.view'), wrap(async (req, res) => {
+  res.json(await billingSummary(req.tenant.id));
+}));
+
+app.post('/api/billing/pay', requirePermission('billing.pay'), stkLimiter, wrap(async (req, res) => {
+  const summary = await billingSummary(req.tenant.id);
+  if (!summary.canPrompt) {
+    return res.status(503).json({ error: 'Card and M-Pesa prompts are not set up yet — pay to the paybill shown instead, or contact support.' });
+  }
+
+  // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
+  const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+
+  const amount = req.body?.amount == null || req.body.amount === '' ? summary.amountDue : Number(req.body.amount);
+  if (!(amount >= 10)) {
+    return res.status(400).json({ error: summary.amountDue > 0 ? 'The smallest payment is KES 10.' : 'Nothing is due right now. Enter an amount of at least KES 10 to pay ahead.' });
+  }
+  if (amount > 250000) return res.status(400).json({ error: 'M-Pesa allows at most KES 250,000 in one prompt.' });
+
+  const owner = await ownerTenantId();
+  const data = await mpesa.stkPush(owner, {
+    phone, amount, accountRef: summary.billingRef, description: 'Licence', platformCollect: true,
+  });
+  const checkoutId = data?.CheckoutRequestID ?? null;
+  if (!checkoutId) return res.status(502).json({ error: 'M-Pesa did not accept the request. Try again in a moment.' });
+  await pool.query(
+    `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+     values ($1, 'daraja', $2, $3, $4, $5)
+     on conflict (tenant_id, provider, checkout_id) do nothing`,
+    [owner, checkoutId, phone, Math.round(amount), { type: 'tenant_fee', tenant_id: req.tenant.id }]);
+  res.json({ checkoutId });
+}));
+
+/** Has the prompt been answered? Only for this tenant's own requests. */
+app.get('/api/billing/pay/:checkoutId', requirePermission('billing.view'), wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    `select status, result_desc from stk_requests
+      where checkout_id = $1 and purpose->>'type' = 'tenant_fee' and purpose->>'tenant_id' = $2`,
+    [req.params.checkoutId, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such request' });
+  res.json({ status: r.status, message: r.result_desc });
 }));
 
 // ── tenant charges (platform owner) ─────────

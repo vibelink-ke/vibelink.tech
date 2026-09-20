@@ -76,6 +76,7 @@ export const NAV_SECTIONS = [
     heading: 'SYSTEM',
     items: [
       { to: '/staff', label: 'Staff & roles', count: (s) => s.staff.length },
+      { to: '/licence', label: 'Licence & billing', perm: 'billing.view' },
       { to: '/settings', label: 'Settings' },
     ],
   },

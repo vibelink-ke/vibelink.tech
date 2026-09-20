@@ -34,5 +34,15 @@
       "Clients: the package name, a coloured online/offline dot and days left. Clients blocked for 4 months become dormant, and are deleted after 5.",
       "Settings → Message templates, staff ID badges with expiry, and staff password reset."
     ]
+  },
+  {
+    "date": "2026-09-20",
+    "title": "Licence & billing: pay by M-Pesa prompt or paybill; payouts in full on your schedule",
+    "items": [
+      "New Licence & billing page: see what is owed, pay with an M-Pesa prompt to your own phone, or pay to the paybill with your reference.",
+      "If a licence expires, only the dashboard becomes view-only — customers and hotspot visitors are never affected.",
+      "Payouts are paid in full (no commission deducted), daily, weekly or manual — choose under Settings → Gateways.",
+      "Platform fees are billed monthly instead: 3% of hotspot sales plus KES 16 per active PPPoE client."
+    ]
   }
 ]

@@ -145,6 +145,10 @@ export const DEFAULT_PERMISSIONS = {
   // What the business earns and keeps is the owner's to see; a cashier who
   // logs expenses does not automatically get the whole profit picture.
   'profitloss.view': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // The tenant's own licence: what they owe the platform, and paying it. Owner only —
+  // it is the account holder's money and the account holder's licence.
+  'billing.view': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'billing.pay':  { owner: true, cashier: false, technician: false, support: false, sales: false },
 
   'hr.view': { owner: true, cashier: false, technician: false, support: false, sales: false },
   'hr.edit': { owner: true, cashier: false, technician: false, support: false, sales: false },
@@ -223,6 +227,8 @@ export const PERMISSION_META = [
   { key: 'bills.view',       page: 'Monthly bills', action: 'View' },
   { key: 'bills.edit',       page: 'Monthly bills', action: 'Create / edit' },
   { key: 'profitloss.view',  page: 'Profit & loss', action: 'View' },
+  { key: 'billing.view',     page: 'Licence & billing', action: 'View' },
+  { key: 'billing.pay',      page: 'Licence & billing', action: 'Pay' },
   { key: 'hr.view', page: 'HR', action: 'View staff pay/employment details' },
   { key: 'hr.edit', page: 'HR', action: 'Edit staff pay/employment details' },
   { key: 'payroll.create',  page: 'HR', action: 'Draft a payroll run' },

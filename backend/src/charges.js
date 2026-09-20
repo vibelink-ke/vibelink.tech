@@ -1,4 +1,4 @@
-import { pool } from './db.js';
+import { pool, config, platformCollectConfig } from './db.js';
 
 /**
  * What tenants are charged each month for using the platform:
@@ -107,4 +107,143 @@ export async function snapshotCharges(key) {
      returning id`,
     [w.start, w.end, w.month]);
   return rows.length;
+}
+
+// ── tenants paying the platform ─────────────────────────────────────────────
+
+/** The platform owner's own tenant: the one whose Daraja credentials take the money. */
+export async function ownerTenantId() {
+  const { rows: [owner] } = await pool.query(
+    'select tenant_id from staff where is_super_admin and tenant_id is not null limit 1');
+  return owner?.tenant_id ?? null;
+}
+
+/** The platform's collection paybill, or null when none is set up. */
+export async function platformPaybill() {
+  const owner = await ownerTenantId();
+  if (!owner) return null;
+  const cfg = (await platformCollectConfig(owner, 'daraja')) ?? (await config(owner, 'daraja'));
+  return cfg?.shortcode ?? null;
+}
+
+/**
+ * Pay the oldest unpaid statements out of the tenant's credit, oldest first,
+ * stopping at the first one the credit cannot cover. Each statement paid buys
+ * one month of licence, counted from whichever is later — today or the date the
+ * licence currently runs to — so paying on time never wastes days and paying
+ * late never gets a month for less. A tenant whose licence has lapsed is
+ * switched back on the moment it is paid up to a future date.
+ *
+ * A statement of nothing (no hotspot sales, no active PPPoE clients) is paid
+ * automatically: there is nothing to owe, and it should not cost them access.
+ * Must run inside a transaction; the tenant row is locked.
+ */
+async function allocateCredit(c, tenantId) {
+  const { rows: [t] } = await c.query('select billing_credit from tenants where id = $1 for update', [tenantId]);
+  let credit = Number(t?.billing_credit ?? 0);
+  const { rows: due } = await c.query(
+    `select id, total from tenant_charges
+      where tenant_id = $1 and status in ('open', 'invoiced')
+      order by month for update`, [tenantId]);
+
+  let paid = 0;
+  for (const s of due) {
+    const total = Number(s.total);
+    if (credit + 0.005 < total) break;
+    credit -= total;
+    paid += 1;
+    await c.query("update tenant_charges set status = 'paid', paid_at = now() where id = $1", [s.id]);
+    await c.query(
+      `update tenants
+          set licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + interval '1 month')::date
+        where id = $1`, [tenantId]);
+  }
+  await c.query(
+    `update tenants
+        set billing_credit = $2,
+            status = case when status = 'readonly' and licence_ends >= current_date then 'active' else status end
+      where id = $1`, [tenantId, Math.max(0, credit)]);
+  return { paid, credit: Math.max(0, credit) };
+}
+
+/**
+ * Record money received from a tenant and apply it. Safe to call twice with the
+ * same reference (a retried callback): the second call does nothing.
+ */
+export async function applyTenantPayment(tenantId, amount, { method, reference = null, phone = null }) {
+  const value = Number(amount);
+  if (!(value > 0)) return { ignored: true };
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const { rows: [receipt] } = await c.query(
+      `insert into tenant_payments (tenant_id, amount, method, reference, phone)
+       values ($1, $2, $3, $4, $5)
+       on conflict (reference) where reference is not null do nothing
+       returning id`, [tenantId, value, method, reference, phone]);
+    if (!receipt) { await c.query('rollback'); return { duplicate: true }; }
+    await c.query('update tenants set billing_credit = billing_credit + $2 where id = $1', [tenantId, value]);
+    const result = await allocateCredit(c, tenantId);
+    await c.query('commit');
+    return { duplicate: false, ...result };
+  } catch (e) {
+    await c.query('rollback').catch(() => {});
+    throw e;
+  } finally {
+    c.release();
+  }
+}
+
+/**
+ * After statements are drawn: settle anything already covered by a tenant's
+ * credit, and any statement of nothing. Run by the monthly job.
+ */
+export async function settleAllFromCredit() {
+  const { rows } = await pool.query(
+    `select id from tenants
+      where billing_credit > 0
+         or id in (select tenant_id from tenant_charges where status in ('open', 'invoiced') and total = 0)`);
+  for (const { id } of rows) {
+    const c = await pool.connect();
+    try {
+      await c.query('begin');
+      await allocateCredit(c, id);
+      await c.query('commit');
+    } catch (e) {
+      await c.query('rollback').catch(() => {});
+      console.error('settleAllFromCredit', id, e.message);
+    } finally {
+      c.release();
+    }
+  }
+}
+
+/** Everything the Licence & billing page shows for one tenant. */
+export async function billingSummary(tenantId) {
+  const { rows: [t] } = await pool.query(
+    `select name, status, licence_ends, billing_ref, billing_credit,
+            (licence_ends - current_date) as days_left
+       from tenants where id = $1`, [tenantId]);
+  const { rows: statements } = await pool.query(
+    `select id, to_char(month, 'YYYY-MM') as month, hotspot_revenue, hotspot_pct, hotspot_fee,
+            pppoe_active, pppoe_rate, pppoe_fee, total, status, paid_at
+       from tenant_charges where tenant_id = $1 order by month desc`, [tenantId]);
+  const owed = statements
+    .filter((s) => s.status === 'open' || s.status === 'invoiced')
+    .reduce((n, s) => n + Number(s.total), 0);
+  const credit = Number(t?.billing_credit ?? 0);
+  const paybill = await platformPaybill();
+  return {
+    tenant: t?.name ?? null,
+    status: t?.status ?? 'active',
+    readOnly: t?.status === 'readonly',
+    licenceEnds: t?.licence_ends ?? null,
+    daysLeft: t?.days_left == null ? null : Number(t.days_left),
+    billingRef: t?.billing_ref ?? null,
+    credit,
+    amountDue: Math.max(0, owed - credit),
+    statements: statements.slice(0, 12),
+    paybill,
+    canPrompt: !!paybill,
+  };
 }

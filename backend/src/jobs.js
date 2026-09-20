@@ -1144,9 +1144,11 @@ export async function settleTenants() {
  * successful run of the month does anything.
  */
 async function generateMonthlyCharges() {
-  const { currentMonthKey, previousMonthKey, snapshotCharges, monthWindow } = await import('./charges.js');
+  const { currentMonthKey, previousMonthKey, snapshotCharges, monthWindow, settleAllFromCredit } = await import('./charges.js');
   const key = previousMonthKey(currentMonthKey());
   const made = await snapshotCharges(key);
+  // Anything a tenant has already paid ahead, and any statement of nothing, settles now.
+  await settleAllFromCredit();
   if (!made) return;
   console.log(`generateMonthlyCharges: ${made} statement(s) for ${key}`);
 
@@ -1279,7 +1281,7 @@ async function ownerBrief() {
 export async function expireTenantLicences() {
   await pool.query(`
     update tenants set status='readonly'
-     where status='active'
+     where status in ('active', 'trial')
        and licence_ends is not null
        and licence_ends < current_date`);
 

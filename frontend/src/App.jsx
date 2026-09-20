@@ -8,6 +8,7 @@ import AuthGate from './app/AuthGate';
 import ResetPassword from './app/ResetPassword';
 import AcceptInvite from './app/AcceptInvite';
 import { isPlatformHost } from './app/host';
+import LicenceBanner from './app/LicenceBanner';
 import CustomerPortal from './screens/CustomerPortal';
 import VerifyStaff from './screens/VerifyStaff';
 import { useMediaQuery } from './app/useMediaQuery';
@@ -41,6 +42,7 @@ import ErrorBoundary from './ui/boundary';
  * they move between them.
  */
 const Landing = lazy(() => import('./screens/Landing'));
+const Licence = lazy(() => import('./screens/Licence'));
 const Hotspot = lazy(() => import('./screens/Hotspot'));
 const Fup = lazy(() => import('./screens/Fup'));
 const MapScreen = lazy(() => import('./screens/Map'));
@@ -225,6 +227,7 @@ export default function App() {
       <Sidebar />
       <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <Topbar />
+        <LicenceBanner />
         {/* 26px of padding either side costs a seventh of a 375px screen, and the
             content is what people came for. Tables and wide cards scroll inside
             themselves rather than pushing the page sideways. */}
@@ -281,6 +284,7 @@ export default function App() {
 
             <Route path="/staff" element={<Staff />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/licence" element={<Licence />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

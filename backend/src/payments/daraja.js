@@ -375,6 +375,28 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
   if (RESERVED_BILL_REFS.has(String(b.BillRefNumber ?? '').trim().toUpperCase())) return;
 
   /**
+   * A tenant paying the platform (licence and monthly fees): the account
+   * number is their reference, VL-101. Only counts when it arrives on the
+   * platform's own paybill — anyone can type any reference into any paybill,
+   * and money that landed elsewhere must never credit a tenant.
+   */
+  const feeRef = String(b.BillRefNumber ?? '').trim().toUpperCase();
+  if (/^VL-\d+$/.test(feeRef)) {
+    const { pool: db } = await import('../db.js');
+    const { platformPaybill, applyTenantPayment } = await import('../charges.js');
+    const ownPaybill = await platformPaybill().catch(() => null);
+    if (ownPaybill && String(b.BusinessShortCode) === String(ownPaybill)) {
+      const { rows: [tenant] } = await db.query('select id from tenants where upper(billing_ref) = $1', [feeRef]);
+      if (tenant) {
+        await applyTenantPayment(tenant.id, Number(b.TransAmount), {
+          method: 'paybill', reference: b.TransID, phone: normalise(b.MSISDN),
+        }).catch(console.error);
+        return;
+      }
+    }
+  }
+
+  /**
    * A walk-in payment for a platform-collected tenant: BillRefNumber
    * carries "subdomain-accountcode" (see stkPushForSubscriber in
    * server.js), not a bare account code, since it landed on the platform
@@ -552,6 +574,14 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      * the net (minus the commission stkPushForSubscriber recorded) accrues
      * to that tenant's settlement balance for the next payout run.
      */
+    // A tenant paying its own licence by prompting itself: credited to that
+    // tenant (p.tenant_id), taken on the platform owner's paybill (req.tenant_id).
+    if (p.type === 'tenant_fee') {
+      const { applyTenantPayment } = await import('../charges.js');
+      await applyTenantPayment(p.tenant_id, Number(req.amount), { method: 'stk', reference: tx.ref, phone: tx.phone });
+      return;
+    }
+
     if (p.type === 'platform_collect') {
       // Same replay guard as the C2B confirm handler above: Safaricom can
       // deliver this STK result callback more than once for the same

@@ -17,9 +17,46 @@ export default function Tenants() {
   const [f, setF] = useState(BLANK);
   const [busy, setBusy] = useState(false);
   const [viewing, setViewing] = useState(null);
+  const [licenceDate, setLicenceDate] = useState('');
+  const [licenceBusy, setLicenceBusy] = useState(false);
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [staffFor, setStaffFor] = useState(null);
+
+  /**
+   * Licence controls for the tenant open in the panel: add or take back days,
+   * or set the exact end date. Days back on the clock switch a lapsed tenant
+   * straight back on. Reloads the list afterwards because the status can change
+   * as a side effect, and the panel should show the truth.
+   */
+  const changeLicence = async (run, done) => {
+    setLicenceBusy(true);
+    try {
+      await run();
+      const list = await api.tenants();
+      store.setCollection('tenants', list);
+      setViewing((v) => list.find((t) => t.id === v?.id) ?? v);
+      setLicenceDate('');
+      store.toast(done);
+    } catch (e) {
+      store.toast(`Could not change the licence: ${e.message}`);
+    } finally {
+      setLicenceBusy(false);
+    }
+  };
+  const addLicenceDays = (days) => changeLicence(
+    () => api.tenantLicence(viewing.id, days),
+    days > 0 ? `Added ${days} days` : `Took back ${-days} days`);
+  const setLicenceEnd = () => {
+    const future = licenceDate >= new Date().toISOString().slice(0, 10);
+    return changeLicence(
+      () => api.updateTenant(viewing.id, {
+        licence_ends: licenceDate,
+        // A date in the future should not leave a lapsed tenant locked out.
+        ...(future && ['readonly', 'suspended'].includes(viewing.status) ? { status: 'active' } : {}),
+      }),
+      'Licence date saved');
+  };
   const [staffList, setStaffList] = useState([]);
   const [staffLoading, setStaffLoading] = useState(false);
   const [resetting, setResetting] = useState(null);
@@ -641,7 +678,22 @@ export default function Tenants() {
             <KV k="Timezone" v={viewing.timezone ?? '—'} />
             <KV k="KRA PIN" v={viewing.kra_pin ?? '—'} />
             <KV k="Support phone" v={viewing.support_phone ?? '—'} />
-            <KV k="Licence ends" v={viewing.licence_ends ? new Date(viewing.licence_ends).toLocaleDateString('en-KE') : '—'} />
+            <KV k="Licence ends" v={viewing.licence_ends ? new Date(viewing.licence_ends).toLocaleDateString('en-KE') : 'No end date'} />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 0' }}>
+              <span style={{ fontSize: 12, color: color.muted }}>
+                Each monthly statement they pay adds a month automatically. Use these to give more time, take it back, or switch a lapsed tenant on now.
+              </span>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <Button onClick={() => addLicenceDays(30)} disabled={licenceBusy}>+30 days</Button>
+                <Button onClick={() => addLicenceDays(90)} disabled={licenceBusy}>+90 days</Button>
+                <Button onClick={() => addLicenceDays(365)} disabled={licenceBusy}>+1 year</Button>
+                <Button onClick={() => addLicenceDays(-7)} disabled={licenceBusy}>−7 days</Button>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <Input type="date" value={licenceDate} onChange={(e) => setLicenceDate(e.target.value)} />
+                <Button onClick={setLicenceEnd} disabled={licenceBusy || !licenceDate}>Set end date</Button>
+              </div>
+            </div>
             <KV k="Joined" v={viewing.created_at ? new Date(viewing.created_at).toLocaleString('en-KE') : '—'} />
             {isSelf(viewing) && (
               <div style={{ fontSize: 12, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 12px' }}>

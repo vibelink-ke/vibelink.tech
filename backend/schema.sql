@@ -2459,3 +2459,26 @@ begin
     insert into schema_flags (name) values ('platform_collect_default_on');
   end if;
 end $$;
+
+-- ─────────────── tenants paying the platform ───────────────
+-- Every receipt from a tenant: paid to the platform paybill quoting their
+-- reference (VL-101), or by an M-Pesa prompt they sent themselves. The
+-- reference (M-Pesa receipt code) is unique, so a replayed callback cannot
+-- credit twice. Applied to their oldest unpaid statements by charges.js.
+create table if not exists tenant_payments (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  amount     numeric(12,2) not null,
+  method     text not null,                 -- paybill | stk | manual
+  reference  text,
+  phone      text,
+  created_at timestamptz not null default now(),
+  constraint tenant_payments_method_valid check (method in ('paybill', 'stk', 'manual'))
+);
+create unique index if not exists tenant_payments_reference_idx
+  on tenant_payments (reference) where reference is not null;
+create index if not exists tenant_payments_tenant_idx on tenant_payments (tenant_id, created_at desc);
+
+-- Money paid beyond what is currently owed; it settles the next statement.
+alter table tenants add column if not exists billing_credit numeric(12,2) not null default 0;
+alter table tenant_charges add column if not exists paid_at timestamptz;
