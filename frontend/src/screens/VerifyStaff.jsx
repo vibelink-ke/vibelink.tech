@@ -5,6 +5,7 @@ import { color, font } from '../theme/tokens';
 // the badge in front of them should see the same colour for the same role.
 const ROLE_COLOR = {
   owner: color.green,
+  manager: color.amberInk,
   cashier: color.amber,
   technician: color.mint,
   support: color.neutralInk,

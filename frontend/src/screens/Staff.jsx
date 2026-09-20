@@ -13,6 +13,7 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, T
 // never pass any permission check, since the API has no idea what it means.
 const ROLES = [
   { value: 'owner', label: 'Owner' },
+  { value: 'manager', label: 'Manager' },
   { value: 'cashier', label: 'Cashier' },
   { value: 'technician', label: 'Technician' },
   { value: 'support', label: 'Support' },
@@ -30,6 +31,7 @@ const BLANK = { name: '', phone: '', email: '', role: 'cashier' };
 // reuses the app's existing palette rather than inventing new colours.
 const ROLE_COLOR = {
   owner: color.green,
+  manager: color.amberInk,
   cashier: color.amber,
   technician: color.mint,
   support: color.neutralInk,

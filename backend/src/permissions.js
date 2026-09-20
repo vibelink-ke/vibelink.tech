@@ -8,14 +8,14 @@ import { pool } from './db.js';
  * to have, and a tenant that locks itself out of its own owner account has
  * no other way back in.
  */
-export const ROLES = ['owner', 'cashier', 'technician', 'support', 'sales'];
+export const ROLES = ['owner', 'manager', 'cashier', 'technician', 'support', 'sales'];
 
-const all = (owner = true) => ({ owner, cashier: false, technician: false, support: false, sales: false });
+const all = (owner = true) => ({ owner, manager: false, cashier: false, technician: false, support: false, sales: false });
 
 export const DEFAULT_PERMISSIONS = {
   'clients.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: true },
   'clients.create':  { owner: true, cashier: true,  technician: false, support: false, sales: true },
-  'clients.edit':    { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'clients.edit':    { owner: true, cashier: false, technician: false, support: true,  sales: false },
   'clients.suspend': { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'clients.delete':  { owner: true, cashier: false, technician: false, support: false, sales: false },
   // Real money moving with no payment behind it — same trust level as
@@ -161,6 +161,21 @@ export const DEFAULT_PERMISSIONS = {
   'payroll.create':  { owner: true, cashier: false, technician: false, support: false, sales: false },
   'payroll.approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
 };
+
+/**
+ * A manager runs the business day to day: everything an owner can do except the
+ * account holder's own money and the keys to the account — the licence and
+ * billing, profit & loss, payouts, payment-gateway credentials, payroll, deleting
+ * staff, and changing who is allowed what. Those stay owner-only unless the
+ * owner grants them in Staff & Roles.
+ */
+const MANAGER_WITHOUT = new Set([
+  'billing.view', 'billing.pay', 'profitloss.view', 'payments.request_payout', 'payment_gateways.edit',
+  'payroll.create', 'payroll.approve', 'staff.delete', 'staff.manage_permissions',
+]);
+for (const [key, row] of Object.entries(DEFAULT_PERMISSIONS)) {
+  row.manager = row.owner !== false && !MANAGER_WITHOUT.has(key);
+}
 
 export const PERMISSION_META = [
   { key: 'clients.view',    page: 'Clients',          action: 'View' },

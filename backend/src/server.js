@@ -19,7 +19,7 @@ import { startJobs, payoutTenantNow } from './jobs.js';
 import { settleStaffCommissionsForPayout } from './payments/apply.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
-import { requirePermission, loadPermissions, savePermissions, PERMISSION_META } from './permissions.js';
+import { requirePermission, loadPermissions, savePermissions, PERMISSION_META, ROLES } from './permissions.js';
 import axios from 'axios';
 
 /**
@@ -9339,6 +9339,12 @@ app.get('/api/staff/:id/id-card', requirePermission('staff.view'), wrap(async (r
 app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) => {
   const { name, phone, email, role = 'support' } = req.body;
   if (!name || !phone) return res.status(400).json({ error: 'name and phone are required' });
+  // Only a real role, and only an owner can make another owner — otherwise anyone
+  // allowed to add staff (a manager, say) could invite themselves an owner.
+  if (!ROLES.includes(role)) return res.status(400).json({ error: 'Unknown role.' });
+  if (role === 'owner' && req.session?.role !== 'owner' && !req.session?.is_super_admin) {
+    return res.status(403).json({ error: 'Only an owner can add another owner.' });
+  }
 
   const { rows: [phoneClash] } = await pool.query(
     'select name from staff where tenant_id=$1 and phone=$2', [req.tenant.id, phone]);
@@ -9413,6 +9419,12 @@ app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res)
 
   if ((target.role === 'owner' || target.role === 'platform_admin') && role && role !== target.role && !req.session.is_super_admin) {
     return res.status(403).json({ error: "Only the platform owner can change an owner's role." });
+  }
+  if (role && role !== target.role) {
+    if (!ROLES.includes(role)) return res.status(400).json({ error: 'Unknown role.' });
+    if (role === 'owner' && req.session?.role !== 'owner' && !req.session?.is_super_admin) {
+      return res.status(403).json({ error: 'Only an owner can make someone an owner.' });
+    }
   }
 
   if (phone && phone !== target.phone) {
