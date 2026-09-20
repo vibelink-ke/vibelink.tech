@@ -210,7 +210,9 @@ export default function Tenants() {
         support_phone: editing.support_phone || null,
         platform_collect_enabled: !!editing.platform_collect_enabled,
         settlement_phone: editing.settlement_phone || null,
-        settlement_commission_pct: editing.settlement_commission_pct === '' ? null : Number(editing.settlement_commission_pct),
+        hotspot_commission_pct: Number(editing.hotspot_commission_pct),
+        pppoe_client_rate: Number(editing.pppoe_client_rate),
+        settlement_frequency: editing.settlement_frequency,
         settlement_fee_mode: editing.settlement_fee_mode,
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
@@ -550,7 +552,9 @@ export default function Tenants() {
                         support_phone: t.support_phone ?? '',
                         platform_collect_enabled: t.platform_collect_enabled ?? false,
                         settlement_phone: t.settlement_phone ?? '',
-                        settlement_commission_pct: t.settlement_commission_pct ?? 5,
+                        hotspot_commission_pct: t.hotspot_commission_pct ?? 3,
+                        pppoe_client_rate: t.pppoe_client_rate ?? 16,
+                        settlement_frequency: t.settlement_frequency ?? 'daily',
                         settlement_fee_mode: t.settlement_fee_mode ?? 'commission_only',
                       })
                     }
@@ -687,7 +691,13 @@ export default function Tenants() {
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
             </Field>
-            <Field label="Platform collects on their behalf" span={2} hint="For a tenant with no payment gateway of their own: customers pay into our own paybill, and we settle it out to them nightly">
+            <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly">
+              <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, hotspot_commission_pct: e.target.value }))} />
+            </Field>
+            <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active line">
+              <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={(e) => setEditing((s) => ({ ...s, pppoe_client_rate: e.target.value }))} />
+            </Field>
+            <Field label="Platform collects on their behalf" span={2} hint="For a tenant with no payment gateway of their own: customers pay into our own paybill, and we pay it out to them in full on their schedule">
               <Select
                 value={editing.platform_collect_enabled ? 'yes' : 'no'}
                 onChange={(e) => setEditing((s) => ({ ...s, platform_collect_enabled: e.target.value === 'yes' }))}
@@ -696,22 +706,30 @@ export default function Tenants() {
             </Field>
             {editing.platform_collect_enabled && (
               <>
-                <Field label="Settlement M-Pesa number" hint="Where nightly payouts are sent">
+                <Field label="Settlement M-Pesa number" hint="Where payouts are sent">
                   <Input value={editing.settlement_phone} onChange={(e) => setEditing((s) => ({ ...s, settlement_phone: e.target.value }))} />
                 </Field>
-                <Field label="Commission (%)" hint="Kept by the platform from each payout">
-                  <Input type="number" step="0.1" value={editing.settlement_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, settlement_commission_pct: e.target.value }))} />
+                <Field label="Payout schedule" hint="Always paid in full">
+                  <Select
+                    value={editing.settlement_frequency}
+                    onChange={(e) => setEditing((s) => ({ ...s, settlement_frequency: e.target.value }))}
+                    options={[
+                      { value: 'daily', label: 'Daily' },
+                      { value: 'weekly', label: 'Weekly (Mondays)' },
+                      { value: 'manual', label: 'Manual (on request)' },
+                    ]}
+                  />
                 </Field>
                 <Field
                   label="Safaricom's B2C fee"
                   span={2}
-                  hint="Safaricom charges us to send a payout, separately from our commission — who covers that cost?"
+                  hint="Safaricom charges us to send a payout — who covers that cost?"
                 >
                   <Select
                     value={editing.settlement_fee_mode}
                     onChange={(e) => setEditing((s) => ({ ...s, settlement_fee_mode: e.target.value }))}
                     options={[
-                      { value: 'commission_only', label: 'Platform absorbs it (commission only)' },
+                      { value: 'commission_only', label: 'Platform absorbs it' },
                       { value: 'tiered', label: "Deduct from the tenant's payout (Safaricom's tariff)" },
                     ]}
                   />

@@ -62,6 +62,7 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('0 2 * * *', safely('settleTenants', settleTenants));
+  cron.schedule('0 1 * * *', safely('generateMonthlyCharges', generateMonthlyCharges));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   // Tenant billing is WHMCS's job now. Vibelink used to raise its own SaaS
@@ -1112,8 +1113,11 @@ export async function settleTenants() {
     `select s.id as settlement_id, s.tenant_id, s.amount, ${SETTLEMENT_COLUMNS}, t.name, t.settlement_fee_mode
        from settlements s join tenants t on t.id = s.tenant_id
       where s.status='pending' and s.amount >= $1
-        and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}`,
-    [SETTLEMENT_MIN_KES]);
+        and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}
+        -- each tenant's own schedule: daily every night, weekly on Mondays, and
+        -- 'manual' never here (only their own "Request payout")
+        and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and $2::boolean))`,
+    [SETTLEMENT_MIN_KES, new Date(Date.now() + 3 * 3600 * 1000).getUTCDay() === 1]);
   if (!rows.length) return;
 
   const ownerTenantId = await platformOwnerTenantId();
@@ -1130,6 +1134,30 @@ export async function settleTenants() {
       console.error('settleTenants:', r.name, e.message);
     }
   }
+}
+
+/**
+ * Monthly statements: once a month has ended, write each billable tenant's
+ * charges for it (see charges.js) and tell the platform owner they are ready.
+ * Runs daily rather than only on the 1st so a day the server was down does not
+ * skip a month; anything already written is left alone, so only the first
+ * successful run of the month does anything.
+ */
+async function generateMonthlyCharges() {
+  const { currentMonthKey, previousMonthKey, snapshotCharges, monthWindow } = await import('./charges.js');
+  const key = previousMonthKey(currentMonthKey());
+  const made = await snapshotCharges(key);
+  if (!made) return;
+  console.log(`generateMonthlyCharges: ${made} statement(s) for ${key}`);
+
+  const ownerTenantId = await platformOwnerTenantId();
+  if (!ownerTenantId) return;
+  const { rows: [sum] } = await pool.query(
+    'select count(*)::int as n, coalesce(sum(total), 0) as total from tenant_charges where month = $1',
+    [monthWindow(key).month]);
+  await notifyOwner(ownerTenantId,
+    `Tenant statements for ${key} are ready: ${sum.n} tenant${sum.n === 1 ? '' : 's'}, KES ${Number(sum.total).toLocaleString('en-KE')} in total.`,
+    { url: '/saas-revenue', title: 'Tenant statements' });
 }
 
 /**

@@ -97,7 +97,7 @@ const FEATURES = [
   ['PAYMENTS', 'M-Pesa that reconciles itself',
    'Paybill, till and STK push. Payments match to the account number the customer typed, and the ones that do not are put in front of you rather than lost.'],
   ['PAYMENTS', 'No paybill yet? We collect for you',
-   'Turn on collection and your customers pay into our paybill from day one, PPPoE or hotspot — we pay you out nightly, net of a small commission, straight to your own M-Pesa number.'],
+   'Turn on collection and your customers pay into our paybill from day one, PPPoE or hotspot — we pay it out to you in full, daily or weekly, straight to your own M-Pesa number. Nothing is taken from your payouts.'],
   ['PAYMENTS', 'A message that matches what happened',
    'Full payment, partial, a voucher, a top-up — each gets the SMS that actually describes it, balance owed included, not one generic "payment received" for every case.'],
   ['NETWORK', 'MikroTik without the console',

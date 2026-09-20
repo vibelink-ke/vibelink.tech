@@ -333,7 +333,7 @@ export default function Payments() {
           <Tile
             label="PENDING SETTLEMENT"
             value={money(pendingSettlement)}
-            hint={pendingSettlement ? 'collected on your behalf, paid out nightly' : 'nothing outstanding'}
+            hint={pendingSettlement ? 'collected on your behalf, paid out on your schedule' : 'nothing outstanding'}
           />
         )}
       </div>

@@ -2397,3 +2397,65 @@ on conflict (payout_id) where payout_id is not null do nothing;
 -- a laptop should not have to think about it. Only the default for tenants
 -- that have not chosen — a tenant's saved setting is not touched.
 alter table hotspot_settings alter column multi_device set default true;
+
+-- ─────────────── platform fees, settlement schedule, collection on by default ───────────────
+-- What a tenant is charged each month, per tenant so the platform owner can set
+-- their own rate: a percentage of the tenant's hotspot revenue and a fixed
+-- amount per active PPPoE client. Defaults are 3% and KES 16.
+alter table tenants add column if not exists hotspot_commission_pct numeric(5,2) not null default 3;
+alter table tenants add column if not exists pppoe_client_rate numeric(8,2) not null default 16;
+
+-- How often collected money is paid out to the tenant. Payouts are always the
+-- full amount collected — nothing is deducted for commission; the fees above
+-- are billed monthly instead. 'manual' pays out only on "Request payout".
+alter table tenants add column if not exists settlement_frequency text not null default 'daily';
+alter table tenants drop constraint if exists tenants_settlement_frequency_check;
+alter table tenants add constraint tenants_settlement_frequency_check
+  check (settlement_frequency in ('daily', 'weekly', 'manual'));
+
+-- New tenants collect through the platform paybill unless they bring a gateway
+-- of their own (a tenant's own gateway always wins — see usePlatformCollect).
+alter table tenants alter column platform_collect_enabled set default true;
+
+-- One statement per tenant per month: the figures and the rates they were
+-- worked out at, kept as they were on the day so a later rate change never
+-- rewrites a statement already sent. Written by jobs.js's generateMonthlyCharges
+-- on the 1st for the month just ended.
+create table if not exists tenant_charges (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid not null references tenants on delete cascade,
+  month           date not null,              -- first day of the month charged
+  hotspot_revenue numeric(12,2) not null default 0,
+  hotspot_pct     numeric(5,2)  not null,
+  hotspot_fee     numeric(12,2) not null default 0,
+  pppoe_active    int           not null default 0,
+  pppoe_rate      numeric(8,2)  not null,
+  pppoe_fee       numeric(12,2) not null default 0,
+  total           numeric(12,2) not null default 0,
+  status          text not null default 'open',
+  note            text,
+  created_at      timestamptz not null default now(),
+  unique (tenant_id, month),
+  constraint tenant_charges_status_valid check (status in ('open', 'invoiced', 'paid', 'waived'))
+);
+
+-- One-time steps, remembered here so re-running the schema does not repeat them.
+create table if not exists schema_flags (
+  name       text primary key,
+  applied_at timestamptz not null default now()
+);
+
+-- Existing tenants that had no way to collect at all (no payment gateway of
+-- their own, collection off) are switched on once. The demo tenant stays off on
+-- purpose (a visitor's "Buy" must never send a real prompt), and so does any
+-- tenant with a gateway of their own.
+do $$
+begin
+  if not exists (select 1 from schema_flags where name = 'platform_collect_default_on') then
+    update tenants t set platform_collect_enabled = true
+     where not t.platform_collect_enabled
+       and t.subdomain <> 'demo'
+       and not exists (select 1 from tenant_payment_config c where c.tenant_id = t.id);
+    insert into schema_flags (name) values ('platform_collect_default_on');
+  end if;
+end $$;

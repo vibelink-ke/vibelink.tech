@@ -287,6 +287,7 @@ export default function Gateways() {
   const [settlementBankPaybill, setSettlementBankPaybill] = useState(store.session?.settlementBankPaybill ?? '');
   const [settlementAccountNumber, setSettlementAccountNumber] = useState(store.session?.settlementAccountNumber ?? '');
   const [settlementBusy, setSettlementBusy] = useState(false);
+  const [settlementFrequency, setSettlementFrequency] = useState(store.session?.settlementFrequency ?? 'daily');
   const saveSettlementMethod = async () => {
     setSettlementBusy(true);
     try {
@@ -294,9 +295,10 @@ export default function Gateways() {
         : settlementMethod === 'till' ? { method: 'till', till: settlementTill }
         : { method: 'bank', bankName: settlementBankName, bankPaybill: settlementBankPaybill, accountNumber: settlementAccountNumber };
       await api.updateSettlementMethod(body);
+      await api.updateSettlementFrequency(settlementFrequency);
       store.signIn({
         ...store.session,
-        settlementMethod, settlementPhone, settlementTill,
+        settlementMethod, settlementFrequency, settlementPhone, settlementTill,
         settlementBankName, settlementBankPaybill, settlementAccountNumber,
       });
       store.toast('Settlement details saved');
@@ -361,9 +363,21 @@ export default function Gateways() {
       {store.session?.platformCollectEnabled && (
         <Card
           title="Settlement payout method"
-          subtitle="We collect your customers' payments on our own paybill and pay you out nightly, net of commission. Choose where those payouts land — set it yourself; we never enter it for you."
+          subtitle="We collect your customers' payments on our own paybill and pay you out in full — nothing is taken from your payouts. Our fees are billed to you monthly instead. Choose when and where you are paid — set it yourself; we never enter it for you."
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Payout schedule" hint="Weekly pays on Mondays. Manual pays only when you press Request payout on the Payments screen.">
+              <Select
+                value={settlementFrequency}
+                onChange={(e) => setSettlementFrequency(e.target.value)}
+                options={[
+                  { value: 'daily', label: 'Daily — every night' },
+                  { value: 'weekly', label: 'Weekly — Mondays' },
+                  { value: 'manual', label: 'Manual — only when I request it' },
+                ]}
+              />
+            </Field>
+
             <Field label="Payout method">
               <Select
                 value={settlementMethod}

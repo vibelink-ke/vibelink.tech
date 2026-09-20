@@ -407,7 +407,9 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
         rawAccount: billRef.slice(dash + 1), payload: b,
       }).catch((e) => { console.error(e); return null; });
       if (result && !result.duplicate) {
-        await accrueSettlement(t.id, Number(b.TransAmount) * (1 - Number(t.settlement_commission_pct ?? 5) / 100))
+        // The full amount: a tenant's payouts are never reduced by commission — the
+        // platform fee is billed monthly instead (see charges.js).
+        await accrueSettlement(t.id, Number(b.TransAmount))
           .catch(console.error);
       }
       return;
@@ -470,7 +472,7 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
         rawAccount: billRef, payload: b,
       }).catch((e) => { console.error(e); return null; });
       if (result && !result.duplicate) {
-        await accrueSettlement(c.tenant_id, Number(b.TransAmount) * (1 - Number(c.settlement_commission_pct ?? 5) / 100))
+        await accrueSettlement(c.tenant_id, Number(b.TransAmount))
           .catch(console.error);
       }
       return;
@@ -566,8 +568,8 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
           : { type: 'hotspot', planId: p.plan_id, mac: p.mac ?? null, routerId: p.router_id ?? null, label: p.label ?? null },
       });
       if (!result?.duplicate) {
-        const commissionPct = Number(p.commissionPct ?? 5);
-        await accrueSettlement(p.tenant_id, Number(req.amount) * (1 - commissionPct / 100));
+        // Whole amount to the tenant; the platform fee is billed monthly.
+        await accrueSettlement(p.tenant_id, Number(req.amount));
       }
       return;
     }

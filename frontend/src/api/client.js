@@ -243,6 +243,7 @@ export const api = {
   makeGatewayDefault: (id) => post(`/api/payment-gateways/${id}/default`, {}),
   setGatewayPlatformCollect: (id, on) => post(`/api/payment-gateways/${id}/platform-collect`, { on }),
   updateSettlementMethod: (body) => patch('/api/settings/settlement-method', body),
+  updateSettlementFrequency: (frequency) => patch('/api/settings/settlement-frequency', { frequency }),
   getB2cFeeTiers: () => get('/api/platform/b2c-fee-tiers'),
   saveB2cFeeTiers: (tiers) => put('/api/platform/b2c-fee-tiers', { tiers }),
   gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),
@@ -356,6 +357,10 @@ export const api = {
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
   deleteTenant: (id) => del(`/api/tenants/${id}`),
+  // what tenants owe the platform each month
+  platformCharges: (month) => get(`/api/platform/charges${month ? `?month=${month}` : ''}`),
+  generateCharges: (month) => post('/api/platform/charges/generate', { month }),
+  setChargeStatus: (id, status) => post(`/api/platform/charges/${id}/status`, { status }),
   tenantStaff: (id) => get(`/api/tenants/${id}/staff`),
   resetTenantStaffLogin: (id, staffId, body) => post(`/api/tenants/${id}/staff/${staffId}`, body),
   refreshPresence: () => post('/api/presence/refresh', {}),

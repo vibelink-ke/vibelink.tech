@@ -7,6 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { generateDueBills } from './bills.js';
+import { currentMonthKey, chargesFor, snapshotCharges, monthWindow } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -10265,11 +10266,68 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   res.json(t);
 }));
 
+// ── tenant charges (platform owner) ─────────
+/**
+ * What each tenant owes the platform for a month: a percentage of hotspot
+ * revenue plus a rate per active PPPoE client, at the tenant's own rates.
+ * Closed months are the stored statements; the current month is live. See
+ * charges.js. Nothing here touches a tenant's payouts — those are paid in full.
+ */
+app.get('/api/platform/charges', superAdminOnly, wrap(async (req, res) => {
+  const key = String(req.query.month ?? currentMonthKey());
+  let rows;
+  try { rows = await chargesFor(key); } catch (e) { return res.status(400).json({ error: e.message }); }
+  const sum = (k) => rows.reduce((n, r) => n + Number(r[k] ?? 0), 0);
+  res.json({
+    month: key,
+    current: key === currentMonthKey(),
+    rows,
+    totals: {
+      hotspotRevenue: sum('hotspot_revenue'), hotspotFee: sum('hotspot_fee'),
+      pppoeActive: sum('pppoe_active'), pppoeFee: sum('pppoe_fee'), total: sum('total'),
+    },
+  });
+}));
+
+/** Draw the statements for a closed month now (the daily job does this on the 1st). */
+app.post('/api/platform/charges/generate', superAdminOnly, wrap(async (req, res) => {
+  const key = String(req.body?.month ?? '');
+  try { monthWindow(key); } catch (e) { return res.status(400).json({ error: e.message }); }
+  if (key >= currentMonthKey()) return res.status(400).json({ error: 'A month can only be closed once it has ended.' });
+  res.json({ created: await snapshotCharges(key) });
+}));
+
+/** Track where a statement stands: open, invoiced, paid or waived. */
+app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, res) => {
+  const status = req.body?.status;
+  if (!['open', 'invoiced', 'paid', 'waived'].includes(status)) {
+    return res.status(400).json({ error: 'Status must be open, invoiced, paid or waived.' });
+  }
+  const { rows: [c] } = await pool.query(
+    'update tenant_charges set status=$2, note=coalesce($3, note) where id=$1 returning *',
+    [req.params.id, status, req.body?.note ?? null]);
+  if (!c) return res.status(404).json({ error: 'No such statement' });
+  res.json(c);
+}));
+
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
-                   'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode'];
+                   'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
+                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  // What the platform charges this tenant, and how often it pays them out.
+  if ('hotspot_commission_pct' in req.body) {
+    const v = Number(req.body.hotspot_commission_pct);
+    if (!(v >= 0 && v <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
+  }
+  if ('pppoe_client_rate' in req.body) {
+    const v = Number(req.body.pppoe_client_rate);
+    if (!(v >= 0 && v <= 100000)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
+  }
+  if ('settlement_frequency' in req.body && !['daily', 'weekly', 'manual'].includes(req.body.settlement_frequency)) {
+    return res.status(400).json({ error: 'Settlement frequency must be daily, weekly or manual.' });
+  }
   const { rows: [t] } = await pool.query(
     `update tenants set ${sets.map((k, i) => `${k}=$${i + 2}`).join(', ')} where id=$1 returning *`,
     [req.params.id, ...sets.map((k) => req.body[k])]);
@@ -10945,6 +11003,16 @@ app.patch('/api/settings/settlement-method', requirePermission('payments.edit'),
   res.status(400).json({ error: 'Unknown settlement method.' });
 }));
 
+/** How often the platform pays this tenant out what it has collected: daily, weekly (Mondays) or manual. */
+app.patch('/api/settings/settlement-frequency', requirePermission('payments.edit'), wrap(async (req, res) => {
+  const frequency = req.body?.frequency;
+  if (!['daily', 'weekly', 'manual'].includes(frequency)) {
+    return res.status(400).json({ error: 'Choose daily, weekly or manual.' });
+  }
+  await pool.query('update tenants set settlement_frequency=$2 where id=$1', [req.tenant.id, frequency]);
+  res.json({ settlementFrequency: frequency });
+}));
+
 /**
  * Only meaningful on the platform-owner's own tenant — daraja.js's
  * resolveConfig() only ever looks this up against whichever tenant the
@@ -11022,7 +11090,8 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
-  { job: 'settleTenants', name: 'Platform settlement payout', cron: '0 2 * * *', detail: 'Pays out what has been collected on behalf of a platform-collect tenant to their registered M-Pesa number' },
+  { job: 'settleTenants', name: 'Platform settlement payout', cron: '0 2 * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, on their own schedule: daily every night, weekly on Mondays, or only when they request it' },
+  { job: 'generateMonthlyCharges', name: 'Tenant monthly statements', cron: '0 1 * * *', detail: 'Once a month has ended, works out each tenant\'s charge — a percentage of hotspot revenue plus a rate per active PPPoE client — and tells the platform owner' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },
   /**
    * Same gap this list's own comment above already describes, caught by
