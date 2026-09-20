@@ -5,7 +5,7 @@ import util from 'node:util';
 import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { pool, tenantByHost } from './db.js';
+import { pool, tenantByHost, withTenant } from './db.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
