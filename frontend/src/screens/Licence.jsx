@@ -145,30 +145,13 @@ export default function Licence() {
                     ? `Active until ${dateLabel(data.licenceEnds)}${data.daysLeft != null ? ` · ${data.daysLeft} day${data.daysLeft === 1 ? '' : 's'} left` : ''}`
                     : 'Active'}
           </span>
-          {expired ? (
-            <span style={{ fontSize: 13.5, color: color.inkSoft }}>
-              {data.trialEnded
-                ? 'You were not charged for the trial. '
-                : ''}
-              The dashboard is locked until this is paid.
-              <b> Your customers and hotspot visitors are not affected:</b> they keep connecting, paying and getting
-              their service as normal.
-              {data.trialEnded
-                ? ` Pay KES ${kes(data.activation?.fee)} below to activate your licence${data.activation?.until ? ` until ${dateLabel(data.activation.until)}` : ''}.`
-                : ' Pay below to switch the dashboard back on straight away.'}
-            </span>
-          ) : data.trial ? (
+          {expired ? null : data.trial ? (
             <span style={{ fontSize: 13.5, color: color.muted }}>
               Nothing is charged during the trial. When it ends the dashboard is locked until your account is activated — your customers are never affected.
             </span>
           ) : (
             <span style={{ fontSize: 13.5, color: color.muted }}>
               Each monthly statement you pay extends your licence by a month.
-            </span>
-          )}
-          {expired && data.payoutsPaused && (
-            <span style={{ fontSize: 13.5, color: color.amberInk, background: color.amberBg, borderRadius: 6, padding: '8px 10px' }}>
-              <b>Payouts are paused.</b> Money collected for you is safe and keeps building up — it is released as soon as you renew.
             </span>
           )}
           {expired && data.trialEnded && (
