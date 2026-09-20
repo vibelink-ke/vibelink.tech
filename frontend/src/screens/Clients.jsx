@@ -104,7 +104,7 @@ function connection(c) {
   if (blocked) return { kind: 'blocked', label: 'Blocked', colour: color.rust, weight: 700 };
   if (online) return { kind: 'online', label: 'Online', colour: ONLINE_GREEN, weight: 600 };
   const seen = seenAgo(c.last_seen);
-  return { kind: 'offline', label: seen === 'never seen' ? 'Offline · never seen' : `Offline · ${seen}`, colour: color.muted, weight: 500 };
+  return { kind: 'offline', label: seen === 'never seen' ? 'Offline' : `Offline · ${seen}`, colour: color.muted, weight: 500 };
 }
 
 const DOT_FILL = {
@@ -116,16 +116,14 @@ const DOT_FILL = {
 
 function ConnDot({ kind }) {
   return (
-    <span style={{ width: 9, height: 9, borderRadius: radius.pill, flexShrink: 0, background: DOT_FILL[kind] }} />
+    <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: radius.pill, flexShrink: 0, background: DOT_FILL[kind] }} />
   );
 }
 
-/** "expires in 5d" / "expired 3d ago" — only where it says something the state does not. */
-function expiryNote(c) {
+/** Whole days until the account runs out; negative once it has. Blank where it means nothing. */
+function daysLeft(c) {
   if (isBlocked(c) || !c.expires_at) return null;
-  const days = Math.round((new Date(c.expires_at).getTime() - Date.now()) / 86400000);
-  if (c.status === 'expired' || days < 0) return days === 0 ? 'expired today' : `expired ${Math.abs(days)}d ago`;
-  return days === 0 ? 'expires today' : `expires in ${days}d`;
+  return Math.round((new Date(c.expires_at).getTime() - Date.now()) / 86400000);
 }
 
 function StatePill({ status, count }) {
@@ -568,20 +566,45 @@ export default function Clients() {
                           at the same place: that account's own Services tab,
                           where each line's plan/router/expiry/status lives
                           on its own row. */}
-                      <span
-                        onClick={() => navigate(`/clients/${c.id}?tab=services`)}
-                        title={multi
-                          ? lines.map((l) => planTitle(l) ?? 'no package').join(', ')
-                          : 'Open this account\'s services'}
-                        style={{
-                          display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
-                          fontSize: 11.5, fontWeight: 600, background: color.tileBg, color: color.green, cursor: 'pointer',
-                        }}
-                      >
-                        {multi
-                          ? `${lines.length} services`
-                          : (planTitle(c) ?? '1 service')}
-                      </span>
+                      {(() => {
+                        // The connection shows here, as colour: a dot beside the
+                        // package, and the pill itself tinted by whether the line is
+                        // up. Hover for the words.
+                        const CONN_PILL = {
+                          online: { bg: '#e2ebe5', fg: ONLINE_GREEN },
+                          offline: { bg: color.tileBg, fg: color.muted },
+                          blocked: { bg: color.rustBg, fg: color.rust },
+                          split: { bg: color.rustBg, fg: color.rust },
+                        };
+                        const conn = connection(c);
+                        const tint = multi ? { bg: color.tileBg, fg: color.green } : CONN_PILL[conn.kind];
+                        return (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                            {multi ? (
+                              <span style={{ display: 'inline-flex', gap: 3 }}>
+                                {lines.slice(0, 8).map((l) => {
+                                  const k = connection(l);
+                                  return <span key={l.id} title={k.label}><ConnDot kind={k.kind} /></span>;
+                                })}
+                              </span>
+                            ) : (
+                              <span title={conn.label}><ConnDot kind={conn.kind} /></span>
+                            )}
+                            <span
+                              onClick={() => navigate(`/clients/${c.id}?tab=services`)}
+                              title={multi
+                                ? lines.map((l) => `${planTitle(l) ?? 'no package'} — ${connection(l).label}`).join('\n')
+                                : conn.label}
+                              style={{
+                                display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
+                                fontSize: 11.5, fontWeight: 600, background: tint.bg, color: tint.fg, cursor: 'pointer',
+                              }}
+                            >
+                              {multi ? `${lines.length} services` : (planTitle(c) ?? '1 service')}
+                            </span>
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={{ ...td, fontFamily: font.mono, fontSize: 12.5, color: '#4a524c' }}>
                       {c.phone}
@@ -591,47 +614,31 @@ export default function Clients() {
                     </td>
                     <td style={td}>
                       {multi ? (() => {
-                        // A multi-service account: the state of each line counted,
-                        // and how many are up, down or blocked.
+                        // A multi-service account: how many lines are in each state.
                         const byState = {};
-                        const byConn = {};
-                        for (const l of lines) {
-                          byState[l.status] = (byState[l.status] ?? 0) + 1;
-                          const k = connection(l).kind;
-                          byConn[k] = (byConn[k] ?? 0) + 1;
-                        }
-                        const LABEL = { online: 'online', offline: 'offline', blocked: 'blocked', split: 'blocked but online' };
+                        for (const l of lines) byState[l.status] = (byState[l.status] ?? 0) + 1;
                         return (
-                          <>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {Object.entries(byState).map(([s, n]) => <StatePill key={s} status={s} count={n} />)}
-                            </div>
-                            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 5 }}>
-                              {['online', 'split', 'blocked', 'offline'].filter((k) => byConn[k]).map((k) => (
-                                <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: color.muted }}>
-                                  <ConnDot kind={k} />{byConn[k]} {LABEL[k]}
-                                </span>
-                              ))}
-                            </div>
-                          </>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            {Object.entries(byState).map(([s, n]) => <StatePill key={s} status={s} count={n} />)}
+                          </div>
                         );
                       })() : (() => {
-                        const conn = connection(c);
-                        const note = expiryNote(c);
+                        const days = daysLeft(c);
                         return (
-                          <>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
                             <StatePill status={c.status} />
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5,
-                                           fontSize: 12.5, fontWeight: conn.weight, color: conn.colour }}>
-                              <ConnDot kind={conn.kind} />
-                              {conn.label}
-                            </span>
-                            {note && (
-                              <span style={{ display: 'block', fontSize: 11.5, color: color.muted, marginTop: 2 }}>
-                                {note}
+                            {days != null && (
+                              <span
+                                title="days remaining"
+                                style={{
+                                  fontFamily: font.mono, fontSize: 12.5, fontWeight: 600,
+                                  color: days < 0 ? color.rust : days <= 3 ? color.amberInk : color.muted,
+                                }}
+                              >
+                                {days}
                               </span>
                             )}
-                          </>
+                          </span>
                         );
                       })()}
                     </td>
