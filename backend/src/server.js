@@ -8055,9 +8055,15 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
  * changed and why" matters as much as the new number.
  */
 app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wallet_adjust'), wrap(async (req, res) => {
+  // Either { balance } — the wallet becomes exactly that (0 clears it) — or the older
+  // { amount }, a signed amount added to whatever is there.
+  const settingBalance = req.body?.balance !== undefined && req.body?.balance !== null && req.body?.balance !== '';
+  const newBalance = Number(req.body?.balance);
   const amount = Number(req.body?.amount);
   const reason = String(req.body?.reason ?? '').trim();
-  if (!Number.isFinite(amount) || amount === 0) {
+  if (settingBalance) {
+    if (!Number.isFinite(newBalance)) return res.status(400).json({ error: 'The balance must be a number.' });
+  } else if (!Number.isFinite(amount) || amount === 0) {
     return res.status(400).json({ error: 'Enter a non-zero amount to add or subtract.' });
   }
   if (!reason) return res.status(400).json({ error: 'A reason is required for a manual wallet adjustment.' });
@@ -8077,7 +8083,7 @@ app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wa
        returning balance`,
       [req.tenant.id, sub.account_code]);
     const before = Number(wallet.balance);
-    const after = before + amount;
+    const after = settingBalance ? newBalance : before + amount;
     await c.query(
       'update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2',
       [req.tenant.id, sub.account_code, after]);
@@ -8085,7 +8091,9 @@ app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wa
   });
 
   await logActivity(req, sub.id, sub.account_code, 'Wallet adjusted',
-    `${amount > 0 ? '+' : ''}KES ${amount.toFixed(2)} (${before.toFixed(2)} → ${after.toFixed(2)}) — ${reason}`);
+    settingBalance
+      ? `Set to KES ${after.toFixed(2)} (was ${before.toFixed(2)}) — ${reason}`
+      : `${amount > 0 ? '+' : ''}KES ${amount.toFixed(2)} (${before.toFixed(2)} → ${after.toFixed(2)}) — ${reason}`);
 
   res.json({ wallet_balance: after });
 }));

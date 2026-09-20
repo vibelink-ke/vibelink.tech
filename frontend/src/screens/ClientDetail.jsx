@@ -181,9 +181,10 @@ export default function ClientDetail() {
   const [walletError, setWalletError] = useState('');
 
   async function submitWalletAdjust() {
-    const amount = Number(walletAdjust.amount);
-    if (!Number.isFinite(amount) || amount === 0) {
-      setWalletError('Enter a non-zero amount to add or subtract.');
+    // The wallet becomes exactly what is typed — 0 clears it, 100 makes it 100.
+    const balance = Number(walletAdjust.amount);
+    if (walletAdjust.amount === '' || !Number.isFinite(balance)) {
+      setWalletError('Enter the balance the wallet should have.');
       return;
     }
     if (!walletAdjust.reason.trim()) {
@@ -193,12 +194,12 @@ export default function ClientDetail() {
     setWalletBusy(true);
     setWalletError('');
     try {
-      const { wallet_balance } = await api.adjustWallet(client.id, { amount, reason: walletAdjust.reason.trim() });
+      const { wallet_balance } = await api.adjustWallet(client.id, { balance, reason: walletAdjust.reason.trim() });
       // Same sibling-refresh every line on this account_code needs after any
       // wallet change — mirrors saveEdit's own refresh elsewhere in this file.
       store.setCollection('clients', (cs) => cs.map((c) => (
         c.account_code === client.account_code ? { ...c, wallet_balance } : c)));
-      store.toast(`Wallet ${amount > 0 ? 'credited' : 'debited'} KES ${Math.abs(amount).toLocaleString('en-KE')}`);
+      store.toast(`Wallet set to KES ${balance.toLocaleString('en-KE')}`);
       setWalletAdjust(null);
     } catch (e) {
       setWalletError(e.message || 'Could not adjust the wallet.');
@@ -590,7 +591,7 @@ export default function ClientDetail() {
             KES {kes(client.wallet_balance)}
           </span>{' '}
           <a
-            onClick={() => { setWalletAdjust({ amount: '', reason: '' }); setWalletError(''); }}
+            onClick={() => { setWalletAdjust({ amount: String(Number(client.wallet_balance ?? 0)), reason: '' }); setWalletError(''); }}
             style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}
           >
             Adjust
@@ -1285,19 +1286,19 @@ export default function ClientDetail() {
           <>
             <Button onClick={() => setWalletAdjust(null)} disabled={walletBusy}>Cancel</Button>
             <Button variant="primary" onClick={submitWalletAdjust} disabled={walletBusy}>
-              {walletBusy ? 'Saving…' : 'Save adjustment'}
+              {walletBusy ? 'Saving…' : 'Set balance'}
             </Button>
           </>
         }
       >
         {walletAdjust && (
           <div style={{ display: 'grid', gap: 12 }}>
-            <Field label="Amount (KES)" hint="Positive to credit, negative to debit — shared across every line on this account">
+            <Field label="New wallet balance (KES)" hint="The wallet becomes exactly this — 0 clears it, 100 makes it 100. Negative means they owe. Shared across every line on this account">
               <Input
                 type="number"
                 value={walletAdjust.amount}
                 onChange={(e) => setWalletAdjust((w) => ({ ...w, amount: e.target.value }))}
-                placeholder="e.g. 500 or -200"
+                placeholder="e.g. 0 or 100"
                 autoFocus
               />
             </Field>
