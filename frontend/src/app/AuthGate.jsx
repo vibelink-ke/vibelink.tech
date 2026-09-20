@@ -416,9 +416,6 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '0 0 auto' }}>
                 <span style={{ fontSize: 17, fontWeight: 600, letterSpacing: '-.01em' }}>Create your ISP account</span>
-                <span style={{ fontSize: 12.5, color: color.neutralInk }}>
-                  First month free. One-off setup fee of KES 550.
-                </span>
               </div>
 
               {/* Only this grid scrolls, so the terms line and submit button stay put. */}
