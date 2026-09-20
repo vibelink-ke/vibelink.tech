@@ -7,6 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost } from './db.js';
 import { generateDueBills } from './bills.js';
+import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
 import { router as bank } from './payments/bankstk.js';
@@ -387,7 +388,7 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   const { rows: [acct] } = await pool.query(
     `select st.*, t.status as tenant_status, t.subdomain from staff st
      join tenants t on t.id = st.tenant_id
-     where (lower(st.email) = lower($1) or lower(st.username) = lower($1))
+     where (lower(st.email) = lower($1) or st.username = $1)
        and ($2::uuid is null or st.tenant_id = $2)`,
     [who, tenant?.id ?? null]);
 
@@ -430,15 +431,17 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
 app.post('/api/auth/signup', wrap(async (req, res) => {
   const { company, subdomain, name, email, phone, password, terms, username } = req.body;
   const sub = String(subdomain ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '');
-  const user = String(username ?? '').toLowerCase().replace(/[^a-z0-9._-]/g, '') || null;
+  const user = String(username ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '') || null;
 
   if (!company) return res.status(400).json({ error: 'Enter your ISP name.' });
   if (!sub) return res.status(400).json({ error: 'Choose a portal subdomain.' });
   if (!name) return res.status(400).json({ error: 'Enter your full name.' });
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(email ?? '')))
     return res.status(400).json({ error: 'Enter a valid work email.' });
-  if (String(password ?? '').length < 8)
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  {
+    const pwProblem = passwordProblem(password);
+    if (pwProblem) return res.status(400).json({ error: pwProblem });
+  }
   if (!terms) return res.status(400).json({ error: 'Accept the terms to continue.' });
 
   const { rows: [dupeEmail] } = await pool.query('select 1 from staff where lower(email)=lower($1)', [String(email).trim()]);
@@ -564,8 +567,10 @@ app.post('/api/auth/forgot', loginLimiter, wrap(async (req, res) => {
 
 app.post('/api/auth/reset', wrap(async (req, res) => {
   const { token, password } = req.body ?? {};
-  if (String(password ?? '').length < 8)
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  {
+    const pwProblem = passwordProblem(password);
+    if (pwProblem) return res.status(400).json({ error: pwProblem });
+  }
 
   const staffId = await auth.consumeLoginToken(token, 'reset');
   if (!staffId) return res.status(400).json({ error: 'That reset link is invalid or has expired.' });
@@ -599,8 +604,10 @@ app.get('/api/auth/invite-info', wrap(async (req, res) => {
  */
 app.post('/api/auth/accept-invite', wrap(async (req, res) => {
   const { token, username, password } = req.body ?? {};
-  if (String(password ?? '').length < 8)
-    return res.status(400).json({ error: 'Password must be at least 8 characters.' });
+  {
+    const pwProblem = passwordProblem(password);
+    if (pwProblem) return res.status(400).json({ error: pwProblem });
+  }
   const uname = String(username ?? '').trim();
   if (!uname) return res.status(400).json({ error: 'Choose a username.' });
 
@@ -9368,7 +9375,7 @@ app.post('/api/staff/:id/password', requirePermission('staff.edit'), wrap(async 
     'select id from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!target) return res.status(404).json({ error: 'No such member of staff' });
 
-  const fresh = crypto.randomBytes(6).toString('base64url');
+  const fresh = generatePassword(12);
   await pool.query('update staff set password_hash=$2 where id=$1', [target.id, await auth.hashPassword(fresh)]);
   // A reset that leaves their old sessions alive has not actually taken the
   // account back — matters just as much for a staff member as for a tenant.
@@ -10510,7 +10517,7 @@ app.post('/api/tenants/:id/staff/:staffId', superAdminOnly, wrap(async (req, res
       'select 1 from staff where lower(email)=lower($1) and id<>$2', [String(email).trim(), target.id]);
     if (rowCount) return res.status(409).json({ error: 'Another account already uses that email.' });
   }
-  const user = username ? String(username).toLowerCase().replace(/[^a-z0-9._-]/g, '') : null;
+  const user = username ? String(username).trim().replace(/[^A-Za-z0-9._-]/g, '') : null;
   if (user) {
     const { rowCount } = await pool.query(
       'select 1 from staff where lower(username)=lower($1) and id<>$2', [user, target.id]);
@@ -10519,7 +10526,7 @@ app.post('/api/tenants/:id/staff/:staffId', superAdminOnly, wrap(async (req, res
 
   // Generated when asked for rather than accepted from the form: nobody should
   // be choosing another person's password, and it is never stored in the clear.
-  const fresh = password === true ? crypto.randomBytes(6).toString('base64url') : null;
+  const fresh = password === true ? generatePassword(12) : null;
   const hash = fresh ? await auth.hashPassword(fresh) : null;
 
   const { rows: [s] } = await pool.query(
@@ -11147,8 +11154,9 @@ app.post('/api/me/password', wrap(async (req, res) => {
   const current = String(req.body?.current ?? '');
   const next = String(req.body?.next ?? '');
 
-  if (next.length < 8) {
-    return res.status(400).json({ error: 'The new password must be at least 8 characters.' });
+  {
+    const pwProblem = passwordProblem(next);
+    if (pwProblem) return res.status(400).json({ error: pwProblem });
   }
 
   const { rows: [acct] } = await pool.query(

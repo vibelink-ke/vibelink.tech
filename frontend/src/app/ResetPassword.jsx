@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { api } from '../api/client';
+import PasswordHelper from '../ui/PasswordHelper';
+import { passwordProblem } from '../lib/password';
 
 const input = {
   border: `1px solid ${color.line}`,
@@ -40,7 +42,8 @@ export default function ResetPassword() {
   const [done, setDone] = useState(false);
 
   const submit = async () => {
-    if (password.length < 8) return setError('Password must be at least 8 characters.');
+    const pwProblem = passwordProblem(password);
+    if (pwProblem) return setError(pwProblem);
     if (password !== password2) return setError('The two passwords do not match.');
     setBusy(true);
     setError('');
@@ -100,11 +103,15 @@ export default function ResetPassword() {
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(''); }}
                 onKeyDown={onKey}
-                placeholder="At least 8 characters"
+                placeholder="8+ characters, upper & lower case, number, symbol"
                 autoComplete="new-password"
                 style={input}
               />
             </div>
+            <PasswordHelper
+              value={password}
+              onSuggest={(p) => { setPassword(p); setPassword2(p); setError(''); }}
+            />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: '#4a524c' }}>Confirm password</span>
               <input

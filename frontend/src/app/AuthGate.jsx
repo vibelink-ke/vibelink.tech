@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { color, font } from '../theme/tokens';
 import { api } from '../api/client';
+import PasswordHelper from '../ui/PasswordHelper';
+import { passwordProblem } from '../lib/password';
 
 /**
  * Sign-in / create-ISP-account gate.
@@ -111,7 +113,8 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
   // will actually be stored rather than silently rewriting it on submit.
   const NORMALISE = {
     subdomain: (v) => v.toLowerCase().replace(/[^a-z0-9-]/g, ''),
-    username: (v) => v.toLowerCase().replace(/[^a-z0-9._-]/g, ''),
+    // Case is kept: the username is case-sensitive when signing in.
+    username: (v) => v.replace(/[^A-Za-z0-9._-]/g, ''),
   };
 
   // Typing clears the error banner, matching setAuthField() in the mockup.
@@ -193,7 +196,8 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     if (!f.subdomain) return setError('Choose a portal subdomain.');
     if (!f.name) return setError('Enter your full name.');
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(f.email)) return setError('Enter a valid work email.');
-    if ((f.password || '').length < 8) return setError('Password must be at least 8 characters.');
+    const pwProblem = passwordProblem(f.password);
+    if (pwProblem) return setError(pwProblem);
     if (f.password !== f.password2) return setError('The two passwords do not match.');
     if (!f.terms) return setError('Accept the terms to continue.');
     setBusy(true);
@@ -497,11 +501,16 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
                     type="password"
                     value={f.password}
                     onChange={set('password')}
-                    placeholder="At least 8 characters"
+                    placeholder="8+ characters, upper & lower case, number, symbol"
                     autoComplete="new-password"
                     style={input}
                   />
                 </Field>
+
+                <PasswordHelper
+                  value={f.password}
+                  onSuggest={(p) => setF((s) => ({ ...s, password: p, password2: p }))}
+                />
 
                 <Field text="Confirm password">
                   <input

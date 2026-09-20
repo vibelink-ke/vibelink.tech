@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import PasswordHelper from '../ui/PasswordHelper';
+import { passwordProblem } from '../lib/password';
 import Gateways from './settings/Gateways';
 import Templates from './settings/Templates';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
@@ -387,7 +389,8 @@ export default function Settings() {
 
   const changePassword = async () => {
     if (pw.next !== pw.again) return store.toast('The two new passwords do not match');
-    if (pw.next.length < 8) return store.toast('Use at least 8 characters');
+    const pwProblem = passwordProblem(pw.next);
+    if (pwProblem) return store.toast(pwProblem);
     setSaving(true);
     try {
       await api.changePassword(pw.current, pw.next);
@@ -611,9 +614,13 @@ export default function Settings() {
               <Field label="Current password">
                 <Input type="password" value={pw.current} onChange={setPw('current')} autoComplete="current-password" />
               </Field>
-              <Field label="New password" hint="At least 8 characters">
+              <Field label="New password" hint="8+ characters with upper and lower case, a number and a symbol">
                 <Input type="password" value={pw.next} onChange={setPw('next')} autoComplete="new-password" />
               </Field>
+              <PasswordHelper
+                value={pw.next}
+                onSuggest={(p) => setPwState((v) => ({ ...v, next: p, again: p }))}
+              />
               <Field label="Repeat new password">
                 <Input type="password" value={pw.again} onChange={setPw('again')} autoComplete="new-password" />
               </Field>
