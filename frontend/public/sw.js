@@ -28,6 +28,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   const url = new URL(event.request.url);
+  // Only this app's own files. Map tiles and other outside images are the browser's to fetch:
+  // answering a failed one with the cached page hands an image request an HTML document.
+  if (url.origin !== self.location.origin) return;
   // The captive portal (billing/src/hotspot-portal.js) shares this origin
   // but is a completely separate, server-rendered page per router/tenant —
   // never the cached app shell. Falling back to the cached "/" (this app's

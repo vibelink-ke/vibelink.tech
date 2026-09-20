@@ -205,13 +205,6 @@ export default function MapScreen() {
       scrollWheelZoom: true, touchZoom: true, dragging: true, doubleClickZoom: true,
     }).setView([-1.2921, 36.8219], 6);   // Kenya, until there is anything to fit
 
-    const tiles = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; OpenStreetMap contributors',
-    });
-    tiles.on('tileerror', () => setTilesFailed(true));
-    tiles.addTo(map.current);
-
     layer.current = L.layerGroup().addTo(map.current);
 
     // A click on empty map: place a node, or add a waypoint to the cable being drawn.
@@ -231,6 +224,46 @@ export default function MapScreen() {
     });
     return () => { map.current?.remove(); map.current = null; };
   }, []);
+
+  // Street map or satellite. The choice is remembered.
+  const [base, setBase] = useState(() => {
+    try { return localStorage.getItem('vibelink:map-base') === 'satellite' ? 'satellite' : 'street'; } catch { return 'street'; }
+  });
+  const chooseBase = (b) => {
+    setBase(b);
+    try { localStorage.setItem('vibelink:map-base', b); } catch { /* not remembered */ }
+  };
+  const tilesRef = useRef([]);
+  useEffect(() => {
+    if (!map.current) return;
+    tilesRef.current.forEach((t) => t.remove());
+    const layers = base === 'satellite'
+      ? [
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19, maxNativeZoom: 18,
+          attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+        }),
+        // Place names and roads over the imagery, so it still says where things are.
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+          maxZoom: 19, maxNativeZoom: 18,
+        }),
+      ]
+      : [L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })];
+    layers.forEach((t, i) => {
+      t.on('tileerror', () => setTilesFailed(true));
+      t.addTo(map.current);
+      if (i === 0) t.bringToBack();
+    });
+    tilesRef.current = layers;
+  }, [base]);
+
+  // Scroll-to-zoom is on for looking around, and off while editing so the page below the
+  // map (the forms, the lists) can still be scrolled to. The buttons and pinch still zoom.
+  const [wheel, setWheel] = useState(true);
+  useEffect(() => {
+    if (!map.current) return;
+    if (wheel) map.current.scrollWheelZoom.enable(); else map.current.scrollWheelZoom.disable();
+  }, [wheel]);
 
   /** A click on something that can be a link end (a drawn node or a router). */
   const endpointClick = useCallback((ref) => {
@@ -474,7 +507,7 @@ export default function MapScreen() {
           {canEdit && (
             <Button
               variant={editMode ? 'primary' : undefined}
-              onClick={() => { setEditMode((v) => !v); setTool(null); setSelected(null); }}
+              onClick={() => { setWheel(editMode); setEditMode((v) => !v); setTool(null); setSelected(null); }}
               title="Draw your fibre or wireless network on the map"
             >
               {editMode ? 'Editing network' : 'Edit network'}
@@ -548,9 +581,18 @@ export default function MapScreen() {
       )}
 
       <Card>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 10 }}>
+          <div style={{ display: 'inline-flex', gap: 6 }}>
+            <Button size="sm" variant={base === 'street' ? 'primary' : undefined} onClick={() => chooseBase('street')}>Map</Button>
+            <Button size="sm" variant={base === 'satellite' ? 'primary' : undefined} onClick={() => chooseBase('satellite')}>Satellite</Button>
+          </div>
+          <Button size="sm" onClick={() => setWheel((v) => !v)} title="When on, the mouse wheel zooms the map; when off, it scrolls the page">
+            Scroll to zoom: {wheel ? 'on' : 'off'}
+          </Button>
+        </div>
         <div
           ref={holder}
-          style={{ height: 520, width: '100%', borderRadius: radius.md, background: color.tileBg, cursor: editMode && tool ? 'crosshair' : undefined }}
+          style={{ height: 520, width: '100%', borderRadius: radius.md, background: color.tileBg, cursor: editMode && tool ? 'crosshair' : undefined, position: 'relative', zIndex: 0, isolation: 'isolate' }}
         />
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 12, fontSize: 12.5, color: color.muted, alignItems: 'center' }}>
           <span><b style={{ color: color.green }}>●</b> active</span>
