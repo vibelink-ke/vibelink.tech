@@ -193,6 +193,7 @@ export default function Sidebar() {
             <div style={{ ...heading, paddingTop: si === 0 ? 10 : 16 }}>{section.heading}</div>
             {section.items
               .filter((item) => !item.perm || store.session?.perms?.[item.perm])
+              .filter((item) => !item.feature || store.session?.features?.[item.feature] || (item.setupPerm && store.session?.perms?.[item.setupPerm]))
               .map((item) => (
                 item.children
                   ? <Group key={item.label} item={item} store={store} />

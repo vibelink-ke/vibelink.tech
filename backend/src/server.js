@@ -7312,6 +7312,208 @@ app.get('/api/map-config', wrap(async (_req, res) => {
   res.json({ satellite: null });
 }));
 
+/**
+ * SmartOLT — see smartolt.js. Viewing needs smartolt.view; connecting, syncing, rebooting,
+ * enabling/disabling, linking and authorising need smartolt.manage.
+ */
+const smartolt = () => import('./smartolt.js');
+const soFail = (res, e, code = 502) => res.status(code).json({ error: e.message });
+
+app.get('/api/smartolt/status', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query('select * from smartolt_config where tenant_id=$1', [req.tenant.id]);
+  if (!c) return res.json({ configured: false, enabled: false });
+  const { rows: [n] } = await pool.query(
+    "select count(*)::int as total, count(*) filter (where status='online')::int as online from smartolt_onus where tenant_id=$1", [req.tenant.id]);
+  res.json({
+    configured: true, enabled: c.enabled, subdomain: c.subdomain, key_last4: c.api_key_last4, auto_disable: c.auto_disable,
+    last_statuses_at: c.last_statuses_at, last_details_at: c.last_details_at, last_error: c.last_error, last_error_at: c.last_error_at,
+    onus: n.total, online: n.online,
+  });
+}));
+
+app.put('/api/smartolt/config', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const { parseSubdomain } = await smartolt();
+  const secrets = await import('./secrets.js');
+  const sub = parseSubdomain(req.body?.subdomain);
+  if (!sub) return res.status(400).json({ error: 'Enter your SmartOLT address, like yourcompany.smartolt.com.' });
+  const key = String(req.body?.apiKey ?? '').trim();
+  const { rows: [have] } = await pool.query('select api_key_enc from smartolt_config where tenant_id=$1', [req.tenant.id]);
+  if (!key && !have?.api_key_enc) return res.status(400).json({ error: 'Paste the API key from SmartOLT (Settings → API).' });
+  if (key && !secrets.configured()) return res.status(500).json({ error: 'This server has no APP_SECRET_KEY, so it cannot store the key safely.' });
+  await pool.query(
+    `insert into smartolt_config (tenant_id, subdomain, api_key_enc, api_key_last4, enabled, auto_disable)
+     values ($1,$2,$3,$4,$5,$6)
+     on conflict (tenant_id) do update set subdomain=excluded.subdomain,
+       api_key_enc = coalesce($3, smartolt_config.api_key_enc), api_key_last4 = coalesce($4, smartolt_config.api_key_last4),
+       enabled=excluded.enabled, auto_disable=excluded.auto_disable, last_error=null`,
+    [req.tenant.id, sub, key ? secrets.encrypt(key) : null, key ? key.slice(-4) : null, req.body?.enabled !== false, !!req.body?.autoDisable]);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/smartolt/config', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  await pool.query('delete from smartolt_config where tenant_id=$1', [req.tenant.id]);
+  await pool.query('delete from smartolt_onus where tenant_id=$1', [req.tenant.id]);
+  await pool.query('delete from smartolt_olts where tenant_id=$1', [req.tenant.id]);
+  await pool.query('delete from smartolt_alerts where tenant_id=$1', [req.tenant.id]);
+  res.json({ ok: true });
+}));
+
+app.post('/api/smartolt/test', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  const sub = m.parseSubdomain(req.body?.subdomain);
+  if (!sub) return res.status(400).json({ error: 'Enter your SmartOLT address, like yourcompany.smartolt.com.' });
+  let apiKey = String(req.body?.apiKey ?? '').trim();
+  if (!apiKey) apiKey = (await m.loadConfig(req.tenant.id))?.apiKey ?? '';
+  if (!apiKey) return res.status(400).json({ error: 'Paste the API key first.' });
+  try { res.json(await m.testConnection({ subdomain: sub, apiKey })); } catch (e) { soFail(res, e, 400); }
+}));
+
+app.post('/api/smartolt/sync', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  const { rows: [c] } = await pool.query('select last_details_at from smartolt_config where tenant_id=$1 and enabled', [req.tenant.id]);
+  if (!c) return res.status(400).json({ error: 'SmartOLT is not connected.' });
+  // SmartOLT allows about 15 full lists an hour; one a few minutes is plenty by hand.
+  if (c.last_details_at && Date.now() - new Date(c.last_details_at) < 3 * 60000) {
+    return res.status(429).json({ error: 'It was refreshed a moment ago — wait a couple of minutes before asking again.' });
+  }
+  try { res.json({ ok: true, ...(await m.syncTenant(req.tenant.id, 'full')) }); } catch (e) { soFail(res, e); }
+}));
+
+app.get('/api/smartolt/overview', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const t = req.tenant.id;
+  const { rows: [tot] } = await pool.query(
+    `select count(*)::int as total,
+            count(*) filter (where status='online')::int as online,
+            count(*) filter (where status='offline')::int as offline,
+            count(*) filter (where status='los')::int as los,
+            count(*) filter (where status='power_fail')::int as power_fail,
+            count(*) filter (where admin_status='disabled')::int as disabled,
+            count(*) filter (where signal_dbm < -27 or lower(coalesce(signal_class,'')) in ('warning','critical'))::int as weak,
+            count(*) filter (where subscriber_id is null)::int as unlinked
+       from smartolt_onus where tenant_id=$1`, [t]);
+  const { rows: olts } = await pool.query(
+    `select o.olt_id, coalesce(o.name, o.olt_id) as name, o.ip, o.hardware,
+            count(n.*)::int as onus, count(n.*) filter (where n.status='online')::int as online
+       from smartolt_olts o left join smartolt_onus n on n.tenant_id=o.tenant_id and n.olt_id=o.olt_id
+      where o.tenant_id=$1 group by o.olt_id, o.name, o.ip, o.hardware order by 2`, [t]);
+  const { rows: longOffline } = await pool.query(
+    `select n.external_id, n.name, n.sn, n.olt_name, n.status, n.offline_since, s.name as client_name, s.id as client_id
+       from smartolt_onus n left join subscribers s on s.id = n.subscriber_id
+      where n.tenant_id=$1 and n.status <> 'online' and n.offline_since < now() - interval '24 hours'
+      order by n.offline_since limit 25`, [t]);
+  const { rows: weak } = await pool.query(
+    `select n.external_id, n.name, n.sn, n.olt_name, n.signal_dbm, n.signal_class, n.distance_m, s.name as client_name, s.id as client_id
+       from smartolt_onus n left join subscribers s on s.id = n.subscriber_id
+      where n.tenant_id=$1 and n.status='online' and (n.signal_dbm < -27 or lower(coalesce(n.signal_class,'')) in ('warning','critical'))
+      order by n.signal_dbm nulls last limit 25`, [t]);
+  const { rows: alerts } = await pool.query('select key, since, notified from smartolt_alerts where tenant_id=$1 order by since', [t]);
+  res.json({ totals: tot, olts, longOffline, weak, alerts });
+}));
+
+app.get('/api/smartolt/onus', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select n.external_id, n.sn, n.name, n.olt_id, n.olt_name, n.board, n.port, n.onu_no, n.onu_type, n.zone, n.odb, n.status,
+            n.signal_class, n.signal_dbm::float8 as signal_dbm, n.distance_m::float8 as distance_m, n.admin_status, n.disabled_by_us,
+            n.offline_since, n.updated_at, n.subscriber_id as client_id, s.name as client_name, s.account_code
+       from smartolt_onus n left join subscribers s on s.id = n.subscriber_id
+      where n.tenant_id=$1 order by n.name nulls last limit 10000`, [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.get('/api/smartolt/onu-for/:subscriberId', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query('select enabled, auto_disable from smartolt_config where tenant_id=$1', [req.tenant.id]);
+  if (!c?.enabled) return res.json({ enabled: false, onu: null });
+  const { rows: [onu] } = await pool.query(
+    `select external_id, sn, name, olt_name, board, port, onu_no, onu_type, zone, status, signal_class, signal_dbm::float8 as signal_dbm,
+            distance_m::float8 as distance_m, admin_status, disabled_by_us, offline_since, updated_at
+       from smartolt_onus where tenant_id=$1 and subscriber_id=$2 limit 1`, [req.tenant.id, req.params.subscriberId]);
+  const { rows: [sub] } = await pool.query('select onu_sn from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, req.params.subscriberId]);
+  res.json({ enabled: true, autoDisable: c.auto_disable, onu: onu ?? null, savedSerial: sub?.onu_sn ?? null });
+}));
+
+app.post('/api/smartolt/onus/:externalId/action', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  const action = String(req.body?.action ?? '');
+  try {
+    await m.onuAction(req.tenant.id, req.params.externalId, action);
+  } catch (e) { return soFail(res, e); }
+  const { rows: [o] } = await pool.query(
+    `select n.sn, s.id as sid, s.account_code from smartolt_onus n left join subscribers s on s.id=n.subscriber_id
+      where n.tenant_id=$1 and n.external_id=$2`, [req.tenant.id, req.params.externalId]);
+  if (o?.sid) await logActivity(req, o.sid, o.account_code, `ONU ${action}`, o.sn ?? null);
+  res.json({ ok: true });
+}));
+
+/** Tie an ONU to a client (or, with no subscriberId, cut the tie for good). */
+app.post('/api/smartolt/onus/:externalId/link', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const sid = req.body?.subscriberId || null;
+  const { rows: [onu] } = await pool.query('select sn, subscriber_id from smartolt_onus where tenant_id=$1 and external_id=$2', [req.tenant.id, req.params.externalId]);
+  if (!onu) return res.status(404).json({ error: 'That ONU is not in the list.' });
+  if (sid) {
+    const { rowCount } = await pool.query('select 1 from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, sid]);
+    if (!rowCount) return res.status(400).json({ error: 'No such client.' });
+    // one ONU per client line
+    await pool.query('update smartolt_onus set subscriber_id=null where tenant_id=$1 and subscriber_id=$2 and external_id <> $3', [req.tenant.id, sid, req.params.externalId]);
+    await pool.query('update smartolt_onus set subscriber_id=$3, link_locked=false where tenant_id=$1 and external_id=$2', [req.tenant.id, req.params.externalId, sid]);
+    if (onu.sn) await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2', [req.tenant.id, sid, onu.sn]);
+  } else {
+    await pool.query('update smartolt_onus set subscriber_id=null, link_locked=true where tenant_id=$1 and external_id=$2', [req.tenant.id, req.params.externalId]);
+    if (onu.subscriber_id) await pool.query('update subscribers set onu_sn=null where tenant_id=$1 and id=$2 and lower(onu_sn)=lower($3)', [req.tenant.id, onu.subscriber_id, onu.sn ?? '']);
+  }
+  res.json({ ok: true });
+}));
+
+/** From a client's page: "this client's ONU has serial …". Links now if SmartOLT already lists it, and at every refresh after. */
+app.post('/api/smartolt/link-by-serial', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const sid = req.body?.subscriberId;
+  const sn = String(req.body?.sn ?? '').trim();
+  const { rows: [sub] } = await pool.query('select id from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, sid]);
+  if (!sub) return res.status(404).json({ error: 'No such client.' });
+  await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2', [req.tenant.id, sid, sn || null]);
+  await pool.query('update smartolt_onus set subscriber_id=null where tenant_id=$1 and subscriber_id=$2', [req.tenant.id, sid]);
+  let linked = false;
+  if (sn) {
+    const { rowCount } = await pool.query(
+      'update smartolt_onus set subscriber_id=$2, link_locked=false where tenant_id=$1 and lower(sn)=lower($3)', [req.tenant.id, sid, sn]);
+    linked = rowCount > 0;
+  }
+  res.json({ ok: true, linked });
+}));
+
+app.get('/api/smartolt/unconfigured', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  try { res.json(await m.unconfiguredOnus(req.tenant.id)); } catch (e) { soFail(res, e); }
+}));
+
+app.get('/api/smartolt/lookup/:what', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  try { res.json(await m.lookup(req.tenant.id, req.params.what)); } catch (e) { res.json([]); }
+}));
+
+app.post('/api/smartolt/authorize', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  try {
+    const out = await m.authorizeOnu(req.tenant.id, req.body ?? {});
+    if (req.body?.subscriberId && req.body?.sn) {
+      await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2', [req.tenant.id, req.body.subscriberId, String(req.body.sn).trim()]);
+    }
+    // pick the new ONU up without waiting for the hourly list
+    const { rows: [c] } = await pool.query('select last_details_at from smartolt_config where tenant_id=$1', [req.tenant.id]);
+    if (!c?.last_details_at || Date.now() - new Date(c.last_details_at) > 3 * 60000) m.syncTenant(req.tenant.id, 'full').catch(() => {});
+    res.json({ ok: true, response: out });
+  } catch (e) { soFail(res, e); }
+}));
+
+/** ONUs with a place: their own coordinates, else the client's. */
+app.get('/api/smartolt/map', requirePermission('smartolt.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select n.external_id as id, n.name, n.sn, n.status, n.signal_dbm::float8 as signal_dbm, n.olt_name,
+            coalesce(n.lat, s.lat)::float8 as lat, coalesce(n.lng, s.lng)::float8 as lng, s.name as client_name
+       from smartolt_onus n left join subscribers s on s.id = n.subscriber_id
+      where n.tenant_id=$1 and coalesce(n.lat, s.lat) is not null and coalesce(n.lng, s.lng) is not null limit 5000`, [req.tenant.id]);
+  res.json(rows);
+}));
+
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
   res.json(rows);

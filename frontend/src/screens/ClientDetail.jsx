@@ -6,6 +6,7 @@ import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
+import ClientOnu from './clients/ClientOnu';
 
 /** A draggable pin — click or drag to set the exact spot, same Leaflet
  * pattern the Map screen already uses (no react-leaflet dependency). */
@@ -87,6 +88,7 @@ const TABS = [
   { id: 'communication', label: 'Communication' },
   { id: 'statistics', label: 'Statistics' },
   { id: 'live', label: 'Live data' },
+  { id: 'fibre', label: 'Fibre (ONU)' },
   { id: 'activity', label: 'Activity log' },
 ];
 
@@ -599,7 +601,7 @@ export default function ClientDetail() {
         </span>
       </div>
 
-      <Tabs value={tab} onChange={setTab} tabs={TABS} />
+      <Tabs value={tab} onChange={setTab} tabs={TABS.filter((t) => t.id !== 'fibre' || store.session?.features?.smartolt)} />
 
       {tab === 'services' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px' }}>
@@ -1034,6 +1036,7 @@ export default function ClientDetail() {
           })()}
         </div>
       )}
+      {tab === 'fibre' && <ClientOnu client={client} />}
       {tab === 'live' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 20px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 8px', flexWrap: 'wrap', gap: 8 }}>

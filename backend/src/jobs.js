@@ -60,6 +60,11 @@ export function startJobs() {
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('*/1 * * * *', safely('watchRadios', watchRadios));
+  // SmartOLT: who is online (light, every 5 minutes), the full ONU list (hourly — SmartOLT limits it), and
+  // disabling/enabling ONUs by payment status for tenants who switched that on.
+  cron.schedule('*/5 * * * *', safely('smartoltStatuses', () => import('./smartolt.js').then((m) => m.syncAll('statuses'))));
+  cron.schedule('7 * * * *', safely('smartoltDetails', () => import('./smartolt.js').then((m) => m.syncAll('full'))));
+  cron.schedule('* * * * *', safely('smartoltEnforce', () => import('./smartolt.js').then((m) => m.enforceOnus())));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('0 2 * * *', safely('settleTenants', settleTenants));

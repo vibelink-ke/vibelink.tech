@@ -87,6 +87,19 @@ const badge = (letter, fill, ring = '#fff', extra = '') => L.divIcon({
   iconAnchor: [11, 11],
 });
 
+/** An ONU: a small diamond, coloured by state; one that is down pulses. */
+const onuIcon = (status) => {
+  const down = status !== 'online';
+  const fill = status === 'online' ? color.green : status === 'power_fail' ? color.amber : color.rust;
+  return L.divIcon({
+    className: '',
+    html: `<span class="${down ? 'vl-pulse' : ''}" style="display:block;width:10px;height:10px;transform:rotate(45deg);
+            background:${fill};border:1.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.2)"></span>`,
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+  });
+};
+
 const num = (v) => {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -149,7 +162,19 @@ export default function MapScreen() {
   const loadNet = useCallback(() => api.network().then(setNet).catch(() => {}), []);
   useEffect(() => { loadNet(); }, [loadNet]);
 
-  const [show, setShow] = useState({ clients: true, routers: true, network: true });
+  // ONUs from SmartOLT, for tenants who have it: a layer, and a count of how many are down.
+  const hasSmartOlt = !!store.session?.features?.smartolt && !!store.session?.perms?.['smartolt.view'];
+  const [onus, setOnus] = useState([]);
+  useEffect(() => {
+    if (!hasSmartOlt) return undefined;
+    const load = () => api.smartoltMap().then(setOnus).catch(() => {});
+    load();   // the first read regardless of tab visibility; only the repeats wait for the tab to be showing
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, [hasSmartOlt]);
+  const onusDown = onus.filter((o) => o.status !== 'online');
+
+  const [show, setShow] = useState({ clients: true, routers: true, network: true, onus: true });
   const [editMode, setEditMode] = useState(false);
   // What a click on the map does next: place a node, or build a link ({ from, path }).
   const [tool, setTool] = useState(null);
@@ -408,6 +433,17 @@ export default function MapScreen() {
       }
     }
 
+    if (show.onus && hasSmartOlt) {
+      for (const o of onus) {
+        L.marker([o.lat, o.lng], {
+          icon: onuIcon(o.status), interactive: !(editMode && tool), zIndexOffset: o.status === 'online' ? -100 : 700,
+        }).bindPopup(
+          `<strong>${esc(o.name ?? o.sn)}</strong><br>ONU ${esc(o.sn)}<br>${esc(o.client_name ?? 'not linked to a client')}<br>`
+          + `${o.status === 'online' ? 'Online' : `<b style="color:${color.rust}">${esc(o.status.replace('_', ' '))}</b>`}`
+          + `${o.signal_dbm != null ? ` · ${esc(o.signal_dbm)} dBm` : ''}`).addTo(layer.current);
+      }
+    }
+
     if (show.clients) {
       for (const c of placed) {
         // In live view the question is who is connected, not who has paid.
@@ -431,7 +467,7 @@ export default function MapScreen() {
       if (points.length === 1) { map.current.setView(points[0], 15); framed.current = true; }
       else if (points.length > 1) { map.current.fitBounds(points, { padding: [40, 40] }); framed.current = true; }
     }
-  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, endpointClick, loadNet, store]);
+  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, endpointClick, loadNet, store, onus, hasSmartOlt]);
 
   // ── editing ──
   const saveNode = async () => {
@@ -583,6 +619,15 @@ export default function MapScreen() {
         </div>
       )}
 
+      {onusDown.length > 0 && (
+        <div style={{
+          fontSize: 13, color: color.rust, background: color.rustBg, border: `1px solid ${color.rust}`,
+          borderRadius: radius.md, padding: '10px 13px', marginBottom: 12, fontWeight: 600,
+        }}>
+          {onusDown.length} of {onus.length} ONU{onus.length === 1 ? '' : 's'} on the map {onusDown.length === 1 ? 'is' : 'are'} not online — see SmartOLT for the list
+        </div>
+      )}
+
       {tilesFailed && (
         <div style={{
           fontSize: 12.5, color: color.amberInk, background: color.amberBg,
@@ -658,7 +703,7 @@ export default function MapScreen() {
           <span><b style={{ color: FIBRE }}>━</b> fibre</span>
           <span><b style={{ color: WIRELESS }}>┅</b> wireless</span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
-            {[['clients', 'Customers'], ['routers', 'Routers'], ['network', 'Network']].map(([key, label]) => (
+            {[['clients', 'Customers'], ['routers', 'Routers'], ['network', 'Network'], ...(hasSmartOlt ? [['onus', 'ONUs']] : [])].map(([key, label]) => (
               <label key={key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
                 <input type="checkbox" checked={show[key]} onChange={(e) => setShow((s) => ({ ...s, [key]: e.target.checked }))} />
                 {label}

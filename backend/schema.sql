@@ -2621,3 +2621,73 @@ alter table network_nodes add column if not exists last_seen timestamptz;
 alter table network_nodes add column if not exists offline_since timestamptz;
 alter table network_nodes add column if not exists offline_notified boolean not null default false;
 alter table network_nodes add column if not exists ping_fails int not null default 0;
+
+-- ─────────────── SmartOLT (a tenant's cloud OLT manager) ───────────────
+-- A tenant who has SmartOLT connects it with their subdomain and an API key. We keep a copy of
+-- their OLTs and ONUs (refreshed from the API) so a client's ONU, the map, alerts and automatic
+-- enable/disable can use it without asking SmartOLT on every page load.
+create table if not exists smartolt_config (
+  tenant_id        uuid primary key references tenants on delete cascade,
+  subdomain        text not null,
+  api_key_enc      text,                              -- encrypted (secrets.js)
+  api_key_last4    text,
+  enabled          boolean not null default true,
+  auto_disable     boolean not null default false,    -- disable an expired client's ONU until they pay
+  last_statuses_at timestamptz,
+  last_details_at  timestamptz,
+  last_error       text,
+  last_error_at    timestamptz,
+  created_at       timestamptz not null default now()
+);
+create table if not exists smartolt_olts (
+  tenant_id  uuid not null references tenants on delete cascade,
+  olt_id     text not null,
+  name       text,
+  ip         text,
+  hardware   text,
+  raw        jsonb not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (tenant_id, olt_id)
+);
+create table if not exists smartolt_onus (
+  tenant_id      uuid not null references tenants on delete cascade,
+  external_id    text not null,                       -- SmartOLT's unique_external_id
+  sn             text,
+  name           text,
+  olt_id         text,
+  olt_name       text,
+  board          text,
+  port           text,
+  onu_no         text,
+  onu_type       text,
+  zone           text,
+  odb            text,
+  address        text,
+  lat            numeric(9,6),
+  lng            numeric(9,6),
+  status         text not null default 'unknown',    -- online | offline | los | power_fail
+  signal_class   text,
+  signal_dbm     numeric(8,2),
+  distance_m     numeric(10,1),
+  admin_status   text,                               -- enabled | disabled
+  authorized_at  timestamptz,
+  subscriber_id  uuid references subscribers on delete set null,
+  link_locked    boolean not null default false,      -- unlinked by hand: do not auto-link again
+  disabled_by_us boolean not null default false,      -- switched off by auto-disable, so only we switch it back on
+  offline_since  timestamptz,
+  seen_at        timestamptz not null default now(),
+  updated_at     timestamptz not null default now(),
+  primary key (tenant_id, external_id)
+);
+create index if not exists smartolt_onus_subscriber on smartolt_onus (tenant_id, subscriber_id);
+create index if not exists smartolt_onus_sn on smartolt_onus (tenant_id, lower(sn));
+-- Open outage alerts (a PON port or a whole OLT with most ONUs down), so each is sent once.
+create table if not exists smartolt_alerts (
+  tenant_id uuid not null references tenants on delete cascade,
+  key       text not null,
+  since     timestamptz not null default now(),
+  notified  boolean not null default false,
+  primary key (tenant_id, key)
+);
+-- The serial number of a client's ONU, so it can be tied to the one SmartOLT reports.
+alter table subscribers add column if not exists onu_sn text;

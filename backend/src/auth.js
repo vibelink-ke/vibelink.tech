@@ -199,6 +199,13 @@ export function sessionToken(req) {
  * tenant changed under Staff & Roles. A super-admin session gets every
  * key true, matching requirePermission's own is_super_admin bypass.
  */
+const smartoltEnabled = async (tenantId) => {
+  try {
+    const { rows: [r] } = await pool.query('select enabled from smartolt_config where tenant_id=$1', [tenantId]);
+    return !!r?.enabled;
+  } catch { return false; }   // before the migration has run
+};
+
 export const publicSession = async (s) => ({
   email: s.email,
   username: s.username,
@@ -213,6 +220,8 @@ export const publicSession = async (s) => ({
         Object.entries(await loadPermissions(s.tenant_id)).map(([k, byRole]) => [k, !!byRole[s.role]])
       ),
   platformCollectEnabled: s.platform_collect_enabled,
+  // Which optional integrations this tenant has switched on, so the app can show or hide their pages.
+  features: { smartolt: await smartoltEnabled(s.tenant_id) },
   // Known the moment they sign in, so an expired tenant lands on the licence page
   // rather than on a dashboard that then redirects.
   // Judged from the date itself, not only the stored status: the status is updated

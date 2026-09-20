@@ -62,9 +62,9 @@ export default function Dashboard() {
   // Data moved through the routers in the last 24 hours, refreshed every minute.
   const [usage, setUsage] = useState(null);
   useEffect(() => {
-    const load = () => { if (!document.hidden) api.usage24h().then(setUsage).catch(() => {}); };
-    load();
-    const id = setInterval(load, 60000);
+    const load = () => api.usage24h().then(setUsage).catch(() => {});
+    load();   // the first read regardless of tab visibility; only the repeats wait for the tab to be showing
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
     return () => clearInterval(id);
   }, []);
   const [runs, setRuns] = useState(null);
