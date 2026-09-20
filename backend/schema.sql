@@ -2514,3 +2514,15 @@ alter table tenants add column if not exists flat_monthly_fee numeric(12,2);
 alter table tenants drop constraint if exists tenants_flat_fee_check;
 alter table tenants add constraint tenants_flat_fee_check check (flat_monthly_fee is null or flat_monthly_fee >= 0);
 alter table tenant_charges add column if not exists flat_fee numeric(12,2) not null default 0;
+
+-- ─────────────── tenants that host for themselves ───────────────
+-- 'self': the tenant runs their own copy of the software on their own server
+-- (like billing.vibelink.co.ke). They are billed a flat monthly fee, and that
+-- server asks this one whether the licence is valid, using instance_key. Only
+-- a hash of the key is kept: it is shown once, when generated.
+alter table tenants add column if not exists hosting text not null default 'platform';
+alter table tenants drop constraint if exists tenants_hosting_check;
+alter table tenants add constraint tenants_hosting_check check (hosting in ('platform', 'self'));
+alter table tenants add column if not exists instance_key_hash text;
+alter table tenants add column if not exists instance_last_seen timestamptz;
+create unique index if not exists tenants_instance_key_idx on tenants (instance_key_hash) where instance_key_hash is not null;

@@ -23,7 +23,12 @@ async function request(method, path, body) {
   });
   const text = await res.text();
   const parsed = text ? safeJson(text) : null;
-  if (!res.ok) throw new ApiError(res.status, parsed ?? text, path);
+  if (!res.ok) {
+    // The licence expired while the tab was open: tell the app so it can lock, rather
+    // than waiting for the next sign-in to find out.
+    if (res.status === 402 && parsed?.licenceExpired) window.dispatchEvent(new Event('vibelink:licence-expired'));
+    throw new ApiError(res.status, parsed ?? text, path);
+  }
   return parsed;
 }
 
@@ -293,6 +298,7 @@ export const api = {
   billingPayStatus: (checkoutId) => get(`/api/billing/pay/${checkoutId}`),
   tenantLicence: (id, days) => post(`/api/tenants/${id}/licence`, { days }),
   tenantActivate: (id, days) => post(`/api/tenants/${id}/activate`, { days }),
+  tenantInstanceKey: (id) => post(`/api/tenants/${id}/instance-key`, {}),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
   detectRouterUpstream: (id) => post(`/api/routers/${id}/detect-upstream`, {}),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),

@@ -1,6 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { VIEW_ONLY_KEY } from '../app/LicenceBanner';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -43,7 +41,6 @@ function CopyBox({ label, value }) {
  */
 export default function Licence() {
   const store = useStore();
-  const navigate = useNavigate();
   const canPay = !!store.session?.perms?.['billing.pay'];
   const canView = !!store.session?.perms?.['billing.view'];
   const [data, setData] = useState(null);
@@ -60,6 +57,8 @@ export default function Licence() {
       setAmount((a) => (a === '' && d.amountDue > 0 ? String(Math.round(d.amountDue)) : a));
       setError(null);
       window.dispatchEvent(new Event('vibelink:licence-changed'));
+      // Paid up: leave the locked page and open the dashboard.
+      if (!d.readOnly && store.session?.licenceExpired) window.location.assign('/');
       return d;
     } catch (e) {
       setError(e.message);
@@ -118,21 +117,9 @@ export default function Licence() {
             </span>
             <span style={{ fontSize: 13.5, color: color.inkSoft }}>
               {expired
-                ? 'Changes in this dashboard are paused until it is renewed. Customers and hotspot visitors are not affected. Please ask the account owner to renew it.'
+                ? 'The dashboard is locked until it is renewed. Customers and hotspot visitors are not affected. Please ask the account owner to renew it.'
                 : 'Nothing to do here.'}
             </span>
-            {expired && (
-              <div>
-                <Button
-                  onClick={() => {
-                    try { sessionStorage.setItem(VIEW_ONLY_KEY, '1'); } catch { /* the banner still appears */ }
-                    navigate('/');
-                  }}
-                >
-                  View the dashboard (read-only)
-                </Button>
-              </div>
-            )}
           </div>
         </Card>
       </Screen>
@@ -163,7 +150,7 @@ export default function Licence() {
               {data.trialEnded
                 ? 'You were not charged for the trial. '
                 : ''}
-              Only changes made in this dashboard are paused — you can still view everything.
+              The dashboard is locked until this is paid.
               <b> Your customers and hotspot visitors are not affected:</b> they keep connecting, paying and getting
               their service as normal.
               {data.trialEnded
@@ -172,7 +159,7 @@ export default function Licence() {
             </span>
           ) : data.trial ? (
             <span style={{ fontSize: 13.5, color: color.muted }}>
-              Nothing is charged during the trial. When it ends the dashboard becomes view-only until your account is activated — your customers are never affected.
+              Nothing is charged during the trial. When it ends the dashboard is locked until your account is activated — your customers are never affected.
             </span>
           ) : (
             <span style={{ fontSize: 13.5, color: color.muted }}>
@@ -184,21 +171,11 @@ export default function Licence() {
               <b>Payouts are paused.</b> Money collected for you is safe and keeps building up — it is released as soon as you renew.
             </span>
           )}
-          {expired && (
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-              {data.trialEnded && (
-                <a href={`mailto:${SALES_EMAIL}?subject=Help activating my account`} style={{ textDecoration: 'none' }}>
-                  <Button>Need help? Contact us</Button>
-                </a>
-              )}
-              <Button
-                onClick={() => {
-                  try { sessionStorage.setItem(VIEW_ONLY_KEY, '1'); } catch { /* the banner still appears */ }
-                  navigate('/');
-                }}
-              >
-                View the dashboard (read-only)
-              </Button>
+          {expired && data.trialEnded && (
+            <div style={{ marginTop: 4 }}>
+              <a href={`mailto:${SALES_EMAIL}?subject=Help activating my account`} style={{ textDecoration: 'none' }}>
+                <Button>Need help? Contact us</Button>
+              </a>
             </div>
           )}
         </div>

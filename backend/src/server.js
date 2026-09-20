@@ -2063,6 +2063,61 @@ app.post('/radius/post-auth', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// ── self-hosted servers ─────────────────────
+/**
+ * A tenant that runs their own copy of the software (billing.vibelink.co.ke and
+ * the like) asks here, with their licence key, whether their licence is valid,
+ * what they owe, and to send them an M-Pesa prompt. The key is the whole
+ * identity: there is no session and no hostname to resolve.
+ *
+ * Only a hash of each key is stored. Rate-limited, and unknown keys all get the
+ * same answer, so it cannot be used to discover which keys exist.
+ */
+const instanceLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many requests.' },
+});
+
+async function instanceTenantId(req) {
+  const key = String(req.get('x-instance-key') ?? '');
+  if (key.length < 32 || key.length > 200) return null;
+  const hash = crypto.createHash('sha256').update(key).digest('hex');
+  const { rows: [t] } = await pool.query(
+    "update tenants set instance_last_seen = now() where instance_key_hash = $1 and hosting = 'self' returning id", [hash]);
+  return t?.id ?? null;
+}
+
+const instance = (handler) => [instanceLimiter, wrap(async (req, res) => {
+  const id = await instanceTenantId(req);
+  if (!id) return res.status(401).json({ error: 'That licence key is not recognised.' });
+  return handler(id, req, res);
+})];
+
+/** The same shape the dashboard's own licence check returns, so one screen serves both. */
+app.get('/api/instance/licence', ...instance(async (id, _req, res) => {
+  const b = await billingSummary(id);
+  res.json({
+    tenant: b.tenant, status: b.status, readOnly: b.readOnly, trial: b.trial, trialEnded: b.trialEnded,
+    activationFee: b.activation?.fee ?? null, amountDue: b.amountDue,
+    licenceEnds: b.licenceEnds, daysLeft: b.daysLeft,
+    expiringSoon: b.daysLeft != null && b.daysLeft <= 7,
+  });
+}));
+app.get('/api/instance/billing', ...instance(async (id, _req, res) => res.json(await billingSummary(id))));
+app.post('/api/instance/pay', ...instance(async (id, req, res) => {
+  const r = await promptTenantFee(id, req.body);
+  res.status(r.status).json(r.json);
+}));
+app.get('/api/instance/pay/:checkoutId', ...instance(async (id, req, res) => {
+  const r = await tenantPromptStatus(id, req.params.checkoutId);
+  if (!r) return res.status(404).json({ error: 'No such request' });
+  res.json(r);
+}));
+
+// What a tenant whose licence has expired can still reach: the pages to pay it,
+// and everything their customers and hotspot visitors use. Nothing else.
+const LICENCE_OPEN = ['/api/billing', '/api/licence', '/portal', '/hotspot', '/radius', '/chat'];
+
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
 // portal and webhooks, which have no session. DEV_TENANT lets the Vite dev server
@@ -2082,24 +2137,24 @@ app.use(async (req, res, next) => {
   if (req.tenant.status === 'suspended') return res.status(402).json({ error: 'subscription suspended' });
 
   /**
-   * Read-only: an overdue platform invoice has reached day 5.
+   * An expired licence locks staff out of the dashboard entirely.
    *
-   * Reading stays open on purpose. An operator who cannot see who owes them money
-   * cannot collect it, and collecting it is how they pay us — locking them out
-   * entirely works against the thing we want to happen. So every screen still
-   * loads and only changes are refused.
+   * Not read-only: they see nothing but the licence page, with the amount to pay
+   * and the ways to pay it — those routes (LICENCE_OPEN) stay open, and nothing
+   * else answers. Signing in still works, so there is somewhere to pay from.
    *
-   * The captive portal and webhooks are exempt: their customers are not the ones
-   * in arrears, and a payment arriving is what lifts this.
+   * Only the dashboard is locked. The captive portal, the customer portal,
+   * RADIUS, chat and webhooks are not staff routes and are never restricted: a
+   * tenant's customers and hotspot visitors are not the ones in arrears, and a
+   * payment arriving is what lifts this. The platform owner is never locked out.
    */
-  if ((req.tenant.status === 'readonly'
-        || (['active', 'trial'].includes(req.tenant.status) && req.tenant.licence_lapsed))
-      && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)
-      && !req.path.startsWith('/portal/')
-      && !req.path.startsWith('/api/billing/')) {
+  const licenceExpired = req.tenant.status === 'readonly'
+    || (['active', 'trial'].includes(req.tenant.status) && req.tenant.licence_lapsed);
+  if (licenceExpired && req.session && !req.session.is_super_admin
+      && !LICENCE_OPEN.some((p) => req.path === p || req.path.startsWith(`${p}/`))) {
     return res.status(402).json({
-      error: 'Your licence has expired, so the account is view-only. Pay under Licence & billing to switch it back on — your customers and hotspot visitors are not affected.',
-      readOnly: true,
+      error: 'Your licence has expired. Pay under Licence & billing to switch your account back on — your customers and hotspot visitors are not affected.',
+      licenceExpired: true,
     });
   }
   next();
@@ -10034,7 +10089,8 @@ app.get('/api/tenants', superAdminOnly, wrap(async (_req, res) => {
         where p.tenant_id=t.id and p.status='applied'
           and p.received_at >= date_trunc('month', now())) collected
     from tenants t order by t.created_at desc`);
-  res.json(rows);
+  // The key's hash never leaves the server; the screen only needs to know one exists.
+  res.json(rows.map(({ instance_key_hash: hash, ...t }) => ({ ...t, has_instance_key: !!hash })));
 }));
 
 /**
@@ -10264,7 +10320,8 @@ app.post('/api/platform/restart', superAdminOnly, wrap(async (_req, res) => {
 }));
 
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
-  const { name, subdomain, hotspotCommissionPct = 3, pppoeClientRate = 16, flatMonthlyFee = null, supportPhone } = req.body;
+  const { name, subdomain, hotspotCommissionPct = 3, pppoeClientRate = 16, flatMonthlyFee = null, supportPhone, hosting = 'platform' } = req.body;
+  if (!['platform', 'self'].includes(hosting)) return res.status(400).json({ error: 'hosting must be platform or self' });
   if (!name || !subdomain) return res.status(400).json({ error: 'name and subdomain are required' });
   const pct = Number(hotspotCommissionPct);
   const rate = Number(pppoeClientRate);
@@ -10272,10 +10329,23 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   if (!(rate >= 0)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
   const flat = flatMonthlyFee === null || flatMonthlyFee === '' ? null : Number(flatMonthlyFee);
   if (flat !== null && !(flat >= 0)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });
+  // A self-hosted tenant is billed a flat fee: there is no usage here to measure.
+  if (hosting === 'self' && flat === null) return res.status(400).json({ error: 'A self-hosted tenant needs a flat monthly fee.' });
+  // Self-hosted tenants are agreed customers, not trials: active now, licensed for the
+  // first month, with billing starting the first full month after.
   const { rows: [t] } = await pool.query(
-    `insert into tenants (name, subdomain, hotspot_commission_pct, pppoe_client_rate, flat_monthly_fee, support_phone)
-     values ($1,$2,$3,$4,$5,$6) returning *`,
-    [name, subdomain, pct, rate, flat, supportPhone ?? null]);
+    `insert into tenants (name, subdomain, hotspot_commission_pct, pppoe_client_rate, flat_monthly_fee, support_phone, hosting,
+                          status, converted_at, licence_ends)
+     values ($1,$2,$3,$4,$5,$6,$7,
+             case when $7 = 'self' then 'active' else 'trial' end,
+             case when $7 = 'self' then now() end,
+             case when $7 = 'self' then current_date + 30 end)
+     returning *`,
+    [name, subdomain, pct, rate, flat, supportPhone ?? null, hosting]);
+
+  // Nothing is set up on the platform for a self-hosted tenant: no help articles,
+  // no support login. Their software runs on their own server.
+  if (hosting === 'self') return res.json({ ...t, instance_key_hash: undefined });
 
   // Starter help articles, so a new ISP is not answering the same four
   // questions from an empty page. Non-fatal: failing to seed content must not
@@ -10295,6 +10365,20 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
   res.json(t);
 }));
 
+/**
+ * Make a licence key for a self-hosted tenant. Shown once, here, and never again:
+ * only its hash is kept. Making another replaces it — the old key stops working
+ * the moment this returns, so the tenant's server must be given the new one.
+ */
+app.post('/api/tenants/:id/instance-key', superAdminOnly, wrap(async (req, res) => {
+  const key = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(key).digest('hex');
+  const { rows: [t] } = await pool.query(
+    "update tenants set instance_key_hash = $2 where id = $1 and hosting = 'self' returning id, name", [req.params.id, hash]);
+  if (!t) return res.status(404).json({ error: 'No such self-hosted tenant' });
+  res.json({ key, name: t.name });
+}));
+
 // ── the tenant's own licence and billing ────
 /**
  * A tenant paying the platform: what is owed, and two ways to pay it —
@@ -10310,44 +10394,59 @@ app.get('/api/billing', requirePermission('billing.view'), wrap(async (req, res)
   res.json(await billingSummary(req.tenant.id));
 }));
 
-app.post('/api/billing/pay', requirePermission('billing.pay'), stkLimiter, wrap(async (req, res) => {
-  const summary = await billingSummary(req.tenant.id);
+/**
+ * Send a tenant an M-Pesa prompt for what they owe (or an amount they choose).
+ * Shared by the dashboard route and by a self-hosted server paying on its
+ * tenant's behalf. Returns { status, json } for the caller to send.
+ */
+async function promptTenantFee(tenantId, body) {
+  const summary = await billingSummary(tenantId);
   if (!summary.canPrompt) {
-    return res.status(503).json({ error: 'Card and M-Pesa prompts are not set up yet — pay to the paybill shown instead, or contact support.' });
+    return { status: 503, json: { error: 'M-Pesa prompts are not set up yet — pay to the paybill shown instead, or contact support.' } };
   }
 
   // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
-  const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+  const phone = String(body?.phone ?? '').replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) return { status: 400, json: { error: 'That does not look like a Kenyan mobile number.' } };
 
-  const amount = req.body?.amount == null || req.body.amount === '' ? summary.amountDue : Number(req.body.amount);
+  const amount = body?.amount == null || body.amount === '' ? summary.amountDue : Number(body.amount);
   if (!(amount >= 10)) {
-    return res.status(400).json({ error: summary.amountDue > 0 ? 'The smallest payment is KES 10.' : 'Nothing is due right now. Enter an amount of at least KES 10 to pay ahead.' });
+    return { status: 400, json: { error: summary.amountDue > 0 ? 'The smallest payment is KES 10.' : 'Nothing is due right now. Enter an amount of at least KES 10 to pay ahead.' } };
   }
-  if (amount > 250000) return res.status(400).json({ error: 'M-Pesa allows at most KES 250,000 in one prompt.' });
+  if (amount > 250000) return { status: 400, json: { error: 'M-Pesa allows at most KES 250,000 in one prompt.' } };
 
   const owner = await ownerTenantId();
   const data = await mpesa.stkPush(owner, {
     phone, amount, accountRef: summary.billingRef, description: 'Licence', platformCollect: true,
   });
   const checkoutId = data?.CheckoutRequestID ?? null;
-  if (!checkoutId) return res.status(502).json({ error: 'M-Pesa did not accept the request. Try again in a moment.' });
+  if (!checkoutId) return { status: 502, json: { error: 'M-Pesa did not accept the request. Try again in a moment.' } };
   await pool.query(
     `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
      values ($1, 'daraja', $2, $3, $4, $5)
      on conflict (tenant_id, provider, checkout_id) do nothing`,
-    [owner, checkoutId, phone, Math.round(amount), { type: 'tenant_fee', tenant_id: req.tenant.id }]);
-  res.json({ checkoutId });
-}));
+    [owner, checkoutId, phone, Math.round(amount), { type: 'tenant_fee', tenant_id: tenantId }]);
+  return { status: 200, json: { checkoutId } };
+}
 
 /** Has the prompt been answered? Only for this tenant's own requests. */
-app.get('/api/billing/pay/:checkoutId', requirePermission('billing.view'), wrap(async (req, res) => {
+async function tenantPromptStatus(tenantId, checkoutId) {
   const { rows: [r] } = await pool.query(
     `select status, result_desc from stk_requests
       where checkout_id = $1 and purpose->>'type' = 'tenant_fee' and purpose->>'tenant_id' = $2`,
-    [req.params.checkoutId, req.tenant.id]);
+    [checkoutId, tenantId]);
+  return r ? { status: r.status, message: r.result_desc } : null;
+}
+
+app.post('/api/billing/pay', requirePermission('billing.pay'), stkLimiter, wrap(async (req, res) => {
+  const r = await promptTenantFee(req.tenant.id, req.body);
+  res.status(r.status).json(r.json);
+}));
+
+app.get('/api/billing/pay/:checkoutId', requirePermission('billing.view'), wrap(async (req, res) => {
+  const r = await tenantPromptStatus(req.tenant.id, req.params.checkoutId);
   if (!r) return res.status(404).json({ error: 'No such request' });
-  res.json({ status: r.status, message: r.result_desc });
+  res.json(r);
 }));
 
 // ── tenant charges (platform owner) ─────────

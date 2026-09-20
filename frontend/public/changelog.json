@@ -45,7 +45,9 @@
       "Platform fees are billed monthly instead: 3% of hotspot sales plus KES 16 per active PPPoE client.",
       "The free trial is 14 days and is never invoiced.",
       "An expired licence now opens a dedicated page with the ways to pay. Payouts pause until it is renewed and are released afterwards.",
-      "After the 14-day free trial, KES 500 activates your licence for 30 days — pay by M-Pesa prompt or paybill."
+      "After the 14-day free trial, KES 500 activates your licence for 30 days — pay by M-Pesa prompt or paybill.",
+      "An expired licence now locks the dashboard completely — only the licence and payment page opens. Customers and hotspot visitors are never affected.",
+      "Tenants who host for themselves can be billed a flat monthly fee, and their server shows the licence-expired page if it lapses."
     ]
   }
 ]

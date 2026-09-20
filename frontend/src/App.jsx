@@ -8,7 +8,8 @@ import AuthGate from './app/AuthGate';
 import ResetPassword from './app/ResetPassword';
 import AcceptInvite from './app/AcceptInvite';
 import { isPlatformHost } from './app/host';
-import LicenceBanner, { VIEW_ONLY_KEY } from './app/LicenceBanner';
+import LicenceBanner from './app/LicenceBanner';
+import LicenceLocked from './screens/LicenceLocked';
 import CustomerPortal from './screens/CustomerPortal';
 import VerifyStaff from './screens/VerifyStaff';
 import { useMediaQuery } from './app/useMediaQuery';
@@ -75,10 +76,7 @@ export default function App() {
   // that same URL — the operator asked to sign in, not to stay put.
   const signInToDashboard = (s, message) => {
     signIn(s, message);
-    // An expired licence is the first thing they see. Any earlier choice to look
-    // around read-only is forgotten, so every sign-in starts on the licence page.
-    try { sessionStorage.removeItem(VIEW_ONLY_KEY); } catch { /* nothing to clear */ }
-    navigate(s?.licenceExpired ? '/licence' : '/', { replace: true });
+    navigate('/', { replace: true });
   };
 
   /**
@@ -214,6 +212,10 @@ export default function App() {
       />
     );
   }
+
+  // An expired licence locks staff out completely: nothing but the licence page.
+  // (The platform owner is never locked out.)
+  if (session.licenceExpired && !session.superAdmin) return <LicenceLocked />;
 
   return (
     // `om-dark` is the mockup's rootClass: it inverts the whole tree, and

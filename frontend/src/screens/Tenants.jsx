@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { name: '', subdomain: '', chargeMode: 'usage', hotspotCommissionPct: '3', pppoeClientRate: '16', flatMonthlyFee: '', supportPhone: '' };
+const BLANK = { name: '', subdomain: '', hosting: 'platform', chargeMode: 'usage', hotspotCommissionPct: '3', pppoeClientRate: '16', flatMonthlyFee: '', supportPhone: '' };
 
 export default function Tenants() {
   const store = useStore();
@@ -14,6 +14,20 @@ export default function Tenants() {
   const [viewing, setViewing] = useState(null);
   const [licenceDate, setLicenceDate] = useState('');
   const [licenceBusy, setLicenceBusy] = useState(false);
+  // A self-hosted tenant's licence key, shown once when it is made.
+  const [instanceKey, setInstanceKey] = useState(null);
+  const makeInstanceKey = async (tenant) => {
+    if (tenant.has_instance_key
+        && !window.confirm('Making a new key stops the old one working at once. Their server will need the new key. Continue?')) return;
+    try {
+      const out = await api.tenantInstanceKey(tenant.id);
+      setInstanceKey({ name: out.name, key: out.key });
+      store.setCollection('tenants', (ts) => ts.map((t) => (t.id === tenant.id ? { ...t, has_instance_key: true } : t)));
+      setEditing((e) => (e ? { ...e, has_instance_key: true } : e));
+    } catch (e) {
+      store.toast(`Could not make a key: ${e.message}`);
+    }
+  };
   const [editing, setEditing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [staffFor, setStaffFor] = useState(null);
@@ -215,7 +229,8 @@ export default function Tenants() {
         subdomain: f.subdomain,
         hotspotCommissionPct: Number(f.hotspotCommissionPct),
         pppoeClientRate: Number(f.pppoeClientRate),
-        flatMonthlyFee: f.chargeMode === 'flat' ? Number(f.flatMonthlyFee) : null,
+        hosting: f.hosting,
+        flatMonthlyFee: f.chargeMode === 'flat' || f.hosting === 'self' ? Number(f.flatMonthlyFee) : null,
         supportPhone: f.supportPhone || null,
       });
       store.setCollection('tenants', (ts) => [created, ...ts]);
@@ -530,6 +545,10 @@ export default function Tenants() {
               ),
             },
             {
+              key: 'hosting', label: 'Runs on',
+              render: (t) => (t.hosting === 'self' ? <Badge tone="default">self-hosted</Badge> : <span style={{ color: color.muted }}>platform</span>),
+            },
+            {
               key: 'hotspot_pct', label: 'Hotspot %', align: 'right',
               render: (t) => (t.flat_monthly_fee != null
                 ? <span style={{ fontFamily: font.mono }}>Flat</span>
@@ -640,16 +659,34 @@ export default function Tenants() {
           <Field label="Support phone">
             <Input value={f.supportPhone} onChange={set('supportPhone')} />
           </Field>
-          <Field label="How are they charged?" span={2}>
+          <Field label="Where does it run?" span={2}>
             <Select
-              value={f.chargeMode}
-              onChange={set('chargeMode')}
+              value={f.hosting}
+              onChange={(e) => setF((s) => ({ ...s, hosting: e.target.value, chargeMode: e.target.value === 'self' ? 'flat' : s.chargeMode }))}
               options={[
-                { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
-                { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
+                { value: 'platform', label: 'On our platform — they use it at their own address here' },
+                { value: 'self', label: 'Self-hosted — they run their own copy on their own server' },
               ]}
             />
           </Field>
+          {f.hosting === 'self' ? (
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+              A self-hosted tenant is billed a flat monthly fee. Their server checks its licence with us every day, and shows a
+              "licence expired" page to their staff if it lapses — never to their customers. After creating them, make their licence
+              key from the tenant's Edit screen and give it to whoever runs their server.
+            </p>
+          ) : (
+            <Field label="How are they charged?" span={2}>
+              <Select
+                value={f.chargeMode}
+                onChange={set('chargeMode')}
+                options={[
+                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
+                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
+                ]}
+              />
+            </Field>
+          )}
           {f.chargeMode === 'flat' ? (
             <Field label="Flat monthly fee (KES)" span={2} hint="The same every month, whatever their usage">
               <Input value={f.flatMonthlyFee} onChange={set('flatMonthlyFee')} type="number" min="0" />
@@ -671,6 +708,12 @@ export default function Tenants() {
         {viewing && (
           <>
             <KV k="Portal" v={`${viewing.subdomain}.vibelink.tech`} />
+            {viewing.hosting === 'self' && (
+              <>
+                <KV k="Runs on" v="Their own server" />
+                <KV k="Last checked in" v={viewing.instance_last_seen ? new Date(viewing.instance_last_seen).toLocaleString('en-KE') : 'Never — no key in use yet'} />
+              </>
+            )}
             <KV k="Status" v={viewing.status} />
             {viewing.flat_monthly_fee != null ? (
               <KV k="Charged" v={`Flat KES ${kes(viewing.flat_monthly_fee)} per month`} />
@@ -742,6 +785,27 @@ export default function Tenants() {
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
             </Field>
+            {editing.hosting === 'self' && (
+              <div style={{ gridColumn: '1 / -1', border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Self-hosted — licence key</span>
+                <span style={{ fontSize: 12.5, color: color.muted }}>
+                  Their server uses this key to check the licence every day. It is shown once, when made; only a fingerprint is kept.
+                  {editing.has_instance_key ? ' A key already exists.' : ' None made yet.'}
+                </span>
+                <div>
+                  <Button onClick={() => makeInstanceKey(editing)}>{editing.has_instance_key ? 'Make a new key' : 'Make licence key'}</Button>
+                </div>
+                {instanceKey && instanceKey.name === editing.name && (
+                  <div style={{ background: color.tileBg, borderRadius: radius.sm, padding: '10px 12px' }}>
+                    <div style={{ fontSize: 12, color: color.rust, fontWeight: 600, marginBottom: 6 }}>Copy this now — it will not be shown again.</div>
+                    <code style={{ display: 'block', fontFamily: font.mono, fontSize: 12, userSelect: 'all', wordBreak: 'break-all', whiteSpace: 'pre-wrap' }}>
+                      {`LICENCE_URL=https://vibelink.tech\nLICENCE_KEY=${instanceKey.key}`}
+                    </code>
+                    <div style={{ fontSize: 12, color: color.muted, marginTop: 6 }}>Add both lines to the .env on their server and restart it.</div>
+                  </div>
+                )}
+              </div>
+            )}
             <Field label="How is this tenant charged?" span={2} hint="Choose one. Either way, payouts to them are never reduced.">
               <Select
                 value={editing.charge_mode}

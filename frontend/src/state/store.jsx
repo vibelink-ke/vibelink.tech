@@ -76,6 +76,13 @@ export function StoreProvider({ children }) {
   // null = signed out, undefined = not checked yet (avoids flashing the gate).
   const [session, setSession] = useState(undefined);
 
+  // Any request answered "licence expired" locks the app at once.
+  useEffect(() => {
+    const lock = () => setSession((s) => (s && !s.licenceExpired ? { ...s, licenceExpired: true } : s));
+    window.addEventListener('vibelink:licence-expired', lock);
+    return () => window.removeEventListener('vibelink:licence-expired', lock);
+  }, []);
+
   // UI-only state, mirroring the mockup's non-data state fields.
   // The mobile nav drawer. Lives here because the Topbar opens it and the
   // Sidebar closes it, and they are siblings.
@@ -216,6 +223,8 @@ export function StoreProvider({ children }) {
    * app breaking rather than keeping itself current.
    */
   const reload = useCallback(async ({ quiet = false } = {}) => {
+    // Locked out: every one of these would be refused, so do not ask.
+    if (session?.licenceExpired) { setLoading(false); return; }
     if (!quiet) setLoading(true);
     // `tenants` is /api/tenants, superAdminOnly on the backend (see
     // server.js) — every tenant's own dashboard fetched it anyway, on every
@@ -292,7 +301,7 @@ export function StoreProvider({ children }) {
    * how a small VPS ends up with a load average nobody can explain.
    */
   useEffect(() => {
-    if (!session) return undefined;
+    if (!session || session.licenceExpired) return undefined;
     const tick = () => {
       if (document.visibilityState === 'visible') {
         reload({ quiet: true });
@@ -387,7 +396,7 @@ export function StoreProvider({ children }) {
    * this is for.
    */
   useEffect(() => {
-    if (!session) return undefined;
+    if (!session || session.licenceExpired) return undefined;
 
     let timer;
     const arm = () => {
@@ -414,7 +423,7 @@ export function StoreProvider({ children }) {
    * without asking the provider on every tick. Paused while the tab is hidden.
    */
   useEffect(() => {
-    if (!session) return undefined;
+    if (!session || session.licenceExpired) return undefined;
     let stop = false;
 
     const tick = async () => {
