@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
@@ -30,6 +30,20 @@ export default function Vouchers() {
   };
 
   const vouchers = store.vouchers ?? [];
+
+  // Live usage: the list is re-read every 10 seconds while the tab is showing, so each
+  // visitor's used data (and who is online) stays current without a refresh.
+  useEffect(() => {
+    let busy = false;
+    const id = setInterval(async () => {
+      if (document.hidden || busy) return;
+      busy = true;
+      try { store.setCollection('vouchers', await api.vouchers()); } catch { /* try again next tick */ }
+      busy = false;
+    }, 10000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const visible = useMemo(
     () =>
@@ -195,7 +209,7 @@ export default function Vouchers() {
 
       <Card
         title="Vouchers"
-        subtitle={`${visible.length} of ${vouchers.length}`}
+        subtitle={`${visible.length} of ${vouchers.length} · live, updates every 10 seconds`}
         actions={
           <Button
             size="sm"
@@ -255,7 +269,21 @@ export default function Vouchers() {
                 : <span style={{ color: color.muted }}>—</span>,
             },
             { key: 'status', label: 'Status', render: (v) => <Badge tone={v.status}>{STATUS_LABEL[v.status] ?? v.status}</Badge> },
-            { key: 'data_used_mb', label: 'Used', align: 'right', render: (v) => `${v.data_used_mb ?? 0} MB` },
+            {
+              key: 'data_used_mb',
+              label: 'Used',
+              align: 'right',
+              render: (v) => {
+                const used = Number(v.data_used_mb ?? 0);
+                const cap = Number(v.data_cap_mb ?? 0);
+                const show = (mb) => (mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`);
+                return (
+                  <span title={cap ? `of a ${show(cap)} cap` : 'no data cap on this bundle'} style={{ fontFamily: font.mono, fontSize: 12.5, color: cap && used >= cap ? color.rust : undefined }}>
+                    {show(used)}{cap ? <span style={{ color: color.muted }}> / {show(cap)}</span> : null}
+                  </span>
+                );
+              },
+            },
             {
               key: 'expires_at',
               label: 'Expires',

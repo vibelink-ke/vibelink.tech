@@ -9060,6 +9060,26 @@ app.delete('/api/tariffs/:id', requirePermission('tariffs.delete'), wrap(async (
  * way: radacct for an open, recently-updated session, live_sessions for
  * what a router answered when last asked.
  */
+/**
+ * Data moved through this tenant's routers in the last 24 hours, and per hour for
+ * the chart. Counted from the moment this was switched on, so the first day shows
+ * `since` — the start of what has been counted so far.
+ */
+app.get('/api/usage/24h', wrap(async (req, res) => {
+  const { rows: [t] } = await pool.query(
+    `select coalesce(sum(bytes_in), 0) as bytes_in, coalesce(sum(bytes_out), 0) as bytes_out, min(bucket) as since
+       from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'`, [req.tenant.id]);
+  const { rows: hours } = await pool.query(
+    `select date_trunc('hour', bucket) as hour, sum(bytes_in + bytes_out) as bytes
+       from usage_buckets where tenant_id = $1 and bucket >= now() - interval '24 hours'
+      group by 1 order by 1`, [req.tenant.id]);
+  res.json({
+    bytes_in: Number(t.bytes_in), bytes_out: Number(t.bytes_out),
+    total: Number(t.bytes_in) + Number(t.bytes_out), since: t.since,
+    hours: hours.map((h) => ({ hour: h.hour, bytes: Number(h.bytes) })),
+  });
+}));
+
 app.get('/api/vouchers', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select v.*,
@@ -9084,7 +9104,11 @@ app.get('/api/vouchers', requirePermission('hotspot.view'), wrap(async (req, res
            -- Which bundle this code actually was, and at what speed — a
            -- voucher only ever carried plan_id, an id an operator cannot
            -- read, so the table had no way to say what somebody bought.
-           p.title as plan_title, p.rate_down, p.rate_up,
+           p.title as plan_title, p.rate_down, p.rate_up, p.data_cap_mb,
+           -- What this visitor has actually used, read from RADIUS accounting (the code
+           -- they typed, and the device's own MAC login) rather than the stored counter,
+           -- which only ever moved for capped bundles.
+           round(coalesce(vu.bytes, 0) / 1048576.0, 1) as data_used_mb,
            -- The M-Pesa/KopoKopo reference that paid for this code, for the
            -- same reason a receipt names the transaction it came from.
            pay.provider_ref as mpesa_ref, pay.provider as pay_provider
@@ -9104,6 +9128,12 @@ app.get('/api/vouchers', requirePermission('hotspot.view'), wrap(async (req, res
       left join lateral (
         select mac, label from voucher_devices where voucher_id = v.id
          order by added_at desc limit 1) dev on true
+      left join lateral (
+        select sum(coalesce(ra.acctinputoctets, 0) + coalesce(ra.acctoutputoctets, 0)) as bytes
+          from radacct ra
+         where ra.username in (v.code, upper(v.mac::text))
+           and exists (select 1 from routers rr where rr.tenant_id = v.tenant_id and rr.host = ra.nasipaddress)
+           and (v.starts_at is null or ra.acctstarttime >= v.starts_at - interval '1 minute')) vu on true
      where v.tenant_id=$1
      order by v.created_at desc
      limit 1000`, [req.tenant.id]);

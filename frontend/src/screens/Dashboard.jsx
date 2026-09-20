@@ -44,12 +44,29 @@ function Tile({ label, value, hint, onClick, valueColor }) {
   );
 }
 
+/** 1234567890 -> "1.15 GB" */
+const fmtBytes = (n) => {
+  const b = Number(n) || 0;
+  if (b >= 1024 ** 4) return `${(b / 1024 ** 4).toFixed(2)} TB`;
+  if (b >= 1024 ** 3) return `${(b / 1024 ** 3).toFixed(2)} GB`;
+  if (b >= 1024 ** 2) return `${(b / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(b / 1024)} KB`;
+};
+
 const greeting = (h = new Date().getHours()) =>
   h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 
 export default function Dashboard() {
   // Its own request: the dashboard should still render if the run log cannot
   // be read, since everything else on it comes from elsewhere.
+  // Data moved through the routers in the last 24 hours, refreshed every minute.
+  const [usage, setUsage] = useState(null);
+  useEffect(() => {
+    const load = () => { if (!document.hidden) api.usage24h().then(setUsage).catch(() => {}); };
+    load();
+    const id = setInterval(load, 60000);
+    return () => clearInterval(id);
+  }, []);
   const [runs, setRuns] = useState(null);
   useEffect(() => { api.automationRuns().then(setRuns).catch(() => {}); }, []);
   // Null until the first answer, so "reading" and "nothing ran" stay distinct.
@@ -299,6 +316,18 @@ export default function Dashboard() {
           label="ACTIVE"
           value={active.length}
           hint="paid & valid — online or not"
+        />
+        {/* Counted from the growth of every accounting session, so it is what actually
+            moved, not an estimate. The first day shows when counting began. */}
+        <Tile
+          label="DATA USED (24H)"
+          value={usage ? fmtBytes(usage.total) : '—'}
+          hint={!usage ? 'counting…'
+            : !usage.total ? 'nothing recorded yet'
+              : `${fmtBytes(usage.bytes_out)} down · ${fmtBytes(usage.bytes_in)} up${
+                usage.since && new Date(usage.since) > new Date(Date.now() - 23.5 * 3600 * 1000)
+                  ? ` · since ${new Date(usage.since).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}`
+                  : ''}`}
         />
         {/* From the job run log. This was a hardcoded zero, so the tile said
             nothing had happened however much had. */}

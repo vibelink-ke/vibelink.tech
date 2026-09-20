@@ -272,6 +272,7 @@ export const api = {
   // ── automation ──
   automation: () => get('/api/automation'),
   automationRuns: () => get('/api/automation/runs'),
+  usage24h: () => get('/api/usage/24h'),
   automationRecent: () => get('/api/automation/recent'),
   setAutomation: (job, enabled) => put(`/api/automation/${job}`, { enabled }),
 

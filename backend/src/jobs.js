@@ -53,7 +53,7 @@ export function startJobs() {
   // scoped to just-expired rows, not a scan of every subscriber/voucher.
   cron.schedule('*/30 * * * * *', safely('expireAndSuspend', expireAndSuspend));
   cron.schedule('*/15 * * * *', safely('enforceFup', enforceFup));
-  cron.schedule('*/15 * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
+  cron.schedule('* * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
   cron.schedule('*/3 * * * *', safely('expireStuckStkRequests', expireStuckStkRequests));
   cron.schedule('0 6 * * *',  safely('generateInvoices', generateInvoices));
   cron.schedule('0 8,12,18 * * *', safely('autoCharge', autoCharge));
@@ -399,6 +399,7 @@ export async function expireAndSuspend() {
  * are skipped, same as every other job here.
  */
 async function purgeExpiredVouchers() {
+  await pool.query("delete from usage_buckets where bucket < now() - interval '8 days'").catch(() => {});
   // left join, not join: a tenant with no hotspot_settings row yet (the
   // column's own default is true) must still get the default behaviour,
   // not be silently skipped for having no row to match at all.
@@ -487,14 +488,19 @@ const HOTSPOT_MB = 1024 * 1024;
 async function enforceHotspotDataCaps() {
   const { rows } = await pool.query(
     `select v.id, v.tenant_id, v.code, v.mac,
-            coalesce(sum(s.bytes_in + s.bytes_out), 0) as bytes,
+            -- From RADIUS accounting, by the code typed and by the device's MAC login.
+            -- (sessions.voucher_id was never filled in, so this used to read 0 for every
+            -- voucher and no data cap was ever enforced.)
+            (select coalesce(sum(coalesce(ra.acctinputoctets, 0) + coalesce(ra.acctoutputoctets, 0)), 0)
+               from radacct ra
+              where ra.username in (v.code, upper(v.mac::text))
+                and exists (select 1 from routers rr where rr.tenant_id = v.tenant_id and rr.host = ra.nasipaddress)
+                and (v.starts_at is null or ra.acctstarttime >= v.starts_at - interval '1 minute')) as bytes,
             p.data_cap_mb
        from vouchers v
        join plans p on p.id = v.plan_id
-       left join sessions s on s.voucher_id = v.id
       where v.status='in_use' and p.data_cap_mb is not null and p.data_cap_mb > 0
-        and v.tenant_id in (${enabledTenants})
-      group by v.id, p.data_cap_mb`,
+        and v.tenant_id in (${enabledTenants})`,
     ['enforceHotspotDataCaps']);
   if (!rows.length) return;
 

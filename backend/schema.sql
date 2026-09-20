@@ -674,6 +674,20 @@ create or replace view nas as
     r.nas_identifier    as description
   from routers r;
 
+-- Data moved through a tenant's routers, in 5-minute buckets, added up from the
+-- growth of each accounting session (see sync_session_from_radacct). A session's
+-- counters only ever say "so far, in total", so "the last 24 hours" cannot be read
+-- off them — the growth has to be recorded as it happens.
+create table if not exists usage_buckets (
+  tenant_id uuid not null references tenants on delete cascade,
+  bucket    timestamptz not null,
+  bytes_in  bigint not null default 0,
+  bytes_out bigint not null default 0,
+  primary key (tenant_id, bucket)
+);
+-- Voucher and PPPoE usage is read by username.
+create index if not exists radacct_username on radacct (username);
+
 /**
  * Mirror accounting into the app's `sessions` table.
  * FUP enforcement sums sessions.bytes_in/out; without this it would always read
@@ -684,9 +698,33 @@ declare
   v_tenant uuid;
   v_sub    uuid;
   v_router uuid;
+  v_in     bigint;
+  v_out    bigint;
 begin
   select id, tenant_id into v_router, v_tenant from routers where host = new.nasipaddress limit 1;
   if v_tenant is null then return new; end if;
+
+  -- Record how much this update added. Never allowed to break accounting itself.
+  begin
+    if tg_op = 'UPDATE' then
+      v_in  := greatest(coalesce(new.acctinputoctets, 0)  - coalesce(old.acctinputoctets, 0), 0);
+      v_out := greatest(coalesce(new.acctoutputoctets, 0) - coalesce(old.acctoutputoctets, 0), 0);
+    else
+      v_in  := coalesce(new.acctinputoctets, 0);
+      v_out := coalesce(new.acctoutputoctets, 0);
+    end if;
+    if v_in > 0 or v_out > 0 then
+      insert into usage_buckets (tenant_id, bucket, bytes_in, bytes_out)
+      values (v_tenant,
+              date_trunc('hour', now()) + (floor(extract(minute from now()) / 5)::int * 5) * interval '1 minute',
+              v_in, v_out)
+      on conflict (tenant_id, bucket) do update
+        set bytes_in  = usage_buckets.bytes_in  + excluded.bytes_in,
+            bytes_out = usage_buckets.bytes_out + excluded.bytes_out;
+    end if;
+  exception when others then
+    null;
+  end;
 
   select id into v_sub from subscribers
    where tenant_id = v_tenant and pppoe_user = new.username limit 1;
