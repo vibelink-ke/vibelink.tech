@@ -4861,20 +4861,30 @@ async function openRouter(ros, { host, port, login, body }) {
  */
 app.get('/api/licence', wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(`
-    select t.status, t.licence_ends, t.converted_at,
+    select t.status, t.licence_ends, t.converted_at, t.billing_credit,
            (t.licence_ends - current_date) as days_left,
-           (t.licence_ends is not null and t.licence_ends < current_date) as lapsed
+           (t.licence_ends is not null and t.licence_ends < current_date) as lapsed,
+           (select coalesce(sum(c.total), 0) from tenant_charges c
+             where c.tenant_id = t.id and c.status in ('open', 'invoiced')) as owed
       from tenants t where t.id = $1`, [req.tenant.id]);
 
   const daysLeft = row?.days_left == null ? null : Number(row.days_left);
   // Expired the day the date passes, not whenever the nightly job next runs.
   const readOnly = row?.status === 'readonly' || (['active', 'trial'].includes(row?.status) && !!row?.lapsed);
+  const trialEnded = readOnly && !row?.converted_at;
+  const credit = Number(row?.billing_credit ?? 0);
+  // What they actually need to pay now: the activation fee after a trial, otherwise
+  // their unpaid statements, less anything already paid ahead.
+  const amountDue = trialEnded
+    ? Math.max(0, ACTIVATION_FEE - credit)
+    : Math.max(0, Number(row?.owed ?? 0) - credit);
   res.json({
     status: row?.status ?? 'active',
     readOnly,
     trial: row?.status === 'trial' && !readOnly,
-    trialEnded: readOnly && !row?.converted_at,
-    activationFee: readOnly && !row?.converted_at ? ACTIVATION_FEE : null,
+    trialEnded,
+    activationFee: trialEnded ? ACTIVATION_FEE : null,
+    amountDue,
     licenceEnds: row?.licence_ends ?? null,
     daysLeft,
     // Invoicing belongs to WHMCS. All this reports is how long the licence has

@@ -409,7 +409,7 @@ export default function Topbar() {
         return (
           <div
             style={{ ...chip, cursor: canOpen ? 'pointer' : 'default', background: color.tileBg }}
-            title={`${ends ? `Licence ends ${ends}` : 'Licence'}${canOpen ? ' — click for billing' : ''}`}
+            title={`${ends ? `Licence ends ${ends}` : 'Licence'}${canOpen && licence?.amountDue > 0 ? ` · KES ${Number(licence.amountDue).toLocaleString('en-KE')} due` : ''}${canOpen ? ' — click for billing' : ''}`}
             onClick={canOpen ? () => navigate('/licence') : undefined}
           >
             <span style={{ color: color.neutralInk }}>Licence</span>
