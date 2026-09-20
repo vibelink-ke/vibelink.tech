@@ -283,6 +283,13 @@ export const api = {
 
   // ── network ──
   routers: () => get('/api/routers'),
+  network: () => get('/api/network'),
+  createNetNode: (b) => post('/api/network/nodes', b),
+  updateNetNode: (id, b) => patch(`/api/network/nodes/${id}`, b),
+  deleteNetNode: (id) => del(`/api/network/nodes/${id}`),
+  createNetLink: (b) => post('/api/network/links', b),
+  updateNetLink: (id, b) => patch(`/api/network/links/${id}`, b),
+  deleteNetLink: (id) => del(`/api/network/links/${id}`),
   createRouter: (r) => post('/api/routers', r),
   ovpnScript: (opts = {}) => post('/api/routers/ovpn-script', opts),
   vpnAccessList: () => get('/api/routers/vpn-access'),

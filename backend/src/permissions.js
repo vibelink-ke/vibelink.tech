@@ -47,6 +47,9 @@ export const DEFAULT_PERMISSIONS = {
   'hotspot.vouchers': { owner: true, cashier: true,  technician: true,  support: false, sales: false },
   'hotspot.delete':   { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'hotspot.compensate': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // The map's drawn network (fibre and wireless): anyone who works the network can see it; drawing is for those who build it.
+  'network.view': { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
+  'network.edit': { owner: true, cashier: false, technician: true,  support: false, sales: false },
 
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -200,6 +203,8 @@ export const PERMISSION_META = [
   { key: 'hotspot.vouchers', page: 'Hotspot', action: 'Generate vouchers' },
   { key: 'hotspot.delete',   page: 'Hotspot', action: 'Delete / void vouchers' },
   { key: 'hotspot.compensate', page: 'Hotspot', action: 'Compensate vouchers (add time)' },
+  { key: 'network.view', page: 'Map', action: 'View the network drawn on the map' },
+  { key: 'network.edit', page: 'Map', action: 'Draw / edit the network (fibre and wireless)' },
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },

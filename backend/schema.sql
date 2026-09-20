@@ -2582,3 +2582,32 @@ begin
     insert into schema_flags (name) values ('b2c_fee_deducted_default');
   end if;
 end $$;
+
+-- ─────────────── the operator's own network, drawn on the map ───────────────
+-- Fibre (OLT, splitters, closures, drops) and wireless (access points, backhaul
+-- radios, stations) placed by hand, and the cables and links between them. A link
+-- end is 'n:<node id>' or 'r:<router id>', so a router can be one end of a cable
+-- without being copied into this table.
+create table if not exists network_nodes (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  kind       text not null,                 -- olt | splitter | closure | onu | ap | ptp | station
+  name       text not null,
+  lat        numeric(9,6) not null,
+  lng        numeric(9,6) not null,
+  details    jsonb not null default '{}',   -- model, frequency, ip, split ratio, ...
+  created_at timestamptz not null default now()
+);
+create index if not exists network_nodes_tenant on network_nodes (tenant_id);
+create table if not exists network_links (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  kind       text not null check (kind in ('fibre', 'wireless')),
+  from_ref   text not null,
+  to_ref     text not null,
+  path       jsonb not null default '[]',   -- waypoints between the ends: [[lat, lng], ...]
+  label      text,
+  details    jsonb not null default '{}',   -- cores, frequency, signal, ...
+  created_at timestamptz not null default now()
+);
+create index if not exists network_links_tenant on network_links (tenant_id);

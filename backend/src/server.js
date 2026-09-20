@@ -7145,6 +7145,121 @@ app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, r
   res.json({ ok: true, sync });
 }));
 
+/**
+ * The operator's own network, drawn on the map: fibre (OLT, splitters, closures,
+ * drops) and wireless (access points, backhaul radios, stations) and the cables
+ * and links between them. A link end is 'n:<node id>' or 'r:<router id>'.
+ */
+const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station'];
+const NET_REF = /^[nr]:[0-9a-fA-F-]{36}$/;
+const netDetails = (d) => {
+  const out = {};
+  if (d && typeof d === 'object' && !Array.isArray(d)) {
+    for (const [k, v] of Object.entries(d).slice(0, 12)) {
+      if (typeof v === 'string' || typeof v === 'number') out[String(k).slice(0, 40)] = String(v).slice(0, 200);
+    }
+  }
+  return out;
+};
+const netCoord = (v, max) => { const n = Number(v); return Number.isFinite(n) && Math.abs(n) <= max ? n : null; };
+const netPath = (p) => (Array.isArray(p) ? p.slice(0, 500) : [])
+  .map((pt) => [netCoord(pt?.[0], 90), netCoord(pt?.[1], 180)]).filter(([a, b]) => a !== null && b !== null);
+
+app.get('/api/network', requirePermission('network.view'), wrap(async (req, res) => {
+  const { rows: nodes } = await pool.query(
+    'select id, kind, name, lat::float8 as lat, lng::float8 as lng, details from network_nodes where tenant_id=$1 order by created_at', [req.tenant.id]);
+  const { rows: links } = await pool.query(
+    'select id, kind, from_ref, to_ref, path, label, details from network_links where tenant_id=$1 order by created_at', [req.tenant.id]);
+  res.json({ nodes, links });
+}));
+
+app.post('/api/network/nodes', requirePermission('network.edit'), wrap(async (req, res) => {
+  const { kind, name } = req.body ?? {};
+  const lat = netCoord(req.body?.lat, 90);
+  const lng = netCoord(req.body?.lng, 180);
+  if (!NET_KINDS.includes(kind)) return res.status(400).json({ error: 'Unknown kind of node.' });
+  if (!String(name ?? '').trim()) return res.status(400).json({ error: 'Give it a name.' });
+  if (lat === null || lng === null) return res.status(400).json({ error: 'A location on the map is needed.' });
+  const { rows: [n] } = await pool.query(
+    `insert into network_nodes (tenant_id, kind, name, lat, lng, details) values ($1,$2,$3,$4,$5,$6)
+     returning id, kind, name, lat::float8 as lat, lng::float8 as lng, details`,
+    [req.tenant.id, kind, String(name).trim().slice(0, 120), lat, lng, netDetails(req.body?.details)]);
+  res.status(201).json(n);
+}));
+
+app.patch('/api/network/nodes/:id', requirePermission('network.edit'), wrap(async (req, res) => {
+  const sets = [];
+  const vals = [];
+  const add = (col, v) => { vals.push(v); sets.push(`${col}=$${vals.length + 2}`); };
+  if (req.body?.name !== undefined) {
+    if (!String(req.body.name).trim()) return res.status(400).json({ error: 'Give it a name.' });
+    add('name', String(req.body.name).trim().slice(0, 120));
+  }
+  if (req.body?.lat !== undefined || req.body?.lng !== undefined) {
+    const lat = netCoord(req.body.lat, 90);
+    const lng = netCoord(req.body.lng, 180);
+    if (lat === null || lng === null) return res.status(400).json({ error: 'That is not a place on the map.' });
+    add('lat', lat); add('lng', lng);
+  }
+  if (req.body?.details !== undefined) add('details', netDetails(req.body.details));
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  const { rows: [n] } = await pool.query(
+    `update network_nodes set ${sets.join(', ')} where tenant_id=$1 and id=$2
+     returning id, kind, name, lat::float8 as lat, lng::float8 as lng, details`,
+    [req.tenant.id, req.params.id, ...vals]);
+  if (!n) return res.status(404).json({ error: 'not found' });
+  res.json(n);
+}));
+
+app.delete('/api/network/nodes/:id', requirePermission('network.edit'), wrap(async (req, res) => {
+  await pool.query('delete from network_links where tenant_id=$1 and (from_ref=$2 or to_ref=$2)', [req.tenant.id, `n:${req.params.id}`]);
+  const { rowCount } = await pool.query('delete from network_nodes where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
+}));
+
+app.post('/api/network/links', requirePermission('network.edit'), wrap(async (req, res) => {
+  const { kind, from, to } = req.body ?? {};
+  if (!['fibre', 'wireless'].includes(kind)) return res.status(400).json({ error: 'A link is fibre or wireless.' });
+  if (!NET_REF.test(String(from)) || !NET_REF.test(String(to)) || from === to) {
+    return res.status(400).json({ error: 'A link needs two different ends.' });
+  }
+  // Both ends must be this tenant's own.
+  for (const ref of [from, to]) {
+    const [type, id] = ref.split(':');
+    const { rowCount } = await pool.query(
+      `select 1 from ${type === 'n' ? 'network_nodes' : 'routers'} where tenant_id=$1 and id=$2`, [req.tenant.id, id]);
+    if (!rowCount) return res.status(400).json({ error: 'One end of that link no longer exists.' });
+  }
+  const { rows: [l] } = await pool.query(
+    `insert into network_links (tenant_id, kind, from_ref, to_ref, path, label, details) values ($1,$2,$3,$4,$5,$6,$7)
+     returning id, kind, from_ref, to_ref, path, label, details`,
+    [req.tenant.id, kind, from, to, JSON.stringify(netPath(req.body?.path)), String(req.body?.label ?? '').trim().slice(0, 120) || null, netDetails(req.body?.details)]);
+  res.status(201).json(l);
+}));
+
+app.patch('/api/network/links/:id', requirePermission('network.edit'), wrap(async (req, res) => {
+  const sets = [];
+  const vals = [];
+  const add = (col, v) => { vals.push(v); sets.push(`${col}=$${vals.length + 2}`); };
+  if (req.body?.label !== undefined) add('label', String(req.body.label).trim().slice(0, 120) || null);
+  if (req.body?.details !== undefined) add('details', netDetails(req.body.details));
+  if (req.body?.path !== undefined) add('path', JSON.stringify(netPath(req.body.path)));
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  const { rows: [l] } = await pool.query(
+    `update network_links set ${sets.join(', ')} where tenant_id=$1 and id=$2
+     returning id, kind, from_ref, to_ref, path, label, details`,
+    [req.tenant.id, req.params.id, ...vals]);
+  if (!l) return res.status(404).json({ error: 'not found' });
+  res.json(l);
+}));
+
+app.delete('/api/network/links/:id', requirePermission('network.edit'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query('delete from network_links where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
+}));
+
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
   res.json(rows);
