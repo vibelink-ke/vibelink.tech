@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { color } from '../theme/tokens';
 import { useStore } from '../state/store';
-import { api } from '../api/client';
+import useLicence from './useLicence';
 
 /** Set by the licence page's "View the dashboard (read-only)" button, for the rest of this browser session. */
 export const VIEW_ONLY_KEY = 'vibelink.viewOnly';
@@ -26,18 +26,8 @@ export default function LicenceBanner() {
   const store = useStore();
   const navigate = useNavigate();
   const { pathname } = useLocation();
-  const [lic, setLic] = useState(null);
+  const lic = useLicence();
   const canPay = !!store.session?.perms?.['billing.view'];
-
-  useEffect(() => {
-    if (!store.session) return undefined;
-    let live = true;
-    const check = () => api.licence().then((l) => { if (live) setLic(l); }).catch(() => {});
-    check();
-    const id = setInterval(check, 30 * 60 * 1000);
-    document.addEventListener('visibilitychange', check);
-    return () => { live = false; clearInterval(id); document.removeEventListener('visibilitychange', check); };
-  }, [store.session]);
 
   const expired = !!lic?.readOnly;
 

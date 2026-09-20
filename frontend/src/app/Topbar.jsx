@@ -5,6 +5,7 @@ import { color, font, radius, TOPBAR_H } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useMediaQuery } from './useMediaQuery';
 import { api } from '../api/client';
+import useLicence from './useLicence';
 import { Button, Drawer, Field, Input, Textarea } from '../ui/primitives';
 
 const chip = {
@@ -175,6 +176,7 @@ export default function Topbar() {
   const store = useStore();
   const isMobile = useMediaQuery('(max-width: 900px)');
   const navigate = useNavigate();
+  const licence = useLicence();
   const { searchQuery, setSearchQuery } = store;
   const results = useSearchResults(searchQuery, store);
   const hasQuery = searchQuery.trim().length > 0;
@@ -381,13 +383,40 @@ export default function Topbar() {
         </span>
       </div>
 
-      <div
-        style={{ ...chip, cursor: 'default', background: color.tileBg }}
-        title="Licence status"
-      >
-        <span style={{ color: color.neutralInk }}>Licence</span>
-        <span style={{ fontFamily: font.mono, fontSize: 12.5, fontWeight: 600, color: color.neutralInk }}>—</span>
-      </div>
+      {(() => {
+        // Days left on the licence, counting down; red once it is nearly gone or
+        // has gone. Opens the billing page for anyone allowed to see it.
+        const days = licence?.daysLeft;
+        const expired = !!licence?.readOnly;
+        let text = '—';
+        let tone = color.neutralInk;
+        if (expired) {
+          text = licence.trialEnded ? 'Trial ended' : 'Expired';
+          tone = color.rust;
+        } else if (days != null) {
+          const unit = days === 1 ? 'day' : 'days';
+          text = days <= 0 ? 'Ends today' : `${days} ${unit}`;
+          if (licence.trial) text = `Trial · ${text}`;
+          tone = days <= 3 ? color.rust : days <= 14 ? color.amberInk : '#0f7a5f';
+        } else if (licence) {
+          text = 'No end date';
+        }
+        const canOpen = !!store.session?.perms?.['billing.view'];
+        const ends = licence?.licenceEnds
+          ? new Date(String(licence.licenceEnds).slice(0, 10) + 'T00:00:00Z')
+              .toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+          : null;
+        return (
+          <div
+            style={{ ...chip, cursor: canOpen ? 'pointer' : 'default', background: color.tileBg }}
+            title={`${ends ? `Licence ends ${ends}` : 'Licence'}${canOpen ? ' — click for billing' : ''}`}
+            onClick={canOpen ? () => navigate('/licence') : undefined}
+          >
+            <span style={{ color: color.neutralInk }}>Licence</span>
+            <span style={{ fontFamily: font.mono, fontSize: 12.5, fontWeight: 600, color: tone }}>{text}</span>
+          </div>
+        );
+      })()}
 
       <div style={{ ...chip, background: '#fff', fontWeight: 500 }} onClick={() => store.setDark(!store.dark)}>
         {store.dark ? '☀ Light' : '☾ Dark'}
