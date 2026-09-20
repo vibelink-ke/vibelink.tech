@@ -35,6 +35,9 @@ const STATUS_COLOUR = {
   suspended: color.rust,
 };
 
+/** The closest zoom at which satellite imagery is still sharp. */
+const SAT_MAX_ZOOM = 18;
+
 const FIBRE = '#1f6fd1';
 const WIRELESS = '#8a4fd0';
 
@@ -237,15 +240,17 @@ export default function MapScreen() {
   useEffect(() => {
     if (!map.current) return;
     tilesRef.current.forEach((t) => t.remove());
+    // Zooming further than the imagery goes only blurs it, so the map stops there.
+    map.current.setMaxZoom(base === 'satellite' ? SAT_MAX_ZOOM : 19);
     const layers = base === 'satellite'
       ? [
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: 19, maxNativeZoom: 18,
+          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_MAX_ZOOM,
           attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
         }),
         // Place names and roads over the imagery, so it still says where things are.
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-          maxZoom: 19, maxNativeZoom: 18,
+          maxZoom: SAT_MAX_ZOOM, maxNativeZoom: SAT_MAX_ZOOM,
         }),
       ]
       : [L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap contributors' })];
@@ -582,9 +587,14 @@ export default function MapScreen() {
 
       <Card>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', marginBottom: 10 }}>
-          <div style={{ display: 'inline-flex', gap: 6 }}>
+          <div style={{ display: 'inline-flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
             <Button size="sm" variant={base === 'street' ? 'primary' : undefined} onClick={() => chooseBase('street')}>Map</Button>
             <Button size="sm" variant={base === 'satellite' ? 'primary' : undefined} onClick={() => chooseBase('satellite')}>Satellite</Button>
+            {base === 'satellite' && (
+              <span style={{ fontSize: 12, color: color.muted }}>
+                Grey squares mean there is no imagery that close here — zoom out a step.
+              </span>
+            )}
           </div>
           <Button size="sm" onClick={() => setWheel((v) => !v)} title="When on, the mouse wheel zooms the map; when off, it scrolls the page">
             Scroll to zoom: {wheel ? 'on' : 'off'}
