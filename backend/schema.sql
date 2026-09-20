@@ -2725,3 +2725,6 @@ alter table settlements add column if not exists stuck_notified boolean not null
 
 -- A payout that failed is retried after this time (an hour), not every minute.
 alter table tenants add column if not exists settlement_retry_at timestamptz;
+
+-- The PPPoE login SmartOLT holds on an ONU, used to tie it to the client with the same PPPoE user.
+alter table smartolt_onus add column if not exists pppoe_user text;

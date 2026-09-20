@@ -114,6 +114,8 @@ const normOnu = (o) => ({
   distance_m: num(first(o, 'distance', 'onu_distance')),
   admin_status: String(first(o, 'administrative_status', 'admin_status') ?? '').toLowerCase() || null,
   authorized_at: first(o, 'authorization_date', 'authorized_at'),
+  // The PPPoE login configured on the ONU's WAN, when SmartOLT holds one.
+  pppoe_user: text(first(o, 'username', 'pppoe_username', 'wan_username')),
 });
 
 // ── keeping our copy ────────────────────────────────────────────────────────
@@ -149,15 +151,15 @@ async function syncOnus(cfg) {
     await pool.query(
       `insert into smartolt_onus (tenant_id, external_id, sn, name, olt_id, olt_name, board, port, onu_no, onu_type,
                                   zone, odb, address, lat, lng, status, signal_class, signal_dbm, distance_m, admin_status,
-                                  authorized_at, seen_at, updated_at, offline_since)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,now(),now(),
+                                  authorized_at, pppoe_user, seen_at, updated_at, offline_since)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,now(),now(),
                case when $16 = 'online' then null else now() end)
        on conflict (tenant_id, external_id) do update set
          sn=excluded.sn, name=excluded.name, olt_id=excluded.olt_id, olt_name=excluded.olt_name, board=excluded.board,
          port=excluded.port, onu_no=excluded.onu_no, onu_type=excluded.onu_type, zone=excluded.zone, odb=excluded.odb,
          address=excluded.address, lat=excluded.lat, lng=excluded.lng, signal_class=excluded.signal_class,
          signal_dbm=excluded.signal_dbm, distance_m=excluded.distance_m, admin_status=excluded.admin_status,
-         authorized_at=excluded.authorized_at, seen_at=now(), updated_at=now(),
+         authorized_at=excluded.authorized_at, pppoe_user=excluded.pppoe_user, seen_at=now(), updated_at=now(),
          offline_since = case when excluded.status = 'online' then null
                               when smartolt_onus.status = 'online' or smartolt_onus.offline_since is null then now()
                               else smartolt_onus.offline_since end,
@@ -166,7 +168,7 @@ async function syncOnus(cfg) {
          status=excluded.status`,
       [cfg.tenant_id, o.external_id, o.sn, o.name, o.olt_id, o.olt_name, o.board, o.port, o.onu_no, o.onu_type,
         o.zone, o.odb, o.address, o.lat, o.lng, o.status, o.signal_class, o.signal_dbm, o.distance_m, o.admin_status,
-        o.authorized_at ? new Date(o.authorized_at) : null]);
+        o.authorized_at ? new Date(o.authorized_at) : null, o.pppoe_user]);
   }
   // Only after a full, non-empty answer: an ONU that is no longer there has been deleted in SmartOLT.
   if (onus.length) await pool.query('delete from smartolt_onus where tenant_id=$1 and seen_at < $2', [cfg.tenant_id, started]);
@@ -196,19 +198,82 @@ async function syncStatuses(cfg) {
   return n;
 }
 
-/** Tie ONUs to clients: by the serial saved on the client, else by an ONU named with a one-line client's account number. */
+const norm = (v) => String(v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Tie ONUs to clients. Each unlinked ONU is tried against the clients, most certain way first, and is
+ * linked only when exactly ONE client fits — two possible clients is left for a person, never guessed:
+ *   1. the ONU's serial number saved on the client
+ *   2. the ONU's PPPoE login equals the client's PPPoE user (the secret on the router)
+ *   3. the ONU is named with the client's account number
+ * and, with { loose: true } (the "Match to clients" button):
+ *   4. the ONU is named with the client's PPPoE user
+ *   5. the ONU is named with the client's name (ignoring case and punctuation)
+ * A client that already has an ONU is never given a second. The serial is saved on the client, so the link
+ * survives every refresh.
+ */
+export async function matchOnus(tenantId, { loose = false } = {}) {
+  const { rows: onus } = await pool.query(
+    'select external_id, sn, name, pppoe_user from smartolt_onus where tenant_id=$1 and subscriber_id is null and not link_locked', [tenantId]);
+  const out = { checked: onus.length, linked: [], ambiguous: [], unmatched: 0 };
+  if (!onus.length) return out;
+
+  const { rows: subs } = await pool.query(
+    `select s.id, s.name, s.account_code, s.pppoe_user, s.onu_sn,
+            exists (select 1 from smartolt_onus o where o.tenant_id=$1 and o.subscriber_id = s.id) as has_onu
+       from subscribers s where s.tenant_id=$1`, [tenantId]);
+  const index = (keyOf) => {
+    const m = new Map();
+    for (const s of subs) {
+      const k = keyOf(s);
+      if (!k) continue;
+      if (!m.has(k)) m.set(k, []);
+      m.get(k).push(s);
+    }
+    return m;
+  };
+  const bySn = index((s) => s.onu_sn && s.onu_sn.toLowerCase());
+  const byPppoe = index((s) => s.pppoe_user && s.pppoe_user.toLowerCase());
+  const byAccount = index((s) => s.account_code && String(s.account_code).toLowerCase());
+  const byName = index((s) => norm(s.name));
+  const lower = (v) => String(v ?? '').toLowerCase();
+
+  const rules = [
+    ['serial number', (o) => bySn.get(lower(o.sn))],
+    ['PPPoE user', (o) => byPppoe.get(lower(o.pppoe_user))],
+    ['account number', (o) => byAccount.get(lower(o.name))],
+    ...(loose ? [
+      ['ONU named with the PPPoE user', (o) => byPppoe.get(lower(o.name))],
+      ['client name', (o) => byName.get(norm(o.name))],
+    ] : []),
+  ];
+
+  const taken = new Set(subs.filter((s) => s.has_onu).map((s) => s.id));
+  for (const o of onus) {
+    let hit = null;
+    let many = null;
+    for (const [by, find] of rules) {
+      const fits = (find(o) ?? []).filter((s) => !taken.has(s.id));
+      if (fits.length === 1) { hit = { by, s: fits[0] }; break; }
+      if (fits.length > 1) { many = { by, n: fits.length }; break; }
+    }
+    if (hit) {
+      taken.add(hit.s.id);
+      await pool.query('update smartolt_onus set subscriber_id=$3 where tenant_id=$1 and external_id=$2 and subscriber_id is null', [tenantId, o.external_id, hit.s.id]);
+      if (o.sn) await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2 and onu_sn is null', [tenantId, hit.s.id, o.sn]);
+      out.linked.push({ external_id: o.external_id, onu: o.name ?? o.sn, sn: o.sn, client: hit.s.name, account_code: hit.s.account_code, by: hit.by });
+    } else if (many) {
+      out.ambiguous.push({ external_id: o.external_id, onu: o.name ?? o.sn, sn: o.sn, matches: many.n, by: many.by });
+    } else {
+      out.unmatched += 1;
+    }
+  }
+  return out;
+}
+
+/** The automatic pass after every refresh: only the certain ways (1 to 3). */
 export async function linkOnus(tenantId) {
-  await pool.query(
-    `update smartolt_onus o set subscriber_id = s.id
-       from subscribers s
-      where o.tenant_id=$1 and o.subscriber_id is null and not o.link_locked
-        and s.tenant_id=$1 and s.onu_sn is not null and o.sn is not null and lower(s.onu_sn) = lower(o.sn)`, [tenantId]);
-  await pool.query(
-    `update smartolt_onus o set subscriber_id = s.id
-       from subscribers s
-      where o.tenant_id=$1 and o.subscriber_id is null and not o.link_locked
-        and s.tenant_id=$1 and o.name is not null and s.account_code = o.name
-        and (select count(*) from subscribers x where x.tenant_id=$1 and x.account_code = o.name) = 1`, [tenantId]);
+  await matchOnus(tenantId, { loose: false });
 }
 
 /**

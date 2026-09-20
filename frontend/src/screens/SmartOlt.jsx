@@ -209,6 +209,21 @@ function Onus({ canManage, navigate, initialShow }) {
   const [olt, setOlt] = useState('all');
   const [busy, setBusy] = useState(null);
   const [linking, setLinking] = useState(null);
+  const [matching, setMatching] = useState(false);
+  const [matched, setMatched] = useState(null);
+
+  // One click: tie every unlinked ONU to its client and show what was done.
+  const matchAll = async () => {
+    setMatching(true);
+    try {
+      setMatched(await api.smartoltMatch());
+      load();
+    } catch (e) {
+      store.toast(`SmartOLT: ${e.message}`);
+    } finally {
+      setMatching(false);
+    }
+  };
 
   const load = useCallback(() => api.smartoltOnus().then(setRows).catch(() => setRows([])), []);
   useEffect(() => {
@@ -268,7 +283,16 @@ function Onus({ canManage, navigate, initialShow }) {
           <Select value={olt} onChange={(e) => setOlt(e.target.value)} options={[{ value: 'all', label: 'All OLTs' }, ...olts.map((o) => ({ value: o, label: o }))]} />
         </Field>
       </div>
-      <Card title="ONUs" subtitle={`${shown.length} of ${rows.length}`}>
+      <Card
+        title="ONUs"
+        subtitle={`${shown.length} of ${rows.length}`}
+        actions={canManage ? (
+          <Button size="sm" variant="primary" onClick={matchAll} disabled={matching}
+            title="Link every unlinked ONU to its client by serial number, PPPoE user, account number or name">
+            {matching ? 'Matching…' : 'Match to clients'}
+          </Button>
+        ) : null}
+      >
         <Table
           rowKey={(r) => r.external_id}
           empty="No ONUs yet — press Sync now on the Connection tab"
@@ -294,6 +318,52 @@ function Onus({ canManage, navigate, initialShow }) {
           ]}
         />
       </Card>
+
+      <Modal
+        open={!!matched}
+        title="Match ONUs to clients"
+        onClose={() => setMatched(null)}
+        width={620}
+        footer={<Button variant="primary" onClick={() => setMatched(null)}>Done</Button>}
+      >
+        {matched && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13.5 }}>
+            {matched.syncError && (
+              <div style={{ color: color.amberInk, background: color.amberBg, borderRadius: 8, padding: '8px 11px' }}>
+                Could not refresh the ONU list first ({matched.syncError}), so this used the last copy.
+              </div>
+            )}
+            <div>
+              Checked <b>{matched.checked}</b> ONU{matched.checked === 1 ? '' : 's'} not yet linked:{' '}
+              <b style={{ color: color.green }}>{matched.linked.length} linked</b>
+              {matched.ambiguous.length > 0 && <>, <b style={{ color: color.amberInk }}>{matched.ambiguous.length} could be more than one client</b></>}
+              {matched.unmatched > 0 && <>, {matched.unmatched} with no match</>}.
+            </div>
+            {matched.linked.length > 0 && (
+              <div style={{ maxHeight: 220, overflowY: 'auto', border: `1px solid ${color.line}`, borderRadius: 8 }}>
+                {matched.linked.map((l) => (
+                  <div key={l.external_id} style={{ display: 'flex', gap: 10, padding: '7px 10px', borderTop: `1px solid ${color.line}`, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: font.mono, fontSize: 12.5 }}>{l.onu}</span>
+                    <span>→ <b>{l.client}</b> <span style={{ color: color.muted }}>{l.account_code}</span></span>
+                    <span style={{ marginLeft: 'auto', color: color.muted, fontSize: 12 }}>by {l.by}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {matched.ambiguous.length > 0 && (
+              <div style={{ fontSize: 13, color: color.muted }}>
+                Left for you: {matched.ambiguous.slice(0, 8).map((a) => `${a.onu} (${a.matches} clients share its ${a.by})`).join(', ')}
+                {matched.ambiguous.length > 8 ? ' …' : ''}. Use <b>Link client</b> on those.
+              </div>
+            )}
+            {matched.unmatched > 0 && (
+              <div style={{ fontSize: 13, color: color.muted }}>
+                For the {matched.unmatched} with no match: name the ONU in SmartOLT with the client's account number or PPPoE user, or use <b>Link client</b> — or type the serial on the client's Fibre tab.
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
 
       <Modal open={!!linking} title={linking ? `Client for ${linking.name ?? linking.sn}` : ''} onClose={() => setLinking(null)}
         footer={<>{linking?.client_id && <Button onClick={() => link(null)} style={{ color: color.rust }}>Unlink</Button>}<Button onClick={() => setLinking(null)}>Cancel</Button></>}>

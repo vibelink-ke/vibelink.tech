@@ -7492,6 +7492,21 @@ app.post('/api/smartolt/link-by-serial', requirePermission('smartolt.manage'), w
   res.json({ ok: true, linked });
 }));
 
+/** One click: link every unlinked ONU to its client by serial, PPPoE user, account number or name. */
+app.post('/api/smartolt/match', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  const { rows: [c] } = await pool.query('select last_details_at from smartolt_config where tenant_id=$1 and enabled', [req.tenant.id]);
+  if (!c) return res.status(400).json({ error: 'SmartOLT is not connected.' });
+  // A fresh list first when ours is stale (it also brings in each ONU's PPPoE login) — SmartOLT limits how often that can be asked.
+  let synced = true;
+  let syncError = null;
+  if (!c.last_details_at || Date.now() - new Date(c.last_details_at) > 10 * 60000) {
+    try { await m.syncTenant(req.tenant.id, 'full'); } catch (e) { synced = false; syncError = e.message; }
+  }
+  const result = await m.matchOnus(req.tenant.id, { loose: true });
+  res.json({ ...result, synced, syncError });
+}));
+
 app.get('/api/smartolt/unconfigured', requirePermission('smartolt.manage'), wrap(async (req, res) => {
   const m = await smartolt();
   try { res.json(await m.unconfiguredOnus(req.tenant.id)); } catch (e) { soFail(res, e); }

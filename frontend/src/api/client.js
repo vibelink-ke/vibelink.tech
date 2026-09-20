@@ -302,6 +302,7 @@ export const api = {
   smartoltLinkOnu: (ext, subscriberId) => post(`/api/smartolt/onus/${encodeURIComponent(ext)}/link`, { subscriberId }),
   smartoltLinkSerial: (subscriberId, sn) => post('/api/smartolt/link-by-serial', { subscriberId, sn }),
   smartoltUnconfigured: () => get('/api/smartolt/unconfigured'),
+  smartoltMatch: () => post('/api/smartolt/match', {}),
   smartoltLookup: (what) => get(`/api/smartolt/lookup/${what}`),
   smartoltAuthorize: (b) => post('/api/smartolt/authorize', b),
   smartoltMap: () => get('/api/smartolt/map'),
