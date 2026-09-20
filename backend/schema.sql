@@ -2312,3 +2312,13 @@ alter table hr_profiles add column if not exists badge_expires_at date;
 -- tenant_sms_config.templates, a per-key JSON override merged over
 -- email.js's own DEFAULTS.
 alter table tenant_email_config add column if not exists templates jsonb not null default '{}'::jsonb;
+
+-- Dormant clients: blocked (expired, suspended or paused) for four months, then
+-- deleted automatically once past five months. blocked_since is when the
+-- current unbroken blocked stretch began; dormant_at is when it was marked
+-- dormant (the deletion warning starts there). Both clear the day the client is
+-- active again. See jobs.js's dormantSweep.
+alter table subscribers add column if not exists blocked_since timestamptz;
+alter table subscribers add column if not exists dormant_at timestamptz;
+create index if not exists subscribers_blocked_since_idx
+  on subscribers (tenant_id, blocked_since) where blocked_since is not null;

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
 import { send } from './sms.js';
 import { fmtNairobi } from './nairobi-time.js';
-import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles } from './radius.js';
+import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles, forgetSubscriberCredentials } from './radius.js';
 import { enforceFup } from './fup.js';
 import * as daraja from './payments/daraja.js';
 import * as bank from './payments/bankstk.js';
@@ -74,6 +74,7 @@ export function startJobs() {
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
+  cron.schedule('0 4 * * *', safely('dormantSweep', dormantSweep));
   cron.schedule('*/1 * * * *', safely('pollWireguardStatus', pollWireguardStatus));
   // The sales-demo tenant ("demo" subdomain) is the real app on real data —
   // nothing about it is a mock — so whatever a prospect clicks, edits or
@@ -624,6 +625,103 @@ async function remind() {
   for (const s of rows) {
     await send(s.tenant_id, s.phone, 'reminder',
       { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code });
+  }
+}
+
+/**
+ * Dormant clients.
+ *
+ * A client blocked for four months — expired, suspended or paused — is marked
+ * dormant. Once past five months blocked, and at least 30 days after being
+ * marked, they are deleted. The 30 days is a real warning: on the first run
+ * anyone already past five months is marked dormant that night and only
+ * deleted a month later, so an owner has time to renew whoever is still wanted.
+ *
+ * Renewing (any change out of expired/suspended/paused) resets everything the
+ * next time this runs.
+ *
+ * Never deleted, however long they have been blocked:
+ *  - an account with money on it (wallet credit) — that is the customer's;
+ *  - a line with an open or partly-paid invoice — that is a debt on record.
+ * Both stay dormant until settled. Payments and invoices survive a delete
+ * either way (their subscriber link is set to null, not removed).
+ *
+ * A tenant can switch it off under Automation, like any other job.
+ */
+async function dormantSweep() {
+  // Back in service: the clock stops and the warning is withdrawn.
+  await pool.query(
+    `update subscribers set blocked_since = null, dormant_at = null
+      where status not in ('expired','suspended','paused')
+        and (blocked_since is not null or dormant_at is not null)
+        and tenant_id in (${enabledTenants})`,
+    ['dormantSweep']);
+
+  // Start the clock for anyone newly blocked. Paused and expired both know when
+  // it began; a suspension leaves no timestamp, so it counts from today.
+  await pool.query(
+    `update subscribers
+        set blocked_since = case
+              when status = 'paused' and paused_at is not null then paused_at
+              when status = 'expired' and expires_at is not null then least(expires_at, now())
+              else now() end
+      where status in ('expired','suspended','paused') and blocked_since is null
+        and tenant_id in (${enabledTenants})`,
+    ['dormantSweep']);
+
+  // Four months blocked: dormant. The owner is told once per run, not per client.
+  const { rows: marked } = await pool.query(
+    `update subscribers set dormant_at = now()
+      where status in ('expired','suspended','paused') and dormant_at is null
+        and blocked_since <= now() - interval '4 months'
+        and tenant_id in (${enabledTenants})
+      returning tenant_id`,
+    ['dormantSweep']);
+  const newlyDormant = new Map();
+  for (const r of marked) newlyDormant.set(r.tenant_id, (newlyDormant.get(r.tenant_id) ?? 0) + 1);
+  for (const [tenantId, n] of newlyDormant) {
+    await notifyOwner(tenantId,
+      `${n} client${n === 1 ? ' is' : 's are'} now dormant (blocked 4+ months). They are deleted automatically `
+      + 'once blocked 5 months and 30 days after this notice. Renew a client to keep them.',
+      { url: '/clients', title: 'Dormant clients' });
+  }
+
+  // Five months blocked and the warning has run its course: delete.
+  const { rows: doomed } = await pool.query(
+    `select s.id, s.tenant_id, s.pppoe_user, s.account_code, s.line_label, s.name
+       from subscribers s
+      where s.status in ('expired','suspended','paused')
+        and s.blocked_since <= now() - interval '5 months'
+        and s.dormant_at <= now() - interval '30 days'
+        and s.tenant_id in (${enabledTenants})
+        and coalesce((select w.balance from account_wallets w
+                       where w.tenant_id = s.tenant_id and w.account_code = s.account_code), 0) <= 0
+        and not exists (select 1 from invoices i
+                         where i.subscriber_id = s.id and i.status in ('open','partial'))`,
+    ['dormantSweep']);
+
+  const deleted = new Map();
+  for (const s of doomed) {
+    try {
+      const { rowCount } = await pool.query('delete from subscribers where tenant_id=$1 and id=$2', [s.tenant_id, s.id]);
+      if (!rowCount) continue;
+      // Same clean-up as deleting by hand: a removed customer whose RADIUS
+      // credentials still authenticate is a customer still getting service.
+      if (s.pppoe_user) await forgetSubscriberCredentials(pool, s.pppoe_user, s.tenant_id);
+      await pool.query(
+        `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
+         values ($1, null, $2, 'system', 'Service deleted', $3)`,
+        [s.tenant_id, s.account_code,
+          `Dormant: blocked over 5 months${s.line_label ? ` — line "${s.line_label}"` : ''}`]);
+      deleted.set(s.tenant_id, (deleted.get(s.tenant_id) ?? 0) + 1);
+    } catch (e) {
+      console.warn('dormantSweep: could not delete', s.id, '—', e.message);
+    }
+  }
+  for (const [tenantId, n] of deleted) {
+    await notifyOwner(tenantId,
+      `${n} dormant client${n === 1 ? '' : 's'} deleted (blocked over 5 months).`,
+      { url: '/clients', title: 'Dormant clients' });
   }
 }
 

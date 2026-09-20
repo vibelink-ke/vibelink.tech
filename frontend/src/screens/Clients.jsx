@@ -61,6 +61,8 @@ const FILTERS = [
   // otherwise a paused client appears nowhere but All.
   { key: 'paused', label: 'Paused', match: (c) => c.status === 'paused' },
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
+  // Blocked for 4+ months; deleted automatically past 5. See jobs.js's dormantSweep.
+  { key: 'dormant', label: 'Dormant', match: (c) => !!c.dormant_at },
 ];
 
 const STATUS_DOT = {
@@ -90,6 +92,7 @@ const STATE_PILL = {
   expired: { bg: '#fbe9df', fg: '#c05a2e', label: 'Expired' },
   paused: { bg: color.amberBg, fg: color.amberInk, label: 'Paused' },
   suspended: { bg: color.rustBg, fg: color.rust, label: 'Suspended' },
+  dormant: { bg: color.tileBg, fg: color.neutralInk, label: 'Dormant' },
 };
 
 const isBlocked = (c) => c.status === 'suspended' || c.status === 'paused';
@@ -118,6 +121,15 @@ function ConnDot({ kind }) {
   return (
     <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: radius.pill, flexShrink: 0, background: DOT_FILL[kind] }} />
   );
+}
+
+/** Days until a dormant client is deleted: five months blocked and 30 days after the notice, whichever is later. */
+function deleteInDays(c) {
+  if (!c.dormant_at) return null;
+  const fiveMonths = new Date(c.blocked_since ?? c.dormant_at);
+  fiveMonths.setMonth(fiveMonths.getMonth() + 5);
+  const afterNotice = new Date(c.dormant_at).getTime() + 30 * 86400000;
+  return Math.max(0, Math.ceil((Math.max(fiveMonths.getTime(), afterNotice) - Date.now()) / 86400000));
 }
 
 /** Whole days until the account runs out; negative once it has. Blank where it means nothing. */
@@ -616,23 +628,28 @@ export default function Clients() {
                       {multi ? (() => {
                         // A multi-service account: how many lines are in each state.
                         const byState = {};
-                        for (const l of lines) byState[l.status] = (byState[l.status] ?? 0) + 1;
+                        for (const l of lines) {
+                          const st = l.dormant_at ? 'dormant' : l.status;
+                          byState[st] = (byState[st] ?? 0) + 1;
+                        }
                         return (
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             {Object.entries(byState).map(([s, n]) => <StatePill key={s} status={s} count={n} />)}
                           </div>
                         );
                       })() : (() => {
-                        const days = daysLeft(c);
+                        const dormant = !!c.dormant_at;
+                        const days = dormant ? deleteInDays(c) : daysLeft(c);
                         return (
                           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                            <StatePill status={c.status} />
+                            <StatePill status={dormant ? 'dormant' : c.status} />
                             {days != null && (
                               <span
-                                title="days remaining"
+                                title={dormant ? 'days until it is deleted automatically' : 'days remaining'}
                                 style={{
                                   fontFamily: font.mono, fontSize: 12.5, fontWeight: 600,
-                                  color: days < 0 ? color.rust : days <= 3 ? color.amberInk : color.muted,
+                                  color: dormant ? (days <= 7 ? color.rust : color.muted)
+                                    : days < 0 ? color.rust : days <= 3 ? color.amberInk : color.muted,
                                 }}
                               >
                                 {days}
