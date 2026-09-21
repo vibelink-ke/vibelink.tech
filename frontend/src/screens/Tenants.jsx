@@ -31,6 +31,10 @@ export default function Tenants() {
   const [editing, setEditing] = useState(null);
   // Remove (hide + suspend, keeps everything) and, from the Removed list, Delete permanently.
   // { ...tenant, mode: 'remove' | 'purge', confirmText, force, check }
+  // One PPPoE rate for every tenant at once.
+  const [bulkRate, setBulkRate] = useState('');
+  const [bulkNew, setBulkNew] = useState(true);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const openRemoval = (t, mode) => {
     setDeleting({ ...t, mode, confirmText: '', force: false, check: null });
@@ -232,6 +236,33 @@ export default function Tenants() {
   const allTenants = store.tenants ?? [];
   const tenants = allTenants.filter((t) => !t.deleted_at);
   const removedTenants = allTenants.filter((t) => t.deleted_at);
+
+  // What tenants are charged per active PPPoE client today, so the effect of a change is plain.
+  const rateGroups = Object.entries(tenants.reduce((m, t) => {
+    const r = Number(t.pppoe_client_rate ?? 16);
+    m[r] = (m[r] ?? 0) + 1;
+    return m;
+  }, {})).sort((a, b) => b[1] - a[1]);
+  const applyBulkRate = async () => {
+    const rate = Number(bulkRate);
+    if (bulkRate === '' || !Number.isFinite(rate) || rate < 0) return store.toast('Enter the rate in KES, zero or more');
+    const changing = tenants.filter((t) => Number(t.pppoe_client_rate ?? 16) !== rate).length;
+    if (!window.confirm(
+      `Set the PPPoE rate to KES ${rate} per active client for all ${tenants.length} tenants?\n\n`
+      + `${changing} tenant${changing === 1 ? '' : 's'} will change; the rest already have it. Statements already drawn keep their old rate.`
+      + (bulkNew ? '\nNew tenants will start on this rate too.' : ''))) return;
+    setBulkBusy(true);
+    try {
+      await api.setAllPppoeRates(rate, bulkNew);
+      store.setCollection('tenants', (ts) => ts.map((t) => (t.deleted_at ? t : { ...t, pppoe_client_rate: rate })));
+      store.toast(`PPPoE rate is now KES ${rate} for every tenant`);
+      setBulkRate('');
+    } catch (e) {
+      store.toast(e.message);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const onboard = async () => {
@@ -616,6 +647,26 @@ export default function Tenants() {
           />
         </Card>
       )}
+
+      <Card
+        title="PPPoE rate for all tenants"
+        subtitle="What every tenant is charged per active PPPoE client each month. Sets it for everyone at once; a single tenant can still be changed under Edit."
+      >
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="Rate (KES per active client)" hint={rateGroups.length ? `Now: ${rateGroups.map(([r, n]) => `KES ${r} (${n} tenant${n === 1 ? '' : 's'})`).join(', ')}` : undefined}>
+            <Input type="number" min="0" value={bulkRate} onChange={(e) => setBulkRate(e.target.value)} placeholder="e.g. 16" style={{ width: 170 }} />
+          </Field>
+          <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 13, paddingBottom: 10, cursor: 'pointer' }}>
+            <input type="checkbox" checked={bulkNew} onChange={(e) => setBulkNew(e.target.checked)} />
+            Also use it for tenants created from now on
+          </label>
+          <div style={{ paddingBottom: 6 }}>
+            <Button variant="primary" onClick={applyBulkRate} disabled={bulkBusy || bulkRate === ''}>
+              {bulkBusy ? 'Applying…' : `Apply to all ${tenants.length} tenants`}
+            </Button>
+          </div>
+        </div>
+      </Card>
 
       {removedTenants.length > 0 && (
         <Card

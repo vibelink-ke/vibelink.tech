@@ -117,7 +117,7 @@ export default function Licence() {
             </span>
             <span style={{ fontSize: 13.5, color: color.inkSoft }}>
               {expired
-                ? 'The dashboard is locked until it is renewed. Customers and hotspot visitors are not affected. Please ask the account owner to renew it.'
+                ? 'The dashboard is locked until it is renewed. Please ask the account owner to renew it.'
                 : 'Nothing to do here.'}
             </span>
           </div>
@@ -147,7 +147,7 @@ export default function Licence() {
           </span>
           {expired ? null : data.trial ? (
             <span style={{ fontSize: 13.5, color: color.muted }}>
-              Nothing is charged during the trial. When it ends the dashboard is locked until your account is activated — your customers are never affected.
+              Nothing is charged during the trial. When it ends the dashboard is locked until your account is activated.
             </span>
           ) : (
             <span style={{ fontSize: 13.5, color: color.muted }}>

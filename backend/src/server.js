@@ -11010,6 +11010,23 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
   res.json(c);
 }));
 
+/**
+ * One PPPoE rate (KES per active client per month) for every tenant at once. Statements already drawn for
+ * closed months keep the rate they were drawn with; this changes what is charged from now on. Tenants on a flat
+ * monthly fee are unaffected in what they pay (their statement ignores the rate) but their stored rate is updated
+ * too. "alsoNew" makes it the starting rate for tenants created later.
+ */
+app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
+  const rate = Number(req.body?.pppoeClientRate);
+  if (!(rate >= 0 && rate <= 100000)) return res.status(400).json({ error: 'The rate must be zero or more.' });
+  const { rowCount } = await pool.query('update tenants set pppoe_client_rate=$1 where deleted_at is null', [rate]);
+  if (req.body?.alsoNew) {
+    // a validated number, formatted here — DDL cannot take a parameter
+    await pool.query(`alter table tenants alter column pppoe_client_rate set default ${rate.toFixed(2)}`);
+  }
+  res.json({ ok: true, updated: rowCount, pppoeClientRate: rate, alsoNew: !!req.body?.alsoNew });
+}));
+
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
