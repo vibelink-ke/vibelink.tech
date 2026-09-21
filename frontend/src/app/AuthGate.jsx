@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { passkeySupported, passkeyOnThisDevice, signInWithPasskey } from '../lib/passkey';
 import { color, font } from '../theme/tokens';
 import { api } from '../api/client';
 import PasswordHelper from '../ui/PasswordHelper';
@@ -99,6 +100,8 @@ const cta = {
 // still in flight, or on the platform's own marketing domain, which belongs
 // to no tenant at all.
 export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = null }) {
+  // Offered only on a device where fingerprint sign-in has been turned on (My account -> Fingerprint sign-in).
+  const fingerprintOffered = passkeySupported() && passkeyOnThisDevice();
   // `only` pins the card to one purpose: sign-in on a tenant's own subdomain,
   // registration on the platform domain. Offering both on a tenant portal
   // invites an operator to register a second time and split their customers
@@ -153,6 +156,23 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
         return;
       }
 
+      onSignedIn(session, `Signed in as ${session.company}`);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const fingerprintLogin = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const session = await signInWithPasskey();
+      if (session.redirectTo) {
+        window.location.assign(session.redirectTo);
+        return;
+      }
       onSignedIn(session, `Signed in as ${session.company}`);
     } catch (e) {
       setError(e.message);
@@ -411,6 +431,16 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
               <button type="button" onClick={login} disabled={busy} style={{ ...cta, opacity: busy ? 0.7 : 1 }}>
                 {busy ? 'Signing in…' : 'Sign in'}
               </button>
+              {fingerprintOffered && (
+                <button
+                  type="button"
+                  onClick={fingerprintLogin}
+                  disabled={busy}
+                  style={{ ...cta, background: 'transparent', color: color.green, border: `1px solid ${color.green}`, opacity: busy ? 0.7 : 1 }}
+                >
+                  Sign in with fingerprint
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, flex: 1 }}>

@@ -2796,3 +2796,20 @@ alter table hotspot_access_codes add column if not exists rate_up_kbps   int;
 -- bundle, keeps that; every other code follows this; with none set the router default applies.
 alter table hotspot_settings add column if not exists access_down_kbps int;
 alter table hotspot_settings add column if not exists access_up_kbps   int;
+
+-- Fingerprint / face / screen-lock sign-in (WebAuthn passkeys), one row per device a staff member turned it on for.
+-- Only the public half of the key is kept. rp_id is the host it was made on: it works only there.
+create table if not exists staff_passkeys (
+  id            uuid primary key default gen_random_uuid(),
+  staff_id      uuid not null references staff on delete cascade,
+  tenant_id     uuid not null references tenants on delete cascade,
+  credential_id text  not null unique,
+  public_key    bytea not null,
+  counter       bigint not null default 0,
+  transports    text[],
+  label         text,
+  rp_id         text  not null,
+  created_at    timestamptz not null default now(),
+  last_used_at  timestamptz
+);
+create index if not exists staff_passkeys_staff on staff_passkeys (staff_id);

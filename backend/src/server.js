@@ -7,6 +7,7 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
+import { passkeyRouter } from './passkeys.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
@@ -371,6 +372,9 @@ app.get('/api/auth/session', wrap(async (req, res) => {
   const s = await auth.readSession(auth.sessionToken(req));
   res.json(s ? await auth.publicSession(s) : null);
 }));
+
+// Sign in with a fingerprint: reachable before a session exists, like the password login below.
+app.use('/api/auth/passkey', passkeyRouter({ pool, auth, tenantByHost, limiter: loginLimiter }));
 
 app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   // `identifier` is the email-or-username field; `email` stays accepted so an

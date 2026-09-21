@@ -54,6 +54,12 @@ export const api = {
   // itself, before there's anyone signed in to know a tenant from.
   publicBrand: () => get('/api/public/brand'),
   login: (creds) => post('/api/auth/login', creds),
+  passkeys: () => get('/api/auth/passkey'),
+  passkeyRegisterOptions: () => post('/api/auth/passkey/register/options', {}),
+  passkeyRegisterVerify: (b) => post('/api/auth/passkey/register/verify', b),
+  passkeyLoginOptions: () => post('/api/auth/passkey/login/options', {}),
+  passkeyLoginVerify: (b) => post('/api/auth/passkey/login/verify', b),
+  deletePasskey: (id) => del(`/api/auth/passkey/${id}`),
   signup: (form) => post('/api/auth/signup', form),
   logout: () => post('/api/auth/logout', {}),
   forgotPassword: (identifier) => post('/api/auth/forgot', { identifier }),

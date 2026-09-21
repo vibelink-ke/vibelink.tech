@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { passkeySupported, enablePasskey, forgetPasskeyFlag } from '../lib/passkey';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -636,6 +637,8 @@ export default function Settings() {
             </div>
           </Card>
 
+          <PasskeyCard store={store} />
+
           <NotificationsCard store={store} />
         </div>
       )}
@@ -1054,5 +1057,72 @@ export default function Settings() {
         </Card>
       )}
     </Screen>
+  );
+}
+
+/**
+ * Fingerprint sign-in: turn it on for this phone or laptop, see the devices it is on, and remove one. The fingerprint
+ * itself never leaves the device; only a public key is kept here.
+ */
+function PasskeyCard({ store }) {
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const supported = passkeySupported();
+
+  const load = () => api.passkeys().then(setItems).catch(() => setItems([]));
+  useEffect(() => { load(); }, []);
+
+  const enable = async () => {
+    const label = window.prompt('Name this device so you can recognise it (for example "My phone"):', 'My phone');
+    if (label === null) return;
+    setBusy(true);
+    try {
+      await enablePasskey(label.trim() || 'This device');
+      store.toast('Fingerprint sign-in is on for this device');
+      await load();
+    } catch (e) {
+      store.toast(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (p) => {
+    if (!window.confirm(`Remove fingerprint sign-in for "${p.label}"? You can still sign in with your password.`)) return;
+    try {
+      await api.deletePasskey(p.id);
+      if ((items ?? []).length <= 1) forgetPasskeyFlag();
+      await load();
+    } catch (e) {
+      store.toast(e.message);
+    }
+  };
+
+  return (
+    <Card title="Fingerprint sign-in" subtitle="Sign in with your fingerprint (or face or screen lock) instead of typing your password">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {(items ?? []).map((p) => (
+          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, fontSize: 13 }}>
+            <span style={{ display: 'flex', flexDirection: 'column' }}>
+              <span style={{ fontWeight: 600 }}>{p.label}</span>
+              <span style={{ fontSize: 11.5, color: '#6b7269' }}>
+                Added {new Date(p.created_at).toLocaleDateString('en-KE')}
+                {p.last_used_at ? ` · last used ${new Date(p.last_used_at).toLocaleDateString('en-KE')}` : ''}
+              </span>
+            </span>
+            <Button size="sm" onClick={() => remove(p)}>Remove</Button>
+          </div>
+        ))}
+        {supported ? (
+          <Button variant="primary" onClick={enable} disabled={busy}>
+            {busy ? 'Waiting for your fingerprint…' : (items ?? []).length ? 'Turn on for this device too' : 'Turn on for this device'}
+          </Button>
+        ) : (
+          <span style={{ fontSize: 12.5, color: '#6b7269' }}>
+            This browser or connection does not support fingerprint sign-in. It needs a secure (https) page and a device with a fingerprint or screen lock.
+          </span>
+        )}
+      </div>
+    </Card>
   );
 }
