@@ -2736,3 +2736,25 @@ alter table smartolt_config add column if not exists sample_onu jsonb;
 -- signed out) but keeps every record. Only a second, deliberate step erases it.
 alter table tenants add column if not exists deleted_at timestamptz;
 alter table tenants add column if not exists deleted_by text;
+
+-- Audit log: who did what, when, and whether it worked. Written by one middleware for every change made through
+-- the API (never for reads), plus sign-ins and failed sign-ins. tenant_id has no foreign key on purpose: a
+-- platform-owner entry such as "Tenant deleted permanently" must outlive the tenant it is about.
+create table if not exists audit_log (
+  id          bigserial primary key,
+  at          timestamptz not null default now(),
+  tenant_id   uuid,
+  tenant_name text,
+  actor_id    uuid,
+  actor       text not null,
+  role        text,
+  platform    boolean not null default false,   -- a platform-owner action (tenants, platform payouts)
+  method      text,
+  path        text,
+  action      text not null,
+  status      int,
+  ip          text,
+  detail      jsonb
+);
+create index if not exists audit_log_tenant_at on audit_log (tenant_id, at desc);
+create index if not exists audit_log_at on audit_log (at desc);

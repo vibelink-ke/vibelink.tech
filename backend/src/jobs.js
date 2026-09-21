@@ -41,6 +41,7 @@ const safely = (name, fn) => async () => {
     // running every minute does not grow the table without limit.
     if (Math.random() < 0.02) {
       await pool.query("delete from job_runs where ran_at < now() - interval '7 days'");
+      await pool.query("delete from audit_log where at < now() - interval '400 days'");
     }
   } catch { /* bookkeeping only */ }
 };

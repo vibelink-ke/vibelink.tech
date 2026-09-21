@@ -6,6 +6,7 @@ import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant } from './db.js';
+import { auditTap, issuesFor } from './audit.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
@@ -88,6 +89,7 @@ app.use((req, res, next) => {
 // whichever json parser consumes the request stream first wins.
 app.use('/api/expenses/:id/receipt', express.json({ limit: '8mb' }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
+app.use('/api', auditTap);
 
 // Caddy is the only thing in front of this process; without this, IP-based
 // rate limiting keys on Caddy's own address instead of the real client, and
@@ -7166,6 +7168,40 @@ const NET_NODE_COLS = 'id, kind, name, lat::float8 as lat, lng::float8 as lng, d
 const netCoord = (v, max) => { const n = Number(v); return Number.isFinite(n) && Math.abs(n) <= max ? n : null; };
 const netPath = (p) => (Array.isArray(p) ? p.slice(0, 500) : [])
   .map((pt) => [netCoord(pt?.[0], 90), netCoord(pt?.[1], 180)]).filter(([a, b]) => a !== null && b !== null);
+
+/**
+ * The audit log. An ISP sees its own; the platform owner can also ask for every tenant's (scope=all) or just the
+ * platform-level actions (scope=platform). Filters: days (default 14, up to 400), q (searches who/what/where), result
+ * (ok | failed), limit (up to 1000).
+ */
+app.get('/api/audit', requirePermission('audit.view'), wrap(async (req, res) => {
+  const owner = !!req.session?.is_super_admin;
+  const scope = String(req.query.scope ?? 'mine');
+  const days = Math.max(1, Math.min(400, Number(req.query.days) || 14));
+  const limit = Math.max(1, Math.min(1000, Number(req.query.limit) || 300));
+  const where = ["at > now() - ($1 || ' days')::interval"];
+  const vals = [String(days)];
+  if (!(owner && scope === 'all')) {
+    if (owner && scope === 'platform') where.push('platform');
+    else { vals.push(req.tenant.id); where.push(`tenant_id=$${vals.length}`); }
+  }
+  if (req.query.result === 'ok') where.push('status < 400');
+  if (req.query.result === 'failed') where.push('status >= 400');
+  if (req.query.q) {
+    vals.push(`%${String(req.query.q).slice(0, 80)}%`);
+    where.push(`(actor ilike $${vals.length} or action ilike $${vals.length} or path ilike $${vals.length} or tenant_name ilike $${vals.length})`);
+  }
+  vals.push(limit);
+  const { rows } = await pool.query(
+    `select id, at, tenant_id, tenant_name, actor, role, platform, method, path, action, status, ip, detail
+       from audit_log where ${where.join(' and ')} order by at desc limit $${vals.length}`, vals);
+  res.json(rows);
+}));
+
+/** Everything that has gone wrong lately: unmatched payments, failed prompts and messages, routers, SmartOLT, sign-ins. */
+app.get('/api/issues', requirePermission('issues.view'), wrap(async (req, res) => {
+  res.json(await issuesFor(req.tenant.id, { superAdmin: !!req.session?.is_super_admin, days: req.query.days }));
+}));
 
 app.get('/api/network', requirePermission('network.view'), wrap(async (req, res) => {
   const { rows: nodes } = await pool.query(

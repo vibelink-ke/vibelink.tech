@@ -123,6 +123,11 @@ export const DEFAULT_PERMISSIONS = {
   // able to grant themselves (or anyone else) more access than they have.
   'staff.manage_permissions': all(),
 
+  // The audit log names people and what they changed, so it is owner-level; the issues list (what failed or
+  // did not match) is operational, so the people who fix those things see it too.
+  'audit.view':  all(),
+  'issues.view': { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
+
   'settings.view':   { owner: true, cashier: true,  technician: false, support: false, sales: false },
   'settings.edit':   all(),
 
@@ -240,6 +245,8 @@ export const PERMISSION_META = [
   { key: 'staff.edit',               page: 'Staff & roles', action: 'Edit' },
   { key: 'staff.delete',             page: 'Staff & roles', action: 'Delete' },
   { key: 'staff.manage_permissions', page: 'Staff & roles', action: 'Change the permission matrix' },
+  { key: 'audit.view',  page: 'Audit log', action: 'View who did what' },
+  { key: 'issues.view', page: 'Issues',    action: 'View failed and unmatched things' },
   { key: 'settings.view', page: 'Settings', action: 'View' },
   { key: 'settings.edit', page: 'Settings', action: 'Edit' },
   { key: 'inventory.view',   page: 'Inventory', action: 'View' },

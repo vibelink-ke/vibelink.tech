@@ -290,6 +290,8 @@ export const api = {
   // ── network ──
   routers: () => get('/api/routers'),
   network: () => get('/api/network'),
+  audit: (query) => get(`/api/audit?${query}`),
+  issues: (days) => get(`/api/issues?days=${days ?? 14}`),
   smartoltStatus: () => get('/api/smartolt/status'),
   saveSmartoltConfig: (b) => put('/api/smartolt/config', b),
   deleteSmartoltConfig: () => del('/api/smartolt/config'),
