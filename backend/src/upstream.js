@@ -19,10 +19,47 @@ const IPV4 = /^(\d{1,3}\.){3}\d{1,3}$/;
  * behind CGNAT or with cloud disabled simply reports nothing, which is a
  * legitimate outcome, not an error.
  */
-async function publicAddress(conn) {
-  const [row] = await conn.write('/ip/cloud/print', []);
+async function cloudAddress(conn) {
+  const [row] = await conn.write('/ip/cloud/print', []).catch(() => []);
   const ip = row?.['public-address'];
   return ip && IPV4.test(ip) ? ip : null;
+}
+
+/** Private, loopback, link-local and carrier-grade-NAT (100.64/10) ranges: not an address the internet sees. */
+function isPublic(ip) {
+  const [a, b] = String(ip).split('.').map(Number);
+  if ([10, 127, 0].includes(a)) return false;
+  if (a === 192 && b === 168) return false;
+  if (a === 172 && b >= 16 && b <= 31) return false;
+  if (a === 169 && b === 254) return false;
+  if (a === 100 && b >= 64 && b <= 127) return false;
+  return a < 224;
+}
+
+/** A public address sitting directly on one of the router's own interfaces (the WAN, when it is not behind NAT). */
+async function wanAddress(conn) {
+  const rows = await conn.write('/ip/address/print', []).catch(() => []);
+  for (const r of rows) {
+    if (String(r.disabled) === 'true') continue;
+    const ip = String(r.address ?? '').split('/')[0];
+    if (IPV4.test(ip) && isPublic(ip)) return ip;
+  }
+  return null;
+}
+
+/**
+ * Ask the internet what address this router's traffic comes from: the router itself fetches a page that echoes
+ * it. Works behind CGNAT and with IP Cloud off, and gives the address of whoever carries the traffic, which is the
+ * upstream we want. Needs the router to have working DNS and internet, which a router being detected has.
+ */
+async function echoedAddress(conn) {
+  const res = await conn.write('/tool/fetch', ['=url=http://api.ipify.org', '=mode=http', '=output=user', '=keep-result=no']).catch(() => []);
+  const data = String((Array.isArray(res) ? res[res.length - 1] : res)?.data ?? '').trim();
+  return IPV4.test(data) && isPublic(data) ? data : null;
+}
+
+async function publicAddress(conn) {
+  return (await echoedAddress(conn)) ?? (await cloudAddress(conn)) ?? (await wanAddress(conn));
 }
 
 /**
@@ -56,12 +93,24 @@ function normalize(raw) {
  * enough for a periodic per-router sweep, never called per-request.
  */
 async function lookupIsp(ip) {
-  const { data } = await axios.get(`http://ip-api.com/json/${ip}`, {
-    params: { fields: 'status,isp,org,as' },
-    timeout: 5000,
-  });
-  if (data?.status !== 'success') return null;
-  return normalize(data.isp) ?? normalize(data.org) ?? normalize(data.as);
+  try {
+    const { data } = await axios.get(`http://ip-api.com/json/${ip}`, {
+      params: { fields: 'status,isp,org,as' },
+      timeout: 5000,
+    });
+    if (data?.status === 'success') {
+      const found = normalize(data.isp) ?? normalize(data.org) ?? normalize(data.as);
+      if (found) return found;
+    }
+  } catch { /* fall through to the second service */ }
+  // A second, independent service, for when the first is rate-limited or unreachable.
+  try {
+    const { data } = await axios.get(`https://ipwho.is/${ip}`, { timeout: 5000 });
+    if (data?.success !== false) {
+      return normalize(data?.connection?.isp) ?? normalize(data?.connection?.org) ?? normalize(data?.connection?.asn);
+    }
+  } catch { /* nothing more to try */ }
+  return null;
 }
 
 /**

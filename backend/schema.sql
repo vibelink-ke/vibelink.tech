@@ -2783,3 +2783,6 @@ alter table voucher_devices add column if not exists bytes_down   bigint not nul
 alter table voucher_devices add column if not exists counter_up   bigint;
 alter table voucher_devices add column if not exists counter_down bigint;
 alter table voucher_devices add column if not exists counted_at   timestamptz;
+
+-- When detection last tried this router, so one that cannot be detected is retried gently rather than every sweep.
+alter table routers add column if not exists upstream_tried_at timestamptz;

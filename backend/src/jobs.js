@@ -100,7 +100,7 @@ export function startJobs() {
   // Every 6 hours, not continuously: this calls out to a third-party IP-to-ISP
   // service per router, so it is deliberately paced rather than run on the
   // same tight loop as the ping watchdog.
-  cron.schedule('20 */6 * * *', safely('detectUpstreamProviders', detectUpstreamProviders));
+  cron.schedule('*/10 * * * *', safely('detectUpstreamProviders', detectUpstreamProviders));
   // Every 5 minutes, not on every RADIUS auth — this is a correction for
   // something that happens rarely (a customer physically relocating), not
   // a hot path, and a live session already tells us the moment it starts.
@@ -170,8 +170,12 @@ export async function detectUpstreamProviders() {
     `select id, tenant_id, host, api_port, service_user, service_password_enc
        from routers
       where upstream_source = 'auto'
+        and status = 'up'
         and service_user is not null
         and service_password_enc is not null
+        -- a router with no answer yet is tried again every half hour; one that has an answer is re-checked every 6 hours
+        and ((upstream_provider is null and coalesce(upstream_tried_at, 'epoch') < now() - interval '30 minutes')
+          or (upstream_provider is not null and coalesce(upstream_checked_at, 'epoch') < now() - interval '6 hours'))
         and tenant_id in (${enabledTenants})`, ['detectUpstreamProviders']);
 
   const secrets = await import('./secrets.js');
@@ -179,6 +183,7 @@ export async function detectUpstreamProviders() {
 
   for (const r of rows) {
     const password = secrets.decrypt(r.service_password_enc);
+    await pool.query('update routers set upstream_tried_at = now() where id = $1', [r.id]);
     const result = await detectRouterUpstream(r, password);
     if (!result) continue;
     await pool.query(
