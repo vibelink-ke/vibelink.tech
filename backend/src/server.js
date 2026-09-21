@@ -512,8 +512,50 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
     redirectTo = `https://${sub}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
   }
 
+  sendSignupWelcome({ tenant, staff, sub, user, email: String(email).trim(), phone });
+
   res.json({ ...(await auth.publicSession(s)), redirectTo });
 }));
+
+/**
+ * The welcome a new tenant gets the moment they sign up, by email and by SMS, so they have their portal address and
+ * how to sign in somewhere other than a browser tab. Never carries the password. The SMS goes out through the
+ * platform's own gateway (a brand-new tenant has no gateway and no credit of their own), and the email through the
+ * platform's mail settings for the same reason. Fire-and-forget: a failure here must never fail the signup.
+ */
+function sendSignupWelcome({ tenant, staff, sub, user, email, phone }) {
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const portal = `https://${sub}.${root}`;
+  const first = String(staff.name ?? '').trim().split(/\s+/)[0] || 'there';
+  const signIn = user || email;
+  const trialEnds = tenant.licence_ends ? new Date(tenant.licence_ends).toISOString().slice(0, 10) : null;
+  const trialLine = trialEnds ? `Your free trial runs until ${trialEnds}.` : 'Your trial has started.';
+
+  import('./email.js').then((mail) => mail.sendSystem(
+    tenant.id, email, 'Welcome to Vibelink — your portal is ready',
+    [
+      `Hi ${first},`,
+      '',
+      `Welcome to Vibelink. ${tenant.name} is set up and ready to use.`,
+      '',
+      `Your portal: ${portal}`,
+      `Sign in with: ${signIn}`,
+      'and the password you chose when you signed up. We never send passwords by email or SMS.',
+      '',
+      trialLine,
+      '',
+      'To get started, add your first router under Routers, then create your internet packages under Internet tariffs.',
+      '',
+      'The Vibelink team',
+    ].join('\n'))).catch((e) => console.error('signup welcome email', tenant.id, e.message));
+
+  if (phone) {
+    import('./sms.js').then((sms) => sms.sendViaPlatformGateway(
+      String(phone).replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254'),
+      `Welcome to Vibelink, ${first}! Your portal: ${portal} Sign in with ${signIn} and your password. ${trialLine}`,
+      'signup')).catch((e) => console.error('signup welcome sms', tenant.id, e.message));
+  }
+}
 
 /**
  * Adopt a session minted on another hostname.
