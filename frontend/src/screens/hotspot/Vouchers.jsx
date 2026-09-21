@@ -61,7 +61,7 @@ export default function Vouchers() {
 
   const expiredCount = vouchers.filter((v) => v.status === 'expired').length;
 
-  const [gen, setGen] = useState(null); // { planId, count, batch } when the modal is open
+  const [gen, setGen] = useState(null); // { planId, count, batch, sendTo } when the modal is open
   const [busy, setBusy] = useState(false);
 
   const exportCsv = async (format = 'csv') => {
@@ -84,6 +84,20 @@ export default function Vouchers() {
     const sent = results.filter((r) => r.status === 'fulfilled').length;
     const skipped = picked.length - withPhone.length;
     store.toast(`Resent ${sent} code(s)${skipped ? `, ${skipped} had no phone number` : ''}`);
+  };
+
+  /** Text the selected codes to a number typed in — for somebody who is not the buyer. */
+  const sendToNumber = async () => {
+    const picked = visible.filter((v) => selected.has(v.id));
+    if (!picked.length) return store.toast('Select at least one voucher first');
+    const phone = window.prompt(`Send ${picked.length} code(s) by SMS to which phone number?`, '');
+    if (!phone) return;
+    try {
+      const out = await api.sendVoucherSms(picked.map((v) => v.id), phone.trim());
+      store.toast(out.sent ? `Sent ${out.codes} code(s) in ${out.sent} message(s)` : 'The SMS could not be sent');
+    } catch (e) {
+      store.toast(`Could not send: ${e.message}`);
+    }
   };
 
   /** Give the selected codes extra time — after an outage, say. Only codes whose clock has started can be extended. */
@@ -119,7 +133,16 @@ export default function Vouchers() {
         batch: gen.batch || null,
       });
       store.setCollection('vouchers', (vs) => [...made, ...vs]);
-      store.toast(`Generated ${made.length} code(s)`);
+      let smsNote = '';
+      if (gen.sendTo?.trim()) {
+        try {
+          const out = await api.sendVoucherSms(made.map((v) => v.id), gen.sendTo.trim());
+          smsNote = out.sent ? ` and sent to ${gen.sendTo.trim()}` : ', but the SMS could not be sent';
+        } catch (e) {
+          smsNote = `, but the SMS failed: ${e.message}`;
+        }
+      }
+      store.toast(`Generated ${made.length} code(s)${smsNote}`);
       setGen(null);
     } catch (e) {
       store.toast(`Could not generate: ${e.message}`);
@@ -133,7 +156,7 @@ export default function Vouchers() {
       actions={
         <>
           <ExportMenu onExport={exportCsv} />
-          <Button variant="primary" onClick={() => setGen({ planId: '', count: 1, batch: '' })}>
+          <Button variant="primary" onClick={() => setGen({ planId: '', count: 1, batch: '', sendTo: '' })}>
             + Generate batch
           </Button>
         </>
@@ -187,6 +210,7 @@ export default function Vouchers() {
         >
           <span style={{ fontSize: 13, color: '#4a524c' }}>{selected.size} selected</span>
           <Button size="sm" onClick={resendSms}>Resend SMS</Button>
+          <Button size="sm" onClick={sendToNumber}>Send to a number…</Button>
           <Button size="sm" onClick={compensate}>Compensate</Button>
           <Button
             size="sm"
@@ -338,6 +362,14 @@ export default function Vouchers() {
             </Field>
             <Field label="Batch label" hint="Optional — helps you find them later">
               <Input value={gen.batch} onChange={(e) => setGen((g) => ({ ...g, batch: e.target.value }))} placeholder="Duka la Mama Njeri" />
+            </Field>
+            <Field label="Send the codes by SMS to" hint="Optional — a phone number to text the new codes to right away, e.g. 0712 345 678">
+              <Input
+                type="tel"
+                value={gen.sendTo ?? ''}
+                onChange={(e) => setGen((g) => ({ ...g, sendTo: e.target.value }))}
+                placeholder="07XX XXX XXX"
+              />
             </Field>
           </div>
         )}

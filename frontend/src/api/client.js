@@ -120,6 +120,7 @@ export const api = {
   // ── vouchers ──
   vouchers: () => get('/api/vouchers'),
   createVouchers: (v) => post('/api/vouchers', v),
+  sendVoucherSms: (ids, phone) => post('/api/vouchers/send-sms', { ids, phone }),
   deleteVouchers: (ids) => post('/api/vouchers/delete', { ids }),
   compensateVouchers: (ids, hours) => post('/api/vouchers/compensate', { ids, hours }),
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),

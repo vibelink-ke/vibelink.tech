@@ -9743,6 +9743,50 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
 }));
 
 /**
+ * Text vouchers to a number typed in: the codes just generated for somebody who is not here, or a few picked from
+ * the list. A single code is sent with a tap-to-connect link; several go out a few to a message, so a long list is
+ * not one huge text. Spends the tenant's SMS balance like any other message. Answers how many messages went out.
+ */
+app.post('/api/vouchers/send-sms', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x) => typeof x === 'string').slice(0, 200) : [];
+  const phone = String(req.body?.phone ?? '').trim();
+  const digits = phone.replace(/[^0-9]/g, '');
+  if (!ids.length) return res.status(400).json({ error: 'Pick at least one code.' });
+  if (digits.length < 9 || digits.length > 13) return res.status(400).json({ error: 'Enter a valid phone number.' });
+
+  const { rows } = await pool.query(
+    `select v.code, p.title as plan from vouchers v left join plans p on p.id = v.plan_id
+      where v.tenant_id = $1 and v.id = any($2::uuid[]) order by v.created_at, v.code`,
+    [req.tenant.id, ids]);
+  if (!rows.length) return res.status(404).json({ error: 'Those codes were not found.' });
+
+  const sms = await import('./sms.js');
+  const org = await sms.orgVars(req.tenant.id);
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const link = req.tenant.subdomain ? `https://${req.tenant.subdomain}.${root}/hotspot/login.html?code=` : null;
+  const company = org.company || req.tenant.name || 'WiFi';
+
+  const messages = [];
+  if (rows.length === 1) {
+    const [v] = rows;
+    messages.push(`${company} WiFi: your code is ${v.code}${v.plan ? ` (${v.plan})` : ''}.${link ? ` Tap to connect: ${link}${v.code}` : ' Type it on the login page to connect.'}`);
+  } else {
+    const plans = [...new Set(rows.map((r) => r.plan).filter(Boolean))];
+    for (let i = 0; i < rows.length; i += 4) {
+      const chunk = rows.slice(i, i + 4).map((r) => r.code).join(', ');
+      messages.push(`${company} WiFi codes${plans.length === 1 ? ` (${plans[0]})` : ''}: ${chunk}. Type one on the login page to connect.`);
+    }
+  }
+
+  let sent = 0;
+  for (const body of messages) {
+    const r = await sms.send(req.tenant.id, phone, 'custom', { ...org, body }).catch(() => null);
+    if (r?.ok === true) sent++;
+  }
+  res.json({ ok: sent > 0, messages: messages.length, sent, codes: rows.length });
+}));
+
+/**
  * Kick every device bound to one of these vouchers via the picker (a TV/
  * console let in through the ip-binding bypass, never through RADIUS at
  * all) before the voucher rows disappear — same reasoning as
