@@ -1272,7 +1272,7 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
  * question rather than a rare edge case.
  *
  * payments.provider_ref already holds the exact M-Pesa TransID for a
- * Daraja payment (applyPayment's own idempotency key) — no separate lookup
+ * payment (applyPayment's own idempotency key, whichever gateway took it) — no separate lookup
  * table needed, this just reads it back. loginLimiter, not pollLimiter:
  * unlike the status polls above this effectively answers "is this code
  * valid" for a guessed input, the same shape of risk a login attempt is.
@@ -1288,7 +1288,7 @@ app.get('/hotspot/voucher-by-mpesa', wrap(async (req, res) => {
   const { rows: [v] } = await pool.query(
     `select vc.code from payments p
        join vouchers vc on vc.id = p.voucher_id
-      where p.tenant_id=$1 and p.provider='daraja' and p.status='applied'
+      where p.tenant_id=$1 and p.status='applied'
         and upper(p.provider_ref) = upper($2)
       limit 1`,
     [tenant.id, mpesaCode]);
