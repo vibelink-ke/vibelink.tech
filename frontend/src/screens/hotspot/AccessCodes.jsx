@@ -11,6 +11,9 @@ import { Button, Card, Field, Input, Screen, Select, Table } from '../../ui/prim
  * hotspot_settings.multi_device and this screen's max_devices are unrelated
  * — that toggle only ever governs voucher-issued logins.
  */
+const CUSTOM = '__custom';
+const mbps = (kbps) => (Math.round(Number(kbps) / 100) / 10).toString();
+
 export default function AccessCodes() {
   const store = useStore();
   const codes = store.accessCodes ?? [];
@@ -21,7 +24,7 @@ export default function AccessCodes() {
   // after the modal opens could overwrite a username/password already typed
   // by hand in that window. Typing your own is just as valid as pressing
   // Generate below — this only avoids the two racing.
-  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '' });
+  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '', downMbps: '', upMbps: '' });
 
   const genCredentials = async () => {
     try {
@@ -34,6 +37,9 @@ export default function AccessCodes() {
 
   const submitCreate = async () => {
     if (!creating.label.trim()) return store.toast('Give this code a label — "Lounge WiFi", "Staff WiFi"');
+    if (creating.planId === CUSTOM && !(Number(creating.downMbps) > 0 && Number(creating.upMbps) > 0)) {
+      return store.toast('Enter both a download and an upload speed in Mbps');
+    }
     setBusy(true);
     try {
       const made = await api.createAccessCode({
@@ -41,7 +47,8 @@ export default function AccessCodes() {
         username: creating.username,
         password: creating.password,
         maxDevices: Number(creating.maxDevices),
-        planId: creating.planId || null,
+        planId: creating.planId && creating.planId !== CUSTOM ? creating.planId : null,
+        ...(creating.planId === CUSTOM ? { speedDownMbps: creating.downMbps, speedUpMbps: creating.upMbps } : {}),
       });
       store.setCollection('accessCodes', (cs) => [made, ...cs]);
       store.toast(`${made.label} created`);
@@ -86,7 +93,9 @@ export default function AccessCodes() {
             {
               key: 'plan',
               label: 'Speed',
-              render: (c) => c.plan_title
+              render: (c) => c.rate_down_kbps && c.rate_up_kbps
+                ? <span>{mbps(c.rate_down_kbps)}/{mbps(c.rate_up_kbps)} Mbps<span style={{ color: color.muted }}> · custom</span></span>
+                : c.plan_title
                 ? <span>{c.plan_title}{c.rate_down ? <span style={{ color: color.muted }}> · {Math.round(c.rate_down / 1000)}/{Math.round(c.rate_up / 1000)} Mbps</span> : null}</span>
                 : <span style={{ color: color.muted }}>Default</span>,
             },
@@ -132,16 +141,35 @@ export default function AccessCodes() {
                 onChange={(e) => setCreating((s) => ({ ...s, maxDevices: e.target.value }))}
               />
             </Field>
-            <Field label="Speed" hint="Optional — leave unset for the router's own default">
+            <Field label="Speed" hint="Pick a bundle's speed, or set your own">
               <Select
                 value={creating.planId}
                 onChange={(e) => setCreating((s) => ({ ...s, planId: e.target.value }))}
                 options={[
                   { value: '', label: 'Default' },
+                  { value: CUSTOM, label: 'Custom speed…' },
                   ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · ${p.rate_down}k/${p.rate_up}k` })),
                 ]}
               />
             </Field>
+            {creating.planId === CUSTOM && (
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Field label="Download (Mbps)" hint="e.g. 5, or 0.5">
+                  <Input
+                    type="number" min="0.1" step="0.1"
+                    value={creating.downMbps}
+                    onChange={(e) => setCreating((s) => ({ ...s, downMbps: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Upload (Mbps)" hint="e.g. 2">
+                  <Input
+                    type="number" min="0.1" step="0.1"
+                    value={creating.upMbps}
+                    onChange={(e) => setCreating((s) => ({ ...s, upMbps: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            )}
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <Button onClick={() => setCreating(null)} disabled={busy}>Cancel</Button>
               <Button variant="primary" onClick={submitCreate} disabled={busy}>

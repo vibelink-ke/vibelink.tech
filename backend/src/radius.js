@@ -140,7 +140,7 @@ function hotspotAccessProfile(maxDevices) {
  */
 export async function ensureAccessCodeRadius(c, tenantId, id) {
   const { rows: [row] } = await c.query(
-    `select ac.username, ac.password, ac.max_devices, p.rate_up, p.rate_down
+    `select ac.username, ac.password, ac.max_devices, p.rate_up, p.rate_down, ac.rate_up_kbps, ac.rate_down_kbps
        from hotspot_access_codes ac
        left join plans p on p.id = ac.plan_id
       where ac.tenant_id=$1 and ac.id=$2`,
@@ -157,7 +157,9 @@ export async function ensureAccessCodeRadius(c, tenantId, id) {
        ($1,$2,'Mikrotik-Group',':=',$4)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [tenantId, row.username,
-     row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k` : '2048k/1024k',
+     // a speed typed in for this code wins over a bundle's, and over the default
+     row.rate_up_kbps && row.rate_down_kbps ? `${row.rate_up_kbps}k/${row.rate_down_kbps}k`
+       : row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k` : '2048k/1024k',
      hotspotAccessProfile(row.max_devices)]);
 }
 

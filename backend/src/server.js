@@ -9902,8 +9902,19 @@ app.get('/api/hotspot/access-codes', requirePermission('hotspot.view'), wrap(asy
 }));
 
 app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
-  const { label, username, password, maxDevices, planId } = req.body;
+  const { label, username, password, maxDevices, planId, speedDownMbps, speedUpMbps } = req.body;
   if (!String(label ?? '').trim()) return res.status(400).json({ error: 'Give this code a label' });
+  // A speed typed in, in Mbps (decimals allowed: 0.5 = 512 kbps). Both or neither.
+  const hasSpeed = (speedDownMbps ?? '') !== '' || (speedUpMbps ?? '') !== '';
+  let downKbps = null;
+  let upKbps = null;
+  if (hasSpeed) {
+    downKbps = Math.round(Number(speedDownMbps) * 1000);
+    upKbps = Math.round(Number(speedUpMbps) * 1000);
+    if (!(downKbps >= 64 && downKbps <= 1000000 && upKbps >= 64 && upKbps <= 1000000)) {
+      return res.status(400).json({ error: 'Give both a download and an upload speed, between 0.1 and 1000 Mbps.' });
+    }
+  }
   if (!/^[A-Za-z0-9]{4,12}$/.test(String(username ?? ''))) {
     return res.status(400).json({ error: 'Username must be 4-12 letters/digits' });
   }
@@ -9917,9 +9928,9 @@ app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wra
   let row;
   try {
     ({ rows: [row] } = await pool.query(
-      `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id)
-       values ($1,$2,$3,$4,$5,$6) returning *`,
-      [req.tenant.id, label.trim(), username, password, devices, planId || null]));
+      `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id, rate_down_kbps, rate_up_kbps)
+       values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+      [req.tenant.id, label.trim(), username, password, devices, hasSpeed ? null : (planId || null), downKbps, upKbps]));
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That username is already in use — pick another.' });
     throw e;

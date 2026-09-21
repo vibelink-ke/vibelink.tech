@@ -2786,3 +2786,8 @@ alter table voucher_devices add column if not exists counted_at   timestamptz;
 
 -- When detection last tried this router, so one that cannot be detected is retried gently rather than every sweep.
 alter table routers add column if not exists upstream_tried_at timestamptz;
+
+-- An access code can carry a speed of its own (typed in, in kbps) instead of borrowing a bundle's. When set it wins
+-- over plan_id; when both are empty the code gets the router's default.
+alter table hotspot_access_codes add column if not exists rate_down_kbps int;
+alter table hotspot_access_codes add column if not exists rate_up_kbps   int;
