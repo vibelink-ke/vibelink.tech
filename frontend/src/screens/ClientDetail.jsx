@@ -1196,7 +1196,7 @@ export default function ClientDetail() {
                 options={[{ value: '', label: 'Next free address' }, ...serviceFreeIps.addresses.map((ip) => ({ value: ip, label: ip }))]}
               />
             </Field>
-            <Field label="PPPoE username" hint="What they dial in with — 4-12 letters/digits">
+            <Field label="PPPoE username" hint="What they dial in with — 2-12 letters/digits">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={serviceForm.pppoeUser}
@@ -1206,7 +1206,7 @@ export default function ClientDetail() {
                 <Button onClick={genServiceCredentials}>Generate</Button>
               </div>
             </Field>
-            <Field label="PPPoE password" hint="4-12 letters/digits">
+            <Field label="PPPoE password" hint="2-12 letters/digits">
               <Input
                 value={serviceForm.pppoePass}
                 onChange={(e) => setServiceForm((s) => ({ ...s, pppoePass: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}

@@ -108,7 +108,7 @@ export default function AddClient() {
 
   // For a hand-typed PPPoE username: letters allowed (a customer or an
   // existing router scheme may already use them), capped at 12 to match
-  // the 4-12 letters/digits the edit route already enforces (server.js) —
+  // the 2-12 letters/digits the edit route already enforces (server.js) —
   // creating something that edit would then reject is worse than capping
   // it here first.
   const setAlnum = (k, max) => (e) =>
@@ -353,7 +353,7 @@ export default function AddClient() {
         {!!linkedAccount && (
           <Card title="Service">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Field label="PPPoE username" hint="4-12 letters/digits. Defaults to the account number — one number to remember">
+              <Field label="PPPoE username" hint="2-12 letters/digits. Defaults to the account number — one number to remember">
                 <div style={{ display: 'flex', gap: 8 }}>
                   <Input
                     value={f.login || f.account}

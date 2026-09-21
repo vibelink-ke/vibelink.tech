@@ -8299,12 +8299,12 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
   // here too so creation cannot produce a pppoe_user that a later edit
   // would then reject as invalid.
   if (pppoeUser != null && String(pppoeUser).trim() !== ''
-      && !/^[A-Za-z0-9]{4,12}$/.test(String(pppoeUser))) {
-    return res.status(400).json({ error: 'PPPoE username must be 4-12 letters/digits' });
+      && !/^[A-Za-z0-9]{2,12}$/.test(String(pppoeUser))) {
+    return res.status(400).json({ error: 'PPPoE username must be 2-12 letters/digits' });
   }
   if (pppoePass != null && String(pppoePass).trim() !== ''
-      && !/^[A-Za-z0-9]{4,12}$/.test(String(pppoePass))) {
-    return res.status(400).json({ error: 'PPPoE password must be 4-12 letters/digits' });
+      && !/^[A-Za-z0-9]{2,12}$/.test(String(pppoePass))) {
+    return res.status(400).json({ error: 'PPPoE password must be 2-12 letters/digits' });
   }
 
   /**
@@ -8660,11 +8660,11 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   // here is typed by staff at a keyboard, matching credentials that may
   // already exist elsewhere (a router secret set up before this system, a
   // scheme a customer picked themselves), so letters are allowed too.
-  if (req.body.pppoe_user != null && !/^[A-Za-z0-9]{4,12}$/.test(String(req.body.pppoe_user))) {
-    return res.status(400).json({ error: 'PPPoE username must be 4-12 letters/digits' });
+  if (req.body.pppoe_user != null && !/^[A-Za-z0-9]{2,12}$/.test(String(req.body.pppoe_user))) {
+    return res.status(400).json({ error: 'PPPoE username must be 2-12 letters/digits' });
   }
-  if (req.body.pppoe_pass != null && !/^[A-Za-z0-9]{4,12}$/.test(String(req.body.pppoe_pass))) {
-    return res.status(400).json({ error: 'PPPoE password must be 4-12 letters/digits' });
+  if (req.body.pppoe_pass != null && !/^[A-Za-z0-9]{2,12}$/.test(String(req.body.pppoe_pass))) {
+    return res.status(400).json({ error: 'PPPoE password must be 2-12 letters/digits' });
   }
 
   // A username change leaves the old radcheck row behind, still valid. Anyone
