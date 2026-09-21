@@ -157,6 +157,16 @@ const loginLimiter = rateLimit({
   message: { error: 'Too many attempts. Try again in a few minutes.' },
 });
 /**
+ * Looking a voucher up from its M-Pesa transaction code. Keyed by IP like the login limiter, but that limiter's 20
+ * per 15 minutes is a whole hotspot's budget (every guest shares the router's one public address), and it locked
+ * guests out after a handful of tries. An M-Pesa code is 10 letters and digits, far too many to guess at any rate
+ * that could get past this, so the ceiling is generous and only there to blunt scraping.
+ */
+const mpesaLookupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Try again in a few minutes.' },
+});
+/**
  * Payment prompts. Keyed by IP alone this was 10 per 10 minutes for a whole hotspot: every guest reaches us from
  * the one public address of their router, so ten people trying to pay locked out everyone else at that site with
  * "Too many payment attempts". So the limit that protects a person is per phone number (nobody's phone should be
@@ -1277,7 +1287,7 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
  * unlike the status polls above this effectively answers "is this code
  * valid" for a guessed input, the same shape of risk a login attempt is.
  */
-app.get('/hotspot/voucher-by-mpesa', loginLimiter, wrap(async (req, res) => {
+app.get('/hotspot/voucher-by-mpesa', mpesaLookupLimiter, wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
@@ -2797,7 +2807,7 @@ app.get('/portal/status/:checkoutId', pollLimiter, async (req, res) => {
 });
 
 /** Customer typed an M-Pesa code after paying a no-API till. */
-app.post('/portal/verify-code', loginLimiter, async (req, res) => {
+app.post('/portal/verify-code', mpesaLookupLimiter, async (req, res) => {
   const { rows: [p] } = await pool.query(
     "select * from payments where tenant_id=$1 and provider_ref=$2", [req.tenant.id, req.body.code]);
   if (!p) return res.status(404).json({ status: 'not_found', grantedMinutes: 20 });
