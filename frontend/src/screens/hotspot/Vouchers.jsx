@@ -133,7 +133,7 @@ export default function Vouchers() {
       actions={
         <>
           <ExportMenu onExport={exportCsv} />
-          <Button variant="primary" onClick={() => setGen({ planId: '', count: 10, batch: '' })}>
+          <Button variant="primary" onClick={() => setGen({ planId: '', count: 1, batch: '' })}>
             + Generate batch
           </Button>
         </>
