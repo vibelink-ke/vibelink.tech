@@ -81,6 +81,7 @@ export const api = {
   smsPlaceholders: () => get('/api/sms/placeholders'),
   smsTemplates: () => get('/api/sms/templates'),
   saveSmsTemplates: (templates) => put('/api/sms/templates', { templates }),
+  changeAccountCode: (id, accountCode) => post(`/api/subscribers/${id}/account-code`, { accountCode }),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),
 
   // ── money ──

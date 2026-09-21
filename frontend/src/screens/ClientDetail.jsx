@@ -178,6 +178,22 @@ export default function ClientDetail() {
   // (which overwrites the number outright) — this adds or subtracts a
   // deliberate amount with a reason attached, for the cases that actually
   // need an audit trail: a refund, a correction, a deduction.
+  // Changing the account number (the paybill account / portal login) — moves the whole account.
+  const [acctChange, setAcctChange] = useState(null);   // { value } while the dialog is open
+  const [acctBusy, setAcctBusy] = useState(false);
+  const submitAccountChange = async () => {
+    setAcctBusy(true);
+    try {
+      const r = await api.changeAccountCode(client.id, acctChange.value.trim());
+      store.setCollection('clients', (cs) => cs.map((c) => (c.account_code === r.old ? { ...c, account_code: r.accountCode } : c)));
+      store.toast(`Account number is now ${r.accountCode}`);
+      setAcctChange(null);
+    } catch (e) {
+      store.toast(e.message);
+    } finally {
+      setAcctBusy(false);
+    }
+  };
   const [walletAdjust, setWalletAdjust] = useState(null);   // { amount: '', reason: '' } while the modal is open
   const [walletBusy, setWalletBusy] = useState(false);
   const [walletError, setWalletError] = useState('');
@@ -726,8 +742,13 @@ export default function ClientDetail() {
           <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
             <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Basic info</div>
             <div style={{ display: 'grid', gap: 12 }}>
-              <Field label="Portal login [ Account number ]" hint="Fixed once created — a customer's account number">
-                <Input value={client.account_code} disabled style={{ fontFamily: font.mono }} />
+              <Field label="Portal login [ Account number ]" hint="The number the customer types as the paybill account and to sign in to their portal">
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Input value={client.account_code} disabled style={{ fontFamily: font.mono }} />
+                  {store.session?.perms?.['clients.edit'] && (
+                    <Button onClick={() => setAcctChange({ value: client.account_code })}>Change</Button>
+                  )}
+                </div>
               </Field>
               <Field label="Date registered">
                 <Input
@@ -1277,6 +1298,42 @@ export default function ClientDetail() {
                 ))}
               </div>
             </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!acctChange}
+        title="Change account number"
+        onClose={() => !acctBusy && setAcctChange(null)}
+        footer={
+          <>
+            <Button onClick={() => setAcctChange(null)} disabled={acctBusy}>Cancel</Button>
+            <Button
+              variant="primary"
+              onClick={submitAccountChange}
+              disabled={acctBusy || !acctChange || acctChange.value.trim() === client.account_code || !/^[A-Za-z0-9]{3,16}$/.test(acctChange.value.trim())}
+            >
+              {acctBusy ? 'Saving…' : 'Change it'}
+            </Button>
+          </>
+        }
+      >
+        {acctChange && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <Field label="New account number" hint="3 to 16 letters or digits. Not used by any other client.">
+              <Input
+                value={acctChange.value}
+                onChange={(e) => setAcctChange({ value: e.target.value })}
+                style={{ fontFamily: font.mono }}
+                autoFocus
+              />
+            </Field>
+            <div style={{ fontSize: 12.5, color: color.amberInk, background: color.amberBg, borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
+              Every line and the shared wallet under <b>{client.account_code}</b> move to the new number. From now on the client must pay
+              with the <b>new</b> number — a payment made with the old one will show up unmatched — and sign in to the portal with it.
+              Tell them before you change it.
+            </div>
           </div>
         )}
       </Modal>

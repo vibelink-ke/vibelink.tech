@@ -8494,6 +8494,57 @@ app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wa
   res.json({ wallet_balance: after });
 }));
 
+/**
+ * Change a client's account number — the number they type as the paybill account, and their portal login.
+ *
+ * It is the account's key: every line under it, its pooled wallet and its activity history all carry it, so
+ * they are all moved together in one transaction. It must be new (no other account uses it, in any case) and
+ * plain letters and digits, like the ones the system generates. The old number stops matching payments: a
+ * payment made with it will arrive unmatched, so the client has to be told the new one.
+ */
+app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'), wrap(async (req, res) => {
+  const next = String(req.body?.accountCode ?? '').trim();
+  if (!/^[A-Za-z0-9]{3,16}$/.test(next)) {
+    return res.status(400).json({ error: 'The account number must be 3 to 16 letters or digits, with no spaces or symbols.' });
+  }
+  if (['SMSCREDIT', 'HOTSPOT'].includes(next.toUpperCase())) {
+    return res.status(400).json({ error: 'That is reserved for the system — choose another.' });
+  }
+  const { rows: [sub] } = await pool.query('select id, account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!sub) return res.status(404).json({ error: 'not found' });
+  const old = sub.account_code;
+  if (next === old) return res.status(400).json({ error: 'That is already their account number.' });
+
+  const c = await pool.connect();
+  try {
+    await c.query('begin');
+    const { rows: [clash] } = await c.query(
+      `select name from subscribers where tenant_id=$1 and lower(account_code)=lower($2) and lower(account_code) <> lower($3) limit 1`,
+      [req.tenant.id, next, old]);
+    if (clash) {
+      await c.query('rollback');
+      return res.status(409).json({ error: `${clash.name} already has the account number ${next}.` });
+    }
+    const { rows: [wallet] } = await c.query('select 1 from account_wallets where tenant_id=$1 and lower(account_code)=lower($2) and lower(account_code) <> lower($3)', [req.tenant.id, next, old]);
+    if (wallet) {
+      await c.query('rollback');
+      return res.status(409).json({ error: `${next} is still in use on another account's wallet.` });
+    }
+    const { rowCount } = await c.query('update subscribers set account_code=$3 where tenant_id=$1 and account_code=$2', [req.tenant.id, old, next]);
+    await c.query('update account_wallets set account_code=$3, updated_at=now() where tenant_id=$1 and account_code=$2', [req.tenant.id, old, next]);
+    await c.query('update activity_log set account_code=$3 where tenant_id=$1 and account_code=$2', [req.tenant.id, old, next]);
+    await c.query('commit');
+    await logActivity(req, sub.id, next, 'Account number changed', `${old} → ${next} (${rowCount} line${rowCount === 1 ? '' : 's'})`);
+    res.json({ ok: true, old, accountCode: next, lines: rowCount });
+  } catch (e) {
+    await c.query('rollback').catch(() => {});
+    if (e.code === '23505') return res.status(409).json({ error: 'That account number is already taken.' });
+    throw e;
+  } finally {
+    c.release();
+  }
+}));
+
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
