@@ -7,6 +7,7 @@ import useLicence from '../app/useLicence';
 import PasswordHelper from '../ui/PasswordHelper';
 import { passwordProblem } from '../lib/password';
 import Gateways from './settings/Gateways';
+import MpesaValidation from './settings/MpesaValidation';
 import Templates from './settings/Templates';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
 
@@ -577,6 +578,7 @@ export default function Settings() {
         tabs={[
           { id: 'general', label: 'General' },
           { id: 'gateways', label: 'Payment gateways' },
+          { id: 'validation', label: 'M-Pesa validation' },
           { id: 'sms', label: 'SMS gateways' },
           { id: 'whatsapp', label: 'WhatsApp' },
           { id: 'smtp', label: 'Email' },
@@ -587,6 +589,7 @@ export default function Settings() {
       />
 
       {tab === 'gateways' && <Gateways />}
+      {tab === 'validation' && <MpesaValidation />}
       {tab === 'templates' && <Templates />}
 
       {/* Your own login, not the business. Neither could be changed from inside

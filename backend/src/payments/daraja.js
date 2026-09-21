@@ -340,8 +340,55 @@ router.post('/b2c-timeout', express.json(), async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
 });
 
-// Validation: accept anything we can plausibly place; Safaricom needs a fast 200.
-router.post('/validate', verifyWebhook, (_req, res) => res.json({ ResultCode: 0, ResultDesc: 'Accepted' }));
+/**
+ * Validation: Safaricom asks before it takes the customer's money. Off by default (accept everything, as
+ * before). When the tenant has switched "M-Pesa validation" on, a payment whose account number belongs to no
+ * client is refused here, so the customer is told at once and keeps their money instead of paying into the
+ * void and waiting for an unmatched payment to be sorted out. Only ever refuses on a clear "no such account":
+ * anything we cannot check (unknown paybill, a database error) is accepted, since a wrongly refused payment
+ * is worse than an unmatched one. Safaricom needs a fast answer either way.
+ */
+const ACCEPTED = { ResultCode: 0, ResultDesc: 'Accepted' };
+const REFUSED = { ResultCode: 'C2B00012', ResultDesc: 'Rejected' };
+
+async function accountExists(b) {
+  const tenantId = await tenantByShortcode('daraja', String(b.BusinessShortCode ?? ''));
+  if (!tenantId) return { ok: true };
+  const { pool } = await import('../db.js');
+  const { rows: [t] } = await pool.query('select id, name, mpesa_validation from tenants where id=$1', [tenantId]);
+  if (!t?.mpesa_validation) return { ok: true };
+
+  const ref = String(b.BillRefNumber ?? '').trim();
+  if (RESERVED_BILL_REFS.has(ref.toUpperCase())) return { ok: true };
+  if (/^VL-\d+$/i.test(ref)) return { ok: true };            // a tenant paying the platform
+  const key = ref.toUpperCase().replace(/[\s-]/g, '');
+  if (!key) return { ok: false, tenant: t, ref };
+
+  const dash = ref.indexOf('-');
+  const { rows } = await pool.query(
+    `select 1 from subscribers s join tenants tt on tt.id = s.tenant_id
+      where upper(replace(s.account_code,'-','')) = $2
+        and (s.tenant_id = $1 or (tt.platform_collect_enabled and (
+              exists (select 1 from staff o where o.is_super_admin and o.tenant_id = $1)
+              or ($3::int > 0 and tt.subdomain = lower(left($4, $3::int))))))
+      limit 1`,
+    [tenantId, dash > 0 ? ref.slice(dash + 1).toUpperCase().replace(/[\s-]/g, '') : key, dash, ref]);
+  return { ok: rows.length > 0, tenant: t, ref };
+}
+
+router.post('/validate', verifyWebhook, async (req, res) => {
+  let verdict = { ok: true };
+  try { verdict = await accountExists(req.body ?? {}); } catch (e) { console.warn('validate:', e.message); }
+  res.json(verdict.ok ? ACCEPTED : REFUSED);
+  if (!verdict.ok) {
+    const { pool } = await import('../db.js');
+    pool.query(
+      `insert into audit_log (tenant_id, tenant_name, actor, role, method, path, action, status, detail)
+       values ($1,$2,'M-Pesa','system','POST','/webhooks/daraja/validate','M-Pesa payment refused: no such account number',422,$3::jsonb)`,
+      [verdict.tenant.id, verdict.tenant.name, JSON.stringify({ account: verdict.ref, amount: req.body?.TransAmount, phone: String(req.body?.MSISDN ?? '').slice(-4).padStart(9, '•') })]
+    ).catch(() => {});
+  }
+});
 
 /**
  * Account references our own STK pushes use that are never a real

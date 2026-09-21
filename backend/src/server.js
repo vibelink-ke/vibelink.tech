@@ -11922,6 +11922,19 @@ app.patch('/api/settings/settlement-frequency', requirePermission('payments.edit
 }));
 
 /** What time of day (Nairobi) this tenant's payout goes out — midnight unless they choose. */
+/** M-Pesa validation: refuse payments to an account number that belongs to no client (see payments/daraja.js). */
+app.get('/api/settings/mpesa-validation', requirePermission('payment_gateways.view'), wrap(async (req, res) => {
+  const { rows: [t] } = await pool.query('select mpesa_validation from tenants where id=$1', [req.tenant.id]);
+  const { rows: [r] } = await pool.query(
+    `select count(*)::int n from audit_log where tenant_id=$1 and path='/webhooks/daraja/validate' and at > now() - interval '30 days'`, [req.tenant.id]);
+  const { rows: gws } = await pool.query("select shortcode from tenant_payment_config where tenant_id=$1 and provider='daraja'", [req.tenant.id]);
+  res.json({ enabled: !!t?.mpesa_validation, refused30d: r.n, shortcodes: gws.map((g) => g.shortcode), validationUrl: `${process.env.BASE_URL ?? ''}/webhooks/daraja/validate` });
+}));
+app.put('/api/settings/mpesa-validation', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
+  await pool.query('update tenants set mpesa_validation=$2 where id=$1', [req.tenant.id, !!req.body?.enabled]);
+  res.json({ ok: true, enabled: !!req.body?.enabled });
+}));
+
 app.patch('/api/settings/settlement-time', requirePermission('payments.edit'), wrap(async (req, res) => {
   const time = String(req.body?.time ?? '');
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {

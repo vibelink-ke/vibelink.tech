@@ -43,6 +43,7 @@ const LABELS = [
   ['POST', /^\/api\/settlements\/payout$/, 'Payout requested'],
   ['POST', /^\/api\/settlements\/[^/]+\/cancel$/, 'Payout cancelled'],
   ['PATCH', /^\/api\/settings\/settlement-/, 'Payout settings changed'],
+  ['PUT', /^\/api\/settings\/mpesa-validation$/, 'M-Pesa validation switched'],
   ['POST', /^\/api\/routers$/, 'Router added'],
   ['PUT', /^\/api\/routers\/[^/]+$/, 'Router edited'],
   ['DELETE', /^\/api\/routers\/[^/]+$/, 'Router deleted'],
