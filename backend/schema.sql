@@ -2813,3 +2813,16 @@ create table if not exists staff_passkeys (
   last_used_at  timestamptz
 );
 create index if not exists staff_passkeys_staff on staff_passkeys (staff_id);
+
+-- Vouchers pointing at a hotspot profile the router does not have. An early migration above named every existing
+-- voucher's profile 'hs-default'; profiles are now per bundle length (hs-cookie-<minutes>), so the router refused
+-- those codes with "unknown user profile <hs-default>" after the password checked out. Point them at the profile
+-- their bundle's length uses (capped at a day, as the router push names it); a code whose bundle is gone gets the
+-- one-day profile. Safe to re-run: nothing is left naming hs-default once it has run.
+update radreply rr
+   set value = 'hs-cookie-' || least(greatest(p.duration_min, 1), 1440)
+  from vouchers v
+  join plans p on p.id = v.plan_id
+ where rr.tenant_id = v.tenant_id and rr.username = v.code
+   and rr.attribute = 'Mikrotik-Group' and rr.value = 'hs-default';
+update radreply set value = 'hs-cookie-1440' where attribute = 'Mikrotik-Group' and value = 'hs-default';

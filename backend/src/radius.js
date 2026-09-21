@@ -101,6 +101,15 @@ export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
     });
   }
 
+  // A safety net: anything still naming the old default profile is let in instead of refused.
+  await ros.ensureHotspotUserProfile(conn, {
+    name: 'hs-default',
+    sharedUsers: (hs?.multi_device ?? true) ? 3 : 1,
+    idleSeconds: hs?.idle_timeout_sec ?? 1200,
+    bindMac: hs?.bind_mac ?? true,
+    cookieMinutes: 1440,
+  });
+
   /**
    * Same idea, one hs-shared-<N> profile per distinct max_devices a
    * permanent access code (hotspot_access_codes — "Lounge WiFi" etc.) is
