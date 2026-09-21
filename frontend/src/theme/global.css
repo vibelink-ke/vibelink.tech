@@ -56,6 +56,16 @@ html.om-dark-root body {
   filter: invert(1) hue-rotate(180deg);
 }
 
+/*
+ * Every map keeps Leaflet's own stacking (its panes and zoom buttons sit at z-index 400-1000) inside itself.
+ * Left loose, a map drew over the sticky header and over any dialog opened above it.
+ */
+.leaflet-container {
+  position: relative;
+  z-index: 0;
+  isolation: isolate;
+}
+
 /* Inputs inherit the app font rather than the UA default. */
 input,
 select,

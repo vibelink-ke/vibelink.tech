@@ -1329,11 +1329,6 @@ export default function ClientDetail() {
                 autoFocus
               />
             </Field>
-            <div style={{ fontSize: 12.5, color: color.amberInk, background: color.amberBg, borderRadius: 8, padding: '10px 12px', lineHeight: 1.55 }}>
-              Every line and the shared wallet under <b>{client.account_code}</b> move to the new number. From now on the client must pay
-              with the <b>new</b> number — a payment made with the old one will show up unmatched — and sign in to the portal with it.
-              Tell them before you change it.
-            </div>
           </div>
         )}
       </Modal>
