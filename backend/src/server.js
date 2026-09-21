@@ -8,6 +8,8 @@ import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
+import { registerLoyalty } from './loyalty.js';
+import { fmtNairobi } from './nairobi-time.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
@@ -9788,6 +9790,9 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
   res.json(made);
 }));
 
+// Loyalty points for hotspot visitors (see loyalty.js).
+registerLoyalty(app, { pool, requirePermission, wrap });
+
 /**
  * Text vouchers to a number typed in: the codes just generated for somebody who is not here, or a few picked from
  * the list. A single code is sent with a tap-to-connect link; several go out a few to a message, so a long list is
@@ -10703,6 +10708,52 @@ app.post('/api/sms/send', requirePermission('messaging.send'), wrap(async (req, 
 app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (req, res) => {
   const { audience = 'all', routerId, planId, body } = req.body;
   if (!body?.trim()) return res.status(400).json({ error: 'body is required' });
+
+  /**
+   * Hotspot visitors who have an active voucher right now: their clock has started and has not run out. Reached by
+   * the phone that bought the code, once per person however many codes they hold, with their own code, expiry and
+   * loyalty points available as tags. The credit is checked first, so a send that cannot be paid for does not
+   * half-go out.
+   */
+  if (audience === 'hotspot') {
+    const sms = await import('./sms.js');
+    const { pointsFor, normPhone } = await import('./loyalty.js');
+    const { rows: vs } = await pool.query(
+      `select v.phone, v.code, v.expires_at, p.title as plan
+         from vouchers v left join plans p on p.id = v.plan_id
+        where v.tenant_id=$1 and v.phone is not null and v.status='in_use'
+          and (v.expires_at is null or v.expires_at > now())
+          and ($2::uuid is null or v.router_id = $2) and ($3::uuid is null or v.plan_id = $3)
+        order by v.expires_at desc nulls last`,
+      [req.tenant.id, routerId || null, planId || null]);
+    const seenP = new Set();
+    const people = vs.filter((v) => { const k = normPhone(v.phone); return k && !seenP.has(k) && seenP.add(k); });
+    if (!people.length) return res.json({ queued: 0 });
+
+    const parts = Math.max(1, Math.ceil(body.length / 160));
+    const needed = people.length * parts;
+    const bal = await sms.smsBalance(req.tenant.id).catch(() => null);
+    const { rows: [tt] } = await pool.query('select platform_sms_balance from tenants where id=$1', [req.tenant.id]);
+    if (bal && !bal.error) {
+      const available = (bal.configured ? Number(bal.credits) : 0) + Number(tt?.platform_sms_balance ?? 0);
+      if (available < needed) {
+        return res.status(402).json({ error: `Not enough SMS credit: this needs about ${needed} and you have ${available}. Nothing was sent.` });
+      }
+    }
+
+    const points = await pointsFor(pool, req.tenant.id, people.map((v) => v.phone));
+    res.json({ queued: people.length });
+    const org = await sms.orgVars(req.tenant.id);
+    for (const v of people) {
+      const vars = {
+        ...org, code: v.code, plan: v.plan ?? '', points: String(points.get(normPhone(v.phone)) ?? 0),
+        expires: v.expires_at ? fmtNairobi(v.expires_at, { dateStyle: 'medium', timeStyle: 'short' }) : '',
+      };
+      vars.body = sms.fill(body, vars);
+      await sms.send(req.tenant.id, v.phone, 'custom', vars).catch(() => {});
+    }
+    return undefined;
+  }
 
   const filters = {
     all: ['', []],

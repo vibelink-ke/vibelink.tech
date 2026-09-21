@@ -8,7 +8,8 @@ import { Button, Card, Field, Input, Screen, Select, Table, Tabs, Textarea } fro
 // "By location" is absent on purpose: subscribers has no location column in
 // schema.sql, so the server could not narrow the audience and would silently
 // message everyone. Add the column first, then the option.
-const AUDIENCES = ['All clients', 'By router', 'By package', 'Expiring soon', 'Expired'];
+const HOTSPOT_AUDIENCE = 'Hotspot visitors (active code)';
+const AUDIENCES = ['All clients', 'By router', 'By package', 'Expiring soon', 'Expired', HOTSPOT_AUDIENCE];
 /** Shown until the server's list arrives, so the row is never empty. */
 const FALLBACK_TAGS = ['{name}', '{account}', '{expires}', '{plan}', '{amount}', '{company}'];
 
@@ -100,10 +101,23 @@ export default function Messaging() {
         return clients.filter((c) => c.expires_at && new Date(c.expires_at) - Date.now() < 3 * 86400000).length;
       case 'Expired':
         return clients.filter((c) => c.status === 'expired').length;
+      case HOTSPOT_AUDIENCE: {
+        // Visitors whose code is active right now, one per phone number (what the server sends to).
+        const seen = new Set();
+        for (const v of store.vouchers ?? []) {
+          if (!v.phone || v.status !== 'in_use') continue;
+          if (v.expires_at && new Date(v.expires_at) <= Date.now()) continue;
+          if (sms.router && v.router_id !== sms.router) continue;
+          if (sms.pkg && v.plan_id !== sms.pkg) continue;
+          const k = String(v.phone).replace(/[^0-9]/g, '').slice(-9);
+          if (k.length === 9) seen.add(k);
+        }
+        return seen.size;
+      }
       default:
         return clients.length;
     }
-  }, [clients, sms.audience, sms.router, sms.pkg]);
+  }, [clients, store.vouchers, sms.audience, sms.router, sms.pkg]);
 
   const len = sms.body.length;
   const parts = Math.max(1, Math.ceil(len / 160));
@@ -164,6 +178,7 @@ export default function Messaging() {
           'By package': 'package',
           'Expiring soon': 'expiring',
           Expired: 'expired',
+          [HOTSPOT_AUDIENCE]: 'hotspot',
         }[sms.audience] ?? 'all';
         // Its own dialog rather than a toast: a bulk send takes seconds against
         // the gateway, and an operator who sees nothing happening presses the
@@ -223,9 +238,32 @@ export default function Messaging() {
           </Field>
         ) : (
           <>
-            <Field label="Audience" hint={`${recipients.toLocaleString()} recipient(s)`}>
+            <Field
+              label="Audience"
+              hint={sms.audience === HOTSPOT_AUDIENCE
+                ? `${recipients.toLocaleString()} recipient(s) — visitors with a code active right now, once each. Tags: {code} {plan} {expires} {points}`
+                : `${recipients.toLocaleString()} recipient(s)`}
+            >
               <Select value={sms.audience} onChange={set('audience')} options={AUDIENCES} />
             </Field>
+            {sms.audience === HOTSPOT_AUDIENCE && (
+              <>
+                <Field label="Router">
+                  <Select
+                    value={sms.router}
+                    onChange={set('router')}
+                    options={[{ value: '', label: 'All routers' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+                  />
+                </Field>
+                <Field label="Bundle">
+                  <Select
+                    value={sms.pkg}
+                    onChange={set('pkg')}
+                    options={[{ value: '', label: 'All bundles' }, ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: p.title }))]}
+                  />
+                </Field>
+              </>
+            )}
             {sms.audience === 'By router' && (
               <Field label="Router">
                 <Select

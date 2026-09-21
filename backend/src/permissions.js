@@ -114,6 +114,11 @@ export const DEFAULT_PERMISSIONS = {
   // authorizes paying them.
   'referrers.manage': { owner: true, cashier: true,  technician: false, support: false, sales: false },
 
+  // Hotspot loyalty points: seeing the balances is for anyone who serves customers; changing the rules, redeeming and
+  // adjusting points spends the business's money, so it is owner-level by default.
+  'loyalty.view':   { owner: true, cashier: true,  technician: false, support: true,  sales: false },
+  'loyalty.manage': all(),
+
   'staff.view':               all(),
   'staff.create':             all(),
   'staff.edit':               all(),
@@ -246,6 +251,8 @@ export const PERMISSION_META = [
   { key: 'staff.delete',             page: 'Staff & roles', action: 'Delete' },
   { key: 'staff.manage_permissions', page: 'Staff & roles', action: 'Change the permission matrix' },
   { key: 'audit.view',  page: 'Audit log', action: 'View who did what' },
+  { key: 'loyalty.view',   page: 'Loyalty', action: 'View points and rewards' },
+  { key: 'loyalty.manage', page: 'Loyalty', action: 'Change the rules, redeem and adjust points' },
   { key: 'issues.view', page: 'Issues',    action: 'View failed and unmatched things' },
   { key: 'settings.view', page: 'Settings', action: 'View' },
   { key: 'settings.edit', page: 'Settings', action: 'Edit' },

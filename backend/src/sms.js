@@ -123,7 +123,7 @@ const accepted = (provider, res) => {
 
 export const DEFAULTS = {
   receipt:  'Thank you. KES {amount} received, ref {code}. Active until {expires}.',
-  voucher:  'Your code is {code}. Valid until {expires}. Tap {link} to connect.',
+  voucher:  'Your code is {code}. Valid until {expires}. Tap {link} to connect.{points_line}',
   reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
   partial:  'Received KES {amount}. Balance KES {balance}. You have {days} day(s) of service.',
   outage:   'Outage at {site}. Engineers are on it, ETA {eta}. Sorry for the trouble.',
@@ -197,6 +197,8 @@ export const PLACEHOLDERS = [
   { token: 'portal',        desc: 'Link to their customer portal sign-in page' },
   { token: 'account_status', desc: 'A signed-in chat visitor\'s own status/days-left, or blank' },
   { token: 'help_link',      desc: 'Link to the public help center, or blank if nothing is published' },
+  { token: 'code',           desc: 'Hotspot visitors only: the code they are using now' },
+  { token: 'points',         desc: 'Hotspot visitors only: their loyalty points' },
 ];
 
 /** The joins a row needs before subscriberVars can fill every token. */

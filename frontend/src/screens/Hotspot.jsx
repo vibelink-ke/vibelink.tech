@@ -8,6 +8,8 @@ import AccessCodes from './hotspot/AccessCodes';
 import PortalDesign from './hotspot/PortalDesign';
 import HotspotRevenue from './hotspot/HotspotRevenue';
 import HotspotSettings from './hotspot/HotspotSettings';
+import Loyalty from './hotspot/Loyalty';
+import { useStore } from '../state/store';
 
 /**
  * Absolute paths, deliberately — not "plans", "vouchers" etc. relative to
@@ -26,10 +28,13 @@ const TABS = [
   { to: '/hotspot/access-codes', label: 'Access codes' },
   { to: '/hotspot/design', label: 'Portal design' },
   { to: '/hotspot/revenue', label: 'Revenue' },
+  { to: '/hotspot/loyalty', label: 'Loyalty', perm: 'loyalty.view' },
   { to: '/hotspot/settings', label: 'Settings' },
 ];
 
 export default function Hotspot() {
+  const store = useStore();
+  const tabs = TABS.filter((t) => !t.perm || store.session?.perms?.[t.perm]);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -51,7 +56,7 @@ export default function Hotspot() {
           flexWrap: 'wrap',
         }}
       >
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <NavLink key={t.label} to={t.to} end={t.end} style={{ textDecoration: 'none' }}>
             {({ isActive }) => (
               <span
@@ -80,6 +85,7 @@ export default function Hotspot() {
         <Route path="design" element={<PortalDesign />} />
         <Route path="revenue" element={<HotspotRevenue />} />
         <Route path="settings" element={<HotspotSettings />} />
+        <Route path="loyalty" element={<Loyalty />} />
         {/* Absolute for the same reason the tabs above are: this is what
             recovers a URL already stuck on a bad relative path like
             /hotspot/plans/plans, and a relative "" here is exactly as

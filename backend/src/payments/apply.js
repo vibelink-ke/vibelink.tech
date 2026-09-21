@@ -1,5 +1,6 @@
 import { withTenant, pool } from '../db.js';
 import { activateSubscriber, issueVoucherAccess } from '../radius.js';
+import { awardForPayment, pointsLine } from '../loyalty.js';
 import { send } from '../sms.js';
 import { fmtNairobi } from '../nairobi-time.js';
 
@@ -180,6 +181,8 @@ export async function applyPayment(tenantId, tx) {
 
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
     await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
+    // Loyalty points for this purchase (off unless the tenant turned them on; never affects the payment).
+    const loyalty = await awardForPayment(c, tenantId, { paymentId, phone: tx.phone, amount: tx.amount });
 
     // Which site this was bought at, for payment-monitoring-by-site — the
     // ordinary "buy a code, type it in" purchase carries this now too (via
@@ -249,7 +252,7 @@ export async function applyPayment(tenantId, tx) {
     const expires = v.expires_at
       ? fmtNairobi(v.expires_at, { dateStyle: 'medium', timeStyle: 'short' })
       : '';
-    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link });
+    await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link, points_line: pointsLine(loyalty) });
     return { paymentId, applied: true, voucher: v };
   });
 }

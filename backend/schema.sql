@@ -2826,3 +2826,39 @@ update radreply rr
  where rr.tenant_id = v.tenant_id and rr.username = v.code
    and rr.attribute = 'Mikrotik-Group' and rr.value = 'hs-default';
 update radreply set value = 'hs-cookie-1440' where attribute = 'Mikrotik-Group' and value = 'hs-default';
+
+-- Loyalty points for hotspot visitors, known by phone number (normalised to 254XXXXXXXXX). Off until a tenant turns it on.
+create table if not exists loyalty_settings (
+  tenant_id     uuid primary key references tenants on delete cascade,
+  enabled       boolean not null default false,
+  kes_per_point int not null default 10 check (kes_per_point >= 1)
+);
+create table if not exists loyalty_rewards (
+  id          uuid primary key default gen_random_uuid(),
+  tenant_id   uuid not null references tenants on delete cascade,
+  plan_id     uuid not null references plans on delete cascade,
+  points_cost int not null check (points_cost > 0),
+  created_at  timestamptz not null default now()
+);
+create table if not exists loyalty_accounts (
+  tenant_id       uuid not null references tenants on delete cascade,
+  phone           text not null,
+  points          int  not null default 0 check (points >= 0),
+  lifetime_points int  not null default 0,
+  last_earned_at  timestamptz,
+  primary key (tenant_id, phone)
+);
+-- Every change to a balance, so a balance can always be explained. payment_id is unique so a payment earns points once.
+create table if not exists loyalty_ledger (
+  id         bigserial primary key,
+  tenant_id  uuid not null references tenants on delete cascade,
+  phone      text not null,
+  delta      int  not null,
+  reason     text not null,          -- purchase | redeem | adjust
+  payment_id uuid unique references payments on delete set null,
+  voucher_id uuid,
+  note       text,
+  created_by uuid,
+  created_at timestamptz not null default now()
+);
+create index if not exists loyalty_ledger_phone on loyalty_ledger (tenant_id, phone, created_at desc);

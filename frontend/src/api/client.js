@@ -126,6 +126,13 @@ export const api = {
   // ── vouchers ──
   vouchers: () => get('/api/vouchers'),
   createVouchers: (v) => post('/api/vouchers', v),
+  loyalty: () => get('/api/loyalty'),
+  saveLoyaltySettings: (b) => put('/api/loyalty/settings', b),
+  addLoyaltyReward: (b) => post('/api/loyalty/rewards', b),
+  deleteLoyaltyReward: (id) => del(`/api/loyalty/rewards/${id}`),
+  loyaltyLedger: (phone) => get(`/api/loyalty/ledger?phone=${encodeURIComponent(phone)}`),
+  adjustLoyalty: (b) => post('/api/loyalty/adjust', b),
+  redeemLoyalty: (b) => post('/api/loyalty/redeem', b),
   sendVoucherSms: (ids, phone) => post('/api/vouchers/send-sms', { ids, phone }),
   deleteVouchers: (ids) => post('/api/vouchers/delete', { ids }),
   compensateVouchers: (ids, hours) => post('/api/vouchers/compensate', { ids, hours }),
