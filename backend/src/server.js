@@ -774,7 +774,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
       where tenant_id=$1 and service='hotspot' and active and visible
         and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
              or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
-      order by price limit 6`,
+      order by price limit 40`,
     [tenant.id, loginRouterId]);
 
   // Branding and behaviour the operator controls from Hotspot -> Settings.
@@ -1413,13 +1413,13 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
           where tenant_id=$1 and service='hotspot' and active and visible
             and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
                  or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
-          order by price limit 6`,
+          order by price limit 40`,
         [tenant.id, siteRouterId])
     : await pool.query(
         `select id, title, price, duration_min, rate_down from plans p
           where tenant_id=$1 and service='hotspot' and active and visible
             and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
-          order by price limit 6`,
+          order by price limit 40`,
         [tenant.id]);
 
   const { rows: routers } = siteRouterId
