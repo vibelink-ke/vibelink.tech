@@ -5097,8 +5097,9 @@ app.get('/api/routers/tunnels', wrap(async (req, res) => {
     rejected: mineRejected,
     // A router whose address is not connected, when some other address is. That
     // pairing is what makes it a mismatch rather than simply being offline.
+    // A router that is answering is not stale, whatever the OpenVPN list says: one on WireGuard is never in it.
     stale: routers
-      .filter((r) => !live.has(String(r.host).split('/')[0]))
+      .filter((r) => r.status !== 'up' && !live.has(String(r.host).split('/')[0]))
       .map((r) => ({ ...r, suggestion: tunnels.find((t) => !t.router)?.address ?? null })),
   });
 }));
