@@ -64,9 +64,6 @@ export default function LicenceLocked() {
             {due > 0 && canPay && <div style={{ marginTop: 12, fontWeight: 600 }}>Amount due: KES {kes(due)}</div>}
             {!canPay && <div style={{ marginTop: 12, fontSize: 13.5, color: '#444' }}>Please ask the account owner to renew it.</div>}
           </div>
-          <div style={{ marginTop: 18, fontSize: 12.5, color: '#555' }}>
-            Your customers and hotspot visitors are not affected.
-          </div>
         </div>
 
         <div style={{ background: '#e8e8e8', padding: '16px 12px', display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap' }}>
