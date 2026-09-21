@@ -160,7 +160,7 @@ const loginLimiter = rateLimit({
  * Payment prompts. Keyed by IP alone this was 10 per 10 minutes for a whole hotspot: every guest reaches us from
  * the one public address of their router, so ten people trying to pay locked out everyone else at that site with
  * "Too many payment attempts". So the limit that protects a person is per phone number (nobody's phone should be
- * flooded with M-Pesa prompts), and the per-IP one is only a generous ceiling for a whole site.
+ * flooded with M-Pesa prompts). There is deliberately no per-IP limit on top: it is the whole site's budget.
  */
 const phoneOf = (req) => String(req.body?.phone ?? '').replace(/D/g, '').slice(-9);
 const stkPhoneLimiter = rateLimit({
@@ -169,11 +169,7 @@ const stkPhoneLimiter = rateLimit({
   keyGenerator: (req) => `phone:${phoneOf(req)}`,
   message: { error: 'Too many payment attempts for this number. Try again in a few minutes.' },
 });
-const stkSiteLimiter = rateLimit({
-  windowMs: 10 * 60 * 1000, max: 300, standardHeaders: true, legacyHeaders: false,
-  message: { error: 'Too many payment attempts. Try again in a few minutes.' },
-});
-const stkLimiter = [stkPhoneLimiter, stkSiteLimiter];
+const stkLimiter = stkPhoneLimiter;
 // The guest's own page polls this every few seconds while waiting on M-Pesa,
 // so the ceiling is generous — this exists to stop someone using the poll
 // endpoint to brute-force checkoutId values, not to slow down a real wait.
