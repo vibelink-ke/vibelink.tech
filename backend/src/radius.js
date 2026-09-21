@@ -722,7 +722,12 @@ export async function walledGarden(c, tenantId, subId) {
   }
 }
 
-export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
+/**
+ * `startOnLogin` is for codes generated in bulk by staff to be handed out later: their clock must start when the
+ * visitor first signs in, whatever the tenant's Voucher expiry setting says. Started at creation, a code shared
+ * hours or days after it was made had already run down, showed as "Used" and was refused.
+ */
+export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { startOnLogin = false } = {}) {
   // Scoped defensively — every call site today already passes a planId that
   // was itself looked up under this tenant, so this has never been reachable
   // with a foreign plan, but a future caller only needs to trust the wrong
@@ -750,7 +755,7 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac) {
    * always starts on creation regardless of the tenant's own preference,
    * because binding it right now already is the moment it starts using it.
    */
-  const fromCreation = prefs.voucher_expiry === 'creation' || !!mac;
+  const fromCreation = !startOnLogin && (prefs.voucher_expiry === 'creation' || !!mac);
   const expires = fromCreation ? new Date(Date.now() + plan.duration_min * 60000) : null;
   const { rows: [v] } = await c.query(
     `insert into vouchers (tenant_id, code, plan_id, phone, mac, status, starts_at, expires_at)

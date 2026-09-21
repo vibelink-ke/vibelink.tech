@@ -9693,7 +9693,7 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
   const made = await withTenant(req.tenant.id, async (c) => {
     const out = [];
     for (let i = 0; i < Math.min(Number(count) || 1, 500); i++) {
-      const v = await issueVoucherAccess(c, req.tenant.id, planId, null, null);
+      const v = await issueVoucherAccess(c, req.tenant.id, planId, null, null, { startOnLogin: true });
       if (batch) await c.query('update vouchers set batch=$2 where id=$1', [v.id, batch]);
       out.push(v);
     }
