@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Footer from './Footer';
 import { passkeySupported, passkeyOnThisDevice, signInWithPasskey } from '../lib/passkey';
 import { color, font } from '../theme/tokens';
 import { api } from '../api/client';
@@ -601,6 +602,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
           Support: support@vibelink.co.ke
         </span>
       </div>
+      <Footer company={brandName} floating />
     </div>
   );
 }

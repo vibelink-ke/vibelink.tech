@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import Footer from '../app/Footer';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import Toast from '../app/Toast';
@@ -81,6 +82,7 @@ export default function LicenceLocked() {
           <Licence />
         </div>
       )}
+      <Footer company={store.session?.company} floating />
       <Toast />
     </div>
   );

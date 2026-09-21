@@ -1,4 +1,5 @@
 import React, { lazy, Suspense, useEffect } from 'react';
+import Footer from './app/Footer';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './app/Sidebar';
 import Topbar from './app/Topbar';
@@ -324,6 +325,7 @@ export default function App() {
           </Suspense>
           </ErrorBoundary>
         </div>
+        <Footer company={session.company} />
       </main>
       <Toast />
       <UpdateAvailableBanner />

@@ -442,6 +442,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
   .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
   .hint { margin:10px 0 0; font-size:14px; color:var(--muted); text-align:center; }
+  .foot { margin:22px 0 0; padding-top:12px; border-top:1px solid var(--line); display:flex; justify-content:space-between;
+          flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:14px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
   .err:empty { display:none; }
@@ -628,6 +630,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          better than a bigger font on a form the TV still could not fill in
          itself. tvMode/?tv=1 stays reachable directly for anyone who still
          wants it; nothing on this page links to it any more. -->
+    <div class="foot"><span>${new Date().getFullYear()} © ${esc(company)}</span><span>Designed and developed by Vibelink</span></div>
   </div>
 
   <div class="popup-overlay" id="popupOverlay" style="display:none">

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import Footer from '../app/Footer';
 import { font } from '../theme/tokens';
 
 /**
@@ -631,6 +632,7 @@ export default function CustomerPortal() {
             {chat?.note && <span style={{ fontSize: 12.5, color: pc.muted }}>{chat.note}</span>}
           </div>
         </div>
+        <Footer />
       </div>
     );
   }
@@ -1006,6 +1008,7 @@ export default function CustomerPortal() {
           )}
         </div>
       </div>
+      <Footer company={me.company} />
     </div>
   );
 }
