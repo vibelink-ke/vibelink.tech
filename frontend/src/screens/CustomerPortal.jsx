@@ -184,6 +184,8 @@ export default function CustomerPortal() {
    */
   const [chat, setChat] = useState(null);   // { id, token, messages, note }
   const [chatDraft, setChatDraft] = useState('');
+  // Who is asking, so support can follow up: filled in before a chat starts unless the account already has both.
+  const [chatForm, setChatForm] = useState(null);   // { name, phone, error } while the form is showing
 
   // Changing the portal password, once signed in — separate state from the
   // signed-out "forgot it" flow above, and separate columns server-side from
@@ -443,7 +445,8 @@ export default function CustomerPortal() {
    * this on the sign-in page too. `me` is null there, so name/phone fall
    * back to something support can still work with.
    */
-  const startChat = async () => {
+  const startChat = async (contact) => {
+    setChatForm(null);
     setChat({ id: null, token: null, messages: [], note: 'Connecting…' });
     try {
       const res = await fetch('/chat/start', {
@@ -453,7 +456,7 @@ export default function CustomerPortal() {
         // as "phone" meant every customer-portal chat's visitor_ref was
         // actually an account number, which is not something WhatsApp (or
         // anyone) can message. me.phone is the real thing on file.
-        body: JSON.stringify({ name: me?.name ?? 'Guest', phone: me?.phone ?? null }),
+        body: JSON.stringify({ name: contact?.name ?? me?.name ?? 'Guest', phone: contact?.phone ?? me?.phone ?? null }),
       });
       const d = await safeJson(res);
       if (!d.chatId) throw new Error(d.error ?? 'Support is not available');
@@ -462,6 +465,38 @@ export default function CustomerPortal() {
       setChat({ id: null, token: null, messages: [], note: e.message });
     }
   };
+
+  const openChat = () => {
+    if (me?.name && me?.phone) return startChat({ name: me.name, phone: me.phone });
+    setChatForm({ name: me?.name ?? '', phone: me?.phone ?? '', error: '' });
+  };
+  const submitChatForm = () => {
+    const name = chatForm.name.trim();
+    const digits = chatForm.phone.replace(/[^0-9]/g, '');
+    if (name.length < 2) return setChatForm((f) => ({ ...f, error: 'Please enter your name.' }));
+    if (digits.length < 9 || digits.length > 13) return setChatForm((f) => ({ ...f, error: 'Please enter a valid phone number.' }));
+    return startChat({ name, phone: chatForm.phone.trim() });
+  };
+  const chatFormView = chatForm && (
+    <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
+      <span style={{ fontSize: 13, color: pc.muted }}>Tell us who you are so support can follow up with you.</span>
+      <input
+        value={chatForm.name}
+        onChange={(e) => setChatForm((f) => ({ ...f, name: e.target.value, error: '' }))}
+        placeholder="Your name" autoComplete="name" maxLength={60}
+        style={{ padding: '10px 12px', fontSize: 15, borderRadius: 9, border: `1px solid ${pc.line}`, outline: 'none' }}
+      />
+      <input
+        value={chatForm.phone}
+        onChange={(e) => setChatForm((f) => ({ ...f, phone: e.target.value, error: '' }))}
+        onKeyDown={(e) => e.key === 'Enter' && submitChatForm()}
+        placeholder="Your phone number, e.g. 0712 345 678" inputMode="tel" autoComplete="tel" maxLength={20}
+        style={{ padding: '10px 12px', fontSize: 15, borderRadius: 9, border: `1px solid ${pc.line}`, outline: 'none' }}
+      />
+      {chatForm.error && <span style={{ fontSize: 12.5, color: '#b3261e' }}>{chatForm.error}</span>}
+      <button style={button(true)} onClick={submitChatForm}>Start chat</button>
+    </div>
+  );
 
   const sendChat = async () => {
     const body = chatDraft.trim();
@@ -561,9 +596,10 @@ export default function CustomerPortal() {
               all and needs a person rather than another self-service form. */}
           <div style={card}>
             <span style={{ fontSize: 14, fontWeight: 700 }}>Still stuck?</span>
-            {!chat && (
-              <button style={button(false)} onClick={startChat}>Chat with support to request your login</button>
+            {!chat && !chatForm && (
+              <button style={button(false)} onClick={openChat}>Chat with support to request your login</button>
             )}
+            {!chat && chatFormView}
             {chat && (
               <div style={{ display: 'grid', gap: 8, marginTop: 4 }}>
                 <div style={{ maxHeight: 180, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -927,9 +963,10 @@ export default function CustomerPortal() {
               </div>
             </div>
           )}
-          {!chat && (
-            <button style={button(false)} onClick={startChat}>Chat with support</button>
+          {!chat && !chatForm && (
+            <button style={button(false)} onClick={openChat}>Chat with support</button>
           )}
+          {!chat && chatFormView}
           {note && <span style={{ fontSize: 13, color: pc.teal }}>{note}</span>}
 
           {chat && (

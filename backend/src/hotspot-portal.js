@@ -607,9 +607,17 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}">Adding a TV or console?</a></p>
     <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
     <div class="chat" id="chat">
-      <div class="log" id="chatLog"></div>
-      <input id="chatText" type="text" placeholder="Type your message" autocomplete="off">
-      <button type="button" id="chatSend">Send</button>
+      <div id="chatForm">
+        <p class="hint" style="margin:0 0 10px">Tell us who you are so support can follow up with you.</p>
+        <input id="chatName" type="text" placeholder="Your name" autocomplete="name" maxlength="60">
+        <input id="chatPhone" type="tel" inputmode="tel" placeholder="Your phone number, e.g. 0712 345 678" autocomplete="tel" maxlength="20" style="margin-top:8px">
+        <button type="button" id="chatStart" style="margin-top:8px">Start chat</button>
+      </div>
+      <div id="chatBody" style="display:none">
+        <div class="log" id="chatLog"></div>
+        <input id="chatText" type="text" placeholder="Type your message" autocomplete="off">
+        <button type="button" id="chatSend">Send</button>
+      </div>
       <p class="hint" id="chatNote"></p>
     </div>
     ${help}
@@ -1012,17 +1020,28 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 
     document.getElementById('chatOpen').addEventListener('click', function () {
       chatPanel.classList.toggle('on');
-      if (!chatPanel.classList.contains('on') || chatId) return;
+    });
+
+    // The visitor says who they are first, so support has a name and a number to follow up on.
+    document.getElementById('chatStart').addEventListener('click', function () {
+      if (chatId) return;
+      var name = document.getElementById('chatName').value.trim();
+      var phone = document.getElementById('chatPhone').value.trim();
+      var digits = phone.replace(/[^0-9]/g, '');
+      if (name.length < 2) { chatNote.textContent = 'Please enter your name.'; return; }
+      if (digits.length < 9 || digits.length > 13) { chatNote.textContent = 'Please enter a valid phone number.'; return; }
       chatNote.textContent = 'Connecting…';
       fetch(API + '/chat/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'Hotspot guest' }),
+        body: JSON.stringify({ name: name, phone: phone }),
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {
           if (!d.chatId) { chatNote.textContent = d.error || 'Support is not available.'; return; }
           chatId = d.chatId; chatToken = d.token;
+          document.getElementById('chatForm').style.display = 'none';
+          document.getElementById('chatBody').style.display = 'block';
           chatNote.textContent = 'Someone will reply here.';
           chatPollTimer = setInterval(pollChat, 3000);
         })

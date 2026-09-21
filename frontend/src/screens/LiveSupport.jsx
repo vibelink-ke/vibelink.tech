@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { color, radius } from '../theme/tokens';
+import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Empty, Grid, Input, Screen, Stat } from '../ui/primitives';
@@ -34,6 +34,12 @@ function Bubble({ from, text, mine }) {
     </div>
   );
 }
+
+/** What the visitor typed as their name, or the number they gave when they did not. */
+const visitorName = (c) => {
+  if (c.display_name && !/^(guest|hotspot guest)$/i.test(c.display_name)) return c.display_name;
+  return c.visitor_ref && c.visitor_ref !== 'anonymous' ? c.visitor_ref : 'Visitor';
+};
 
 export default function LiveSupport() {
   const store = useStore();
@@ -221,7 +227,10 @@ export default function LiveSupport() {
                     gap: 3,
                   }}
                 >
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>{c.visitor_ref}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>{visitorName(c)}</span>
+                  {c.visitor_ref && c.visitor_ref !== 'anonymous' && (
+                    <span style={{ fontSize: 12, color: color.neutralInk, fontFamily: font.mono }}>{c.visitor_ref}</span>
+                  )}
                   <span style={{ fontSize: 11.5, color: color.muted }}>
                     {c.status === 'waiting' ? 'Waiting — click to accept' : 'Active'}
                   </span>
@@ -232,7 +241,7 @@ export default function LiveSupport() {
         </Card>
 
         <Card
-          title={current ? `Chat · ${current.visitor_ref}` : 'Chat'}
+          title={current ? `Chat · ${visitorName(current)}${current.visitor_ref && current.visitor_ref !== 'anonymous' ? ` · ${current.visitor_ref}` : ''}` : 'Chat'}
           actions={
             current && (
               <>
