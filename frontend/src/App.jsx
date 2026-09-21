@@ -126,6 +126,8 @@ export default function App() {
    * the hostname it depends on cannot change mid-session anyway.
    */
   const [tenantBrand, setTenantBrand] = React.useState(null);
+  // This address belongs to no ISP (never had one, or the account was deleted).
+  const [siteGone, setSiteGone] = React.useState(false);
   useEffect(() => {
     if (isPlatformHost()) return undefined;
     let cancelled = false;
@@ -147,7 +149,10 @@ export default function App() {
         link.removeAttribute('type');
         link.href = '/api/public/favicon';
       }
-    }).catch(() => {});
+    }).catch((e) => {
+      // Only a clear "no such tenant" answer counts — a network blip must not blank the site.
+      if (!cancelled && e?.status === 404 && e?.body?.error === 'unknown tenant') setSiteGone(true);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -155,6 +160,23 @@ export default function App() {
   // a different audience on the same hostname: no sidebar, no admin store, and a
   // cookie the admin routes do not accept. Checked first so a subscriber never
   // sees the staff sign-in card.
+  // A deleted (or never existing) ISP's address still reaches this app — the certificate and the
+  // wildcard DNS are still there — so say so, rather than showing a sign-in that can never work.
+  if (siteGone) {
+    const parent = window.location.hostname.split('.').slice(1).join('.');
+    return (
+      <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f5f6f3', padding: 24, fontFamily: "'Inter', system-ui, sans-serif", color: '#161a17' }}>
+        <div style={{ maxWidth: 440, textAlign: 'center' }}>
+          <h1 style={{ fontSize: 22, margin: '0 0 10px', fontWeight: 600 }}>This site is not available</h1>
+          <p style={{ color: '#5a635c', fontSize: 14.5, lineHeight: 1.55, margin: '0 0 18px' }}>
+            {window.location.hostname} is not an active account. If you think this is a mistake, please contact your internet provider.
+          </p>
+          {parent && parent.includes('.') && <a href={`https://${parent}`}>Go to {parent}</a>}
+        </div>
+      </div>
+    );
+  }
+
   if (pathname.startsWith('/customer')) return <CustomerPortal />;
 
   // A staff ID badge's QR code lands here — a stranger scanning it has no
