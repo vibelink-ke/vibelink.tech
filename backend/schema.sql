@@ -2791,3 +2791,8 @@ alter table routers add column if not exists upstream_tried_at timestamptz;
 -- over plan_id; when both are empty the code gets the router's default.
 alter table hotspot_access_codes add column if not exists rate_down_kbps int;
 alter table hotspot_access_codes add column if not exists rate_up_kbps   int;
+
+-- One speed for every access code of the tenant (Hotspot -> Access codes). A code with a speed of its own, or a
+-- bundle, keeps that; every other code follows this; with none set the router default applies.
+alter table hotspot_settings add column if not exists access_down_kbps int;
+alter table hotspot_settings add column if not exists access_up_kbps   int;

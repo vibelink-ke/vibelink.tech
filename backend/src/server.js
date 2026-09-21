@@ -9901,6 +9901,37 @@ app.get('/api/hotspot/access-codes', requirePermission('hotspot.view'), wrap(asy
   res.json(rows);
 }));
 
+/** The one speed every access code follows, if one is set. */
+app.get('/api/hotspot/access-codes-speed', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const { rows: [h] } = await pool.query('select access_down_kbps, access_up_kbps from hotspot_settings where tenant_id=$1', [req.tenant.id]);
+  const { rows: [n] } = await pool.query('select count(*)::int as n from hotspot_access_codes where tenant_id=$1', [req.tenant.id]);
+  res.json({ downKbps: h?.access_down_kbps ?? null, upKbps: h?.access_up_kbps ?? null, codes: n.n });
+}));
+
+/**
+ * One speed for all access codes. Saved as the tenant's speed for access codes, and every existing code is put on it:
+ * a speed of its own or a bundle picked for a code is cleared so it follows this instead. Codes made later with no
+ * speed chosen follow it too. Devices already connected keep their old speed until they reconnect.
+ */
+app.post('/api/hotspot/access-codes-speed', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const down = Math.round(Number(req.body?.speedDownMbps) * 1000);
+  const up = Math.round(Number(req.body?.speedUpMbps) * 1000);
+  if (!(down >= 64 && down <= 1000000 && up >= 64 && up <= 1000000)) {
+    return res.status(400).json({ error: 'Give both a download and an upload speed, between 0.1 and 1000 Mbps.' });
+  }
+  await pool.query(
+    `insert into hotspot_settings (tenant_id, access_down_kbps, access_up_kbps) values ($1,$2,$3)
+     on conflict (tenant_id) do update set access_down_kbps = excluded.access_down_kbps, access_up_kbps = excluded.access_up_kbps`,
+    [req.tenant.id, down, up]);
+  const { rows } = await pool.query(
+    `update hotspot_access_codes set plan_id = null, rate_down_kbps = null, rate_up_kbps = null
+      where tenant_id=$1 returning id`, [req.tenant.id]);
+  const { withTenant } = await import('./db.js');
+  const radius = await import('./radius.js');
+  await withTenant(req.tenant.id, async (c) => { for (const r of rows) await radius.ensureAccessCodeRadius(c, req.tenant.id, r.id); });
+  res.json({ ok: true, updated: rows.length, downKbps: down, upKbps: up });
+}));
+
 app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
   const { label, username, password, maxDevices, planId, speedDownMbps, speedUpMbps } = req.body;
   if (!String(label ?? '').trim()) return res.status(400).json({ error: 'Give this code a label' });

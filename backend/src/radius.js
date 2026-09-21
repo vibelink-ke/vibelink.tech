@@ -140,9 +140,11 @@ function hotspotAccessProfile(maxDevices) {
  */
 export async function ensureAccessCodeRadius(c, tenantId, id) {
   const { rows: [row] } = await c.query(
-    `select ac.username, ac.password, ac.max_devices, p.rate_up, p.rate_down, ac.rate_up_kbps, ac.rate_down_kbps
+    `select ac.username, ac.password, ac.max_devices, p.rate_up, p.rate_down, ac.rate_up_kbps, ac.rate_down_kbps,
+            hs.access_up_kbps, hs.access_down_kbps
        from hotspot_access_codes ac
        left join plans p on p.id = ac.plan_id
+       left join hotspot_settings hs on hs.tenant_id = ac.tenant_id
       where ac.tenant_id=$1 and ac.id=$2`,
     [tenantId, id]);
   if (!row) return;
@@ -159,7 +161,8 @@ export async function ensureAccessCodeRadius(c, tenantId, id) {
     [tenantId, row.username,
      // a speed typed in for this code wins over a bundle's, and over the default
      row.rate_up_kbps && row.rate_down_kbps ? `${row.rate_up_kbps}k/${row.rate_down_kbps}k`
-       : row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k` : '2048k/1024k',
+       : row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k`
+       : row.access_up_kbps && row.access_down_kbps ? `${row.access_up_kbps}k/${row.access_down_kbps}k` : '2048k/1024k',
      hotspotAccessProfile(row.max_devices)]);
 }
 

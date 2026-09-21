@@ -129,6 +129,8 @@ export const api = {
   // ── permanent hotspot access codes ("Lounge WiFi" etc.) ──
   hotspotAccessCodes: () => get('/api/hotspot/access-codes'),
   createAccessCode: (c) => post('/api/hotspot/access-codes', c),
+  accessCodesSpeed: () => get('/api/hotspot/access-codes-speed'),
+  setAccessCodesSpeed: (speedDownMbps, speedUpMbps) => post('/api/hotspot/access-codes-speed', { speedDownMbps, speedUpMbps }),
   deleteAccessCode: (id) => del(`/api/hotspot/access-codes/${id}`),
 
   // ── hotspot ──

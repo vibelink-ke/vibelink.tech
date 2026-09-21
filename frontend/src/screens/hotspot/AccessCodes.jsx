@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { color, font } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
@@ -19,6 +19,32 @@ export default function AccessCodes() {
   const codes = store.accessCodes ?? [];
   const [creating, setCreating] = useState(null);
   const [busy, setBusy] = useState(false);
+
+  // One speed for every access code.
+  const [all, setAll] = useState({ down: '', up: '', saved: null, busy: false });
+  useEffect(() => {
+    api.accessCodesSpeed().then((r) => setAll((a) => ({
+      ...a, saved: r.downKbps && r.upKbps ? r : null,
+      down: r.downKbps ? mbps(r.downKbps) : '', up: r.upKbps ? mbps(r.upKbps) : '',
+    }))).catch(() => {});
+  }, []);
+  const applyAll = async () => {
+    const d = Number(all.down);
+    const u = Number(all.up);
+    if (!(d > 0 && u > 0)) return store.toast('Enter both a download and an upload speed in Mbps');
+    if (codes.length && !window.confirm(`Put all ${codes.length} access code(s) on ${d}/${u} Mbps? A speed set on an individual code is replaced.`)) return;
+    setAll((a) => ({ ...a, busy: true }));
+    try {
+      const out = await api.setAccessCodesSpeed(d, u);
+      const fresh = await api.hotspotAccessCodes();
+      store.setCollection('accessCodes', () => fresh);
+      setAll((a) => ({ ...a, busy: false, saved: { downKbps: out.downKbps, upKbps: out.upKbps } }));
+      store.toast(`All access codes are now ${d}/${u} Mbps`);
+    } catch (e) {
+      setAll((a) => ({ ...a, busy: false }));
+      store.toast(`Could not set the speed: ${e.message}`);
+    }
+  };
 
   // Starts blank rather than pre-fetching a suggestion: an auto-fill landing
   // after the modal opens could overwrite a username/password already typed
@@ -77,6 +103,27 @@ export default function AccessCodes() {
         <Button variant="primary" onClick={openCreate}>+ New access code</Button>
       }
     >
+      <Card
+        title="One speed for all access codes"
+        subtitle={all.saved
+          ? `Every access code is on ${mbps(all.saved.downKbps)}/${mbps(all.saved.upKbps)} Mbps (download/upload) unless it has a speed of its own`
+          : 'Set one speed for every access code at once, instead of choosing it code by code'}
+      >
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+          <Field label="Download (Mbps)">
+            <Input type="number" min="0.1" step="0.1" value={all.down} onChange={(e) => setAll((a) => ({ ...a, down: e.target.value }))} style={{ width: 150 }} />
+          </Field>
+          <Field label="Upload (Mbps)">
+            <Input type="number" min="0.1" step="0.1" value={all.up} onChange={(e) => setAll((a) => ({ ...a, up: e.target.value }))} style={{ width: 150 }} />
+          </Field>
+          <div style={{ paddingBottom: 6 }}>
+            <Button variant="primary" onClick={applyAll} disabled={all.busy || !all.down || !all.up}>
+              {all.busy ? 'Applying…' : codes.length ? `Apply to all ${codes.length} code(s)` : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
       <Card
         title="Access codes"
         subtitle="Permanent logins that don't expire — for a lounge, staff, or anyone you'd rather not hand a voucher"
