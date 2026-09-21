@@ -5054,7 +5054,7 @@ app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
 app.get('/api/routers/tunnels', wrap(async (req, res) => {
   const { liveTunnels } = await import('./tunnel.js');
   const { rows: routers } = await pool.query(
-    'select id, name, host from routers where tenant_id=$1', [req.tenant.id]);
+    'select id, name, host, status from routers where tenant_id=$1', [req.tenant.id]);
   const { rows: [t] } = await pool.query(
     'select tunnel_subnet from tenants where id=$1', [req.tenant.id]);
 
