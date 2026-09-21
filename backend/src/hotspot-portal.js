@@ -336,7 +336,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
      gap mobile Chrome adds when 100vh includes the address bar's height. */
   body { margin:0; min-height:100vh; min-height:100dvh; display:flex; align-items:flex-start; justify-content:center;
          background:var(--bg); color:var(--ink); padding:20px;
-         font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+         font:14.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; margin-top:${tvMode ? '0' : 'max(5vh, 16px)'};
           background:var(--card); border:1px solid var(--line); border-radius:var(--rad);
           padding:${tvMode ? '40px 34px' : '26px 22px'}; }
@@ -354,21 +354,21 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .plan strong { font-size:21px; }
   .meta, .hint { font-size:16px !important; }
   ` : ''}
-  h1 { margin:0 0 2px; font-size:24px; }
-  .sub { margin:0 0 20px; color:var(--muted); font-size:15px; }
-  label { display:block; font-size:14px; color:var(--muted); margin:12px 0 5px; }
+  h1 { margin:0 0 2px; font-size:21px; }
+  .sub { margin:0 0 18px; color:var(--muted); font-size:13.5px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 5px; }
   /* Background is a fixed light color regardless of template, so the text
      color has to be fixed dark too — using var(--ink) here made typed text
      on the 'dark' template (near-white ink) nearly invisible against this
      always-light field. */
-  input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
+  input { width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--line);
           border-radius:9px; background:#fafbf9; color:#161a17; }
   /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
      focus, which shoves the form off screen on the phones most guests use. */
-  button { width:100%; margin-top:18px; padding:13px; font-size:16px; font-weight:600;
+  button { width:100%; margin-top:16px; padding:12px; font-size:15px; font-weight:600;
            color:var(--btnInk); background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
-  .plans-title { font-size:14px; color:var(--muted); margin:0 0 10px; }
+  .plans-title { font-size:13px; color:var(--muted); margin:0 0 10px; }
   /* Three parts now, not two: name (grows to fill the row), then price and
      Buy sitting together at the end — price is no longer the button, so
      space-between alone would strand it in the middle of the row instead of
@@ -377,13 +377,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           padding:10px 0; border-bottom:1px solid var(--line); }
   .plan:last-child { border-bottom:0; }
   .plan-name { min-width:0; flex:1 1 auto; }
-  .plan-name strong { display:block; font-size:16px; }
-  .meta { display:block; color:var(--muted); font-size:14px; white-space:nowrap; }
+  .plan-name strong { display:block; font-size:14.5px; }
+  .meta { display:block; color:var(--muted); font-size:12.5px; white-space:nowrap; }
   .price { font-weight:600; white-space:nowrap; flex:0 0 auto; }
   /* width:auto and margin-top:0 undo the global button rule above, which exists
      for Connect. Without them every price button stretched to the full width of
      the card and squeezed the bundle name into a two-line column. */
-  .buy { width:auto; margin-top:0; padding:9px 15px; font-size:15px; font-weight:600;
+  .buy { width:auto; margin-top:0; padding:8px 14px; font-size:14px; font-weight:600;
          white-space:nowrap; color:var(--btnInk); background:var(--green); border:0;
          border-radius:8px; cursor:pointer; min-width:96px; }
   .buy:hover { background:var(--greenDark); }
@@ -421,7 +421,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
          background:var(--bg); display:none; }
   .pay.on { display:block; }
-  .pay h2 { margin:0 0 4px; font-size:16px; }
+  .pay h2 { margin:0 0 4px; font-size:15px; }
   /* Shared by the M-Pesa-code-recovery box below the login form — same
      reveal-panel shape as .pay/.chat, distinct name since it isn't either
      of those specific panels. */
@@ -431,17 +431,17 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
   .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }
-  .chat-open { width:auto; margin:16px auto 0; display:block; padding:9px 15px; font-size:14.5px;
+  .chat-open { width:auto; margin:16px auto 0; display:block; padding:8px 14px; font-size:13.5px;
                background:transparent; color:var(--green); border:1px solid var(--green); }
   .chat { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
           background:var(--bg); display:none; }
   .chat.on { display:block; }
   .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
          margin:0 0 10px; }
-  .msg { padding:7px 10px; border-radius:9px; font-size:14.5px; max-width:85%; }
+  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
   .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
-  .hint { margin:10px 0 0; font-size:14px; color:var(--muted); text-align:center; }
+  .hint { margin:10px 0 0; font-size:13px; color:var(--muted); text-align:center; }
   .foot { margin:22px 0 0; padding-top:12px; border-top:1px solid var(--line); display:flex; justify-content:space-between;
           flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
   .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:14px;
@@ -1244,13 +1244,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   :root { --ink:#161a17; --muted:#8a9186; --line:rgba(128,128,128,.25); --green:#0f7a5f; --bg:#f5f6f3; --card:#fff; }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); padding:20px;
-         font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+         font:14.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
   .card { max-width:440px; margin:0 auto 14px; background:var(--card); border:1px solid var(--line);
           border-radius:14px; padding:22px; }
   h1 { margin:0 0 4px; font-size:20px; }
   h2 { margin:0 0 4px; font-size:15px; }
   .sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
-  input { width:100%; padding:11px 12px; font-size:17px; border:1px solid var(--line);
+  input { width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--line);
           border-radius:9px; background:#fafbf9; color:#161a17; }
   button { width:100%; margin-top:12px; padding:13px; font-size:16px; font-weight:600;
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
