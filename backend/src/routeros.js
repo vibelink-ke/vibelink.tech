@@ -2086,6 +2086,25 @@ export async function bindDeviceByMac(conn, { mac, downKbps, upKbps, comment = '
 }
 
 /**
+ * What each bound device has moved so far, from the per-device queue bindDeviceByMac makes. These devices bypass
+ * the hotspot login, so RADIUS accounting never sees them; the queue's byte counters are the only record. Returns
+ * a Map of MAC -> { up, down } (up = sent by the device). The counters restart from zero when the router reboots.
+ */
+export async function deviceQueueCounters(conn) {
+  const out = new Map();
+  const queues = await conn.write('/queue/simple/print', []).catch(() => []);
+  for (const q of queues) {
+    const m = /^ispHotspot-([0-9A-Fa-f]{12})/.exec(String(q.name ?? ''));
+    if (!m) continue;
+    const [up, down] = String(q.bytes ?? '').split('/').map((n) => Number(n));
+    if (!Number.isFinite(up) || !Number.isFinite(down)) continue;
+    const hex = m[1].toUpperCase();
+    out.set(hex.match(/../g).join(':'), { up, down });
+  }
+  return out;
+}
+
+/**
  * Undo bindDeviceByMac — called once the underlying voucher/device expires.
  *
  * Removing the ip-binding stops the *next* connection from bypassing again,

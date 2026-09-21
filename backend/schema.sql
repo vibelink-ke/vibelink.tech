@@ -2774,3 +2774,12 @@ alter table audit_log add column if not exists method      text;
 alter table audit_log add column if not exists path        text;
 alter table audit_log add column if not exists status      int;
 alter table audit_log add column if not exists ip          text;
+
+-- Traffic of devices let in by an ip-binding bypass (imported guests, TVs, consoles). They never touch RADIUS, so
+-- there is no accounting for them; the router's own per-device queue counts their bytes instead, and jobs.js
+-- (countDeviceTraffic) adds the difference to these totals. counter_* is the last reading, to take differences from.
+alter table voucher_devices add column if not exists bytes_up     bigint not null default 0;
+alter table voucher_devices add column if not exists bytes_down   bigint not null default 0;
+alter table voucher_devices add column if not exists counter_up   bigint;
+alter table voucher_devices add column if not exists counter_down bigint;
+alter table voucher_devices add column if not exists counted_at   timestamptz;

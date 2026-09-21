@@ -61,6 +61,7 @@ export function startJobs() {
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
   cron.schedule('*/1 * * * *', safely('watchRadios', watchRadios));
+  cron.schedule('*/10 * * * *', safely('countDeviceTraffic', countDeviceTraffic));
   // SmartOLT: who is online (light, every 5 minutes), the full ONU list (hourly — SmartOLT limits it), and
   // disabling/enabling ONUs by payment status for tenants who switched that on.
   cron.schedule('*/5 * * * *', safely('smartoltStatuses', () => import('./smartolt.js').then((m) => m.syncAll('statuses'))));
@@ -853,6 +854,68 @@ async function watchdog() {
  * can reach). Two misses in a row mark a radio down; the owner is told once after
  * it has been down for OFFLINE_MINUTES, and again when it is back.
  */
+/**
+ * Count the traffic of devices bound by an ip-binding bypass (imported guests, TVs, consoles). They never log in,
+ * so RADIUS accounting has nothing for them; the router's per-device queue does. Every ten minutes the counters
+ * are read and the difference since the last reading is added to the device's total (a counter that went down means
+ * the router restarted, so its new value is all new traffic). The first reading counts everything since the queue
+ * was made but is left out of the dashboard's 24-hour figure, which only takes what moved since the last reading.
+ */
+async function countDeviceTraffic() {
+  const { rows } = await pool.query(
+    `select d.id, d.mac, d.counter_up, d.counter_down, v.tenant_id,
+            r.id as router_id, r.host, r.api_port, r.status as router_status, r.service_user, r.service_password_enc
+       from voucher_devices d
+       join vouchers v on v.id = d.voucher_id
+       join routers r on r.id = d.router_id
+      where d.unbound_at is null and v.tenant_id in (${enabledTenants})`, ['countDeviceTraffic']);
+  if (!rows.length) return;
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const byRouter = new Map();
+  for (const d of rows) {
+    if (!byRouter.has(d.router_id)) byRouter.set(d.router_id, []);
+    byRouter.get(d.router_id).push(d);
+  }
+  for (const devices of byRouter.values()) {
+    const r = devices[0];
+    if (r.router_status !== 'up' || !r.service_user || !r.service_password_enc) continue;
+    let conn;
+    try {
+      const password = secrets.decrypt(r.service_password_enc);
+      if (!password) continue;
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password });
+      const counters = await ros.deviceQueueCounters(conn);
+      for (const d of devices) {
+        const c = counters.get(String(d.mac).toUpperCase());
+        if (!c) continue;
+        const first = d.counter_up === null;
+        const dUp = first || c.up < Number(d.counter_up) ? c.up : c.up - Number(d.counter_up);
+        const dDown = first || c.down < Number(d.counter_down) ? c.down : c.down - Number(d.counter_down);
+        await pool.query(
+          `update voucher_devices set bytes_up = bytes_up + $2, bytes_down = bytes_down + $3,
+                  counter_up = $4, counter_down = $5, counted_at = now() where id = $1`,
+          [d.id, dUp, dDown, c.up, c.down]);
+        if (!first && (dUp > 0 || dDown > 0)) {
+          await pool.query(
+            `insert into usage_buckets (tenant_id, bucket, bytes_in, bytes_out, hotspot_bytes)
+             values ($1, date_trunc('hour', now()) + (floor(extract(minute from now()) / 5)::int * 5) * interval '1 minute', $2, $3, $2 + $3)
+             on conflict (tenant_id, bucket) do update
+               set bytes_in = usage_buckets.bytes_in + excluded.bytes_in,
+                   bytes_out = usage_buckets.bytes_out + excluded.bytes_out,
+                   hotspot_bytes = usage_buckets.hotspot_bytes + excluded.hotspot_bytes`,
+            [d.tenant_id, dUp, dDown]).catch(() => {});
+        }
+      }
+    } catch (e) {
+      console.warn('countDeviceTraffic:', r.host, '-', e.message);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+}
+
 async function watchRadios() {
   const { rows } = await pool.query(
     `select n.id, n.tenant_id, n.name, n.details->>'ip' as ip, n.status, n.offline_since, n.offline_notified, n.ping_fails,

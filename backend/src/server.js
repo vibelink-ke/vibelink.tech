@@ -9683,7 +9683,7 @@ app.get('/api/vouchers', requirePermission('hotspot.view'), wrap(async (req, res
            -- What this visitor has actually used, read from RADIUS accounting (the code
            -- they typed, and the device's own MAC login) rather than the stored counter,
            -- which only ever moved for capped bundles.
-           round(coalesce(vu.bytes, 0) / 1048576.0, 1) as data_used_mb,
+           round((coalesce(vu.bytes, 0) + coalesce((select sum(vd.bytes_up + vd.bytes_down) from voucher_devices vd where vd.voucher_id = v.id), 0)) / 1048576.0, 1) as data_used_mb,
            -- The M-Pesa/KopoKopo reference that paid for this code, for the
            -- same reason a receipt names the transaction it came from.
            pay.provider_ref as mpesa_ref, pay.provider as pay_provider
