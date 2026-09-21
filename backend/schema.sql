@@ -2762,3 +2762,15 @@ create index if not exists audit_log_at on audit_log (at desc);
 -- M-Pesa validation: when on, a paybill payment typed with an account number that belongs to no client is refused
 -- by Safaricom before the customer's money moves (needs External Validation enabled on the paybill).
 alter table tenants add column if not exists mpesa_validation boolean not null default false;
+
+-- An older, unused audit_log (id, tenant_id not null, actor, action, target, detail, at) already existed, so the
+-- create above was skipped: bring it up to the shape the audit log writes.
+alter table audit_log alter column tenant_id drop not null;
+alter table audit_log add column if not exists tenant_name text;
+alter table audit_log add column if not exists actor_id    uuid;
+alter table audit_log add column if not exists role        text;
+alter table audit_log add column if not exists platform    boolean not null default false;
+alter table audit_log add column if not exists method      text;
+alter table audit_log add column if not exists path        text;
+alter table audit_log add column if not exists status      int;
+alter table audit_log add column if not exists ip          text;
