@@ -65,7 +65,7 @@ const FILTERS = [
   // otherwise a paused client appears nowhere but All.
   { key: 'paused', label: 'Paused', match: (c) => c.status === 'paused' },
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
-  // Blocked for 4+ months; deleted automatically past 5. See jobs.js's dormantSweep.
+  // Blocked for 3+ months; deleted automatically past 5. See jobs.js's dormantSweep.
   { key: 'dormant', label: 'Dormant', match: (c) => !!c.dormant_at },
 ];
 

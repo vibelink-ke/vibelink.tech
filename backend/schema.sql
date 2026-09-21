@@ -2355,7 +2355,7 @@ alter table hr_profiles add column if not exists badge_expires_at date;
 -- email.js's own DEFAULTS.
 alter table tenant_email_config add column if not exists templates jsonb not null default '{}'::jsonb;
 
--- Dormant clients: blocked (expired, suspended or paused) for four months, then
+-- Dormant clients: blocked (expired, suspended or paused) for three months, then
 -- deleted automatically once past five months. blocked_since is when the
 -- current unbroken blocked stretch began; dormant_at is when it was marked
 -- dormant (the deletion warning starts there). Both clear the day the client is

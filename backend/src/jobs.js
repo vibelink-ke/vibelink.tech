@@ -679,7 +679,7 @@ async function remind() {
 /**
  * Dormant clients.
  *
- * A client blocked for four months — expired, suspended or paused — is marked
+ * A client blocked for three months — expired, suspended or paused — is marked
  * dormant. Once past five months blocked, and at least 30 days after being
  * marked, they are deleted. The 30 days is a real warning: on the first run
  * anyone already past five months is marked dormant that night and only
@@ -717,11 +717,11 @@ async function dormantSweep() {
         and tenant_id in (${enabledTenants})`,
     ['dormantSweep']);
 
-  // Four months blocked: dormant. The owner is told once per run, not per client.
+  // Three months blocked: dormant. The owner is told once per run, not per client.
   const { rows: marked } = await pool.query(
     `update subscribers set dormant_at = now()
       where status in ('expired','suspended','paused') and dormant_at is null
-        and blocked_since <= now() - interval '4 months'
+        and blocked_since <= now() - interval '3 months'
         and tenant_id in (${enabledTenants})
       returning tenant_id`,
     ['dormantSweep']);
@@ -729,7 +729,7 @@ async function dormantSweep() {
   for (const r of marked) newlyDormant.set(r.tenant_id, (newlyDormant.get(r.tenant_id) ?? 0) + 1);
   for (const [tenantId, n] of newlyDormant) {
     await notifyOwner(tenantId,
-      `${n} client${n === 1 ? ' is' : 's are'} now dormant (blocked 4+ months). They are deleted automatically `
+      `${n} client${n === 1 ? ' is' : 's are'} now dormant (blocked 3+ months). They are deleted automatically `
       + 'once blocked 5 months and 30 days after this notice. Renew a client to keep them.',
       { url: '/clients', title: 'Dormant clients' });
   }
