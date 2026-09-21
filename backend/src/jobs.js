@@ -1340,7 +1340,7 @@ export async function settleTenants() {
     const local = "(now() at time zone 'Africa/Nairobi')";
     const { rows: due } = await pool.query(
       `select t.id, t.name, (t.settlement_retry_at is not null) as retried from tenants t
-        where t.platform_collect_enabled
+        where t.platform_collect_enabled and t.deleted_at is null
           and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and extract(dow from ${local}) = 1))
           and t.settlement_time <= ${local}::time
           and (t.settlement_last_run is null or t.settlement_last_run < ${local}::date)

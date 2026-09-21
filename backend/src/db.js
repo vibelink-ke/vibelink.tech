@@ -44,8 +44,16 @@ export async function tenantByHost(host) {
   if (!name || name === root || name === `www.${root}`) return null;
 
   const sub = name.split('.')[0];
-  const { rows } = await pool.query('select * from tenants where subdomain=$1', [sub]);
-  return rows[0] ?? null;
+  // A removed tenant is no tenant here: its address answers "unknown tenant". (Before the migration that
+  // adds deleted_at has run, fall back to the plain lookup rather than take every site down.)
+  try {
+    const { rows } = await pool.query('select * from tenants where subdomain=$1 and deleted_at is null', [sub]);
+    return rows[0] ?? null;
+  } catch (e) {
+    if (e.code !== '42703') throw e;
+    const { rows } = await pool.query('select * from tenants where subdomain=$1', [sub]);
+    return rows[0] ?? null;
+  }
 }
 
 /**
@@ -129,4 +137,4 @@ export async function jobEnabled(tenantId, job) {
 export const enabledTenants = `
   select t.id from tenants t
   left join automation_jobs a on a.tenant_id = t.id and a.job = $1
-  where coalesce(a.enabled, true)`;
+  where coalesce(a.enabled, true) and t.deleted_at is null`;

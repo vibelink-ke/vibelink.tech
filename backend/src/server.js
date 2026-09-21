@@ -11517,12 +11517,73 @@ app.post('/api/tickets/:id/notes', wrap(async (req, res) => {
 }));
 
 // ── tenant delete (platform owner) ────────────────
-app.delete('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
-  if (req.params.id === req.tenant.id)
-    return res.status(400).json({ error: 'You cannot delete the tenant you are signed in to.' });
-  const { rows: [t] } = await pool.query('delete from tenants where id=$1 returning name, subdomain', [req.params.id]);
-  if (!t) return res.status(404).json({ error: 'not found' });
+/**
+ * What stands in the way of erasing a tenant: money that is owed either way, or in flight. Erasing a tenant
+ * also erases its payout and payment records, so these must be settled first (or knowingly overridden).
+ */
+async function tenantDeleteCheck(id) {
+  const { rows: [t] } = await pool.query('select id, name, subdomain, status, deleted_at, billing_credit from tenants where id=$1', [id]);
+  if (!t) return null;
+  const { rows: [p] } = await pool.query(
+    `select count(*) filter (where status='processing')::int as processing_n,
+            coalesce(sum(amount) filter (where status='processing'), 0) as processing_kes,
+            coalesce(sum(amount) filter (where status='pending'), 0) as pending_kes
+       from settlements where tenant_id=$1`, [id]);
+  const { rows: [owed] } = await pool.query(
+    "select coalesce(sum(total), 0) as kes from tenant_charges where tenant_id=$1 and status in ('open', 'invoiced')", [id]);
+  const kes = (n) => Number(n).toLocaleString('en-KE');
+  const blockers = [];
+  if (p.processing_n) blockers.push({ kind: 'processing', text: `${p.processing_n} payout${p.processing_n === 1 ? '' : 's'} (KES ${kes(p.processing_kes)}) sent to Safaricom and not confirmed` });
+  if (Number(p.pending_kes) > 0) blockers.push({ kind: 'pending', text: `KES ${kes(p.pending_kes)} collected for them and not yet paid out` });
+  if (Number(owed.kes) > 0) blockers.push({ kind: 'owes', text: `KES ${kes(owed.kes)} of your statements to them are unpaid` });
+  if (Number(t.billing_credit) > 0) blockers.push({ kind: 'credit', text: `KES ${kes(t.billing_credit)} of prepaid credit on their account` });
+  return { tenant: t, blockers };
+}
+
+app.get('/api/tenants/:id/delete-check', superAdminOnly, wrap(async (req, res) => {
+  const c = await tenantDeleteCheck(req.params.id);
+  if (!c) return res.status(404).json({ error: 'not found' });
+  res.json({ blockers: c.blockers });
+}));
+
+/**
+ * Remove a tenant: suspended and hidden, everything kept. Its address answers "not available", its staff are
+ * signed out, background jobs and payouts skip it. Restore undoes it; Delete permanently (below) erases it.
+ */
+app.post('/api/tenants/:id/remove', superAdminOnly, wrap(async (req, res) => {
+  if (req.params.id === req.tenant.id) return res.status(400).json({ error: 'You cannot remove the tenant you are signed in to.' });
+  const { rows: [t] } = await pool.query(
+    `update tenants set status='suspended', deleted_at=now(), deleted_by=$2 where id=$1 and deleted_at is null returning id, name, subdomain`,
+    [req.params.id, req.session?.name ?? 'platform owner']);
+  if (!t) return res.status(404).json({ error: 'not found, or already removed' });
+  await pool.query('delete from admin_sessions where tenant_id=$1', [req.params.id]);
   res.json({ ok: true, ...t });
+}));
+
+app.post('/api/tenants/:id/restore', superAdminOnly, wrap(async (req, res) => {
+  const { rows: [t] } = await pool.query(
+    "update tenants set deleted_at=null, deleted_by=null where id=$1 and deleted_at is not null returning id, name, subdomain, status", [req.params.id]);
+  if (!t) return res.status(404).json({ error: 'not found, or not removed' });
+  res.json({ ok: true, ...t });   // still suspended: reactivate it from Edit when ready
+}));
+
+/** The only way to erase a tenant: it must already be removed, you type its address, and money in flight blocks it unless overridden. */
+app.post('/api/tenants/:id/purge', superAdminOnly, wrap(async (req, res) => {
+  if (req.params.id === req.tenant.id) return res.status(400).json({ error: 'You cannot delete the tenant you are signed in to.' });
+  const c = await tenantDeleteCheck(req.params.id);
+  if (!c) return res.status(404).json({ error: 'not found' });
+  if (!c.tenant.deleted_at) return res.status(400).json({ error: 'Remove it first — a tenant is only erased after it has been removed.' });
+  if (String(req.body?.confirm ?? '') !== c.tenant.subdomain) return res.status(400).json({ error: 'Type the tenant\'s address exactly to confirm.' });
+  if (c.blockers.length && !req.body?.force) {
+    return res.status(409).json({ error: 'There is money still to settle with this tenant.', blockers: c.blockers });
+  }
+  const { rows: [t] } = await pool.query('delete from tenants where id=$1 returning name, subdomain', [req.params.id]);
+  res.json({ ok: true, ...t });
+}));
+
+/** Kept only so an old screen gets a clear answer. */
+app.delete('/api/tenants/:id', superAdminOnly, wrap(async (_req, res) => {
+  res.status(400).json({ error: 'Use Remove first; a removed tenant can then be deleted permanently.' });
 }));
 
 // ── payment gateways: several per provider ────────

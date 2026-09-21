@@ -2731,3 +2731,8 @@ alter table smartolt_onus add column if not exists pppoe_user text;
 
 -- One ONU exactly as SmartOLT sent it (secrets hidden), so a field with an unexpected name can be seen and mapped.
 alter table smartolt_config add column if not exists sample_onu jsonb;
+
+-- Removing a tenant hides and suspends it (its site says "not available", jobs and payouts stop, staff are
+-- signed out) but keeps every record. Only a second, deliberate step erases it.
+alter table tenants add column if not exists deleted_at timestamptz;
+alter table tenants add column if not exists deleted_by text;

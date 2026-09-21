@@ -29,7 +29,13 @@ export default function Tenants() {
     }
   };
   const [editing, setEditing] = useState(null);
+  // Remove (hide + suspend, keeps everything) and, from the Removed list, Delete permanently.
+  // { ...tenant, mode: 'remove' | 'purge', confirmText, force, check }
   const [deleting, setDeleting] = useState(null);
+  const openRemoval = (t, mode) => {
+    setDeleting({ ...t, mode, confirmText: '', force: false, check: null });
+    api.tenantDeleteCheck(t.id).then((c) => setDeleting((d) => (d && d.id === t.id ? { ...d, check: c.blockers } : d))).catch(() => {});
+  };
   const [staffFor, setStaffFor] = useState(null);
 
   /**
@@ -223,7 +229,9 @@ export default function Tenants() {
     );
   }
 
-  const tenants = store.tenants ?? [];
+  const allTenants = store.tenants ?? [];
+  const tenants = allTenants.filter((t) => !t.deleted_at);
+  const removedTenants = allTenants.filter((t) => t.deleted_at);
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const onboard = async () => {
@@ -330,14 +338,30 @@ export default function Tenants() {
   };
 
   const confirmDelete = async () => {
-    if (deleting.confirmText !== deleting.subdomain) return;
     try {
-      await api.deleteTenant(deleting.id);
-      store.setCollection('tenants', (ts) => ts.filter((t) => t.id !== deleting.id));
-      store.toast(`${deleting.name} and all its data deleted`);
+      if (deleting.mode === 'remove') {
+        await api.removeTenant(deleting.id);
+        store.setCollection('tenants', (ts) => ts.map((t) => (t.id === deleting.id ? { ...t, status: 'suspended', deleted_at: new Date().toISOString() } : t)));
+        store.toast(`${deleting.name} removed — nothing was deleted, and it can be restored`);
+      } else {
+        if (deleting.confirmText !== deleting.subdomain) return;
+        await api.purgeTenant(deleting.id, { confirm: deleting.confirmText, force: deleting.force });
+        store.setCollection('tenants', (ts) => ts.filter((t) => t.id !== deleting.id));
+        store.toast(`${deleting.name} and all its data deleted`);
+      }
       setDeleting(null);
     } catch (e) {
-      store.toast(`Could not delete: ${e.message}`);
+      store.toast(e.message);
+    }
+  };
+
+  const restore = async (t) => {
+    try {
+      await api.restoreTenant(t.id);
+      store.setCollection('tenants', (ts) => ts.map((x) => (x.id === t.id ? { ...x, deleted_at: null, deleted_by: null } : x)));
+      store.toast(`${t.name} restored — it is still suspended; reactivate it from Edit when ready`);
+    } catch (e) {
+      store.toast(e.message);
     }
   };
 
@@ -593,6 +617,33 @@ export default function Tenants() {
         </Card>
       )}
 
+      {removedTenants.length > 0 && (
+        <Card
+          title="Removed tenants"
+          subtitle="Suspended and hidden, with every record kept. Restore one, or delete it permanently once nothing is owed either way."
+        >
+          <Table
+            rowKey={(t) => t.id}
+            toolbar="never"
+            rows={removedTenants}
+            columns={[
+              { key: 'name', label: 'ISP', render: (t) => <span style={{ fontWeight: 600 }}>{t.name}</span> },
+              { key: 'subdomain', label: 'Address', render: (t) => <span style={{ fontFamily: font.mono, fontSize: 12.5 }}>{t.subdomain}</span> },
+              { key: 'deleted', label: 'Removed', render: (t) => `${new Date(t.deleted_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })}${t.deleted_by ? ` · ${t.deleted_by}` : ''}` },
+              {
+                key: 'act', label: '', align: 'right',
+                render: (t) => (
+                  <span style={{ display: 'inline-flex', gap: 6 }}>
+                    <Button size="sm" onClick={() => restore(t)}>Restore</Button>
+                    <Button size="sm" style={{ color: color.rust }} onClick={() => openRemoval(t, 'purge')}>Delete permanently</Button>
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
       <Card title="Tenants" subtitle={filtering ? `${shownTenants.length} of ${tenants.length} match` : `${tenants.length} in total — search by name, subdomain, billing ID, phone or status`}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, alignItems: 'end', paddingBottom: 12 }}>
           <Field label="Status">
@@ -716,14 +767,14 @@ export default function Tenants() {
                   </span>
                   {isSelf(t) ? (
                     <span style={{ color: color.muted, fontSize: 12.5, fontWeight: 600 }} title="You are signed in to this tenant">
-                      Delete
+                      Remove
                     </span>
                   ) : (
                     <span
-                      onClick={() => setDeleting({ ...t, confirmText: '' })}
+                      onClick={() => openRemoval(t, 'remove')}
                       style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
                     >
-                      Delete
+                      Remove
                     </span>
                   )}
                 </span>
@@ -1080,37 +1131,65 @@ export default function Tenants() {
 
       <Modal
         open={!!deleting}
-        title={`Delete ${deleting?.name ?? ''}`}
+        title={deleting ? (deleting.mode === 'remove' ? `Remove ${deleting.name}` : `Delete ${deleting.name} permanently`) : ''}
         onClose={() => setDeleting(null)}
         footer={
           <>
             <Button onClick={() => setDeleting(null)}>Cancel</Button>
             <Button
               variant="danger"
-              disabled={deleting?.confirmText !== deleting?.subdomain}
+              disabled={deleting?.mode === 'purge' && (deleting?.confirmText !== deleting?.subdomain || (deleting?.check?.length > 0 && !deleting?.force))}
               onClick={confirmDelete}
             >
-              Delete permanently
+              {deleting?.mode === 'remove' ? 'Remove' : 'Delete permanently'}
             </Button>
           </>
         }
       >
         {deleting && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ background: '#fdf1ec', border: '1px solid #f0d8ce', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: color.rust, lineHeight: 1.5 }}>
-              This removes the tenant and <strong>everything belonging to it</strong> — subscribers,
-              payments, invoices, vouchers, routers, tickets and staff logins. It cannot be undone.
-            </div>
+            {deleting.mode === 'remove' ? (
+              <div style={{ background: color.amberBg, border: '1px solid #ecd9a8', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: color.amberInk, lineHeight: 1.55 }}>
+                <strong>Nothing is deleted.</strong> The tenant is suspended and hidden from this list; its address shows
+                &ldquo;not available&rdquo;, its staff are signed out, and jobs, messages and payouts skip it. All its
+                records stay, and you can restore it. To erase it for good you delete it permanently afterwards.
+              </div>
+            ) : (
+              <div style={{ background: '#fdf1ec', border: '1px solid #f0d8ce', borderRadius: 9, padding: '11px 13px', fontSize: 12.5, color: color.rust, lineHeight: 1.5 }}>
+                This erases the tenant and <strong>everything belonging to it</strong> — subscribers, payments, payout
+                records, invoices, vouchers, routers, tickets and staff logins. It cannot be undone.
+              </div>
+            )}
             <KV k="Active devices" v={deleting.devices ?? 0} />
             <KV k="Collected this month" v={`KES ${kes(deleting.collected)}`} />
-            <Field label={`Type "${deleting.subdomain}" to confirm`}>
-              <Input
-                value={deleting.confirmText}
-                onChange={(e) => setDeleting((s) => ({ ...s, confirmText: e.target.value }))}
-                placeholder={deleting.subdomain}
-                style={{ fontFamily: font.mono }}
-              />
-            </Field>
+            {deleting.check === null ? (
+              <span style={{ fontSize: 12.5, color: color.muted }}>Checking for money still to settle…</span>
+            ) : deleting.check.length > 0 ? (
+              <div style={{ border: `1px solid ${color.rust}`, borderRadius: 9, padding: '10px 13px', fontSize: 12.5 }}>
+                <strong style={{ color: color.rust }}>Money still to settle with this tenant:</strong>
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18, lineHeight: 1.6 }}>
+                  {deleting.check.map((b) => <li key={b.kind}>{b.text}</li>)}
+                </ul>
+                {deleting.mode === 'purge' && (
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10, cursor: 'pointer' }}>
+                    <input type="checkbox" checked={deleting.force} onChange={(e) => setDeleting((d) => ({ ...d, force: e.target.checked }))} style={{ marginTop: 3 }} />
+                    <span>I understand these records are erased with the tenant and I have settled it another way.</span>
+                  </label>
+                )}
+              </div>
+            ) : (
+              <span style={{ fontSize: 12.5, color: color.green }}>No money outstanding either way.</span>
+            )}
+            {deleting.mode === 'purge' && (
+              <Field label={`Type "${deleting.subdomain}" to confirm`}>
+                <Input
+                  value={deleting.confirmText}
+                  onChange={(e) => setDeleting((s) => ({ ...s, confirmText: e.target.value }))}
+                  placeholder={deleting.subdomain}
+                  style={{ fontFamily: font.mono }}
+                />
+              </Field>
+            )}
           </div>
         )}
       </Modal>

@@ -399,7 +399,10 @@ export const api = {
   setTenantSmsBalance: (id, body) => post(`/api/tenants/${id}/sms-balance`, body),
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
-  deleteTenant: (id) => del(`/api/tenants/${id}`),
+  tenantDeleteCheck: (id) => get(`/api/tenants/${id}/delete-check`),
+  removeTenant: (id) => post(`/api/tenants/${id}/remove`, {}),
+  restoreTenant: (id) => post(`/api/tenants/${id}/restore`, {}),
+  purgeTenant: (id, body) => post(`/api/tenants/${id}/purge`, body),
   // what tenants owe the platform each month
   platformCharges: (month) => get(`/api/platform/charges${month ? `?month=${month}` : ''}`),
   generateCharges: (month) => post('/api/platform/charges/generate', { month }),
