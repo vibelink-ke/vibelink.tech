@@ -16,7 +16,7 @@ export default function Loyalty() {
   const store = useStore();
   const canManage = !!store.session?.perms?.['loyalty.manage'];
   const [data, setData] = useState(null);
-  const [rules, setRules] = useState({ enabled: false, kesPerPoint: 10 });
+  const [rules, setRules] = useState({ enabled: false, kesPerPoint: 10, selfServe: false });
   const [savingRules, setSavingRules] = useState(false);
   const [newReward, setNewReward] = useState({ planId: '', pointsCost: '' });
   const [redeeming, setRedeeming] = useState(null);   // { phone, points, rewardId }
@@ -27,7 +27,7 @@ export default function Loyalty() {
     try {
       const d = await api.loyalty();
       setData(d);
-      setRules({ enabled: d.enabled, kesPerPoint: d.kesPerPoint });
+      setRules({ enabled: d.enabled, kesPerPoint: d.kesPerPoint, selfServe: !!d.selfServe });
     } catch (e) {
       setData({ enabled: false, kesPerPoint: 10, rewards: [], members: [] });
       store.toast(e.message);
@@ -38,7 +38,7 @@ export default function Loyalty() {
   const saveRules = async () => {
     setSavingRules(true);
     try {
-      await api.saveLoyaltySettings({ enabled: rules.enabled, kesPerPoint: Number(rules.kesPerPoint) });
+      await api.saveLoyaltySettings({ enabled: rules.enabled, kesPerPoint: Number(rules.kesPerPoint), selfServe: rules.selfServe });
       store.toast(rules.enabled ? 'Loyalty points are on' : 'Loyalty points are off');
       await load();
     } catch (e) {
@@ -120,6 +120,12 @@ export default function Loyalty() {
           <Field label="Shillings that earn 1 point" hint={`Now: KES ${rules.kesPerPoint} spent = 1 point (a KES ${Number(rules.kesPerPoint) * 5} purchase earns 5)`}>
             <Input type="number" min="1" value={rules.kesPerPoint} onChange={(e) => setRules((r) => ({ ...r, kesPerPoint: e.target.value }))} style={{ width: 160 }} />
           </Field>
+          <Toggle
+            checked={rules.selfServe}
+            onChange={(v) => setRules((r) => ({ ...r, selfServe: v }))}
+            label="Let visitors check and redeem their own points"
+            detail="Adds a My loyalty points button to the login page. They enter their number and an SMS code (one SMS each time), then spend points on the rewards. Re-push the login page to each router to show it."
+          />
           {canManage && <Button variant="primary" onClick={saveRules} disabled={savingRules} style={{ alignSelf: 'flex-start' }}>{savingRules ? 'Saving…' : 'Save'}</Button>}
         </div>
       </Card>

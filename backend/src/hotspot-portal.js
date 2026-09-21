@@ -116,7 +116,7 @@ function bestInkOn(hex) {
 }
 
 export function loginPage({
-  company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false,
+  company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
   hotspotGateway = null, adText = null, adUrl = null,
@@ -607,6 +607,24 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       asks for, so nothing here needs to know it in advance.
     -->
     <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}">Adding a TV or console?</a></p>
+    ${loyalty ? `<button type="button" class="chat-open" id="loyOpen">My loyalty points</button>
+    <div class="chat" id="loyPanel">
+      <div id="loyStep1">
+        <p class="hint" style="margin:0 0 10px">Enter the phone number you paid with. We will text you a code.</p>
+        <input id="loyPhone" type="tel" inputmode="tel" placeholder="Your phone number, e.g. 0712 345 678" autocomplete="tel" maxlength="20">
+        <button type="button" id="loySend" style="margin-top:8px">Send me a code</button>
+      </div>
+      <div id="loyStep2" style="display:none">
+        <p class="hint" style="margin:0 0 10px">Enter the 6-digit code we texted you.</p>
+        <input id="loyOtp" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6">
+        <button type="button" id="loyVerify" style="margin-top:8px">Check my points</button>
+      </div>
+      <div id="loyStep3" style="display:none">
+        <p class="hint" style="margin:0 0 10px" id="loyPoints"></p>
+        <div id="loyRewards" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+      <p class="hint" id="loyNote"></p>
+    </div>` : ''}
     <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
     <div class="chat" id="chat">
       <div id="chatForm">
@@ -986,6 +1004,85 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         });
     });
   } catch (e) { /* Buy stays unresponsive; Talk to support below is unaffected */ }
+
+  // ── loyalty points ─────────────────────────────────────────────────
+  try {
+    var loyOpen = document.getElementById('loyOpen');
+    if (loyOpen) {
+      var loyPanel = document.getElementById('loyPanel');
+      var loyNote = document.getElementById('loyNote');
+      var loyPhoneVal = '', loyToken = '';
+      var loyPost = function (path, body) {
+        return fetch(API + '/hotspot/loyalty/' + path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+      };
+      var loyShow = function (n) {
+        ['loyStep1', 'loyStep2', 'loyStep3'].forEach(function (id, i) {
+          document.getElementById(id).style.display = (i + 1 === n) ? 'block' : 'none';
+        });
+      };
+      loyOpen.addEventListener('click', function () { loyPanel.classList.toggle('on'); });
+
+      document.getElementById('loySend').addEventListener('click', function () {
+        loyPhoneVal = document.getElementById('loyPhone').value.trim();
+        var digits = loyPhoneVal.replace(/[^0-9]/g, '');
+        if (digits.length < 9 || digits.length > 13) { loyNote.textContent = 'Please enter a valid phone number.'; return; }
+        loyNote.textContent = 'Sending…';
+        loyPost('otp', { phone: loyPhoneVal }).then(function (res) {
+          if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'Could not send the code.'; return; }
+          loyNote.textContent = (res.d && res.d.message) || 'If that number has points, a code is on its way.';
+          loyShow(2);
+        }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; });
+      });
+
+      document.getElementById('loyVerify').addEventListener('click', function () {
+        var otp = document.getElementById('loyOtp').value.trim();
+        if (otp.length < 6) { loyNote.textContent = 'Enter the 6-digit code.'; return; }
+        loyNote.textContent = 'Checking…';
+        loyPost('verify', { phone: loyPhoneVal, otp: otp }).then(function (res) {
+          if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'That code is not right.'; return; }
+          loyToken = res.d.token;
+          loyShow(3);
+          loyNote.textContent = '';
+          renderLoyRewards(res.d.points, res.d.rewards || []);
+        }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; });
+      });
+
+      var renderLoyRewards = function (points, rewards) {
+        document.getElementById('loyPoints').textContent = 'You have ' + points + ' loyalty point' + (points === 1 ? '' : 's') + '.';
+        var box = document.getElementById('loyRewards');
+        box.textContent = '';
+        if (!rewards.length) { box.textContent = 'There are no rewards to redeem yet.'; return; }
+        rewards.forEach(function (rw) {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px';
+          var label = document.createElement('span');
+          label.textContent = 'Free ' + rw.title + ' — ' + rw.points_cost + ' points';
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = 'Redeem';
+          btn.style.width = 'auto';
+          btn.disabled = rw.points_cost > points;
+          btn.addEventListener('click', function () {
+            btn.disabled = true;
+            loyNote.textContent = 'Getting your code…';
+            loyPost('redeem', { token: loyToken, rewardId: rw.id }).then(function (res) {
+              if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'Could not redeem.'; btn.disabled = false; return; }
+              loyNote.textContent = 'Your code is ' + res.d.code + ' — connecting…';
+              document.getElementById('loyPoints').textContent = 'Points left: ' + res.d.remaining + '.';
+              submitHotspotLogin(res.d.code);
+            }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; btn.disabled = false; });
+          });
+          row.appendChild(label);
+          row.appendChild(btn);
+          box.appendChild(row);
+        });
+      };
+    }
+  } catch (e) { /* the points panel stays unresponsive; the rest of the page is unaffected */ }
 
   // ── talk to support ────────────────────────────────────────────────
   try {

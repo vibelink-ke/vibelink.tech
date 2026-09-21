@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
-import { registerLoyalty } from './loyalty.js';
+import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
 import { fmtNairobi } from './nairobi-time.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
@@ -885,6 +885,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // redirect target is fetched by a guest's own browser, not RouterOS, so
     // it must never re-trigger the very redirect that sent it here.
     routerId: loginRouterId,
+    loyalty: await selfServeOn(pool, tenant.id),
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
@@ -1311,6 +1312,9 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
   if (!v) return res.json({ status: 'unknown' });
   res.json({ status: v.status, expiresAt: v.expires_at });
 }));
+
+// The visitor's own loyalty points on the hotspot login page (see loyalty.js): SMS code, then check and redeem.
+registerLoyaltyPublic(app, { pool, tenantByHost, wrap });
 
 /**
  * Recover a voucher code from the M-Pesa transaction code alone — for a

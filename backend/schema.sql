@@ -2862,3 +2862,6 @@ create table if not exists loyalty_ledger (
   created_at timestamptz not null default now()
 );
 create index if not exists loyalty_ledger_phone on loyalty_ledger (tenant_id, phone, created_at desc);
+
+-- Whether visitors may check and redeem their own loyalty points on the hotspot login page (proved with an SMS code).
+alter table loyalty_settings add column if not exists self_serve boolean not null default false;
