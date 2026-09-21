@@ -144,6 +144,8 @@ export default function AccessCodes() {
                 ? <span>{mbps(c.rate_down_kbps)}/{mbps(c.rate_up_kbps)} Mbps<span style={{ color: color.muted }}> · custom</span></span>
                 : c.plan_title
                 ? <span>{c.plan_title}{c.rate_down ? <span style={{ color: color.muted }}> · {Math.round(c.rate_down / 1000)}/{Math.round(c.rate_up / 1000)} Mbps</span> : null}</span>
+                : all.saved
+                ? <span>{mbps(all.saved.downKbps)}/{mbps(all.saved.upKbps)} Mbps<span style={{ color: color.muted }}> · all codes</span></span>
                 : <span style={{ color: color.muted }}>Default</span>,
             },
             {
