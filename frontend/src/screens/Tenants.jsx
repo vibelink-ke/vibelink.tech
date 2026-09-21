@@ -181,10 +181,14 @@ export default function Tenants() {
     }
   };
 
+  // A choice is only pending until Save is pressed, so the dropdown always shows what was picked.
+  const [pendingSender, setPendingSender] = useState({});
   const assignSender = async (t, gatewayId) => {
     setAssigning(t.id);
     try {
       await api.setTenantSmsGateway(t.id, gatewayId || null);
+      setPendingSender((p) => { const n = { ...p }; delete n[t.id]; return n; });
+      store.toast(`Sender saved for ${t.name}`);
       store.setCollection('tenants', (ts) => ts.map((x) =>
         (x.id === t.id ? { ...x, platform_sms_gateway_id: gatewayId || null } : x)));
     } catch (e) {
@@ -566,17 +570,26 @@ export default function Tenants() {
                 key: 'sender',
                 label: 'Sender',
                 align: 'right',
-                render: (t) => (
-                  <Select
-                    value={t.platform_sms_gateway_id ?? ''}
-                    disabled={assigning === t.id}
-                    onChange={(e) => assignSender(t, e.target.value)}
-                    options={[
-                      { value: '', label: `Default (${gateways.find((g) => g.isDefault)?.name ?? '—'})` },
-                      ...gateways.map((g) => ({ value: g.id, label: g.name })),
-                    ]}
-                  />
-                ),
+                render: (t) => {
+                  const saved = t.platform_sms_gateway_id ?? '';
+                  const picked = pendingSender[t.id] ?? saved;
+                  return (
+                    <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                      <Select
+                        value={picked}
+                        disabled={assigning === t.id}
+                        onChange={(e) => setPendingSender((p) => ({ ...p, [t.id]: e.target.value }))}
+                        options={[
+                          { value: '', label: `Default (${gateways.find((g) => g.isDefault)?.name ?? '—'})` },
+                          ...gateways.map((g) => ({ value: g.id, label: g.name })),
+                        ]}
+                      />
+                      <Button size="sm" variant="primary" disabled={picked === saved || assigning === t.id} onClick={() => assignSender(t, picked)}>
+                        {assigning === t.id ? 'Saving…' : 'Save'}
+                      </Button>
+                    </span>
+                  );
+                },
               },
             ]}
           />
