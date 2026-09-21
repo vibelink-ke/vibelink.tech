@@ -2063,7 +2063,36 @@ app.post('/radius/post-auth', wrap(async (req, res) => {
   const { withTenant } = await import('./db.js');
   await withTenant(v.tenant_id, (c) => startVoucherClock(c, v.tenant_id, username, mac));
   res.json({ ok: true });
+  releaseStaleVoucherSession(v.tenant_id, username, mac).catch((e) => console.warn('releaseStaleVoucherSession:', e.message));
 }));
+
+/**
+ * A code that is "in use" in our records is not necessarily online: the visitor may have left without logging
+ * out, and the router then keeps that session, refusing the code to anyone else, until its own idle timeout.
+ * When somebody signs in with a code that has already started, ask the tenant's hotspot routers whether it is
+ * really active. If the only sessions are stale, clear them and log the visitor in; if it is genuinely in use
+ * on another device, leave it. Best effort: an unreachable router changes nothing.
+ */
+async function releaseStaleVoucherSession(tenantId, code, mac) {
+  const { rows: [v] } = await pool.query("select status from vouchers where tenant_id=$1 and code=$2", [tenantId, code]);
+  if (v?.status !== 'in_use') return;
+  const { rows: routers } = await pool.query(
+    `select host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null and service_password_enc is not null`, [tenantId]);
+  if (!routers.length) return;
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  await Promise.allSettled(routers.map(async (r) => {
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 6 });
+      const out = await ros.releaseStaleHotspotUser(conn, { user: code, mac });
+      if (out.released) console.log(`voucher ${code}: freed ${out.released} stale session(s)${out.connected ? ' and logged the visitor in' : ''}`);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }));
+}
 
 // ── self-hosted servers ─────────────────────
 /**

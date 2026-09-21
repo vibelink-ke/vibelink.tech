@@ -2131,6 +2131,41 @@ export async function unbindDeviceByMac(conn, { mac }) {
 }
 
 /**
+ * A visitor typed a code that the router says is already in use. Ask the router whether it really is: a session
+ * that has moved no traffic for a couple of minutes belongs to a device that walked away without logging out, and
+ * the router keeps it (and refuses everyone else) until its own idle timeout. Such stale sessions are removed, and
+ * the visitor who asked is logged in. A session that is genuinely busy, or one belonging to this same device, is
+ * left alone — the code really is in use.
+ */
+export async function releaseStaleHotspotUser(conn, { user, mac, staleAfterSec = 120 }) {
+  const MAC = String(mac ?? '').toUpperCase();
+  const rows = await conn.write('/ip/hotspot/active/print', [`?user=${user}`]).catch(() => []);
+  const out = { found: rows.length, live: 0, released: 0, connected: false };
+  for (const a of rows) {
+    const rowMac = String(a['mac-address'] ?? '').toUpperCase();
+    if (MAC && rowMac === MAC) { out.live++; continue; }          // this same device: already connected
+    const idle = parseRouterOSDuration(a['idle-time']);
+    if (idle == null || idle < staleAfterSec) { out.live++; continue; }   // busy, or cannot tell: leave it
+    await cmd(conn, 'release stale hotspot session', '/ip/hotspot/active/remove', [`=.id=${idOf(a)}`]);
+    if (rowMac) {
+      const hosts = await conn.write('/ip/hotspot/host/print', [`?mac-address=${rowMac}`]).catch(() => []);
+      for (const h of hosts) await cmd(conn, 'clear stale hotspot host', '/ip/hotspot/host/remove', [`=.id=${idOf(h)}`]);
+    }
+    out.released++;
+  }
+  if (out.released && !out.live && MAC) {
+    const [host] = await conn.write('/ip/hotspot/host/print', [`?mac-address=${MAC}`]).catch(() => []);
+    if (host?.address && String(host.authorized) !== 'true') {
+      // The password of a voucher is its code (see issueVoucherAccess).
+      await cmd(conn, 'log the visitor in', '/ip/hotspot/active/login',
+        [`=user=${user}`, `=password=${user}`, `=ip=${host.address}`, `=mac-address=${MAC}`]);
+      out.connected = true;
+    }
+  }
+  return out;
+}
+
+/**
  * Every device this router has locked to a fixed IP — the admin-facing
  * counterpart to bindDeviceByMac/unbindDeviceByMac, which until now were
  * only ever called from the public hotspot voucher flow. bindDeviceByMac's
