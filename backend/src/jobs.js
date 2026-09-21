@@ -341,7 +341,7 @@ export async function expireAndSuspend() {
     `select id, tenant_id from subscribers
       where status='expired' and tenant_id in (${enabledTenants})`, ['expireAndSuspend']);
   for (const s of stillExpired) {
-    await walledGarden(pool, s.tenant_id, s.id)
+    await walledGarden(pool, s.tenant_id, s.id, { heal: true })
       .catch((e) => console.error('expireAndSuspend: walledGarden retry failed for', s.id, '—', e.message));
   }
   /**

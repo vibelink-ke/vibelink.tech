@@ -677,8 +677,32 @@ export async function clearFupThrottle(c, tenantId, subId) {
 const EXPIRED_RATE = '1k/1k';
 const BLOCK_LIST = 'ispblocking';
 
+/**
+ * Is it worth sending this subscriber's router a live message right now? Used by the repeat pass in
+ * expireAndSuspend, which runs every 30 seconds over everyone already expired: a CoA to someone who is offline is
+ * refused ("no such session") and one to a router that is not answering waits ~9 seconds to give up, so doing it
+ * for every expired client every half minute floods the router's log and stalls the job. Only somebody seen online
+ * recently gets one, and a router whose last message just failed is left alone for a few minutes.
+ */
+async function worthPushingLive(c, s) {
+  try {
+    const { rows: [r] } = await c.query(
+      `select coa_last_ok, coa_last_at from routers where host = $1`, [s.host]);
+    if (r && r.coa_last_ok === false && r.coa_last_at && Date.now() - new Date(r.coa_last_at).getTime() < 5 * 60000) return false;
+    const { rows: [online] } = await c.query(
+      `select 1 from radacct where username = $1 and acctstoptime is null
+          and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
+        union all
+        select 1 from live_sessions where tenant_id = $2 and username = $1 and seen_at > now() - interval '15 minutes'
+        limit 1`, [s.pppoe_user, s.tenant_id]);
+    return !!online;
+  } catch {
+    return true;   // cannot tell: behave as before rather than skip a cut-off
+  }
+}
+
 /** Cut a suspended/expired/paused subscriber off at the firewall and to near-zero speed. */
-export async function walledGarden(c, tenantId, subId) {
+export async function walledGarden(c, tenantId, subId, { heal = false } = {}) {
   const { rows: [s] } = await c.query(
     `select s.*, r.host, r.secret, r.pppoe_pool
        from subscribers s left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
@@ -711,7 +735,7 @@ export async function walledGarden(c, tenantId, subId) {
       [s.pppoe_user, address, tenantId]);
   }
 
-  if (s.host) {
+  if (s.host && (!heal || await worthPushingLive(c, s))) {
     // The address-list attribute takes effect on the live session immediately;
     // the disconnect (if the pool actually changed) is what makes the new
     // Framed-IP-Address apply without waiting for them to redial on their own.
