@@ -31,8 +31,9 @@ export default function Tenants() {
   const [editing, setEditing] = useState(null);
   // Remove (hide + suspend, keeps everything) and, from the Removed list, Delete permanently.
   // { ...tenant, mode: 'remove' | 'purge', confirmText, force, check }
-  // One PPPoE rate for every tenant at once.
+  // The PPPoE rate and the hotspot percentage, for every tenant at once.
   const [bulkRate, setBulkRate] = useState('');
+  const [bulkPct, setBulkPct] = useState('');
   const [bulkNew, setBulkNew] = useState(true);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
@@ -237,26 +238,37 @@ export default function Tenants() {
   const tenants = allTenants.filter((t) => !t.deleted_at);
   const removedTenants = allTenants.filter((t) => t.deleted_at);
 
-  // What tenants are charged per active PPPoE client today, so the effect of a change is plain.
-  const rateGroups = Object.entries(tenants.reduce((m, t) => {
-    const r = Number(t.pppoe_client_rate ?? 16);
+  // What tenants are charged today, so the effect of a change is plain.
+  const groupsOf = (get, dflt) => Object.entries(tenants.reduce((m, t) => {
+    const r = Number(get(t) ?? dflt);
     m[r] = (m[r] ?? 0) + 1;
     return m;
   }, {})).sort((a, b) => b[1] - a[1]);
+  const rateGroups = groupsOf((t) => t.pppoe_client_rate, 16);
+  const pctGroups = groupsOf((t) => t.hotspot_commission_pct, 3);
   const applyBulkRate = async () => {
-    const rate = Number(bulkRate);
-    if (bulkRate === '' || !Number.isFinite(rate) || rate < 0) return store.toast('Enter the rate in KES, zero or more');
-    const changing = tenants.filter((t) => Number(t.pppoe_client_rate ?? 16) !== rate).length;
+    const rate = bulkRate === '' ? null : Number(bulkRate);
+    const pct = bulkPct === '' ? null : Number(bulkPct);
+    if (rate === null && pct === null) return store.toast('Enter a PPPoE rate, a hotspot percentage, or both');
+    if (rate !== null && !(Number.isFinite(rate) && rate >= 0)) return store.toast('The PPPoE rate must be zero or more');
+    if (pct !== null && !(Number.isFinite(pct) && pct >= 0 && pct <= 100)) return store.toast('The hotspot percentage must be between 0 and 100');
+    const lines = [];
+    if (rate !== null) lines.push(`PPPoE: KES ${rate} per active client (${tenants.filter((t) => Number(t.pppoe_client_rate ?? 16) !== rate).length} tenants change)`);
+    if (pct !== null) lines.push(`Hotspot: ${pct}% of sales (${tenants.filter((t) => Number(t.hotspot_commission_pct ?? 3) !== pct).length} tenants change)`);
     if (!window.confirm(
-      `Set the PPPoE rate to KES ${rate} per active client for all ${tenants.length} tenants?\n\n`
-      + `${changing} tenant${changing === 1 ? '' : 's'} will change; the rest already have it. Statements already drawn keep their old rate.`
-      + (bulkNew ? '\nNew tenants will start on this rate too.' : ''))) return;
+      `Apply to all ${tenants.length} tenants?\n\n${lines.join('\n')}\n\nStatements already drawn keep their old rates.`
+      + (bulkNew ? '\nNew tenants will start on these too.' : ''))) return;
     setBulkBusy(true);
     try {
-      await api.setAllPppoeRates(rate, bulkNew);
-      store.setCollection('tenants', (ts) => ts.map((t) => (t.deleted_at ? t : { ...t, pppoe_client_rate: rate })));
-      store.toast(`PPPoE rate is now KES ${rate} for every tenant`);
+      await api.setAllRates({ pppoeClientRate: rate, hotspotCommissionPct: pct, alsoNew: bulkNew });
+      store.setCollection('tenants', (ts) => ts.map((t) => (t.deleted_at ? t : {
+        ...t,
+        ...(rate !== null ? { pppoe_client_rate: rate } : {}),
+        ...(pct !== null ? { hotspot_commission_pct: pct } : {}),
+      })));
+      store.toast('Rates updated for every tenant');
       setBulkRate('');
+      setBulkPct('');
     } catch (e) {
       store.toast(e.message);
     } finally {
@@ -649,19 +661,22 @@ export default function Tenants() {
       )}
 
       <Card
-        title="PPPoE rate for all tenants"
-        subtitle="What every tenant is charged per active PPPoE client each month. Sets it for everyone at once; a single tenant can still be changed under Edit."
+        title="Rates for all tenants"
+        subtitle="What every tenant is charged each month: a rate per active PPPoE client and a percentage of hotspot sales. Fill in either or both and apply to everyone at once; a single tenant can still be changed under Edit."
       >
         <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <Field label="Rate (KES per active client)" hint={rateGroups.length ? `Now: ${rateGroups.map(([r, n]) => `KES ${r} (${n} tenant${n === 1 ? '' : 's'})`).join(', ')}` : undefined}>
-            <Input type="number" min="0" value={bulkRate} onChange={(e) => setBulkRate(e.target.value)} placeholder="e.g. 16" style={{ width: 170 }} />
+          <Field label="PPPoE rate (KES per active client)" hint={rateGroups.length ? `Now: ${rateGroups.map(([r, n]) => `KES ${r} (${n})`).join(', ')}` : undefined}>
+            <Input type="number" min="0" value={bulkRate} onChange={(e) => setBulkRate(e.target.value)} placeholder="e.g. 16" style={{ width: 190 }} />
+          </Field>
+          <Field label="Hotspot commission (% of sales)" hint={pctGroups.length ? `Now: ${pctGroups.map(([r, n]) => `${r}% (${n})`).join(', ')}` : undefined}>
+            <Input type="number" min="0" max="100" step="0.1" value={bulkPct} onChange={(e) => setBulkPct(e.target.value)} placeholder="e.g. 3" style={{ width: 190 }} />
           </Field>
           <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 13, paddingBottom: 10, cursor: 'pointer' }}>
             <input type="checkbox" checked={bulkNew} onChange={(e) => setBulkNew(e.target.checked)} />
-            Also use it for tenants created from now on
+            Also use for tenants created from now on
           </label>
           <div style={{ paddingBottom: 6 }}>
-            <Button variant="primary" onClick={applyBulkRate} disabled={bulkBusy || bulkRate === ''}>
+            <Button variant="primary" onClick={applyBulkRate} disabled={bulkBusy || (bulkRate === '' && bulkPct === '')}>
               {bulkBusy ? 'Applying…' : `Apply to all ${tenants.length} tenants`}
             </Button>
           </div>

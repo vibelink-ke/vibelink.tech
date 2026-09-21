@@ -11011,20 +11011,31 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
 }));
 
 /**
- * One PPPoE rate (KES per active client per month) for every tenant at once. Statements already drawn for
- * closed months keep the rate they were drawn with; this changes what is charged from now on. Tenants on a flat
- * monthly fee are unaffected in what they pay (their statement ignores the rate) but their stored rate is updated
- * too. "alsoNew" makes it the starting rate for tenants created later.
+ * The rates every tenant is charged, set for all of them at once: the PPPoE rate (KES per active client per
+ * month) and/or the hotspot commission (% of hotspot sales). Either may be left out. Statements already drawn
+ * for closed months keep the rate they were drawn with; this changes what is charged from now on. Tenants on a
+ * flat monthly fee pay the same (their statement ignores both) but their stored rates are updated too.
+ * "alsoNew" makes them the starting rates for tenants created later. Removed tenants are left alone.
  */
 app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
-  const rate = Number(req.body?.pppoeClientRate);
-  if (!(rate >= 0 && rate <= 100000)) return res.status(400).json({ error: 'The rate must be zero or more.' });
-  const { rowCount } = await pool.query('update tenants set pppoe_client_rate=$1 where deleted_at is null', [rate]);
+  const has = (k) => req.body?.[k] !== undefined && req.body?.[k] !== null && req.body?.[k] !== '';
+  const pppoe = has('pppoeClientRate') ? Number(req.body.pppoeClientRate) : null;
+  const hotspot = has('hotspotCommissionPct') ? Number(req.body.hotspotCommissionPct) : null;
+  if (pppoe === null && hotspot === null) return res.status(400).json({ error: 'Enter a PPPoE rate, a hotspot percentage, or both.' });
+  if (pppoe !== null && !(pppoe >= 0 && pppoe <= 100000)) return res.status(400).json({ error: 'The PPPoE rate must be zero or more.' });
+  if (hotspot !== null && !(hotspot >= 0 && hotspot <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
+
+  const sets = [];
+  const vals = [];
+  if (pppoe !== null) { vals.push(pppoe); sets.push(`pppoe_client_rate=$${vals.length}`); }
+  if (hotspot !== null) { vals.push(hotspot); sets.push(`hotspot_commission_pct=$${vals.length}`); }
+  const { rowCount } = await pool.query(`update tenants set ${sets.join(', ')} where deleted_at is null`, vals);
   if (req.body?.alsoNew) {
-    // a validated number, formatted here — DDL cannot take a parameter
-    await pool.query(`alter table tenants alter column pppoe_client_rate set default ${rate.toFixed(2)}`);
+    // validated numbers, formatted here — DDL cannot take a parameter
+    if (pppoe !== null) await pool.query(`alter table tenants alter column pppoe_client_rate set default ${pppoe.toFixed(2)}`);
+    if (hotspot !== null) await pool.query(`alter table tenants alter column hotspot_commission_pct set default ${hotspot.toFixed(2)}`);
   }
-  res.json({ ok: true, updated: rowCount, pppoeClientRate: rate, alsoNew: !!req.body?.alsoNew });
+  res.json({ ok: true, updated: rowCount, pppoeClientRate: pppoe, hotspotCommissionPct: hotspot, alsoNew: !!req.body?.alsoNew });
 }));
 
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
