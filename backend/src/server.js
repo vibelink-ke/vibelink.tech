@@ -9311,6 +9311,36 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
 }));
 
 /**
+ * The Hotspot screen's own Dashboard tab — "Sold today" / "Revenue today" —
+ * a third spot with the same bug the main Dashboard and the line above it
+ * already had fixed: derived client-side from store.vouchers (capped at
+ * 1000, GET /api/vouchers) and store.mpesaTx (capped at 500, GET
+ * /api/payments), both of which a genuinely busy hotspot blows through
+ * before a single day is out. Real count/sum queries, no cap, bucketed by
+ * Nairobi midnight the same way GET /api/dashboard/collections is.
+ */
+app.get('/api/hotspot/today', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const now = new Date();
+  const todayStart = nairobiMidnight(now, 0);
+  const tomorrowStart = nairobiMidnight(now, 1);
+
+  const { rows: [rev] } = await pool.query(
+    `select coalesce(sum(amount), 0)::float8 as revenue
+       from payments
+      where tenant_id=$1 and status='applied' and voucher_id is not null
+        and received_at >= $2 and received_at < $3`,
+    [req.tenant.id, todayStart, tomorrowStart]);
+
+  const { rows: [sold] } = await pool.query(
+    `select count(*)::int as sold
+       from vouchers
+      where tenant_id=$1 and created_at >= $2 and created_at < $3`,
+    [req.tenant.id, todayStart, tomorrowStart]);
+
+  res.json({ revenue: rev.revenue, sold: sold.sold });
+}));
+
+/**
  * Payment monitoring by site — how much each physical router has actually
  * collected, PPPoE and hotspot combined.
  *

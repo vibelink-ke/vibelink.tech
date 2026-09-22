@@ -19,23 +19,20 @@ export default function HotspotDashboard() {
   const unused = vouchers.filter((v) => v.status === 'unused');
   const expired = vouchers.filter((v) => v.status === 'expired');
 
-  // Revenue today summed every applied hotspot payment ever returned, with
-  // no date filter — it never actually reset at midnight, the same bug the
-  // main Dashboard's Collected Today tile had.
-  const revenue = (store.mpesaTx ?? [])
-    .filter((p) => {
-      if (!p.voucher_id || p.status !== 'applied') return false;
-      const at = p.received_at ? new Date(p.received_at) : null;
-      return at && at.toDateString() === new Date().toDateString();
-    })
-    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
-
-  // Issued since midnight. A voucher exists because somebody paid for it, so
-  // this is the day's hotspot sales without needing a separate tally.
-  const soldToday = (store.vouchers ?? []).filter((v) => {
-    const at = v.created_at ? new Date(v.created_at) : null;
-    return at && at.toDateString() === new Date().toDateString();
-  }).length;
+  // Revenue today / sold today — a real count/sum query (GET /api/hotspot/today),
+  // not derived from store.mpesaTx (capped at 500, GET /api/payments) or
+  // store.vouchers (capped at 1000, GET /api/vouchers). Both caps are well
+  // within reach on a single busy day, and silently undercounting either one
+  // read as "today" losing transactions it actually had.
+  const [today, setToday] = useState(null);
+  useEffect(() => {
+    const load = () => api.hotspotToday().then(setToday).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
+  const revenue = today?.revenue ?? 0;
+  const soldToday = today?.sold ?? 0;
 
   /**
    * "Online now" reads from voucher.status === 'in_use', which is only as
