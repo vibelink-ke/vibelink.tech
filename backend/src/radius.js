@@ -300,7 +300,7 @@ export async function applyContentionQueue(s) {
     });
     await ros.ensureContentionMember(conn, {
       poolName: `contention-${s.plan_id}`, pppoeUser: s.pppoe_user,
-      rateDown: s.rate_down, rateUp: s.rate_up,
+      rateDown: s.rate_down, rateUp: s.rate_up, customerName: s.name,
     });
   } finally {
     if (conn) ros.close(conn);

@@ -1137,13 +1137,18 @@ export async function ensureContentionPool(conn, { name, rateDown, rateUp }) {
  * own max-limit, which alone would just be a second copy of the RADIUS
  * limit.
  */
-export async function ensureContentionMember(conn, { poolName, pppoeUser, rateDown, rateUp }) {
+export async function ensureContentionMember(conn, { poolName, pppoeUser, rateDown, rateUp, customerName }) {
   const target = `<pppoe-${pppoeUser}>`;
   const fields = [
     `=target=${target}`,
     `=max-limit=${rateUp}k/${rateDown}k`,
     `=parent=${poolName}`,
-    `=comment=${managed('ispContention member')}`,
+    // Customer's full name alongside the usual managed-marker, when there is one — a technician
+    // looking at Winbox's queue list otherwise sees only the pppoe- login (e.g. "demo1000"), which
+    // tells nobody who that actually is without cross-referencing the app. name= itself stays the
+    // stable pppoeUser identifier (nothing here relies on it, but keeping it short and plain is
+    // still the safer choice for a RouterOS identifier than a full name with spaces would be).
+    `=comment=${managed(customerName ? `ispContention member — ${customerName}` : 'ispContention member')}`,
   ];
   const rows = await conn.write('/queue/simple/print', [`?target=${target}`]);
   const found = rows[0];
