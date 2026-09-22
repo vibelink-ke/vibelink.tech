@@ -460,11 +460,30 @@ export default function MapScreen() {
         const fill = live
           ? (c.online ? color.green : '#9aa39c')
           : (STATUS_COLOUR[c.status] ?? color.muted);
-        L.marker([c._lat, c._lng], { icon: dot(fill, '#fff'), interactive: !(editMode && tool), zIndexOffset: -200 })
+        const m = L.marker([c._lat, c._lng], {
+          icon: dot(fill, '#fff'),
+          // A pin dropped in the wrong spot (a bad address, a guess that missed) is dragged
+          // straight rather than re-typed — same edit-mode gate as network nodes, so it can't
+          // happen by an accidental bump while just browsing the map.
+          draggable: editMode && !tool,
+          interactive: !(editMode && tool),
+          zIndexOffset: -200,
+        })
           .bindPopup(
             `<strong>${esc(c.name)}</strong><br>${esc(c.account_code)}<br>`
             + `${esc(c.location)}<br>${esc(c.status)}`)
           .addTo(layer.current);
+        m.on('dragend', async () => {
+          const p = m.getLatLng();
+          try {
+            await api.updateSubscriber(c.id, { lat: p.lat, lng: p.lng });
+            store.setCollection('clients', (cs) => cs.map((x) => (x.id === c.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
+            store.toast(`${c.name}'s location updated`);
+          } catch (err) {
+            store.toast(`Could not move it: ${err.message}`);
+            m.setLatLng([c._lat, c._lng]);   // snap back — the store never changed, so this is the truth
+          }
+        });
       }
     }
 
