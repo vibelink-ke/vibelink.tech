@@ -3681,23 +3681,62 @@ app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
  * earns by being chosen, never just by being assigned the work).
  */
 app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(async (req, res) => {
+  /**
+   * Three CTEs, each aggregated down to one row per staff member before anything is joined to `staff` — a plain
+   * join of leads straight to referral_commissions (the previous shape of this query) multiplies rows together
+   * (N leads × M commission payments for the same person), which silently inflated every count() here for anyone
+   * with more than one of either. Aggregating each piece separately first, then joining single rows, cannot fan out.
+   */
   const { rows } = await pool.query(
-    `select st.id, st.name,
-            count(l.id) filter (where l.assigned_to = st.id) as leads_assigned,
-            count(l.id) filter (where l.assigned_to = st.id and l.status = 'won') as leads_won,
-            count(l.id) filter (
-              where l.assigned_to = st.id and l.status = 'won'
-                and l.won_at >= date_trunc('month', now())
-            ) as won_this_month,
-            coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month,
-            coalesce(sum(rc.amount), 0) as earned_total
+    `with sub_value as (
+       -- What each subscriber has actually paid — real money collected, not a plan's list price.
+       select subscriber_id,
+              sum(amount) filter (where status = 'applied') as total,
+              sum(amount) filter (where status = 'applied' and received_at >= date_trunc('month', now())) as this_month
+         from payments
+        where tenant_id = $1
+        group by subscriber_id
+     ),
+     lead_stats as (
+       -- brought_* is the whole point of "Employee of the month": not a count of leads, but what the clients this
+       -- person actually signed up (leads.subscriber_id, set once a lead becomes a client) have paid the business —
+       -- this month, and lifetime.
+       select l.assigned_to as staff_id,
+              count(*) as leads_assigned,
+              count(*) filter (where l.status = 'won') as leads_won,
+              count(*) filter (where l.status = 'won' and l.won_at >= date_trunc('month', now())) as won_this_month,
+              coalesce(sum(sv.total), 0) as brought_total,
+              coalesce(sum(sv.this_month), 0) as brought_this_month
+         from leads l
+         left join sub_value sv on sv.subscriber_id = l.subscriber_id
+        where l.tenant_id = $1 and l.assigned_to is not null
+        group by l.assigned_to
+     ),
+     comm_stats as (
+       -- Separate from the above on purpose: commission is only ever earned by whoever was explicitly named as a
+       -- lead's referrer (every staff member is one automatically — ensureStaffReferrer), never by being assigned
+       -- the work of chasing it.
+       select r.staff_id,
+              coalesce(sum(rc.amount), 0) as earned_total,
+              coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month
+         from referrers r
+         left join referral_commissions rc on rc.referrer_id = r.id
+        where r.tenant_id = $1 and r.staff_id is not null
+        group by r.staff_id
+     )
+     select st.id, st.name,
+            coalesce(ls.leads_assigned, 0) as leads_assigned,
+            coalesce(ls.leads_won, 0) as leads_won,
+            coalesce(ls.won_this_month, 0) as won_this_month,
+            coalesce(ls.brought_this_month, 0) as brought_this_month,
+            coalesce(ls.brought_total, 0) as brought_total,
+            coalesce(cs.earned_this_month, 0) as earned_this_month,
+            coalesce(cs.earned_total, 0) as earned_total
        from staff st
-       left join leads l on l.tenant_id = st.tenant_id and l.assigned_to = st.id
-       left join referrers r on r.tenant_id = st.tenant_id and r.staff_id = st.id
-       left join referral_commissions rc on rc.referrer_id = r.id
+       left join lead_stats ls on ls.staff_id = st.id
+       left join comm_stats cs on cs.staff_id = st.id
       where st.tenant_id = $1 and st.role <> 'platform_admin'
-      group by st.id, st.name
-      order by won_this_month desc, leads_won desc`,
+      order by brought_this_month desc, won_this_month desc`,
     [req.tenant.id]);
   res.json(rows);
 }));
@@ -10313,11 +10352,19 @@ app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req
   const { rows: [before] } = sets.includes('assigned_to')
     ? await pool.query('select assigned_to from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
     : { rows: [null] };
+  const vals = [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])];
+  const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
+  if (sets.includes('status')) {
+    // "Employee of the month" (Team jobs) ranks on jobs actually finished this month — resolved_at is when a
+    // ticket first turned 'resolved', same idea as leads.won_at just above: set once, cleared if it is reopened,
+    // so a ticket resolved again later counts again, in the month it is actually finished.
+    setClauses.push(`resolved_at = case when $${sets.indexOf('status') + 3}::text = 'resolved' then coalesce(resolved_at, now()) else null end`);
+  }
   const { rows: [t] } = await pool.query(
-    `update tickets set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}, updated_at=now()
+    `update tickets set ${setClauses.join(', ')}, updated_at=now()
      ${resetNotified ? ', sla_breach_notified=false' : ''}
      where tenant_id=$1 and id=$2 returning *`,
-    [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
+    vals);
   if (!t) return res.status(404).json({ error: 'not found' });
   res.json(t);
   if (sets.includes('assigned_to') && t.assigned_to && t.assigned_to !== before?.assigned_to) {

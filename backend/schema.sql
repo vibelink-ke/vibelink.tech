@@ -2879,3 +2879,8 @@ insert into referrers (tenant_id, staff_id, name, phone, commission_type, commis
 select st.tenant_id, st.id, st.name, st.phone, 'percent', 5, 'Every staff member is a referrer by default — set their own rate here'
   from staff st
  where not exists (select 1 from referrers r where r.tenant_id = st.tenant_id and r.staff_id = st.id);
+
+-- When a ticket first turned 'resolved' — what "Employee of the month" (Team jobs) ranks on: the total jobs a
+-- staff member has actually finished, not merely been assigned. See PATCH /api/tickets/:id.
+alter table tickets add column if not exists resolved_at timestamptz;
+update tickets set resolved_at = updated_at where status = 'resolved' and resolved_at is null;

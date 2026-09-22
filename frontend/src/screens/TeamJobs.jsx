@@ -27,10 +27,12 @@ export default function TeamJobs() {
 
   // One row per staff member (including "Unassigned"), each with its own open/in-progress/resolved counts — the
   // workload and progress the owner actually wants at a glance, before drilling into any one person's list.
+  const monthStart = useMemo(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d; }, []);
+  const yearStart = useMemo(() => { const d = new Date(); d.setMonth(0, 1); d.setHours(0, 0, 0, 0); return d; }, []);
   const byPerson = useMemo(() => {
     const groups = new Map();
     const bump = (id, name) => {
-      if (!groups.has(id)) groups.set(id, { id, name, open: 0, in_progress: 0, resolved: 0, total: 0 });
+      if (!groups.has(id)) groups.set(id, { id, name, open: 0, in_progress: 0, resolved: 0, resolvedThisMonth: 0, resolvedThisYear: 0, total: 0 });
       return groups.get(id);
     };
     for (const t of tickets) {
@@ -39,9 +41,25 @@ export default function TeamJobs() {
         : bump('__unassigned', 'Unassigned');
       g[t.status] = (g[t.status] ?? 0) + 1;
       g.total += 1;
+      // "Employee of the month"/"of the year": the total of work actually finished — a job resolved once and
+      // left resolved (resolved_at is set once, the first time, and cleared only if it is reopened — see
+      // PATCH /api/tickets/:id).
+      if (t.resolved_at && new Date(t.resolved_at) >= monthStart) g.resolvedThisMonth += 1;
+      if (t.resolved_at && new Date(t.resolved_at) >= yearStart) g.resolvedThisYear += 1;
     }
     return [...groups.values()].sort((a, b) => (b.open + b.in_progress) - (a.open + a.in_progress));
-  }, [tickets, staffById]);
+  }, [tickets, staffById, monthStart, yearStart]);
+
+  const topOfMonth = useMemo(() => {
+    const eligible = byPerson.filter((p) => p.id !== '__unassigned');
+    const top = [...eligible].sort((a, b) => b.resolvedThisMonth - a.resolvedThisMonth)[0];
+    return top && top.resolvedThisMonth > 0 ? top : null;
+  }, [byPerson]);
+  const topOfYear = useMemo(() => {
+    const eligible = byPerson.filter((p) => p.id !== '__unassigned');
+    const top = [...eligible].sort((a, b) => b.resolvedThisYear - a.resolvedThisYear)[0];
+    return top && top.resolvedThisYear > 0 ? top : null;
+  }, [byPerson]);
 
   const visible = useMemo(() => tickets
     .filter((t) => staffFilter === 'all' || (staffFilter === '__unassigned' ? !t.assigned_to : t.assigned_to === staffFilter))
@@ -54,6 +72,31 @@ export default function TeamJobs() {
       title="Team jobs"
       subtitle="Every job across the team, who it is assigned to, and how far along it is"
     >
+      {(topOfMonth || topOfYear) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
+          {topOfMonth && (
+            <Card title="🏆 Employee of the month">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{topOfMonth.name}</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
+                  {topOfMonth.resolvedThisMonth} job{topOfMonth.resolvedThisMonth === 1 ? '' : 's'} finished this month
+                </span>
+              </div>
+            </Card>
+          )}
+          {topOfYear && (
+            <Card title="🏆 Employee of the year">
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 20, fontWeight: 700 }}>{topOfYear.name}</span>
+                <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
+                  {topOfYear.resolvedThisYear} job{topOfYear.resolvedThisYear === 1 ? '' : 's'} finished this year
+                </span>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))', gap: 12 }}>
         {byPerson.map((p) => (
           <div
@@ -66,7 +109,7 @@ export default function TeamJobs() {
           >
             <span style={{ fontSize: 13.5, fontWeight: 600, color: p.id === '__unassigned' ? color.rust : color.ink }}>{p.name}</span>
             <span style={{ fontSize: 12, color: color.muted }}>
-              {p.open + p.in_progress} open{p.in_progress ? ` (${p.in_progress} in progress)` : ''} · {p.resolved} resolved
+              {p.open + p.in_progress} open{p.in_progress ? ` (${p.in_progress} in progress)` : ''} · {p.resolvedThisMonth} finished this month
             </span>
             <div style={{ height: 6, borderRadius: radius.pill, background: color.tileBg, overflow: 'hidden', display: 'flex' }}>
               {p.total > 0 && (

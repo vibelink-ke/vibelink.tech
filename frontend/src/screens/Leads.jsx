@@ -783,26 +783,14 @@ export default function Leads() {
           <Card title="Performance"><span style={{ fontSize: 13, color: color.muted }}>No staff to show yet.</span></Card>
         ) : (
           <>
-            {(() => {
-              // A competition, not a payout: ranked on leads won this month, not on commission — commission
-              // belongs only to whoever was explicitly named as a lead's referrer (see the "All-time" table).
-              const top = [...perf].sort((a, b) => Number(b.won_this_month) - Number(a.won_this_month))[0];
-              return top && Number(top.won_this_month) > 0 && (
-                <Card title="🏆 Employee of the month">
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 20, fontWeight: 700 }}>{top.name}</span>
-                    <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
-                      {top.won_this_month} lead{top.won_this_month === 1 ? '' : 's'} won this month
-                    </span>
-                  </div>
-                </Card>
-              );
-            })()}
-
-            <Card title="Leaderboard" subtitle="Ranked by leads won this month — a competition, not a payout">
+            {/* Who is actually finishing the work (jobs assigned and resolved) competes as "Employee of the month"
+                on Team jobs, not here — this is about the money leads have brought in, and who earns commission
+                for it, which is a different question with a different, deliberately chosen answer (see the
+                comment on PATCH /api/leads/:id). */}
+            <Card title="Sales leaderboard" subtitle="Ranked by what the leads assigned to them have actually brought in this month">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
-                  const max = Math.max(1, ...perf.map((p) => Number(p.won_this_month)));
+                  const max = Math.max(1, ...perf.map((p) => Number(p.brought_this_month)));
                   return perf.map((p, i) => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ width: 18, fontSize: 12.5, color: color.muted, fontFamily: font.mono }}>{i + 1}</span>
@@ -812,23 +800,25 @@ export default function Leads() {
                       <div style={{ flex: 1, height: 20, background: color.tileBg, borderRadius: radius.pill, overflow: 'hidden' }}>
                         <div
                           style={{
-                            width: `${(Number(p.won_this_month) / max) * 100}%`, height: '100%',
+                            width: `${(Number(p.brought_this_month) / max) * 100}%`, height: '100%',
                             background: i === 0 ? color.green : color.neutralInk, borderRadius: radius.pill,
                             transition: 'width .3s',
                           }}
                         />
                       </div>
-                      <span style={{ width: 70, textAlign: 'right', fontSize: 13, fontFamily: font.mono, fontWeight: 600 }}>
-                        {p.won_this_month}/{p.leads_assigned}
+                      <span style={{ width: 90, textAlign: 'right', fontSize: 13, fontFamily: font.mono, fontWeight: 600 }}>
+                        {kes(p.brought_this_month)}
                       </span>
-                      <span style={{ width: 70, textAlign: 'right', fontSize: 12, color: color.muted }}>won this month</span>
+                      <span style={{ width: 70, textAlign: 'right', fontSize: 12, color: color.muted }}>
+                        {p.won_this_month}/{p.leads_assigned} won
+                      </span>
                     </div>
                   ));
                 })()}
               </div>
             </Card>
 
-            <Card title="All-time" subtitle="Lifetime leads assigned/won, and commission earned as a named referrer">
+            <Card title="All-time" subtitle="Lifetime leads, what they have brought in, and commission earned as a named referrer">
               <Table
                 rowKey={(p) => p.id}
                 rows={perf}
@@ -839,6 +829,10 @@ export default function Leads() {
                   {
                     key: 'rate', label: 'Conversion', align: 'right',
                     render: (p) => `${p.leads_assigned > 0 ? Math.round((p.leads_won / p.leads_assigned) * 100) : 0}%`,
+                  },
+                  {
+                    key: 'brought_total', label: 'Brought to the company', align: 'right',
+                    render: (p) => kes(p.brought_total),
                   },
                   {
                     key: 'earned_total', label: 'Commission (as referrer)', align: 'right',
