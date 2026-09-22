@@ -6504,6 +6504,23 @@ async function repushRadiusSecret(tenantId, routerId) {
   }
 }
 
+/**
+ * Just the router's position on the Map screen — dragging its pin there needs a
+ * plain PATCH, not the full PUT /api/routers/:id below (which treats an empty
+ * field on any of its several other settings as "leave that alone", a contract
+ * that doesn't fit a two-field drag-and-drop write).
+ */
+app.patch('/api/routers/:id/location', requirePermission('routers.edit'), wrap(async (req, res) => {
+  const lat = coord(req.body?.lat, 90);
+  const lng = coord(req.body?.lng, 180);
+  if (lat === null || lng === null) return res.status(400).json({ error: 'That is not a place on the map.' });
+  const { rows: [r] } = await pool.query(
+    'update routers set lat=$3, lng=$4 where id=$1 and tenant_id=$2 returning id, lat::float8 as lat, lng::float8 as lng',
+    [req.params.id, req.tenant.id, lat, lng]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  res.json(r);
+}));
+
 app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
   const { name, host, secret, apiPort, role, nasIdentifier, upstreamProvider } = req.body ?? {};
   // A typed-in value overrides auto-detection until the operator clears the

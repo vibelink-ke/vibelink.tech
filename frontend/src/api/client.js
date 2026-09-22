@@ -357,6 +357,7 @@ export const api = {
   tenantActivate: (id, days) => post(`/api/tenants/${id}/activate`, { days }),
   tenantInstanceKey: (id) => post(`/api/tenants/${id}/instance-key`, {}),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),
+  updateRouterLocation: (id, ll) => patch(`/api/routers/${id}/location`, ll),
   detectRouterUpstream: (id) => post(`/api/routers/${id}/detect-upstream`, {}),
   autoconfigRouter: (id, opts = {}) => post(`/api/routers/${id}/autoconfig`, opts),
   routerInterfaces: (id, creds = {}) => post(`/api/routers/${id}/interfaces`, creds),

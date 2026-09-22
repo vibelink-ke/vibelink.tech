@@ -466,6 +466,7 @@ export default function MapScreen() {
           icon: down
             ? dot(color.rust, '#fff', 'vl-pulse')
             : dot(r.status === 'up' ? color.ink : '#9aa39c', tool?.from === ref ? '#e08a00' : '#fff'),
+          draggable: editMode && !tool,
           zIndexOffset: down ? 1000 : 0,
         }).addTo(layer.current);
         m.bindPopup(
@@ -473,6 +474,17 @@ export default function MapScreen() {
           + (down ? `<b style="color:${color.rust}">Offline</b> — since ${esc(ago(r.offline_since ?? r.last_seen))}`
             : r.status === 'up' ? 'Online' : 'Status not known yet'));
         m.on('click', () => { if (endpointClick(`r:${r.id}`)) m.closePopup(); });
+        m.on('dragend', async () => {
+          const p = m.getLatLng();
+          try {
+            await api.updateRouterLocation(r.id, { lat: p.lat, lng: p.lng });
+            store.setCollection('routers', (rs) => rs.map((x) => (x.id === r.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
+            store.toast(`${r.name}'s location updated`);
+          } catch (err) {
+            store.toast(`Could not move it: ${err.message}`);
+            m.setLatLng([r._lat, r._lng]);
+          }
+        });
       }
     }
 
@@ -718,7 +730,7 @@ export default function MapScreen() {
       )}
 
       {editMode && (
-        <Card title="Draw your network" subtitle="Pick what to place, then click the map. Drag a placed node to move it; click one to edit or remove it.">
+        <Card title="Draw your network" subtitle="Pick what to place, then click the map. Drag a customer, router or placed node to correct its location; click a node or link to edit or remove it.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {['fibre', 'wireless', 'site'].map((group) => (
               <div key={group} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
