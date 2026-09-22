@@ -40,18 +40,9 @@ export const NAV_SECTIONS = [
       // same screen) rather than as a separate page — a referrer is where a
       // lead's "referral" channel actually points, not a separate concern,
       // so one count covers both.
-      { to: '/leads', label: 'Leads', count: (s) => s.leads.length + s.referrers.length },
-      {
-        to: '/field-tech',
-        label: 'My jobs',
-        count: (s) => s.tickets.filter((t) => t.assigned_to === s.session?.id && t.status !== 'resolved').length,
-      },
-      {
-        to: '/team-jobs',
-        label: 'Team jobs',
-        perm: 'tickets.view_team',
-        count: (s) => s.tickets.filter((t) => t.status !== 'resolved').length,
-      },
+      // Leads, My jobs and Team jobs together, on their own tabs — see Work.jsx. The badge counts leads (its
+      // default, first tab), the same way Hotspot's own nav entry counts vouchers, its most-visited tab.
+      { to: '/work', label: 'Leads & jobs', count: (s) => s.leads.length + s.referrers.length },
       { to: '/messaging', label: 'Messaging' },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],
