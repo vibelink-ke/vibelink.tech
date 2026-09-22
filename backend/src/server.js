@@ -10,6 +10,7 @@ import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight } from './nairobi-time.js';
+import { DEMO_SUBDOMAIN } from './demo-tenant.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
@@ -4752,35 +4753,54 @@ app.get('/api/routers/tunnel-info', wrap(async (req, res) => {
 // were derived from a row count, so tenants collided with each other and a deleted
 // router's address was immediately handed to the next one.
 app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res) => {
-  const { ensureSubnet, nextHostIp, SERVER_IP } = await import('./tunnel.js');
+  const { ensureSubnet, nextHostIp, prefixOf, SERVER_IP } = await import('./tunnel.js');
 
   const subnet = await ensureSubnet(req.tenant.id);
-  const nasIp = await nextHostIp(req.tenant.id);
-  const token = crypto.randomBytes(6).toString('hex');
-  // Name from the address, so it stays unique and stays put if rows are removed.
-  /**
-   * Unique across the whole platform, not just this tenant.
-   *
-   * The name was router-<last octet>, and ovpn_clients is unique per tenant —
-   * so every tenant's first router was called "router-2". OpenVPN knows only
-   * the username when a client connects, and client-connect.sh looks the
-   * address up by that name alone, so it could return another tenant's
-   * allocation: the router dialled in, got an address from somebody else's
-   * block, and the address shown here never matched the one on the router.
-   *
-   * Each tenant owns a distinct /24, so the block and the host octet together
-   * are unique and still readable — router-3-2 is the second router in
-   * 10.50.3.0/24.
-   */
-  const octets = nasIp.split('.');
-  const username = `router-${octets[2]}-${octets[3]}`;
 
-  // Stored hashed; the plaintext below is shown once, in the script, and then gone.
-  await pool.query(
-    `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip)
-     values ($1,$2,crypt($3, gen_salt('bf')),$4)`,
-    [req.tenant.id, username, token, nasIp]
-  );
+  /**
+   * The demo tenant (demo-tenant.js) has no router that will ever actually dial in — this button
+   * exists there purely for a prospect to look at, not to use. nextHostIp() plus a real insert
+   * would claim one more address out of its (finite, 253-host) subnet and leave one more real,
+   * permanently hashed credential on file per click — ovpn_clients is deliberately not one of the
+   * tables the hourly reset wipes (see that file's own comment on why), so on a demo that gets
+   * clicked a lot, nothing would ever reclaim either. A fixed, unconsumed placeholder inside the
+   * tenant's real subnet costs nothing and still produces a script that reads exactly like a real
+   * one — nothing else downstream needs to know the difference.
+   */
+  const isDemo = req.tenant.subdomain === DEMO_SUBDOMAIN;
+  let nasIp, token, username;
+  if (isDemo) {
+    nasIp = `${prefixOf(subnet)}.99`;
+    token = 'demo-token';
+    username = 'router-demo-99';
+  } else {
+    nasIp = await nextHostIp(req.tenant.id);
+    token = crypto.randomBytes(6).toString('hex');
+    // Name from the address, so it stays unique and stays put if rows are removed.
+    /**
+     * Unique across the whole platform, not just this tenant.
+     *
+     * The name was router-<last octet>, and ovpn_clients is unique per tenant —
+     * so every tenant's first router was called "router-2". OpenVPN knows only
+     * the username when a client connects, and client-connect.sh looks the
+     * address up by that name alone, so it could return another tenant's
+     * allocation: the router dialled in, got an address from somebody else's
+     * block, and the address shown here never matched the one on the router.
+     *
+     * Each tenant owns a distinct /24, so the block and the host octet together
+     * are unique and still readable — router-3-2 is the second router in
+     * 10.50.3.0/24.
+     */
+    const octets = nasIp.split('.');
+    username = `router-${octets[2]}-${octets[3]}`;
+
+    // Stored hashed; the plaintext below is shown once, in the script, and then gone.
+    await pool.query(
+      `insert into ovpn_clients (tenant_id, username, password_hash, assigned_ip)
+       values ($1,$2,crypt($3, gen_salt('bf')),$4)`,
+      [req.tenant.id, username, token, nasIp]
+    );
+  }
 
   // Detected from the deployment; the caller may still override, because on a
   // bench the server is just an address on the same LAN.
@@ -4949,6 +4969,20 @@ app.post('/api/routers/ovpn-script', requireRole('owner'), wrap(async (req, res)
  * enforces the isolation; it is entirely a property of that firewall chain.
  */
 app.post('/api/routers/vpn-access', requireRole('owner'), wrap(async (req, res) => {
+  /**
+   * Unlike the router-onboarding script above, this one is not text a router pastes and dials —
+   * it is a complete, real OpenVPN client profile (the tunnel's own CA cert plus a real,
+   * permanently valid credential) that a person imports and actually connects with. Minting a
+   * real one for the demo tenant, whose login is public and documented, would hand anyone who
+   * signs in a working, unexpiring foothold on the platform's real internal tunnel network —
+   * confined to this tenant's own routers by the firewall (see the comment above), but a real
+   * peer on real infrastructure regardless, for a tenant nothing about is meant to be real.
+   * Refused outright rather than faked, since a "fake but still working" credential here would
+   * defeat the entire point.
+   */
+  if (req.tenant.subdomain === DEMO_SUBDOMAIN) {
+    return res.status(403).json({ error: 'VPN access is not available on the demo tenant.' });
+  }
   const { ensureSubnet, nextHostIp } = await import('./tunnel.js');
 
   const { rows: [{ count }] } = await pool.query(
@@ -7105,6 +7139,13 @@ app.delete('/api/inventory/:id', requirePermission('inventory.delete'), wrap(asy
 // Preferred over OVPN on RouterOS 7: in-kernel, and far faster than RouterOS's
 // single-threaded OpenVPN. RouterOS 6 has no WireGuard — use the OVPN route there.
 app.post('/api/routers/wg-peer', requireRole('owner'), wrap(async (req, res) => {
+  // Same reasoning as /api/routers/vpn-access — a WireGuard private key is a real,
+  // permanently valid credential any generic WireGuard client can use, not text
+  // scoped to a MikroTik the way the OVPN onboarding script is. Refused outright
+  // on the demo tenant, whose login is public, rather than minted and left on file.
+  if (req.tenant.subdomain === DEMO_SUBDOMAIN) {
+    return res.status(403).json({ error: 'WireGuard onboarding is not available on the demo tenant.' });
+  }
   const wg = await import('./wireguard.js');
   const { name, routerId } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Name the router' });

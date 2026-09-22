@@ -93,10 +93,14 @@ export function startJobs() {
   // The sales-demo tenant ("demo" subdomain) is the real app on real data —
   // nothing about it is a mock — so whatever a prospect clicks, edits or
   // "buys" while exploring it genuinely persists, the same as any tenant.
-  // This is what keeps that from meaning anything: on the hour, every hour,
-  // it gets wiped and reseeded from scratch, so no one ever inherits the
-  // last visitor's mess and nothing risky can accumulate.
-  cron.schedule('0 * * * *', safely('resetDemoTenant', resetDemoTenant));
+  // This is what keeps that from meaning anything: every 15 minutes it gets
+  // wiped and reseeded from scratch, so no one ever inherits the last
+  // visitor's mess and nothing risky can accumulate for long. Was hourly —
+  // shortened so stray changes don't sit around for most of an hour between
+  // resets. Still long enough that a mid-walkthrough demo call is unlikely
+  // to get wiped out from under someone; shorten further if that turns out
+  // to matter less than a tighter cleanup cycle does.
+  cron.schedule('*/15 * * * *', safely('resetDemoTenant', resetDemoTenant));
   // Every 6 hours, not continuously: this calls out to a third-party IP-to-ISP
   // service per router, so it is deliberately paced rather than run on the
   // same tight loop as the ping watchdog.
