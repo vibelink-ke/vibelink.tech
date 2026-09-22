@@ -3635,26 +3635,22 @@ async function referrerForSubscriber(tenantId, subscriberId) {
 }
 
 /**
- * Same shape as referrerForSubscriber, for a staff member closing a lead —
- * see PATCH /api/leads/:id's own comment for why this exists. 5% is a
- * starting default an operator can correct under Leads -> Sales reps; a
- * sales role earning nothing until someone remembers to configure a rate
- * would make the whole feature look broken from day one.
+ * Every staff member is a referrer by default — anyone on the team can bring in a customer themselves (a
+ * technician's own neighbour, a cashier's friend) and be paid for it exactly like an outside referrer, without
+ * someone first having to remember to set them up as one. Called when a staff row is created; schema.sql
+ * backfills it once for staff that predate this. Deliberately NOT called from winning a lead — being the
+ * referrer is who actually brought the customer in, chosen by hand, never inferred from who a lead was
+ * assigned to work (that is tracked separately, for Employee of the month, not commission).
  */
-async function referrerForStaff(tenantId, staffId) {
+async function ensureStaffReferrer(tenantId, staffId, name, phone) {
   const { rows: [existing] } = await pool.query(
     'select id from referrers where tenant_id=$1 and staff_id=$2', [tenantId, staffId]);
   if (existing) return existing.id;
-
-  const { rows: [member] } = await pool.query(
-    'select name, phone from staff where id=$1 and tenant_id=$2', [staffId, tenantId]);
-  if (!member) return null;
-
   const { rows: [created] } = await pool.query(
     `insert into referrers (tenant_id, staff_id, name, phone, commission_type, commission_rate, notes)
-     values ($1,$2,$3,$4,'percent',5,'Added automatically — closed a lead assigned to them')
+     values ($1,$2,$3,$4,'percent',5,'Every staff member is a referrer by default — set their own rate here')
      returning id`,
-    [tenantId, staffId, member.name, member.phone]);
+    [tenantId, staffId, name, phone ?? null]);
   return created.id;
 }
 
@@ -3671,17 +3667,18 @@ app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   res.json(rows);
 });
 /**
- * Per staff member: leads assigned, leads won, and commission earned —
- * this month and lifetime. Every staff row is included, not just ones with
- * activity, so someone assigned leads that never converted still shows up
- * at zero rather than silently missing from the leaderboard — the research
- * behind this screen was explicit that a leaderboard only earns trust when
- * it visibly reflects the real CRM data, not a filtered view of it.
+ * "Employee of the month": per staff member, leads assigned and leads won — this month and lifetime — ranked on
+ * winning leads they were assigned, a competition, not a payout. Every staff row is included, not just ones with
+ * activity, so someone assigned leads that never converted still shows up at zero rather than silently missing
+ * from the leaderboard.
  *
- * Commission comes through the same referrers/referral_commissions tables
- * a customer or external referrer earns through (see referrerForStaff) —
- * closing a lead and referring a customer are, as far as this system
- * already tracks compensation, the same kind of event.
+ * won_at (not created_at) decides "this month": a lead can be created in one month and won in a later one, and
+ * counting it by when it was created credited the wrong month, or none at all, for exactly the leads that took
+ * real work to close.
+ *
+ * Commission is separate and shown for information only, never used to rank this: it belongs to whoever was
+ * explicitly named as a lead's referrer (every staff member is one automatically — ensureStaffReferrer — but only
+ * earns by being chosen, never just by being assigned the work).
  */
 app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
@@ -3690,7 +3687,7 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
             count(l.id) filter (where l.assigned_to = st.id and l.status = 'won') as leads_won,
             count(l.id) filter (
               where l.assigned_to = st.id and l.status = 'won'
-                and l.created_at >= date_trunc('month', now())
+                and l.won_at >= date_trunc('month', now())
             ) as won_this_month,
             coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month,
             coalesce(sum(rc.amount), 0) as earned_total
@@ -3700,7 +3697,7 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
        left join referral_commissions rc on rc.referrer_id = r.id
       where st.tenant_id = $1 and st.role <> 'platform_admin'
       group by st.id, st.name
-      order by earned_this_month desc, leads_won desc`,
+      order by won_this_month desc, leads_won desc`,
     [req.tenant.id]);
   res.json(rows);
 }));
@@ -10124,6 +10121,9 @@ app.post('/api/staff', requirePermission('staff.create'), wrap(async (req, res) 
     throw e;
   }
 
+  // Every staff member is a referrer from the moment they exist — see ensureStaffReferrer's own comment.
+  await ensureStaffReferrer(req.tenant.id, s.id, s.name, s.phone).catch((e) => console.error('ensureStaffReferrer', e.message));
+
   // The row existing was previously the whole "invite" — nothing was ever
   // sent to the person it names, so they had no password, no username, and
   // no way to discover either fact short of being told by hand. SMS always
@@ -10408,32 +10408,29 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
   }
 
   /**
-   * Winning a lead with nobody named as its referrer, but a staff member
-   * chasing it, credits that staff member instead — closing a lead is, in
-   * every way this system already tracks compensation, indistinguishable
-   * from being the reason the customer signed up. Only when there is
-   * genuinely no referrer already: an actual named referrer (a customer
-   * sending a friend, an outside party) always wins over the sales rep who
-   * happened to be assigned, since that relationship was explicit and this
-   * one is inferred. Falls back to whoever created the lead when it was
-   * never assigned to anyone — a lead worked and closed by the same person
-   * who entered it should never lose its commission just because
-   * "assigned_to" was left blank.
+   * Commission belongs only to whoever was explicitly named as the referrer — never inferred from who a lead
+   * happened to be assigned to. Closing a lead and referring the customer who became it are different things:
+   * being assigned it is work, tracked (and competed on) as "Employee of the month" below; being the referrer is
+   * a real person, chosen deliberately, who brought the customer in — every staff member already has a referrer
+   * record of their own (ensureStaffReferrer, staff.js) precisely so they can be picked here when that is genuinely
+   * them, without turning "whoever it was assigned to" into automatic pay.
+   *
+   * What this DOES still track: won_at, the moment a lead first turns 'won' — what "Employee of the month" (the
+   * leads-won leaderboard, not a commission figure) actually ranks on. Set once; re-saving a lead that is already
+   * won, or any other status change, leaves it alone. Reopening a lead (moving it off 'won') clears it, so a
+   * reopened-then-rewon lead counts again, in the month it is actually won.
    */
-  if (req.body.status === 'won' && !sets.includes('referrer_id')) {
-    const { rows: [current] } = await pool.query(
-      'select referrer_id, assigned_to, created_by from leads where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-    const staffId = req.body.assigned_to ?? current?.assigned_to ?? current?.created_by;
-    if (current && !current.referrer_id && staffId) {
-      req.body.referrer_id = await referrerForStaff(req.tenant.id, staffId);
-      sets.push('referrer_id');
-    }
+  const vals = [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])];
+  const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
+  if (sets.includes('status')) {
+    // Only when status is actually part of this update — the same $n placeholder status itself already got above.
+    setClauses.push(`won_at = case when $${sets.indexOf('status') + 3}::text = 'won' then coalesce(won_at, now()) else null end`);
   }
 
   const { rows: [l] } = await pool.query(
-    `update leads set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}
+    `update leads set ${setClauses.join(', ')}
      where tenant_id=$1 and id=$2 returning *`,
-    [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
+    vals);
   if (!l) return res.status(404).json({ error: 'not found' });
   res.json(l);
 }));

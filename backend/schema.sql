@@ -2865,3 +2865,17 @@ create index if not exists loyalty_ledger_phone on loyalty_ledger (tenant_id, ph
 
 -- Whether visitors may check and redeem their own loyalty points on the hotspot login page (proved with an SMS code).
 alter table loyalty_settings add column if not exists self_serve boolean not null default false;
+
+-- When a lead first turned 'won' — what the leaderboard ("Employee of the month": who is winning the most leads
+-- they were assigned, not who is earning the most commission) actually ranks on. Cleared if a lead is reopened, so
+-- a lead won again later counts again, in the month it is actually won — see PATCH /api/leads/:id.
+alter table leads add column if not exists won_at timestamptz;
+update leads set won_at = created_at where status = 'won' and won_at is null;
+
+-- Every staff member is a referrer by default (ensureStaffReferrer, server.js) from the moment they're created —
+-- this backfills anyone added before that existed. Commission is only ever earned by whoever is explicitly named
+-- as a lead's referrer, never just by being assigned to work it.
+insert into referrers (tenant_id, staff_id, name, phone, commission_type, commission_rate, notes)
+select st.tenant_id, st.id, st.name, st.phone, 'percent', 5, 'Every staff member is a referrer by default — set their own rate here'
+  from staff st
+ where not exists (select 1 from referrers r where r.tenant_id = st.tenant_id and r.staff_id = st.id);
