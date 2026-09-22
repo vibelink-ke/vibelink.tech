@@ -9205,7 +9205,7 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
   }[req.query.period] ?? "now() - interval '4 months'";
 
   const { rows: sales } = await pool.query(`
-    select pay.plan_id, pay.amount
+    select v.plan_id, pay.amount
       from payments pay
       join vouchers v on v.id = pay.voucher_id
      where pay.tenant_id=$1 and pay.status='applied' and pay.voucher_id is not null
