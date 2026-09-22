@@ -93,6 +93,7 @@ export const api = {
   // ── money ──
   payments: () => get('/api/payments'),
   paymentsBySite: () => get('/api/payments/by-site'),
+  dashboardCollections: () => get('/api/dashboard/collections'),
   hotspotRevenue: (period) => get(`/api/hotspot/revenue?period=${encodeURIComponent(period)}`),
   unmatchedPayments: () => get('/api/payments/unmatched'),
   matchPayment: (id, subscriberId) => post(`/api/payments/${id}/match`, { subscriberId }),

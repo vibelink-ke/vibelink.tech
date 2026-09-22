@@ -9,7 +9,7 @@ import { pool, tenantByHost, withTenant } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
-import { fmtNairobi } from './nairobi-time.js';
+import { fmtNairobi, fmtNairobiIso, nairobiMidnight } from './nairobi-time.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
@@ -9208,6 +9208,62 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
      order by pay.received_at desc
      limit 500`, [req.tenant.id]);
   res.json(rows);
+}));
+
+/**
+ * Dashboard's "Collected today", "PPPoE income today" and the "Collections by
+ * channel · last 7 days" chart — a real date-ranged query, the same fix the
+ * Hotspot Revenue screen already got (see the comment just below). Those
+ * tiles used to be computed client-side from /api/payments above, which caps
+ * at the 500 most recent payments of every kind — fine for a quiet tenant,
+ * silently wrong the moment daily volume passes 500: "today" itself starts
+ * losing its own earlier transactions, and any day further back than that
+ * simply has no rows left in the capped list at all, showing as zero. Both
+ * read as "revenue is dropping" when the real numbers are climbing.
+ *
+ * Day boundaries are Nairobi midnight (nairobiMidnight), not whatever
+ * Postgres's own session timezone happens to default to — same reasoning
+ * apply.js's ceilToMidnight already gives for why this isn't left to the
+ * database to decide.
+ */
+app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(async (req, res) => {
+  const now = new Date();
+  const todayStart = nairobiMidnight(now, 0);
+  const tomorrowStart = nairobiMidnight(now, 1);
+  const windowStart = nairobiMidnight(now, -6);   // today plus the 6 days before it — 7 days total
+
+  const { rows } = await pool.query(
+    `select received_at, provider, amount, subscriber_id, voucher_id
+       from payments
+      where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3`,
+    [req.tenant.id, windowStart, tomorrowStart]);
+
+  let todayTotal = 0;
+  let todayPppoe = 0;
+  const todayProviders = new Set();
+  const byDay = new Map();   // Nairobi 'YYYY-MM-DD' -> { provider: total }
+
+  for (const p of rows) {
+    const amount = Number(p.amount ?? 0);
+    const day = fmtNairobiIso(p.received_at);
+    const bucket = byDay.get(day) ?? {};
+    bucket[p.provider] = (bucket[p.provider] ?? 0) + amount;
+    byDay.set(day, bucket);
+
+    if (new Date(p.received_at) >= todayStart) {
+      todayTotal += amount;
+      todayProviders.add(p.provider);
+      if (p.subscriber_id && !p.voucher_id) todayPppoe += amount;
+    }
+  }
+
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const iso = fmtNairobiIso(nairobiMidnight(now, -i));
+    days.push({ iso, byProvider: byDay.get(iso) ?? {} });
+  }
+
+  res.json({ today: { total: todayTotal, pppoe: todayPppoe, channels: todayProviders.size }, days });
 }));
 
 /**

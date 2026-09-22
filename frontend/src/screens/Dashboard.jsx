@@ -105,6 +105,21 @@ export default function Dashboard() {
   // fails closed rather than flashing money figures before perms arrive.
   const canSeeFinance = !!store.session?.perms?.['dashboard.finance'];
 
+  // Collected today / PPPoE today / the 7-day-by-channel chart, below — a real
+  // date-ranged query (GET /api/dashboard/collections), not derived from
+  // store.mpesaTx. That list caps at the 500 most recent payments of every
+  // kind, which a tenant with real volume blows through in well under a day —
+  // "today" starts losing its own earlier transactions, and any day further
+  // back than that has no rows left in the capped list at all, reading as
+  // revenue crashing to zero when it was actually climbing.
+  const [collections, setCollections] = useState(null);
+  useEffect(() => {
+    const load = () => api.dashboardCollections().then(setCollections).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
 
   const today = useMemo(
     () =>
@@ -157,68 +172,41 @@ export default function Dashboard() {
   const hotspotOnline = hotspotActive.filter((v) => v.online);
   const online = [...pppoeOnline, ...hotspotOnline];
 
-  // "Collected today" summed every applied payment ever returned, with no
-  // date filter at all — it never actually reset at midnight, just kept
-  // growing for as long as the payments table did. This tile is meant to
-  // answer "how much came in today," which "today" here now actually means.
-  const appliedToday = (store.mpesaTx ?? []).filter((p) => {
-    if (p.status !== 'applied') return false;
-    const at = p.received_at ? new Date(p.received_at) : null;
-    return at && at.toDateString() === new Date().toDateString();
-  });
-  const collected = appliedToday.reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  // "Collected today" / PPPoE-only / channels used — from the real date-ranged
+  // query above (collections), not summed from store.mpesaTx, which quietly
+  // drops rows once a tenant's daily volume passes the /api/payments cap.
+  const collected = collections?.today?.total ?? 0;
   // PPPoE only: a payment applied to a subscriber's account, not a hotspot
-  // voucher sale. subscriber_id/voucher_id are mutually exclusive on a
-  // payment row (server.js's GET /api/payments joins both, one is always
-  // null), which is a firmer split than guessing from the channel/provider —
-  // a till or bank STK payment can settle either kind of account.
-  const collectedPppoeToday = appliedToday
-    .filter((p) => p.subscriber_id && !p.voucher_id)
-    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
-  // The "last 7 days" chart heading was paired with the same "today" total
-  // above it — right label, wrong number underneath it.
-  const collected7d = (store.mpesaTx ?? [])
-    .filter((p) => p.status === 'applied' && p.received_at && Date.now() - new Date(p.received_at).getTime() <= 7 * 86400000)
-    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
-  // How many distinct payment channels actually collected something, not how
-  // many individual transactions came in — "across 6 payments" read like six
-  // separate gateways when it was six M-Pesa STK receipts on the one till.
-  const channelsUsed = new Set(appliedToday.map((p) => p.provider)).size;
+  // voucher sale — subscriber_id/voucher_id are mutually exclusive on a
+  // payment row, split the same way the backend query itself splits them.
+  const collectedPppoeToday = collections?.today?.pppoe ?? 0;
+  // The "last 7 days" chart heading was once paired with an unrelated
+  // "today" total — this sums the same 7 real days the chart below draws.
+  const collected7d = (collections?.days ?? [])
+    .reduce((a, d) => a + Object.values(d.byProvider ?? {}).reduce((x, v) => x + v, 0), 0);
+  // How many distinct payment channels actually collected something today,
+  // not how many individual transactions came in — "across 6 payments" read
+  // like six separate gateways when it was six M-Pesa STK receipts on one till.
+  const channelsUsed = collections?.today?.channels ?? 0;
 
   /**
    * The chart under "Collections by channel · last 7 days" never actually
    * drew anything — each day column was a flat 1px line and a label, sized
    * from nothing, so the chart looked identical whether collections were
    * zero or ten thousand shillings. Real per-day, per-channel totals for
-   * the trailing 7 days, stacked in the same order CHANNELS lists them.
+   * the trailing 7 (Nairobi) days the backend already bucketed, stacked in
+   * the same order CHANNELS lists them.
    */
-  const chartDays = useMemo(() => {
-    const days = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - i);
-      days.push(d);
-    }
-    return days.map((d) => {
-      const dayPayments = (store.mpesaTx ?? []).filter((p) => {
-        if (p.status !== 'applied' || !p.received_at) return false;
-        return new Date(p.received_at).toDateString() === d.toDateString();
-      });
-      const segments = CHANNELS.map((c) => ({
-        swatch: c.swatch,
-        total: dayPayments
-          .filter((p) => c.providers.includes(p.provider))
-          .reduce((a, p) => a + Number(p.amount ?? 0), 0),
-      }));
-      return {
-        label: d.toLocaleDateString('en-KE', { weekday: 'short' }),
-        iso: d.toISOString().slice(0, 10),
-        total: segments.reduce((a, s) => a + s.total, 0),
-        segments,
-      };
-    });
-  }, [store.mpesaTx]);
+  const chartDays = useMemo(() => (collections?.days ?? []).map((d) => {
+    const segments = CHANNELS.map((c) => ({
+      swatch: c.swatch,
+      total: c.providers.reduce((a, prov) => a + Number(d.byProvider?.[prov] ?? 0), 0),
+    }));
+    // d.iso is the Nairobi calendar date the backend already bucketed by — read as a plain UTC
+    // date purely to get its weekday name, not to re-derive the boundary itself.
+    const label = new Date(`${d.iso}T00:00:00Z`).toLocaleDateString('en-KE', { weekday: 'short', timeZone: 'UTC' });
+    return { label, iso: d.iso, total: segments.reduce((a, s) => a + s.total, 0), segments };
+  }), [collections]);
   const chartPeak = Math.max(1, ...chartDays.map((d) => d.total));
 
   const expiring = useMemo(() => {
