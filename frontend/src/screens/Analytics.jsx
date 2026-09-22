@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -6,6 +7,7 @@ import { Bar, Card, Grid, Screen, Select, Stat, Table } from '../ui/primitives';
 
 export default function Analytics() {
   const store = useStore();
+  const navigate = useNavigate();
   const [month, setMonth] = useState('This month');
 
   // MRR/churn need real per-plan and per-payment math (a plan's own billing
@@ -78,7 +80,12 @@ export default function Analytics() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {Object.entries(byStatus).map(([status, n]) => (
-                <div key={status} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <div
+                  key={status}
+                  onClick={() => navigate(`/clients?status=${status}`)}
+                  title={`See these ${status} clients`}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 5, cursor: 'pointer' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                     <span style={{ textTransform: 'capitalize' }}>{status}</span>
                     <span style={{ fontFamily: font.mono }}>{n}</span>
@@ -99,7 +106,12 @@ export default function Analytics() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {byRouter.map((r) => (
-                <div key={r.name} style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                <div
+                  key={r.name}
+                  onClick={() => navigate(`/clients?q=${encodeURIComponent(r.name)}`)}
+                  title={`See clients on ${r.name}`}
+                  style={{ display: 'flex', flexDirection: 'column', gap: 5, cursor: 'pointer' }}
+                >
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                     <span>{r.name}</span>
                     <span style={{ fontFamily: font.mono }}>{r.count}</span>

@@ -213,6 +213,7 @@ export default function Dashboard() {
       }));
       return {
         label: d.toLocaleDateString('en-KE', { weekday: 'short' }),
+        iso: d.toISOString().slice(0, 10),
         total: segments.reduce((a, s) => a + s.total, 0),
         segments,
       };
@@ -391,20 +392,27 @@ export default function Dashboard() {
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
               {chartDays.map((day, i) => (
-                <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%' }}>
+                <div
+                  key={i}
+                  onClick={() => day.total > 0 && navigate(`/payments?tab=all&day=${day.iso}`)}
+                  title={day.total > 0 ? `KES ${kes(day.total)} — click to see these transactions` : undefined}
+                  style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%', cursor: day.total > 0 ? 'pointer' : 'default' }}
+                >
                   {day.total > 0 ? (
-                    <div
-                      title={`KES ${kes(day.total)}`}
-                      style={{
-                        height: `${Math.max(2, (day.total / chartPeak) * 100)}%`,
-                        display: 'flex', flexDirection: 'column-reverse',
-                        borderRadius: '3px 3px 0 0', overflow: 'hidden',
-                      }}
-                    >
-                      {day.segments.filter((s) => s.total > 0).map((s, si) => (
-                        <div key={si} style={{ background: s.swatch, height: `${(s.total / day.total) * 100}%` }} />
-                      ))}
-                    </div>
+                    <>
+                      <span style={{ textAlign: 'center', fontSize: 10.5, fontFamily: font.mono, color: color.neutralInk }}>{kes(day.total)}</span>
+                      <div
+                        style={{
+                          height: `${Math.max(2, (day.total / chartPeak) * 100)}%`,
+                          display: 'flex', flexDirection: 'column-reverse',
+                          borderRadius: '3px 3px 0 0', overflow: 'hidden',
+                        }}
+                      >
+                        {day.segments.filter((s) => s.total > 0).map((s, si) => (
+                          <div key={si} style={{ background: s.swatch, height: `${(s.total / day.total) * 100}%` }} />
+                        ))}
+                      </div>
+                    </>
                   ) : (
                     <div style={{ height: 1, background: '#c3ccc6' }} />
                   )}
@@ -414,7 +422,12 @@ export default function Dashboard() {
             </div>
             <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', borderTop: '1px solid #eef0ec', paddingTop: 12 }}>
               {CHANNELS.map((c) => (
-                <span key={c.label} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#4a524c' }}>
+                <span
+                  key={c.label}
+                  onClick={() => navigate(`/payments?tab=all&channel=${c.providers.join(',')}`)}
+                  title={`See ${c.label} transactions`}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#4a524c', cursor: 'pointer' }}
+                >
                   <span style={{ width: 9, height: 9, borderRadius: 2, background: c.swatch }} />
                   {c.label}
                 </span>

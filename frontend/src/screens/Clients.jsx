@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
@@ -244,9 +244,21 @@ export default function Clients() {
 
   // Batches of 20 / 50 / 100, and a search over account, name, phone, email and package.
   const accountText = (a) =>
-    [a.primary.account_code, a.primary.name, a.primary.phone, a.primary.email, ...a.lines.map((l) => planTitle(l))]
+    [a.primary.account_code, a.primary.name, a.primary.phone, a.primary.email, a.primary.router_name, ...a.lines.map((l) => planTitle(l))]
       .filter(Boolean).join(' ');
   const t = useTable(visibleAccounts, accountText);
+
+  // Coming from Analytics' charts ("?status=<key>" or "?q=<router name>"): apply the matching filter tab, or search
+  // for the router, the moment the search box exists to type into.
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const status = params.get('status');
+    const q = params.get('q');
+    if (status && FILTERS.some((f) => f.key === status)) setFilter(status);
+    if (q) t.search(q);
+    if (status || q) setParams((sp) => { sp.delete('status'); sp.delete('q'); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const pageAccounts = t.pageRows;
   const lineIds = (accts) => accts.flatMap((a) => a.lines.map((l) => l.id));
   const allSelected = pageAccounts.length > 0 && pageAccounts.every((a) => selected.has(a.primary.id));

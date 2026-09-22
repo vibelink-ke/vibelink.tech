@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
@@ -68,6 +68,27 @@ export default function Payments() {
     setAssignTo('');
     setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
   }, [openId, store.unmatched]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /**
+   * Coming from a chart click (Dashboard's "Collections by channel", or the "Collections tracking" chart just below):
+   * switches to All transactions and narrows the list to that day, channel or month. Captured once into local state
+   * (not left in the URL) so "Reset filters" has something to clear back to.
+   */
+  const [chartFilter, setChartFilter] = useState(null);   // { day } | { channel: [...] } | { month, year }
+  useEffect(() => {
+    const tabParam = params.get('tab');
+    const day = params.get('day');
+    const channel = params.get('channel');
+    const month = params.get('month');
+    const year = params.get('year');
+    if (!tabParam && !day && !channel && !month) return;
+    if (tabParam) setTab(tabParam);
+    if (day) setChartFilter({ day });
+    else if (channel) setChartFilter({ channel: channel.split(',') });
+    else if (month) setChartFilter({ month: Number(month), year: Number(year) });
+    setParams((sp) => { ['tab', 'day', 'channel', 'month', 'year'].forEach((k) => sp.delete(k)); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const unmatched = store.unmatched ?? [];
   const all = store.mpesaTx ?? [];
@@ -142,11 +163,24 @@ export default function Payments() {
         const t = new Date(p.received_at ?? 0);
         return t.getMonth() === d.getMonth() && t.getFullYear() === d.getFullYear() && p.status === 'applied';
       });
-      out.push({ label, total: inMonth.reduce((a, p) => a + Number(p.amount ?? 0), 0) });
+      out.push({ label, month: d.getMonth(), year: d.getFullYear(), total: inMonth.reduce((a, p) => a + Number(p.amount ?? 0), 0) });
     }
     const peak = Math.max(1, ...out.map((m) => m.total));
     return out.map((m) => ({ ...m, pct: (m.total / peak) * 100 }));
   }, [all]);
+
+  // What the All-transactions table actually shows: everything, unless a chart click narrowed it to one day,
+  // channel or month (chartFilter, set above from the query string a chart click navigated here with).
+  const filteredAll = useMemo(() => {
+    if (!chartFilter) return all;
+    if (chartFilter.day) return all.filter((p) => (p.received_at ?? '').slice(0, 10) === chartFilter.day);
+    if (chartFilter.channel) return all.filter((p) => chartFilter.channel.includes(p.provider));
+    if (chartFilter.month != null) return all.filter((p) => {
+      const t = new Date(p.received_at ?? 0);
+      return t.getMonth() === chartFilter.month && t.getFullYear() === chartFilter.year;
+    });
+    return all;
+  }, [all, chartFilter]);
 
   const [stkForm, setStkForm] = useState(null);
   const [stkResult, setStkResult] = useState(null);
@@ -382,7 +416,12 @@ export default function Payments() {
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 26, height: 220, paddingTop: 6 }}>
           {months.map((m) => (
-            <div key={m.label} style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', gap: 6 }}>
+            <div
+              key={m.label}
+              onClick={() => { setTab('all'); setChartFilter({ month: m.month, year: m.year }); }}
+              title={`See ${m.label}'s transactions`}
+              style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', gap: 6, cursor: m.total > 0 ? 'pointer' : 'default' }}
+            >
               <span style={{ fontFamily: font.mono, fontSize: 11.5, color: '#4a524c', textAlign: 'center' }}>{kes(m.total)}</span>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 5, height: '100%' }}>
                 <div style={{ flex: 1, height: `${m.pct}%`, background: '#1652d9', borderRadius: '4px 4px 0 0' }} />
@@ -491,10 +530,20 @@ export default function Payments() {
           )}
 
           {tab === 'all' && (
-            <Table
+            <>
+              {chartFilter && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 13px', marginBottom: 10, background: color.subtleBg, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: 12.5 }}>
+                  <span>
+                    Filtered to {chartFilter.day ? new Date(chartFilter.day).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : chartFilter.channel ? chartFilter.channel.join(', ') : `${new Date(chartFilter.year, chartFilter.month).toLocaleDateString('en-KE', { month: 'long', year: 'numeric' })}`}
+                    {' '}· {filteredAll.length} of {all.length}
+                  </span>
+                  <span onClick={() => setChartFilter(null)} style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}>Clear</span>
+                </div>
+              )}
+              <Table
               rowKey={(r) => r.id}
               empty="No transactions recorded yet"
-              rows={all}
+              rows={filteredAll}
               columns={[
                 { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
@@ -517,7 +566,8 @@ export default function Payments() {
                 { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
                 { key: 'received_at', label: 'Received', render: (r) => when(r.received_at) },
               ]}
-            />
+              />
+            </>
           )}
 
           {tab === 'invoices' && (
