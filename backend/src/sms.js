@@ -6,6 +6,19 @@ import { fmtNairobiDate } from './nairobi-time.js';
  * SMS gateways. Each tenant picks a primary in Settings -> SMS; the rest act as failover
  * in the order they are configured. Credentials live in tenant_sms_config.credentials.
  */
+/**
+ * None of these ever set a request timeout, so a gateway that goes slow or simply
+ * stops answering — rather than cleanly rejecting — hung the request until whatever
+ * the OS's own TCP timeout happens to be (minutes, not seconds). One send stuck like
+ * that blocks the sender behind it too: sendSms tries providers in order and awaits
+ * each one before moving to the next. Worse for the platform relay specifically
+ * (POST /api/platform-sms/relay in server.js) — a sibling deployment's own outbound
+ * fetch has to give up first, so it reports a plain timeout with no HTTP status at
+ * all, none of the accept/reject logic below ever runs, and no failover to that
+ * deployment's own local gateway happens until its own client-side timeout fires.
+ */
+const GATEWAY_TIMEOUT_MS = 15000;
+
 const PROVIDERS = {
   // HostPinnacle Kenya — https://smsportal.hostpinnacle.co.ke
   hostpinnacle: async (c, to, msg) => axios.post(
@@ -15,31 +28,31 @@ const PROVIDERS = {
       mobile: to, msg, msgType: 'text', duplicatecheck: 'true',
       output: 'json', sendMethod: 'quick'
     }),
-    { headers: { apikey: c.api_key, 'Content-Type': 'application/x-www-form-urlencoded', 'cache-control': 'no-cache' } }
+    { timeout: GATEWAY_TIMEOUT_MS, headers: { apikey: c.api_key, 'Content-Type': 'application/x-www-form-urlencoded', 'cache-control': 'no-cache' } }
   ),
 
   africastalking: async (c, to, msg) => axios.post(
     'https://api.africastalking.com/version1/messaging',
     new URLSearchParams({ username: c.username, to: '+' + to, message: msg, from: c.sender_id }),
-    { headers: { apiKey: c.api_key, Accept: 'application/json' } }
+    { timeout: GATEWAY_TIMEOUT_MS, headers: { apiKey: c.api_key, Accept: 'application/json' } }
   ),
 
   textsms: async (c, to, msg) => axios.post('https://sms.textsms.co.ke/api/services/sendsms/', {
     apikey: c.api_key, partnerID: c.partner_id, shortcode: c.sender_id, mobile: to, message: msg
-  }),
+  }, { timeout: GATEWAY_TIMEOUT_MS }),
 
   ujumbe: async (c, to, msg) => axios.post('https://ujumbesms.co.ke/api/messaging',
     { data: [{ message_bag: { numbers: to, message: msg, sender: c.sender_id } }] },
-    { headers: { 'X-Authorization': c.api_key, email: c.email } }),
+    { timeout: GATEWAY_TIMEOUT_MS, headers: { 'X-Authorization': c.api_key, email: c.email } }),
 
   mobitech: async (c, to, msg) => axios.post('https://api.mobitechtechnologies.com/sms/sendsms',
     { mobile: to, response_type: 'json', sender_name: c.sender_id, service_id: 0, message: msg },
-    { headers: { 'h_api_key': c.api_key } }),
+    { timeout: GATEWAY_TIMEOUT_MS, headers: { 'h_api_key': c.api_key } }),
 
   twilio: async (c, to, msg) => axios.post(
     `https://api.twilio.com/2010-04-01/Accounts/${c.account_sid}/Messages.json`,
     new URLSearchParams({ To: '+' + to, From: c.from, Body: msg }),
-    { auth: { username: c.account_sid, password: c.auth_token } }),
+    { timeout: GATEWAY_TIMEOUT_MS, auth: { username: c.account_sid, password: c.auth_token } }),
 
   // Same API as plain Twilio SMS — only the whatsapp: prefix on both numbers
   // differs. The operator's "from" field is just their WhatsApp-enabled
@@ -49,11 +62,11 @@ const PROVIDERS = {
   twilio_whatsapp: async (c, to, msg) => axios.post(
     `https://api.twilio.com/2010-04-01/Accounts/${c.account_sid}/Messages.json`,
     new URLSearchParams({ To: `whatsapp:+${to}`, From: `whatsapp:${c.from}`, Body: msg }),
-    { auth: { username: c.account_sid, password: c.auth_token } }),
+    { timeout: GATEWAY_TIMEOUT_MS, auth: { username: c.account_sid, password: c.auth_token } }),
 
   custom: async (c, to, msg) => axios.post(c.url,
     JSON.parse(String(c.body_template ?? '{}').replace('{to}', to).replace('{message}', msg)),
-    { headers: c.headers ?? {} })
+    { timeout: GATEWAY_TIMEOUT_MS, headers: c.headers ?? {} })
 };
 
 /**
