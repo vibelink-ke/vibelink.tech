@@ -257,6 +257,22 @@ function describe(e) {
   return e?.message || parts.map((x) => x?.message).filter(Boolean).join('; ') || `${e?.code ?? 'unknown error'}`;
 }
 
+/**
+ * What a guest sees when their payment prompt failed to even reach the gateway — a DNS lookup that could not
+ * resolve, a timed-out connection, the gateway itself down. Node's own error for that ("getaddrinfo EAI_AGAIN
+ * api.kopokopo.com") used to go straight to the popup on the hotspot login page: technically true, and useless
+ * or alarming to someone just trying to pay for WiFi. A real answer FROM the gateway (a declined shortcode, an
+ * invalid number) still comes through as-is, since that one is actually about something the guest can act on;
+ * only the case where nothing answered at all gets replaced. The raw error is still logged here either way, for
+ * whoever is actually debugging it.
+ */
+function gatewayErrorMessage(e, context) {
+  const fromGateway = e?.response?.data?.errorMessage ?? e?.response?.data?.ResponseDescription;
+  if (fromGateway) return fromGateway;
+  console.error(`${context ?? 'payment'} gateway unreachable:`, e?.code ?? '', e?.message ?? e);
+  return 'Could not reach the payment gateway right now. Please try again in a moment.';
+}
+
 /** Wrap an async handler so a rejected promise becomes a 500 instead of a hung socket. */
 const wrap = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -1236,7 +1252,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     }
     res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
   } catch (e) {
-    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+    res.status(502).json({ error: gatewayErrorMessage(e, 'hotspot/buy') });
   }
 }));
 
@@ -1710,7 +1726,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
     }
     res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
   } catch (e) {
-    res.status(502).json({ error: e.response?.data?.errorMessage ?? e.message });
+    res.status(502).json({ error: gatewayErrorMessage(e, 'hotspot/tv-buy') });
   }
 }));
 
@@ -2831,7 +2847,7 @@ app.post('/portal/buy', stkLimiter, async (req, res) => {
     const r = await mpesa.stkPush(req.tenant.id, { phone, amount: await price(planId), accountRef: 'HOTSPOT' });
     res.json({ status: 'pending', checkoutId: r.CheckoutRequestID });
   } catch (e) {
-    res.status(502).json({ status: 'fallback', till: await till(req.tenant.id), error: e.message });
+    res.status(502).json({ status: 'fallback', till: await till(req.tenant.id), error: gatewayErrorMessage(e, 'portal/buy') });
   }
 });
 
