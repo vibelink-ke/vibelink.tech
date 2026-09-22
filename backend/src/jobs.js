@@ -105,6 +105,9 @@ export function startJobs() {
   // something that happens rarely (a customer physically relocating), not
   // a hot path, and a live session already tells us the moment it starts.
   cron.schedule('*/5 * * * *', safely('autoRelocateSubscribers', autoRelocateSubscribers));
+  // Once, early on the 1st — last month is over by then in every timezone this platform runs in, so there is
+  // nothing left to arrive that could change who won.
+  cron.schedule('10 6 1 * *', safely('employeeOfTheMonth', employeeOfTheMonth));
 }
 
 /**
@@ -1076,6 +1079,65 @@ export async function notifyAssignment(tenantId, staffId, ticket) {
   }
 }
 
+
+/**
+ * Runs once, early on the 1st of each month: for every enabled tenant, finds who finished the most jobs (tickets
+ * resolved — resolved_at, set once the first time a ticket turns 'resolved') in the month that just ended, and —
+ * if there is a winner — congratulates them by SMS and push, the same channels a job assignment reaches them on
+ * (notifyAssignment, just above). This is the server-side, once-a-month version of the same count the Dashboard
+ * banner and Team jobs' own trophy cards compute live from the browser; the two are expected to agree.
+ *
+ * A reward amount is never paid automatically — nothing here moves money. When a tenant has set one
+ * (app_settings.eotm_reward_amount, Settings -> General), it raises a 'pending' expense tagged to the winner,
+ * exactly the record an ordinary staff reimbursement would leave, for the owner to approve and pay through
+ * Expenses like any other one. Left at 0 (the default), only the congratulations goes out.
+ */
+async function employeeOfTheMonth() {
+  const { rows: tenants } = await pool.query(
+    `select id, name, subdomain from tenants where deleted_at is null and id in (${enabledTenants})`, ['employeeOfTheMonth']);
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthLabel = monthStart.toLocaleDateString('en-KE', { month: 'long', year: 'numeric' });
+
+  for (const t of tenants) {
+    try {
+      const { rows: [winner] } = await pool.query(
+        `select assigned_to as staff_id, count(*)::int as jobs
+           from tickets
+          where tenant_id=$1 and assigned_to is not null and status='resolved'
+            and resolved_at >= $2 and resolved_at < $3
+          group by assigned_to
+          order by count(*) desc
+          limit 1`,
+        [t.id, monthStart, monthEnd]);
+      if (!winner) continue;
+
+      const { rows: [s] } = await pool.query('select name, phone from staff where id=$1 and tenant_id=$2', [winner.staff_id, t.id]);
+      if (!s) continue;
+
+      const { rows: [cfg] } = await pool.query('select eotm_reward_amount from app_settings where tenant_id=$1', [t.id]);
+      const reward = Number(cfg?.eotm_reward_amount ?? 0);
+
+      const body = `Congratulations! You're Employee of the Month for ${monthLabel} — ${winner.jobs} job${winner.jobs === 1 ? '' : 's'} finished.`
+        + (reward > 0 ? ` A KES ${reward.toLocaleString('en-KE')} appreciation is on its way to you.` : '');
+      if (s.phone) await send(t.id, s.phone, 'custom', { body }).catch((e) => console.error('employeeOfTheMonth sms failed', t.id, e.message));
+      const push = await import('./push.js');
+      await push.sendPush(t.id, { title: '🏆 Employee of the Month', body, url: '/', staffId: winner.staff_id })
+        .catch((e) => console.error('employeeOfTheMonth push failed', t.id, e.message));
+
+      if (reward > 0) {
+        await pool.query(
+          `insert into expenses (tenant_id, category, description, amount, staff_id, status)
+           values ($1, 'Employee of the month', $2, $3, $4, 'pending')`,
+          [t.id, `Employee of the month — ${monthLabel} (${winner.jobs} job${winner.jobs === 1 ? '' : 's'} finished): ${s.name}`, reward, winner.staff_id]);
+      }
+      console.log(`employeeOfTheMonth: ${t.subdomain} — ${s.name} (${winner.jobs} jobs, ${monthLabel})`);
+    } catch (e) {
+      console.error('employeeOfTheMonth failed for tenant', t.id, e.message);
+    }
+  }
+}
 
 /**
  * Put a router's RADIUS back when it drifts.

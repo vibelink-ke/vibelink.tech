@@ -343,6 +343,21 @@ export default function Dashboard() {
           <span style={{ fontSize: 14, color: color.ink }}>
             <b>Employee of the month</b> for {lastMonthMvp.month}: <b>{lastMonthMvp.name}</b> — {lastMonthMvp.jobs} job{lastMonthMvp.jobs === 1 ? '' : 's'} finished
           </span>
+          <Button
+            onClick={async () => {
+              const { downloadCertificate } = await import('../lib/export');
+              await downloadCertificate(`employee-of-the-month-${lastMonthMvp.month.toLowerCase().replace(/\s+/g, '-')}.pdf`, {
+                company: store.session?.company,
+                title: `Employee of the Month — ${lastMonthMvp.month}`,
+                name: lastMonthMvp.name,
+                subtitle: 'In recognition of outstanding work',
+                detail: `${lastMonthMvp.jobs} job${lastMonthMvp.jobs === 1 ? '' : 's'} finished`,
+              });
+            }}
+            style={{ marginLeft: 'auto' }}
+          >
+            🖨 Certificate
+          </Button>
         </div>
       )}
 

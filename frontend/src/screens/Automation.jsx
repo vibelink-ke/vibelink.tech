@@ -48,12 +48,23 @@ export default function Automation() {
   const [runs, setRuns] = useState(null);
   const [alertPhone, setAlertPhone] = useState('');
   const [salesPhone, setSalesPhone] = useState('');
+  const [eotmReward, setEotmReward] = useState('');
   useEffect(() => {
     api.settings().then((d) => {
       setAlertPhone(d.alertPhone ?? '');
       setSalesPhone(d.salesPhone ?? '');
+      setEotmReward(String(d.eotmRewardAmount ?? 0));
     }).catch(() => {});
   }, []);
+
+  const saveEotmReward = async () => {
+    try {
+      await api.saveSettings({ eotmRewardAmount: Number(eotmReward) || 0 });
+      store.toast(Number(eotmReward) > 0 ? `Employee of the month gets KES ${Number(eotmReward).toLocaleString('en-KE')}` : 'No reward set — only the congratulations goes out');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
 
   const saveAlertPhone = async () => {
     try {
@@ -127,6 +138,24 @@ export default function Automation() {
             </Field>
           </div>
           <Button variant="primary" onClick={saveSalesPhone}>Save</Button>
+        </div>
+      </Card>
+
+      {/* Who last month's Employee of the month was (Team jobs, and the Dashboard banner) is computed live from
+          jobs finished — this only sets what they're congratulated with, on the 1st of the month. */}
+      <Card title="🏆 Employee of the month" subtitle="Automatically congratulated on the 1st of every month — ranked on jobs finished, not sales">
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ minWidth: 220 }}>
+            <Field label="Appreciation amount (KES)" hint="0 sends only the congratulations SMS. Above 0 also raises a pending expense for the owner to approve and pay.">
+              <Input
+                type="number" min="0" step="50"
+                value={eotmReward}
+                onChange={(e) => setEotmReward(e.target.value)}
+                placeholder="0"
+              />
+            </Field>
+          </div>
+          <Button variant="primary" onClick={saveEotmReward}>Save</Button>
         </div>
       </Card>
 

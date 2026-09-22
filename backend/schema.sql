@@ -2287,6 +2287,10 @@ alter table routers add column if not exists upstream_public_ip inet;
 -- owner's own phone, when unset — see notifySales in jobs.js.
 alter table app_settings add column if not exists sales_phone text;
 
+-- What "Employee of the month" is worth, in KES. 0 (the default) means the congratulations still goes out but no
+-- expense is raised for it — see employeeOfTheMonth in jobs.js.
+alter table app_settings add column if not exists eotm_reward_amount numeric(12,2) not null default 0;
+
 -- Which of a tenant's own already-configured paybills (tenant_payment_config
 -- — several are supported per provider, see the "several paybills per
 -- provider" migration above) a customer at this router actually pays into.

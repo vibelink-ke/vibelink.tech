@@ -12501,11 +12501,22 @@ app.get('/api/settings', requirePermission('settings.view'), wrap(async (req, re
     prefs: extra?.prefs ?? {},
     alertPhone: extra?.alert_phone ?? null,
     salesPhone: extra?.sales_phone ?? null,
+    eotmRewardAmount: extra?.eotm_reward_amount ?? 0,
   });
 }));
 
 app.put('/api/settings', requirePermission('settings.edit'), wrap(async (req, res) => {
-  const { org, smtp, prefs, alertPhone, salesPhone } = req.body;
+  const { org, smtp, prefs, alertPhone, salesPhone, eotmRewardAmount } = req.body;
+
+  // What "Employee of the month" is worth, in KES — 0 (the default) means the congratulations SMS still goes out
+  // (jobs.js's employeeOfTheMonth) but no expense is raised for it. Owner-set, same trust level as a payout amount.
+  if (eotmRewardAmount !== undefined) {
+    const amount = Math.max(0, Math.round(Number(eotmRewardAmount) || 0));
+    await pool.query(
+      `insert into app_settings (tenant_id, eotm_reward_amount) values ($1, $2)
+       on conflict (tenant_id) do update set eotm_reward_amount = excluded.eotm_reward_amount`,
+      [req.tenant.id, amount]);
+  }
 
   // Where router alerts go. Stored on app_settings rather than staff, because
   // it is a rota decision, not a person's contact detail.
