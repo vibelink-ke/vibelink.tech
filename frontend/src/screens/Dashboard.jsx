@@ -237,6 +237,33 @@ export default function Dashboard() {
   // yet, unlike a ticket a staff member just raised themselves.
   const newFromCustomers = (store.tickets ?? []).filter((t) => t.source === 'portal' && t.status === 'open').length;
 
+  /**
+   * Last month's Employee of the month, on the dashboard for everyone to see — not just on Team jobs, which most
+   * roles never open. Shown for the first week of the new month only (the recognition is worth a moment, not a
+   * permanent fixture crowding out today's numbers), computed from the same resolved_at every job is already
+   * marked with, the moment it was actually finished (see Team jobs / PATCH /api/tickets/:id).
+   */
+  const lastMonthMvp = useMemo(() => {
+    const now = new Date();
+    if (now.getDate() > 7) return null;
+    const monthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const monthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
+    const staffById = Object.fromEntries((store.staff ?? []).map((s) => [s.id, s.name]));
+    const counts = new Map();
+    for (const t of store.tickets ?? []) {
+      if (!t.assigned_to || !t.resolved_at) continue;
+      const at = new Date(t.resolved_at);
+      if (at < monthStart || at >= monthEnd) continue;
+      counts.set(t.assigned_to, (counts.get(t.assigned_to) ?? 0) + 1);
+    }
+    let top = null;
+    for (const [staffId, n] of counts) {
+      if (!top || n > top.jobs) top = { staffId, jobs: n };
+    }
+    if (!top) return null;
+    return { name: staffById[top.staffId] ?? 'A former staff member', jobs: top.jobs, month: monthStart.toLocaleDateString('en-KE', { month: 'long' }) };
+  }, [store.tickets, store.staff]);
+
   const exportCsv = () => {
     const rows = [
       ['metric', 'value'],
@@ -303,6 +330,21 @@ export default function Dashboard() {
           <Button onClick={exportCsv}>Export</Button>
         </div>
       </div>
+
+      {lastMonthMvp && (
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+            padding: '14px 18px', borderRadius: radius.lg,
+            background: 'linear-gradient(90deg, #eafaf1 0%, #f4fdf8 100%)', border: `1px solid #bfe8d2`,
+          }}
+        >
+          <span style={{ fontSize: 26, lineHeight: 1 }}>🏆</span>
+          <span style={{ fontSize: 14, color: color.ink }}>
+            <b>Employee of the month</b> for {lastMonthMvp.month}: <b>{lastMonthMvp.name}</b> — {lastMonthMvp.jobs} job{lastMonthMvp.jobs === 1 ? '' : 's'} finished
+          </span>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
         {canSeeFinance && (
