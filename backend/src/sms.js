@@ -19,13 +19,28 @@ import { fmtNairobiDate } from './nairobi-time.js';
  */
 const GATEWAY_TIMEOUT_MS = 15000;
 
+/**
+ * Plain GSM 03.38 text, or does this need UCS-2? HostPinnacle's msgType has to match what the
+ * body actually contains — send an em dash, a curly quote or an ellipsis under msgType:'text'
+ * (declared regardless of content, before this existed) and they reject the whole message with
+ * "Msg Text and MsgType Mismatch" (status 171), not just drop the one offending character. Every
+ * one of those punctuation marks turns up in this codebase's own prose voice, including inside a
+ * few SMS templates themselves (an em dash reads naturally in "You earned a point — total 3"),
+ * so detecting per-message and switching to 'unicode' when needed survives that house style
+ * without hunting down and rewriting every occurrence by hand. Unicode SMS costs more per
+ * segment (70 GSM-7-equivalent characters instead of 160) — worth it next to the alternative,
+ * which was never delivering the message at all.
+ */
+const GSM7 = /^[A-Za-z0-9 \r\n@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ!"#¤%&'()*+,./:;<=>?¡ÄÖÑÜ§¿äöñüà{}~|€^\\[\]-]*$/;
+const isGsm7 = (s) => GSM7.test(String(s ?? ''));
+
 const PROVIDERS = {
   // HostPinnacle Kenya — https://smsportal.hostpinnacle.co.ke
   hostpinnacle: async (c, to, msg) => axios.post(
     'https://smsportal.hostpinnacle.co.ke/SMSApi/send',
     new URLSearchParams({
       userid: c.userid, password: c.password, senderid: c.sender_id,
-      mobile: to, msg, msgType: 'text', duplicatecheck: 'true',
+      mobile: to, msg, msgType: isGsm7(msg) ? 'text' : 'unicode', duplicatecheck: 'true',
       output: 'json', sendMethod: 'quick'
     }),
     { timeout: GATEWAY_TIMEOUT_MS, headers: { apikey: c.api_key, 'Content-Type': 'application/x-www-form-urlencoded', 'cache-control': 'no-cache' } }

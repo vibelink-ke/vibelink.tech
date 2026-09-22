@@ -52,8 +52,12 @@ export async function awardForPayment(c, tenantId, { paymentId, phone, amount })
   }
 }
 
+// A plain hyphen, not an em dash: this fires on every single hotspot purchase, the highest-volume
+// SMS this app sends, and a hyphen keeps it in plain GSM-7 (160 characters/segment). sms.js's
+// PROVIDERS.hostpinnacle now detects and switches to unicode mode (70/segment, costs more) for a
+// message that genuinely needs it elsewhere — no reason to pay that on the busiest template.
 /** The sentence added to the voucher SMS when points were earned. */
-export const pointsLine = (r) => (r ? ` You earned ${plural(r.earned, 'loyalty point')} — total ${r.total}.` : '');
+export const pointsLine = (r) => (r ? ` You earned ${plural(r.earned, 'loyalty point')} - total ${r.total}.` : '');
 
 /** points by normalised phone, for a set of numbers; empty if the tables are not there yet. */
 export async function pointsFor(pool, tenantId, phones) {
