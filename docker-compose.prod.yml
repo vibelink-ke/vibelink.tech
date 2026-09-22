@@ -35,6 +35,15 @@ services:
     sysctls:
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
+    # api, openvpn and freeradius share this namespace (network_mode: 'service:net'
+    # below), so its resolver is theirs too — `dns:` on any of them would be rejected
+    # by Compose as meaningless there, since they don't own the namespace to set it on.
+    # Pinned rather than left to whatever the host forwards, after the API twice hit
+    # getaddrinfo EAI_AGAIN on an outbound call (KopoKopo, then the SMS relay) that a
+    # retry moments later resolved fine — the host's own upstream, not this container.
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     # Every port for all four services is published here.
     ports:
       - '1194:1194/tcp'   # OVPN. TCP, not UDP: the RouterOS 6 client cannot do UDP
