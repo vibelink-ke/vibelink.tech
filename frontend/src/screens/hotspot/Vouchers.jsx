@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
@@ -32,6 +33,15 @@ export default function Vouchers() {
 
   const vouchers = store.vouchers ?? [];
 
+  // Coming from the top-bar search ("?open=<code>"): show just that code, whatever the status filters say, and drop
+  // the param from the address bar once captured so it isn't stuck there.
+  const [params, setParams] = useSearchParams();
+  const [openCode, setOpenCode] = useState(() => params.get('open') ?? '');
+  useEffect(() => {
+    if (params.get('open')) setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Live usage: the list is re-read every 10 seconds while the tab is showing, so each
   // visitor's used data (and who is online) stays current without a refresh.
   useEffect(() => {
@@ -49,12 +59,13 @@ export default function Vouchers() {
   const visible = useMemo(
     () =>
       vouchers.filter((v) => {
+        if (openCode) return v.code === openCode;   // came from search: only the one code, regardless of the filters above
         if (filter.status !== 'All status' && v.status !== filter.status) return false;
         if (filter.from && new Date(v.created_at) < new Date(filter.from)) return false;
         if (filter.to && new Date(v.created_at) > new Date(filter.to)) return false;
         return true;
       }),
-    [vouchers, filter]
+    [vouchers, filter, openCode]
   );
 
   const set = (k) => (e) => setFilter((s) => ({ ...s, [k]: e.target.value }));
@@ -186,6 +197,7 @@ export default function Vouchers() {
             <Button
               onClick={() => {
                 setFilter({ status: 'All status', type: 'All types', from: '', to: '' });
+                setOpenCode('');
                 store.toast('Filters reset');
               }}
             >
@@ -234,7 +246,7 @@ export default function Vouchers() {
 
       <Card
         title="Vouchers"
-        subtitle={`${visible.length} of ${vouchers.length} · live, updates every 10 seconds`}
+        subtitle={openCode ? `Showing code ${openCode} only — Reset filters above to see the rest` : `${visible.length} of ${vouchers.length} · live, updates every 10 seconds`}
         actions={
           <Button
             size="sm"

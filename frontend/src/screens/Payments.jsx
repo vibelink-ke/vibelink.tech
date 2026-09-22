@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
@@ -52,6 +53,21 @@ export default function Payments() {
   const [resolving, setResolving] = useState(null);
   const [assignTo, setAssignTo] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Coming from the top-bar search ("?open=<payment id>"): jump to Unmatched and open it, same as clicking Resolve.
+  const [params, setParams] = useSearchParams();
+  const openId = params.get('open');
+  useEffect(() => {
+    if (!openId) return;
+    // The list loads asynchronously after this screen mounts, so the match may not be here yet on the first pass —
+    // keep watching store.unmatched until it shows up, rather than giving up on an empty list.
+    const p = (store.unmatched ?? []).find((x) => x.id === openId);
+    if (!p) return;
+    setTab('unmatched');
+    setResolving(p);
+    setAssignTo('');
+    setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
+  }, [openId, store.unmatched]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const unmatched = store.unmatched ?? [];
   const all = store.mpesaTx ?? [];

@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -86,6 +87,18 @@ export default function Tickets() {
       setDetail(null);
     }
   };
+
+  // Coming from the top-bar search ("?open=<ticket id>"): open its detail drawer directly.
+  const [params, setParams] = useSearchParams();
+  const openId = params.get('open');
+  useEffect(() => {
+    if (!openId) return;
+    // tickets loads asynchronously after mount — keep watching it rather than giving up on an empty list.
+    const t = tickets.find((x) => x.id === openId);
+    if (!t) return;
+    openDetail(t);
+    setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
+  }, [openId, tickets]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [approving, setApproving] = useState(false);
   const approvePlanChange = async (t) => {

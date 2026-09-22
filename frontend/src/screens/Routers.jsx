@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -366,6 +367,28 @@ export default function Routers() {
   const routers = store.routers ?? [];
   const up = routers.filter((r) => r.status === 'up').length;
   const down = routers.filter((r) => r.status === 'down').length;
+
+  const openEdit = (r) => setEdit({
+    id: r.id, name: r.name, host: String(r.host).split('/')[0],
+    // The real secret, not blank: it is generated for you, so this
+    // is the only place to read it when configuring a router by hand.
+    secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
+    upstreamProvider: r.upstream_provider ?? '',
+    originalUpstreamProvider: r.upstream_provider ?? '',
+    upstreamSource: r.upstream_source ?? 'auto',
+  });
+
+  // Coming from the top-bar search ("?open=<router id>"): open it for editing directly.
+  const [params, setParams] = useSearchParams();
+  const openId = params.get('open');
+  useEffect(() => {
+    if (!openId) return;
+    // routers loads asynchronously after mount — keep watching it rather than giving up on an empty list.
+    const r = routers.find((x) => x.id === openId);
+    if (!r) return;
+    openEdit(r);
+    setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
+  }, [openId, routers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target.value }));
 
@@ -1310,20 +1333,7 @@ Revoke anyway?`
                     >
                       Import
                     </MenuItem>
-                    <MenuItem
-                      onClick={() => {
-                        setMenuFor(null);
-                        setEdit({
-                          id: r.id, name: r.name, host: String(r.host).split('/')[0],
-                          // The real secret, not blank: it is generated for you, so this
-                          // is the only place to read it when configuring a router by hand.
-                          secret: r.secret ?? '', apiPort: String(r.api_port ?? 8728), role: r.role ?? 'both',
-                          upstreamProvider: r.upstream_provider ?? '',
-                          originalUpstreamProvider: r.upstream_provider ?? '',
-                          upstreamSource: r.upstream_source ?? 'auto',
-                        });
-                      }}
-                    >
+                    <MenuItem onClick={() => { setMenuFor(null); openEdit(r); }}>
                       Edit
                     </MenuItem>
                     <MenuItem

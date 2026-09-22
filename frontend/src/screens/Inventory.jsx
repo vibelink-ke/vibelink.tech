@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -65,6 +66,18 @@ export default function Inventory() {
     serialNumber: i.serial_number || '', status: i.status, notes: i.notes || '',
     quantity: String(i.quantity ?? 1), unit: i.unit || '', units: [],
   });
+
+  // Coming from the top-bar search ("?open=<item id>"): open it for editing directly.
+  const [params, setParams] = useSearchParams();
+  const openId = params.get('open');
+  useEffect(() => {
+    if (!openId) return;
+    // items loads asynchronously after mount — keep watching it rather than giving up on an empty list.
+    const i = items.find((x) => x.id === openId);
+    if (!i) return;
+    openEdit(i);
+    setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
+  }, [openId, items]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Whether this is one identified gadget, several identical identified
   // units, or a multi-unit stock line with no identity at all is decided by
