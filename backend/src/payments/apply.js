@@ -249,9 +249,15 @@ export async function applyPayment(tenantId, tx) {
     // ("Thu Aug 20 2026 18:30:00 GMT+0300 (East Africa Time)"), which reads
     // like a jumble of numbers in a text message. A guest needs a day and a
     // time, not a timezone name.
+    //
+    // null here isn't missing data — for a tenant whose hotspot_settings.voucher_expiry
+    // is 'login' (issueVoucherAccess, radius.js), the clock deliberately hasn't started
+    // yet: expires_at only gets set on this voucher's first RADIUS auth. Falling through
+    // to '' used to print "Valid until ." — a blank nobody could make sense of, for the
+    // single most common voucher-expiry setting there is.
     const expires = v.expires_at
       ? fmtNairobi(v.expires_at, { dateStyle: 'medium', timeStyle: 'short' })
-      : '';
+      : 'your first login';
     await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link, points_line: pointsLine(loyalty) });
     return { paymentId, applied: true, voucher: v };
   });
