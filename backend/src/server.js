@@ -4386,6 +4386,79 @@ app.post('/api/payroll/runs/:id/items', requirePermission('payroll.create'), wra
   res.json(item);
 }));
 
+/**
+ * Fix a line before the run is locked — a mistyped amount, a note that needed correcting. Only `amount` and
+ * `note`; `type`/`staff_id`/`source_id` are what a line actually is, not something to quietly reclassify, so
+ * changing those means deleting the line and adding the right one instead. Draft-only, same as adding a line:
+ * approve() snapshots each staff member's total the moment it locks the run, so an edit after that would drift
+ * from a payout that may already be on its way.
+ */
+app.patch('/api/payroll/runs/:id/items/:itemId', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { rows: [existing] } = await pool.query(
+    `select pi.id, pi.type from payroll_items pi
+       join payroll_runs pr on pr.id = pi.run_id
+      where pi.id=$1 and pi.run_id=$2 and pr.tenant_id=$3 and pr.status='draft'`,
+    [req.params.itemId, req.params.id, req.tenant.id]);
+  if (!existing) return res.status(404).json({ error: 'No such line on a draft run' });
+
+  const sets = [];
+  const vals = [req.params.itemId];
+  if (req.body?.amount !== undefined) {
+    let value = Number(req.body.amount);
+    if (!(value > 0)) return res.status(400).json({ error: 'amount must be a positive number' });
+    // The same sign convention insertion uses — a deduction is always stored negative, so editing it still takes
+    // a plain positive number, the same as the field the operator actually typed into when the line was created.
+    if (existing.type === 'deduction') value = -value;
+    vals.push(value);
+    sets.push(`amount=$${vals.length}`);
+  }
+  if (req.body?.note !== undefined) {
+    vals.push(req.body.note || null);
+    sets.push(`note=$${vals.length}`);
+  }
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  const { rows: [item] } = await pool.query(
+    `update payroll_items set ${sets.join(', ')} where id=$1 returning *`, vals);
+  res.json(item);
+}));
+
+/** Remove a line — a bonus/deduction added by mistake, an expense reimbursement that should not have been pulled in. */
+app.delete('/api/payroll/runs/:id/items/:itemId', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    `delete from payroll_items pi using payroll_runs pr
+      where pi.id=$1 and pi.run_id=$2 and pr.id=pi.run_id and pr.tenant_id=$3 and pr.status='draft'`,
+    [req.params.itemId, req.params.id, req.tenant.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such line on a draft run' });
+  res.json({ ok: true });
+}));
+
+/** The run's own period, while it is still a draft — created with the wrong dates, say. */
+app.patch('/api/payroll/runs/:id', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { periodStart, periodEnd } = req.body ?? {};
+  if (!periodStart && !periodEnd) return res.status(400).json({ error: 'nothing to update' });
+  const { rows: [run] } = await pool.query(
+    `update payroll_runs set period_start=coalesce($3,period_start), period_end=coalesce($4,period_end)
+      where id=$1 and tenant_id=$2 and status='draft' returning *`,
+    [req.params.id, req.tenant.id, periodStart || null, periodEnd || null]);
+  if (!run) return res.status(404).json({ error: 'No such draft payroll run' });
+  res.json(run);
+}));
+
+/**
+ * Delete a whole run — only ever while it is still a draft, nothing paid or even locked in yet. Once approved,
+ * payroll_payouts exist and may already be on their way to Safaricom; undoing that is a cancellation, a different
+ * and much more careful operation than deleting a draft, and does not belong on this route.
+ */
+app.delete('/api/payroll/runs/:id', requirePermission('payroll.create'), wrap(async (req, res) => {
+  const { rows: [run] } = await pool.query(
+    'select status from payroll_runs where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!run) return res.status(404).json({ error: 'No such payroll run' });
+  if (run.status !== 'draft') return res.status(409).json({ error: 'Only a draft run can be deleted — this one has already been approved.' });
+  await pool.query('delete from payroll_runs where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  res.json({ ok: true });
+}));
+
 app.get('/api/payroll/runs', requirePermission('payroll.create'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select pr.*,

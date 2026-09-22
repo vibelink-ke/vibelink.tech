@@ -201,6 +201,57 @@ function Payroll() {
     }
   };
 
+  const deleteRun = async (r) => {
+    if (!window.confirm(`Delete this draft run (${r.period_start} – ${r.period_end})? Its line items go with it.`)) return;
+    try {
+      await api.deletePayrollRun(r.id);
+      await load();
+      store.toast('Draft deleted');
+    } catch (e) {
+      store.toast(`Could not delete: ${e.message}`);
+    }
+  };
+
+  const [editingPeriod, setEditingPeriod] = useState(null);   // { periodStart, periodEnd } while the drawer is open
+  const savePeriod = async () => {
+    setBusy(true);
+    try {
+      const run = await api.editPayrollRun(viewing.id, editingPeriod);
+      setViewing((v) => ({ ...v, ...run }));
+      await load();
+      setEditingPeriod(null);
+      store.toast('Period updated');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const [editingItem, setEditingItem] = useState(null);   // { id, amount, note } while the drawer is open
+  const saveItem = async () => {
+    setBusy(true);
+    try {
+      await api.editPayrollItem(viewing.id, editingItem.id, { amount: Number(editingItem.amount) || 0, note: editingItem.note || null });
+      await refreshRun();
+      setEditingItem(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteItem = async (i) => {
+    if (!window.confirm(`Remove this ${i.type.replace('_', ' ')} line for ${i.staff_name}?`)) return;
+    try {
+      await api.deletePayrollItem(viewing.id, i.id);
+      await refreshRun();
+    } catch (e) {
+      store.toast(`Could not delete: ${e.message}`);
+    }
+  };
+
   const disburse = async () => {
     if (!window.confirm('Disburse this run? M-Pesa payouts send real money now; manual ones are marked paid.')) return;
     setBusy(true);
@@ -230,7 +281,17 @@ function Payroll() {
             { key: 'period', label: 'Period', render: (r) => `${r.period_start} – ${r.period_end}` },
             { key: 'total', label: 'Total', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>KES {Number(r.total).toLocaleString('en-KE')}</span> },
             { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status === 'completed' ? 'active' : r.status === 'draft' ? 'default' : 'pending'}>{r.status}</Badge> },
-            { key: 'act', label: '', align: 'right', render: (r) => <span onClick={() => openRun(r.id)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>View</span> },
+            {
+              key: 'act', label: '', align: 'right',
+              render: (r) => (
+                <span style={{ display: 'inline-flex', gap: 12 }}>
+                  <span onClick={() => openRun(r.id)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>View</span>
+                  {r.status === 'draft' && (
+                    <span onClick={() => deleteRun(r)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Delete</span>
+                  )}
+                </span>
+              ),
+            },
           ]}
         />
       </Card>
@@ -260,6 +321,7 @@ function Payroll() {
               <Badge tone={viewing.status === 'completed' ? 'active' : viewing.status === 'draft' ? 'default' : 'pending'}>{viewing.status}</Badge>
               {viewing.status === 'draft' && (
                 <>
+                  <Button onClick={() => setEditingPeriod({ periodStart: viewing.period_start, periodEnd: viewing.period_end })}>Edit period</Button>
                   <Button onClick={() => setAdding({ staffId: '', type: 'bonus', amount: '', note: '' })}>+ Add line</Button>
                   <Button variant="primary" onClick={approve} disabled={busy}>{busy ? 'Approving…' : 'Approve'}</Button>
                 </>
@@ -280,6 +342,15 @@ function Payroll() {
                   { key: 'type', label: 'Type', render: (i) => <span style={{ textTransform: 'capitalize' }}>{i.type.replace('_', ' ')}</span> },
                   { key: 'amount', label: 'Amount', align: 'right', render: (i) => <span style={{ fontFamily: font.mono }}>KES {Number(i.amount).toLocaleString('en-KE')}</span> },
                   { key: 'note', label: 'Note', render: (i) => <span style={{ color: color.muted, fontSize: 12 }}>{i.note ?? ''}</span> },
+                  ...(viewing.status === 'draft' ? [{
+                    key: 'act', label: '', align: 'right',
+                    render: (i) => (
+                      <span style={{ display: 'inline-flex', gap: 10, whiteSpace: 'nowrap' }}>
+                        <span onClick={() => setEditingItem({ id: i.id, amount: String(Math.abs(Number(i.amount))), note: i.note ?? '' })} style={{ fontSize: 12, fontWeight: 600, color: color.ink, cursor: 'pointer' }}>Edit</span>
+                        <span onClick={() => deleteItem(i)} style={{ fontSize: 12, fontWeight: 600, color: color.rust, cursor: 'pointer' }}>Delete</span>
+                      </span>
+                    ),
+                  }] : []),
                 ]}
               />
             </div>
@@ -335,6 +406,34 @@ function Payroll() {
               <Input value={adding.note} onChange={(e) => setAdding((s) => ({ ...s, note: e.target.value }))} />
             </Field>
             <Button variant="primary" onClick={addItem} disabled={busy || !adding.staffId}>{busy ? 'Adding…' : 'Add'}</Button>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!editingItem} title="Edit line item" onClose={() => setEditingItem(null)} width={360}>
+        {editingItem && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Amount (KES)">
+              <Input type="number" min="0" value={editingItem.amount} onChange={(e) => setEditingItem((s) => ({ ...s, amount: e.target.value }))} />
+            </Field>
+            <Field label="Note">
+              <Input value={editingItem.note} onChange={(e) => setEditingItem((s) => ({ ...s, note: e.target.value }))} />
+            </Field>
+            <Button variant="primary" onClick={saveItem} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer open={!!editingPeriod} title="Edit period" onClose={() => setEditingPeriod(null)} width={340}>
+        {editingPeriod && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Field label="Period start">
+              <Input type="date" value={editingPeriod.periodStart} onChange={(e) => setEditingPeriod((s) => ({ ...s, periodStart: e.target.value }))} />
+            </Field>
+            <Field label="Period end">
+              <Input type="date" value={editingPeriod.periodEnd} onChange={(e) => setEditingPeriod((s) => ({ ...s, periodEnd: e.target.value }))} />
+            </Field>
+            <Button variant="primary" onClick={savePeriod} disabled={busy}>{busy ? 'Saving…' : 'Save'}</Button>
           </div>
         )}
       </Drawer>

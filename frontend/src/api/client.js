@@ -232,6 +232,10 @@ export const api = {
   payrollRun: (id) => get(`/api/payroll/runs/${id}`),
   createPayrollRun: (r) => post('/api/payroll/runs', r),
   addPayrollItem: (runId, item) => post(`/api/payroll/runs/${runId}/items`, item),
+  editPayrollItem: (runId, itemId, fields) => patch(`/api/payroll/runs/${runId}/items/${itemId}`, fields),
+  deletePayrollItem: (runId, itemId) => del(`/api/payroll/runs/${runId}/items/${itemId}`),
+  editPayrollRun: (id, fields) => patch(`/api/payroll/runs/${id}`, fields),
+  deletePayrollRun: (id) => del(`/api/payroll/runs/${id}`),
   approvePayrollRun: (id) => post(`/api/payroll/runs/${id}/approve`, {}),
   disbursePayrollRun: (id, reference) => post(`/api/payroll/runs/${id}/disburse`, { reference }),
 
