@@ -105,6 +105,15 @@ const num = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/**
+ * Is this actually a real position, or a placeholder that just happens to parse as a number? 0,0 is Null Island —
+ * a point in the Gulf of Guinea, nowhere near any tenant this platform serves — and it is exactly what a lat/lng
+ * pair reads as when it was never really set (an unset column, or a form field left blank and coerced to 0). A
+ * client or router "at" 0,0 used to render there and drag the map's auto-fit out to include it, opening the map
+ * on a view of the whole of Africa instead of the area anyone actually works in.
+ */
+const hasCoords = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
+
 /** Metres along a line of [lat, lng] points. */
 const lengthM = (pts) => {
   let total = 0;
@@ -192,13 +201,13 @@ export default function MapScreen() {
   const placed = useMemo(
     () => clients
       .map((c) => ({ ...c, _lat: num(c.lat), _lng: num(c.lng) }))
-      .filter((c) => c._lat !== null && c._lng !== null),
+      .filter((c) => hasCoords(c._lat, c._lng)),
     [clients],
   );
   const placedRouters = useMemo(
     () => routers
       .map((r) => ({ ...r, _lat: num(r.lat), _lng: num(r.lng) }))
-      .filter((r) => r._lat !== null && r._lng !== null),
+      .filter((r) => hasCoords(r._lat, r._lng)),
     [routers],
   );
   const missing = clients.length - placed.length;
@@ -389,6 +398,7 @@ export default function MapScreen() {
       }
 
       for (const n of net.nodes) {
+        if (!hasCoords(Number(n.lat), Number(n.lng))) continue;   // never actually placed — nothing real to draw
         const k = KINDS[n.kind] ?? KINDS.closure;
         const ref = `n:${n.id}`;
         const down = n.status === 'down';
@@ -463,9 +473,15 @@ export default function MapScreen() {
     // yank the map away from whatever is being drawn.
     if (!framed.current) {
       const points = [...placed, ...placedRouters].map((p) => [p._lat, p._lng]);
-      net.nodes.forEach((n) => points.push([Number(n.lat), Number(n.lng)]));
+      for (const n of net.nodes) {
+        const [la, ln] = [Number(n.lat), Number(n.lng)];
+        if (hasCoords(la, ln)) points.push([la, ln]);
+      }
       if (points.length === 1) { map.current.setView(points[0], 15); framed.current = true; }
       else if (points.length > 1) { map.current.fitBounds(points, { padding: [40, 40] }); framed.current = true; }
+      // Nothing real to fit to (every point was Null Island, or there is simply nothing placed yet) — stay on
+      // the Kenya view the map already opened with, rather than sitting at whatever zoom was last set.
+      else framed.current = true;
     }
   }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, endpointClick, loadNet, store, onus, hasSmartOlt]);
 
