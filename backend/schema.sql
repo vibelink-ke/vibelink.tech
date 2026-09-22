@@ -2595,7 +2595,7 @@ end $$;
 create table if not exists network_nodes (
   id         uuid primary key default gen_random_uuid(),
   tenant_id  uuid not null references tenants on delete cascade,
-  kind       text not null,                 -- olt | splitter | closure | onu | ap | ptp | station
+  kind       text not null,                 -- olt | splitter | closure | onu | ap | ptp | station | tower | pole | cabinet | power
   name       text not null,
   lat        numeric(9,6) not null,
   lng        numeric(9,6) not null,

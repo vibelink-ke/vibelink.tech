@@ -48,6 +48,7 @@ const REAL_TILE_BYTES = 3000;
 
 const FIBRE = '#1f6fd1';
 const WIRELESS = '#8a4fd0';
+const SITE = '#8a5a2e';
 
 /** What can be placed, and the extra facts worth keeping about each. */
 const KINDS = {
@@ -58,10 +59,14 @@ const KINDS = {
   ap:       { label: 'Access point',    group: 'wireless', letter: 'A', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ssid', 'SSID'], ['ip', 'IP address']] },
   ptp:      { label: 'Backhaul radio',  group: 'wireless', letter: 'P', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ip', 'IP address']] },
   station:  { label: 'Station / CPE',   group: 'wireless', letter: 'R', fill: WIRELESS, fields: [['model', 'Model'], ['ip', 'IP address'], ['customer', 'Customer']] },
+  tower:    { label: 'Tower / mast',    group: 'site',     letter: 'T', fill: SITE,     fields: [['height', 'Height (m)'], ['note', 'Note']] },
+  pole:     { label: 'Pole',            group: 'site',     letter: 'L', fill: SITE,     fields: [['note', 'Note']] },
+  cabinet:  { label: 'Cabinet / NAP',   group: 'site',     letter: 'N', fill: SITE,     fields: [['note', 'Note']] },
+  power:    { label: 'Power / generator', group: 'site',   letter: 'G', fill: SITE,     fields: [['note', 'Note']] },
 };
 const LINK_FIELDS = {
   fibre: [['cores', 'Cores']],
-  wireless: [['frequency', 'Frequency (GHz)'], ['signal', 'Signal (dBm)']],
+  wireless: [['frequency', 'Frequency (GHz)'], ['signal', 'Signal (dBm)'], ['los', 'Line-of-sight issue right now', 'checkbox']],
 };
 
 /** "OLT" and "ONU / drop" keep their capitals mid-sentence; "Splitter" does not. */
@@ -214,7 +219,7 @@ export default function MapScreen() {
   const offline = routers.filter((r) => r.status === 'down');
   const offlineRadios = net.nodes.filter((n) => n.status === 'down');
 
-  /** [lat, lng] for a link end: 'n:<id>' is a drawn node, 'r:<id>' a router. */
+  /** [lat, lng] for a link end: 'n:<id>' is a drawn node, 'r:<id>' a router, 'c:<id>' a customer. */
   const posOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
     // 'p:<lat>,<lng>' — a free point on the map, where a cable simply starts or stops.
@@ -226,22 +231,41 @@ export default function MapScreen() {
       const n = net.nodes.find((x) => x.id === id);
       return n ? [Number(n.lat), Number(n.lng)] : null;
     }
+    if (kind === 'c') {
+      const c = placed.find((x) => x.id === id);
+      return c ? [c._lat, c._lng] : null;
+    }
     const r = placedRouters.find((x) => x.id === id);
     return r ? [r._lat, r._lng] : null;
-  }, [net.nodes, placedRouters]);
+  }, [net.nodes, placed, placedRouters]);
 
   const nameOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
     if (kind === 'p') return 'a point on the map';
     if (kind === 'n') return net.nodes.find((x) => x.id === id)?.name ?? 'removed';
+    if (kind === 'c') return clients.find((x) => x.id === id)?.name ?? 'removed';
     return routers.find((x) => x.id === id)?.name ?? 'removed';
-  }, [net.nodes, routers]);
+  }, [net.nodes, clients, routers]);
 
   const isDown = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
     if (kind === 'r') return routers.find((x) => x.id === id)?.status === 'down';
+    if (kind === 'c') return false;   // a customer isn't "broken hardware" — see clientOffline for their own connectivity
     return net.nodes.find((x) => x.id === id)?.status === 'down';
   }, [routers, net.nodes]);
+
+  /**
+   * A link ending on a customer (a 'c:' ref) is the one place "is data actually moving"
+   * has a real answer: whether that customer is connected right now. Not "broken" the way
+   * a dead radio is — the gear can be fine and still have nobody on the other end of it.
+   */
+  const clientOffline = useCallback((ref) => {
+    const [kind, id] = String(ref).split(':');
+    if (kind !== 'c') return false;
+    const c = clients.find((x) => x.id === id);
+    if (!c) return false;
+    return live ? c.online === false : c.status !== 'active';
+  }, [clients, live]);
 
   useEffect(() => {
     if (!holder.current || map.current) return;
@@ -373,15 +397,24 @@ export default function MapScreen() {
         if (!a || !b) continue;
         const pts = [a, ...(l.path ?? []), b];
         const broken = isDown(l.from_ref) || isDown(l.to_ref);
+        const losIssue = !broken && !!l.details?.los;
+        const clientDown = !broken && !losIssue && (clientOffline(l.from_ref) || clientOffline(l.to_ref));
+        // "Flowing" is the ordinary, healthy state — a moving dash, like current down the wire.
+        // Anything that stops it being trusted (broken gear, a known LOS problem, or simply nobody
+        // home at the customer end) drops it to a dim, still line instead — still there, just not
+        // carrying anything right now.
+        const flowing = !broken && !losIssue && !clientDown;
         const fibre = l.kind === 'fibre';
         const line = L.polyline(pts, {
           color: broken ? color.rust : (fibre ? FIBRE : WIRELESS),
           weight: selected?.type === 'link' && selected.id === l.id ? 6 : 3,
           dashArray: fibre ? undefined : '8 8',
-          opacity: 0.9,
+          opacity: flowing ? 0.9 : 0.5,
+          className: flowing ? 'vl-flow' : '',
         }).addTo(layer.current);
         line.bindTooltip(
-          `${fibre ? 'Fibre' : 'Wireless'}${l.label ? ` · ${esc(l.label)}` : ''}${fibre ? ` · ${fmtLen(lengthM(pts))}` : ''}${broken ? ' · a device on it is offline' : ''}`,
+          `${fibre ? 'Fibre' : 'Wireless'}${l.label ? ` · ${esc(l.label)}` : ''}${fibre ? ` · ${fmtLen(lengthM(pts))}` : ''}`
+          + `${broken ? ' · a device on it is offline' : losIssue ? ' · line-of-sight issue' : clientDown ? ' · customer offline' : ''}`,
           { sticky: true });
         line.on('click', (e) => { L.DomEvent.stopPropagation(e); if (!toolRef.current) setSelected({ type: 'link', id: l.id }); });
       }
@@ -460,19 +493,22 @@ export default function MapScreen() {
         const fill = live
           ? (c.online ? color.green : '#9aa39c')
           : (STATUS_COLOUR[c.status] ?? color.muted);
+        const ref = `c:${c.id}`;
         const m = L.marker([c._lat, c._lng], {
-          icon: dot(fill, '#fff'),
+          icon: dot(fill, tool?.from === ref ? '#e08a00' : '#fff'),
           // A pin dropped in the wrong spot (a bad address, a guess that missed) is dragged
           // straight rather than re-typed — same edit-mode gate as network nodes, so it can't
-          // happen by an accidental bump while just browsing the map.
+          // happen by an accidental bump while just browsing the map. Left interactive even mid-tool
+          // (unlike before) so a wireless link can be drawn straight to the customer it serves —
+          // see endpointClick below.
           draggable: editMode && !tool,
-          interactive: !(editMode && tool),
           zIndexOffset: -200,
         })
           .bindPopup(
             `<strong>${esc(c.name)}</strong><br>${esc(c.account_code)}<br>`
             + `${esc(c.location)}<br>${esc(c.status)}`)
           .addTo(layer.current);
+        m.on('click', () => { if (endpointClick(ref)) m.closePopup(); });
         m.on('dragend', async () => {
           const p = m.getLatLng();
           try {
@@ -502,7 +538,7 @@ export default function MapScreen() {
       // the Kenya view the map already opened with, rather than sitting at whatever zoom was last set.
       else framed.current = true;
     }
-  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, endpointClick, loadNet, store, onus, hasSmartOlt]);
+  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, loadNet, store, onus, hasSmartOlt]);
 
   // ── editing ──
   const saveNode = async () => {
@@ -593,10 +629,17 @@ export default function MapScreen() {
     : n.status === 'up' ? `online (last answered ${ago(n.last_seen)})`
       : n.watch_router_id ? 'waiting for the first check' : 'not watched');
 
-  const fieldsFor = (list, values, setValues) => list.map(([key, label]) => (
-    <Field key={key} label={label}>
-      <Input value={values[key] ?? ''} onChange={(e) => setValues({ ...values, [key]: e.target.value })} />
-    </Field>
+  const fieldsFor = (list, values, setValues) => list.map(([key, label, type]) => (
+    type === 'checkbox' ? (
+      <label key={key} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, alignSelf: 'end', paddingBottom: 8, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!values[key]} onChange={(e) => setValues({ ...values, [key]: e.target.checked ? 'yes' : '' })} />
+        {label}
+      </label>
+    ) : (
+      <Field key={key} label={label}>
+        <Input value={values[key] ?? ''} onChange={(e) => setValues({ ...values, [key]: e.target.value })} />
+      </Field>
+    )
   ));
 
   const finishCable = () => {
@@ -615,8 +658,8 @@ export default function MapScreen() {
 
   const toolHint = !tool ? null
     : tool.type === 'node' ? `Click the map where the ${lc(KINDS[tool.kind].label)} is.`
-      : !tool.from ? 'Click the map where the cable starts — or click a node or router to start from it.'
-        : `Click along the route (${tool.path.length} point${tool.path.length === 1 ? '' : 's'} so far). Click a node or router to end on it, or press Finish to end at the last point.`;
+      : !tool.from ? 'Click the map where the cable starts — or click a node, router or customer to start from it.'
+        : `Click along the route (${tool.path.length} point${tool.path.length === 1 ? '' : 's'} so far). Click a node, router or customer to end on it, or press Finish to end at the last point.`;
 
   return (
     <Screen
@@ -643,7 +686,8 @@ export default function MapScreen() {
         </>
       }
     >
-      <style>{'@keyframes vlpulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.7)}100%{box-shadow:0 0 0 16px rgba(192,57,43,0)}}.vl-pulse{animation:vlpulse 1.4s infinite}'}</style>
+      <style>{'@keyframes vlpulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.7)}100%{box-shadow:0 0 0 16px rgba(192,57,43,0)}}.vl-pulse{animation:vlpulse 1.4s infinite}'
+        + '@keyframes vlflow{to{stroke-dashoffset:-24}}.vl-flow{stroke-dasharray:6 10;animation:vlflow .9s linear infinite}'}</style>
 
       {offline.length + offlineRadios.length > 0 && (
         <div style={{
@@ -676,19 +720,23 @@ export default function MapScreen() {
       {editMode && (
         <Card title="Draw your network" subtitle="Pick what to place, then click the map. Drag a placed node to move it; click one to edit or remove it.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {['fibre', 'wireless'].map((group) => (
+            {['fibre', 'wireless', 'site'].map((group) => (
               <div key={group} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                <b style={{ width: 78, fontSize: 12.5, color: group === 'fibre' ? FIBRE : WIRELESS }}>{group === 'fibre' ? 'Fibre' : 'Wireless'}</b>
+                <b style={{ width: 88, fontSize: 12.5, color: group === 'fibre' ? FIBRE : group === 'wireless' ? WIRELESS : SITE }}>
+                  {group === 'fibre' ? 'Fibre' : group === 'wireless' ? 'Wireless' : 'Infrastructure'}
+                </b>
                 {Object.entries(KINDS).filter(([, k]) => k.group === group).map(([kind, k]) => (
                   <Button key={kind} size="sm" variant={tool?.type === 'node' && tool.kind === kind ? 'primary' : undefined}
                     onClick={() => setTool(tool?.type === 'node' && tool.kind === kind ? null : { type: 'node', kind })}>
                     + {k.label}
                   </Button>
                 ))}
-                <Button size="sm" variant={tool?.type === 'link' && tool.kind === group ? 'primary' : undefined}
-                  onClick={() => setTool(tool?.type === 'link' && tool.kind === group ? null : { type: 'link', kind: group, from: null, path: [] })}>
-                  {group === 'fibre' ? 'Draw cable' : 'Link radios'}
-                </Button>
+                {group !== 'site' && (
+                  <Button size="sm" variant={tool?.type === 'link' && tool.kind === group ? 'primary' : undefined}
+                    onClick={() => setTool(tool?.type === 'link' && tool.kind === group ? null : { type: 'link', kind: group, from: null, path: [] })}>
+                    {group === 'fibre' ? 'Draw cable' : 'Link radios'}
+                  </Button>
+                )}
               </div>
             ))}
             {toolHint && (

@@ -7366,12 +7366,15 @@ app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, r
 
 /**
  * The operator's own network, drawn on the map: fibre (OLT, splitters, closures,
- * drops) and wireless (access points, backhaul radios, stations) and the cables
- * and links between them. A link end is 'n:<node id>' or 'r:<router id>'.
+ * drops), wireless (access points, backhaul radios, stations) and general site
+ * infrastructure (towers, poles, cabinets, power) — and the cables and links
+ * between them. A link end is 'n:<node id>', 'r:<router id>' or 'c:<subscriber id>'
+ * — the last one lets a wireless link (or a fibre drop) end straight on the
+ * customer it actually serves, instead of only on drawn equipment.
  */
-const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station'];
-// 'n:<node id>', 'r:<router id>', or 'p:<lat>,<lng>' — open ground where a cable starts or stops.
-const NET_REF = /^(?:[nr]:[0-9a-fA-F-]{36}|p:-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?)$/;
+const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station', 'tower', 'pole', 'cabinet', 'power'];
+// 'n:<node id>', 'r:<router id>', 'c:<subscriber id>', or 'p:<lat>,<lng>' — open ground where a cable starts or stops.
+const NET_REF = /^(?:[nrc]:[0-9a-fA-F-]{36}|p:-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?)$/;
 const netDetails = (d) => {
   const out = {};
   if (d && typeof d === 'object' && !Array.isArray(d)) {
@@ -7503,8 +7506,8 @@ app.post('/api/network/links', requirePermission('network.edit'), wrap(async (re
       if (netCoord(la, 90) === null || netCoord(ln, 180) === null) return res.status(400).json({ error: 'That is not a place on the map.' });
       continue;
     }
-    const { rowCount } = await pool.query(
-      `select 1 from ${type === 'n' ? 'network_nodes' : 'routers'} where tenant_id=$1 and id=$2`, [req.tenant.id, id]);
+    const table = type === 'n' ? 'network_nodes' : type === 'c' ? 'subscribers' : 'routers';
+    const { rowCount } = await pool.query(`select 1 from ${table} where tenant_id=$1 and id=$2`, [req.tenant.id, id]);
     if (!rowCount) return res.status(400).json({ error: 'One end of that link no longer exists.' });
   }
   const { rows: [l] } = await pool.query(
@@ -9152,6 +9155,10 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
   // so a delete blocked by a foreign key looked like it had worked and the row
   // reappeared on the next refresh.
   if (!rowCount) return res.status(409).json({ error: 'Client could not be deleted' });
+
+  // Same cleanup a deleted network node already gets — a wireless link drawn straight to this
+  // customer (see NET_REF's 'c:' ref) would otherwise dangle, pointing at a row that is now gone.
+  await pool.query('delete from network_links where tenant_id=$1 and (from_ref=$2 or to_ref=$2)', [req.tenant.id, `c:${req.params.id}`]);
 
   if (s.pppoe_user) {
     const radius = await import('./radius.js');
