@@ -1053,6 +1053,29 @@ export async function notifySales(tenantId, body, { url = '/leads', title = 'Vib
   }
 }
 
+/**
+ * A job (ticket) landed on someone's own queue — reaches that one person, not the whole tenant the way
+ * notifyOwner/notifySales broadcast: an installation assigned to a technician who is out of signal range should
+ * not page the owner too, and a push here only ever wakes that technician's own device (push.js's staffId scoping).
+ * Fires from the single place a ticket's assigned_to actually changes (PATCH /api/tickets/:id in server.js), so
+ * every path that assigns a job — the quick-assign dropdown, the edit form — is covered by this one call.
+ */
+export async function notifyAssignment(tenantId, staffId, ticket) {
+  try {
+    const { rows: [s] } = await pool.query('select name, phone from staff where id=$1 and tenant_id=$2', [staffId, tenantId]);
+    if (!s) return;
+    const { rows: [t] } = await pool.query('select subdomain from tenants where id=$1', [tenantId]);
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    const link = t?.subdomain ? `https://${t.subdomain}.${root}/tickets?open=${ticket.id}` : '';
+    const body = `You've been assigned a job: ${ticket.subject} (${ticket.number}), priority ${ticket.priority}.${link ? ` ${link}` : ''}`;
+    if (s.phone) await send(tenantId, s.phone, 'custom', { body }).catch((e) => console.error('assignment sms failed', tenantId, e.message));
+    const push = await import('./push.js');
+    await push.sendPush(tenantId, { title: 'New job assigned to you', body, url: `/tickets?open=${ticket.id}`, staffId }).catch((e) => console.error('assignment push failed', tenantId, e.message));
+  } catch (e) {
+    console.error('notifyAssignment failed', tenantId, e.message);
+  }
+}
+
 
 /**
  * Put a router's RADIUS back when it drifts.

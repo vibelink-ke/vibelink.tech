@@ -44,10 +44,15 @@ export async function removeSubscription(endpoint) {
  * paged, and a dead subscription is removed right then rather than retried
  * forever.
  */
-export async function sendPush(tenantId, { title, body, url = '/' }) {
+export async function sendPush(tenantId, { title, body, url = '/', staffId = null }) {
   if (!configured) return;
+  // staffId narrows this to one person's own devices (a job assigned to them) — omitted, it goes to
+  // every device any of the tenant's staff have opted in on, as it always did.
   const { rows } = await pool.query(
-    'select endpoint, keys from push_subscriptions where tenant_id=$1', [tenantId]);
+    staffId
+      ? 'select endpoint, keys from push_subscriptions where tenant_id=$1 and staff_id=$2'
+      : 'select endpoint, keys from push_subscriptions where tenant_id=$1',
+    staffId ? [tenantId, staffId] : [tenantId]);
   if (!rows.length) return;
 
   await Promise.all(rows.map(async (s) => {

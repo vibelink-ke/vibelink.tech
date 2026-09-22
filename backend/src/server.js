@@ -10307,6 +10307,12 @@ app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req
   // already fired should let a genuinely new breach notify again, rather
   // than staying silently suppressed by a flag from before the edit.
   const resetNotified = sets.includes('due_at') || sets.includes('status');
+  // Read before the update, so a genuinely new assignment (not just re-saving the same person) can be told apart
+  // from one that was already theirs — the single choke point every assignment (the quick dropdown, the edit
+  // form) goes through, so this is the one place that needs to notice it.
+  const { rows: [before] } = sets.includes('assigned_to')
+    ? await pool.query('select assigned_to from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
+    : { rows: [null] };
   const { rows: [t] } = await pool.query(
     `update tickets set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}, updated_at=now()
      ${resetNotified ? ', sla_breach_notified=false' : ''}
@@ -10314,6 +10320,10 @@ app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req
     [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
   if (!t) return res.status(404).json({ error: 'not found' });
   res.json(t);
+  if (sets.includes('assigned_to') && t.assigned_to && t.assigned_to !== before?.assigned_to) {
+    const { notifyAssignment } = await import('./jobs.js');
+    notifyAssignment(req.tenant.id, t.assigned_to, t).catch((e) => console.error('notifyAssignment', e.message));
+  }
 }));
 
 app.delete('/api/tickets/:id', requirePermission('tickets.delete'), wrap(async (req, res) => {
