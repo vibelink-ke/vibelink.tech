@@ -56,6 +56,7 @@ const Analytics = lazy(() => import('./screens/Analytics'));
 const Leads = lazy(() => import('./screens/Leads'));
 const Messaging = lazy(() => import('./screens/Messaging'));
 const FieldTech = lazy(() => import('./screens/FieldTech'));
+const TeamJobs = lazy(() => import('./screens/TeamJobs'));
 const LiveSupport = lazy(() => import('./screens/LiveSupport'));
 const Outages = lazy(() => import('./screens/Outages'));
 const Sla = lazy(() => import('./screens/Sla'));
@@ -300,6 +301,7 @@ export default function App() {
             <Route path="/tickets" element={<Tickets />} />
             <Route path="/leads" element={<Leads />} />
             <Route path="/field-tech" element={<FieldTech />} />
+            <Route path="/team-jobs" element={<TeamJobs />} />
             <Route path="/messaging" element={<Messaging />} />
             <Route path="/live-support" element={<LiveSupport />} />
             <Route path="/outages" element={<Outages />} />

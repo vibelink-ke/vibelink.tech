@@ -46,6 +46,12 @@ export const NAV_SECTIONS = [
         label: 'My jobs',
         count: (s) => s.tickets.filter((t) => t.assigned_to === s.session?.id && t.status !== 'resolved').length,
       },
+      {
+        to: '/team-jobs',
+        label: 'Team jobs',
+        perm: 'tickets.view_team',
+        count: (s) => s.tickets.filter((t) => t.status !== 'resolved').length,
+      },
       { to: '/messaging', label: 'Messaging' },
       { to: '/knowledge-base', label: 'Knowledge base', count: (s) => s.articles.length },
     ],

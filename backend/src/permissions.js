@@ -57,6 +57,10 @@ export const DEFAULT_PERMISSIONS = {
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'tickets.delete':  all(),
+  // The whole team's job board — every ticket, who it is assigned to, how far along it is. Owner-level: a
+  // technician's or support agent's own queue (tickets.view) is theirs to see; watching everyone's workload
+  // at once is a management view, same trust level as routers.delete or staff.manage_permissions.
+  'tickets.view_team': all(),
 
   // Revenue/MRR reporting — same trust level as payments.view, since it's
   // the same underlying money figures rolled up rather than itemized.
@@ -223,6 +227,7 @@ export const PERMISSION_META = [
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },
+  { key: 'tickets.view_team', page: 'Tickets', action: 'See every job across the team (Team jobs)' },
   { key: 'analytics.view', page: 'Analytics', action: 'View' },
   { key: 'dashboard.finance', page: 'Dashboard', action: 'View revenue figures' },
   { key: 'leads.view',     page: 'Leads', action: 'View' },

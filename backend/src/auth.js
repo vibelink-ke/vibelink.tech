@@ -207,6 +207,10 @@ const smartoltEnabled = async (tenantId) => {
 };
 
 export const publicSession = async (s) => ({
+  // The signed-in staff member's own id — "My jobs" (FieldTech.jsx) and the sidebar's own-jobs count key off this
+  // (t.assigned_to === session.id). It was never sent to the browser at all, so both always matched nothing,
+  // for every staff member on every tenant, not only the owner.
+  id: s.staff_id,
   email: s.email,
   username: s.username,
   name: s.name,
