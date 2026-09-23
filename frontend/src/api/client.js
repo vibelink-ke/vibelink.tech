@@ -146,6 +146,7 @@ export const api = {
   createAccessCode: (c) => post('/api/hotspot/access-codes', c),
   accessCodesSpeed: () => get('/api/hotspot/access-codes-speed'),
   setAccessCodesSpeed: (speedDownMbps, speedUpMbps) => post('/api/hotspot/access-codes-speed', { speedDownMbps, speedUpMbps }),
+  updateAccessCode: (id, c) => patch(`/api/hotspot/access-codes/${id}`, c),
   deleteAccessCode: (id) => del(`/api/hotspot/access-codes/${id}`),
 
   // ── hotspot ──

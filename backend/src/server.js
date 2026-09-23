@@ -10355,9 +10355,15 @@ app.post('/api/hotspot/access-codes-speed', requirePermission('hotspot.vouchers'
     `insert into hotspot_settings (tenant_id, access_down_kbps, access_up_kbps) values ($1,$2,$3)
      on conflict (tenant_id) do update set access_down_kbps = excluded.access_down_kbps, access_up_kbps = excluded.access_up_kbps`,
     [req.tenant.id, down, up]);
+  // Disabled codes are excluded: their RADIUS row was already removed
+  // (forgetAccessCode), and re-running ensureAccessCodeRadius on them here
+  // would silently switch a paused code back on the moment someone applies
+  // a platform-wide speed change, which is not what "disabled" is supposed
+  // to mean. They keep whatever speed they had; it takes effect again if
+  // and when they're re-enabled.
   const { rows } = await pool.query(
     `update hotspot_access_codes set plan_id = null, rate_down_kbps = null, rate_up_kbps = null
-      where tenant_id=$1 returning id`, [req.tenant.id]);
+      where tenant_id=$1 and enabled returning id`, [req.tenant.id]);
   const { withTenant } = await import('./db.js');
   const radius = await import('./radius.js');
   await withTenant(req.tenant.id, async (c) => { for (const r of rows) await radius.ensureAccessCodeRadius(c, req.tenant.id, r.id); });
@@ -10405,6 +10411,70 @@ app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wra
   // Group names is only actually created on the next Configure/heal cycle —
   // pushing now means a router already Configured picks it up immediately
   // rather than the code silently failing to log anyone in until then.
+  repushHotspotConfigToAllRouters(req.tenant.id);
+  res.json(row);
+}));
+
+/**
+ * Pause/resume a code, or change its device cap or speed, without deleting
+ * and recreating it (which would mean a new username/password every time).
+ *
+ * Disabling removes its RADIUS credentials outright (forgetAccessCode) —
+ * the same as a delete, minus actually losing the row — so a paused code
+ * really does stop working immediately rather than merely being hidden.
+ * Re-enabling writes them back with whatever speed/device cap it currently
+ * has. Editing speed on an already-disabled code just updates the row; it
+ * takes effect the next time it's enabled, not before.
+ */
+app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const { rows: [existing] } = await pool.query(
+    'select * from hotspot_access_codes where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!existing) return res.status(404).json({ error: 'not found' });
+
+  const sets = [];
+  const vals = [req.tenant.id, req.params.id];
+  const set = (col, val) => { vals.push(val); sets.push(`${col}=$${vals.length}`); };
+
+  if ('enabled' in req.body) set('enabled', !!req.body.enabled);
+
+  if ('maxDevices' in req.body) {
+    const devices = Math.round(Number(req.body.maxDevices));
+    if (!Number.isFinite(devices) || devices < 1 || devices > 50) {
+      return res.status(400).json({ error: 'Max devices must be between 1 and 50' });
+    }
+    set('max_devices', devices);
+  }
+
+  if ('planId' in req.body || 'speedDownMbps' in req.body || 'speedUpMbps' in req.body) {
+    const hasSpeed = (req.body.speedDownMbps ?? '') !== '' || (req.body.speedUpMbps ?? '') !== '';
+    if (hasSpeed) {
+      const downKbps = Math.round(Number(req.body.speedDownMbps) * 1000);
+      const upKbps = Math.round(Number(req.body.speedUpMbps) * 1000);
+      if (!(downKbps >= 64 && downKbps <= 1000000 && upKbps >= 64 && upKbps <= 1000000)) {
+        return res.status(400).json({ error: 'Give both a download and an upload speed, between 0.1 and 1000 Mbps.' });
+      }
+      set('rate_down_kbps', downKbps);
+      set('rate_up_kbps', upKbps);
+      set('plan_id', null);
+    } else {
+      set('plan_id', req.body.planId || null);
+      set('rate_down_kbps', null);
+      set('rate_up_kbps', null);
+    }
+  }
+
+  if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+
+  const { rows: [row] } = await pool.query(
+    `update hotspot_access_codes set ${sets.join(', ')} where tenant_id=$1 and id=$2 returning *`, vals);
+
+  const radius = await import('./radius.js');
+  if (row.enabled) {
+    const { withTenant } = await import('./db.js');
+    await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
+  } else {
+    await radius.forgetAccessCode(pool, req.tenant.id, row.username);
+  }
   repushHotspotConfigToAllRouters(req.tenant.id);
   res.json(row);
 }));

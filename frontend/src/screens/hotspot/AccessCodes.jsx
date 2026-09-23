@@ -18,7 +18,9 @@ export default function AccessCodes() {
   const store = useStore();
   const codes = store.accessCodes ?? [];
   const [creating, setCreating] = useState(null);
+  const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
 
   // One speed for every access code.
   const [all, setAll] = useState({ down: '', up: '', saved: null, busy: false });
@@ -81,6 +83,53 @@ export default function AccessCodes() {
       setCreating(null);
     } catch (e) {
       store.toast(`Could not create: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleEnabled = async (c) => {
+    setTogglingId(c.id);
+    try {
+      const updated = await api.updateAccessCode(c.id, { enabled: !c.enabled });
+      store.setCollection('accessCodes', (cs) => cs.map((x) => (x.id === c.id ? updated : x)));
+      store.toast(`${c.label} ${updated.enabled ? 'enabled' : 'disabled'}`);
+    } catch (e) {
+      store.toast(`Could not change it: ${e.message}`);
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  // Same shape as "creating" — pre-filled from the row rather than fetched,
+  // since everything it needs is already sitting in the table.
+  const openEdit = (c) => setEditing({
+    id: c.id,
+    label: c.label,
+    maxDevices: c.max_devices,
+    planId: c.rate_down_kbps && c.rate_up_kbps ? CUSTOM : (c.plan_id ?? ''),
+    downMbps: c.rate_down_kbps ? mbps(c.rate_down_kbps) : '',
+    upMbps: c.rate_up_kbps ? mbps(c.rate_up_kbps) : '',
+  });
+
+  const submitEdit = async () => {
+    if (editing.planId === CUSTOM && !(Number(editing.downMbps) > 0 && Number(editing.upMbps) > 0)) {
+      return store.toast('Enter both a download and an upload speed in Mbps');
+    }
+    setBusy(true);
+    try {
+      const updated = await api.updateAccessCode(editing.id, {
+        maxDevices: Number(editing.maxDevices),
+        planId: editing.planId && editing.planId !== CUSTOM ? editing.planId : null,
+        ...(editing.planId === CUSTOM
+          ? { speedDownMbps: editing.downMbps, speedUpMbps: editing.upMbps }
+          : { speedDownMbps: '', speedUpMbps: '' }),
+      });
+      store.setCollection('accessCodes', (cs) => cs.map((x) => (x.id === updated.id ? updated : x)));
+      store.toast(`${editing.label} updated`);
+      setEditing(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
     } finally {
       setBusy(false);
     }
@@ -149,16 +198,85 @@ export default function AccessCodes() {
                 : <span style={{ color: color.muted }}>Default</span>,
             },
             {
-              key: 'del', label: '', align: 'right',
+              key: 'status',
+              label: 'Status',
               render: (c) => (
-                <Button size="sm" style={{ color: color.rust, borderColor: color.rust }} onClick={() => remove(c)}>
-                  Delete
+                <Button
+                  size="sm"
+                  disabled={togglingId === c.id}
+                  style={c.enabled === false
+                    ? { color: color.muted, borderColor: color.muted }
+                    : { color: color.green, borderColor: color.green }}
+                  onClick={() => toggleEnabled(c)}
+                  title={c.enabled === false ? 'Disabled — nobody can log in with this code' : 'Active — click to disable'}
+                >
+                  {togglingId === c.id ? 'Working…' : c.enabled === false ? 'Disabled' : 'Active'}
                 </Button>
+              ),
+            },
+            {
+              key: 'actions', label: '', align: 'right',
+              render: (c) => (
+                <span style={{ display: 'inline-flex', gap: 8 }}>
+                  <Button size="sm" onClick={() => openEdit(c)}>Edit</Button>
+                  <Button size="sm" style={{ color: color.rust, borderColor: color.rust }} onClick={() => remove(c)}>
+                    Delete
+                  </Button>
+                </span>
               ),
             },
           ]}
         />
       </Card>
+
+      {editing && (
+        <Card title={`Edit ${editing.label}`}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
+            <Field label="Max devices" hint="How many phones/laptops can be online on this code at once">
+              <Input
+                type="number" min={1} max={50}
+                value={editing.maxDevices}
+                onChange={(e) => setEditing((s) => ({ ...s, maxDevices: e.target.value }))}
+              />
+            </Field>
+            <Field label="Speed" hint="Pick a bundle's speed, or set your own">
+              <Select
+                value={editing.planId}
+                onChange={(e) => setEditing((s) => ({ ...s, planId: e.target.value }))}
+                options={[
+                  { value: '', label: 'Default' },
+                  { value: CUSTOM, label: 'Custom speed…' },
+                  ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · ${p.rate_down}k/${p.rate_up}k` })),
+                ]}
+              />
+            </Field>
+            {editing.planId === CUSTOM && (
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Field label="Download (Mbps)" hint="e.g. 5, or 0.5">
+                  <Input
+                    type="number" min="0.1" step="0.1"
+                    value={editing.downMbps}
+                    onChange={(e) => setEditing((s) => ({ ...s, downMbps: e.target.value }))}
+                  />
+                </Field>
+                <Field label="Upload (Mbps)" hint="e.g. 2">
+                  <Input
+                    type="number" min="0.1" step="0.1"
+                    value={editing.upMbps}
+                    onChange={(e) => setEditing((s) => ({ ...s, upMbps: e.target.value }))}
+                  />
+                </Field>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Button onClick={() => setEditing(null)} disabled={busy}>Cancel</Button>
+              <Button variant="primary" onClick={submitEdit} disabled={busy}>
+                {busy ? 'Saving…' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
 
       {creating && (
         <Card title="New access code">

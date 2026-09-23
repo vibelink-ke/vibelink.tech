@@ -2912,3 +2912,11 @@ update tickets set resolved_at = updated_at where status = 'resolved' and resolv
 -- by any path — PATCH /api/tenants/:id (Super Admin only) is the only way to set it.
 alter table tenants add column if not exists max_concurrent_clients int
   check (max_concurrent_clients is null or max_concurrent_clients >= 0);
+
+-- A pause switch for a permanent access code, short of deleting it outright.
+-- Deleting has always meant "gone for good" (its RADIUS row is removed and
+-- the username can be reissued); this is for "not right now" — a lounge
+-- closed for the night, a staff code someone wants to freeze without losing
+-- the label/username/password/speed already set up for it. See PATCH
+-- /api/hotspot/access-codes/:id.
+alter table hotspot_access_codes add column if not exists enabled boolean not null default true;
