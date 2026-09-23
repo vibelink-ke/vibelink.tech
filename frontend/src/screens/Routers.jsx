@@ -512,6 +512,24 @@ export default function Routers() {
     }
   };
 
+  /**
+   * Ships a failover-logic change (a staleAfter/confirmChecks tuning) to a router
+   * that already has WireGuard+OVPN failover set up, straight over the live API
+   * connection — no paste-in script, and no touching tunnel keys at all, unlike
+   * "Re-onboard tunnel" above.
+   */
+  const refreshFailover = async (r) => {
+    setBusy(true);
+    try {
+      const res = await api.refreshFailover(r.id);
+      store.toast(res.skipped ? `Nothing to refresh on ${r.name} — ${res.skipped}` : `${r.name}'s failover logic is up to date`);
+    } catch (e) {
+      store.toast(`Could not refresh it: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const copyScript = async () => {
     try {
       await navigator.clipboard.writeText(ovpn.script);
@@ -1308,6 +1326,12 @@ Revoke anyway?`
                       title="Router lost its tunnel config (e.g. a factory reset)? Re-issue fresh keys for its existing tunnel and get the paste-in script again."
                     >
                       Re-onboard tunnel
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); refreshFailover(r); }}
+                      title="Push the current WireGuard/OVPN failover logic to this router — no new keys, no paste-in script, just an updated switching rule if this platform has changed it"
+                    >
+                      Refresh failover logic
                     </MenuItem>
                     <MenuItem
                       onClick={() => { setMenuFor(null); setTraffic({ router: r, ports: null, error: null }); }}

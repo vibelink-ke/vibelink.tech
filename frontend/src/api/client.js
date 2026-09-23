@@ -349,6 +349,7 @@ export const api = {
   wgPeer: (opts = {}) => post('/api/routers/wg-peer', opts),
   failoverScript: (opts = {}) => post('/api/routers/failover-script', opts),
   reonboardTunnel: (routerId) => post(`/api/routers/${routerId}/reonboard-tunnel`, {}),
+  refreshFailover: (routerId) => post(`/api/routers/${routerId}/refresh-failover`, {}),
   wgPeers: () => get('/api/routers/wg-peers'),
   deleteWgPeer: (id) => del(`/api/routers/wg-peers/${id}`),
   tunnelInfo: () => get('/api/routers/tunnel-info'),

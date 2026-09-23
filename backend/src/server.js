@@ -7406,6 +7406,36 @@ app.post('/api/routers/:id/reonboard-tunnel', requireRole('owner'), wrap(async (
   });
 }));
 
+/**
+ * Ships a failover-logic change (a staleAfter/confirmChecks tuning, say) to a
+ * router that already has WireGuard+OVPN failover onboarded, without touching
+ * its tunnel keys at all — routeros.js's pushFailoverScript over the live API
+ * connection, not a paste-in script. reonboard-tunnel above is for a router
+ * that lost its own config; this is for one that didn't, just running logic
+ * this platform has since improved.
+ */
+app.post('/api/routers/:id/refresh-failover', requireRole('owner'), wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    'select id, name, host, api_port, service_user, service_password_enc from routers where id=$1 and tenant_id=$2',
+    [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  if (!r.service_user || !r.service_password_enc) {
+    return res.status(409).json({ error: 'Run Configure on this router first — pushing needs its service credentials.' });
+  }
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let conn;
+  try {
+    const password = secrets.decrypt(r.service_password_enc);
+    if (!password) return res.status(409).json({ error: 'Could not read this router\'s stored credentials.' });
+    conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password });
+    const result = await ros.pushFailoverScript(conn, {});
+    res.json(result);
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.get('/api/routers/wg-peers', wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select p.id, p.name, p.assigned_ip, p.enabled, p.last_handshake, p.rx_bytes, p.tx_bytes,

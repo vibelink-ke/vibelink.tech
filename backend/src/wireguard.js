@@ -152,6 +152,20 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
  * checks a fresh reading before deciding: recovered means committing to the
  * switch back, still down means disabling it again and trying once more on
  * the next scheduled run.
+ *
+ * That single 10-second look used to be trusted on its own — one lucky
+ * handshake, once every 2 minutes, was enough to flip straight back to
+ * WireGuard. A marginal or intermittently-flapping link could look good for
+ * exactly that window and bad again moments later, so the router kept
+ * committing to a transport it couldn't actually hold — switching itself is
+ * not free (the ~10s window both interfaces spend settling), so doing it on
+ * one good reading rather than a confirmed one made the flapping worse, not
+ * better. A :global streak, surviving across scheduled runs until reboot,
+ * now requires confirmChecks consecutive good readings — each its own
+ * independent retest, roughly one scheduler interval apart — before
+ * actually committing to the switch back. Any single bad reading resets it
+ * to zero, so a link has to hold up continuously across the whole window,
+ * not just get lucky twice.
  */
 /**
  * Just the script body — the part inside billing-failover's own source={...}
@@ -163,11 +177,17 @@ export function mikrotikScript({ privateKey, presharedKey: psk, assignedIp, endp
  * router: paste-a-script onboarding and a live API push must never drift
  * into two different failover behaviours.
  */
-export function failoverScriptSource({ staleAfter = '240s' } = {}) {
+export function failoverScriptSource({ staleAfter = '240s', confirmChecks = 2 } = {}) {
   return [
     ':local wg [/interface wireguard find where name=billing-wg];',
     ':local ovpn [/interface ovpn-client find where name=billing-ovpn];',
     ':local wgDisabled [/interface wireguard get $wg disabled];',
+    '',
+    // Survives across scheduled runs (reset only on reboot) — how many *consecutive*
+    // good retests billing-wg has had while parked on OVPN, so a switch back only
+    // ever commits once the link has held up across more than one look at it.
+    ':global wgGoodStreak;',
+    ':if ([:typeof $wgGoodStreak] = "nothing") do={ :set wgGoodStreak 0 };',
     '',
     ':if ($wgDisabled = false) do={',
     '  :local peer [/interface wireguard peers find where interface=billing-wg];',
@@ -177,6 +197,9 @@ export function failoverScriptSource({ staleAfter = '240s' } = {}) {
     '    :log warning "billing-wg stale ($age) -- failing over to OVPN";',
     '    /interface wireguard set $wg disabled=yes;',
     '    /interface ovpn-client set $ovpn disabled=no;',
+    // Fresh instability, fresh count — a streak left over from confirming a
+    // previous recovery must not let this new episode skip straight to "confirmed."
+    '    :set wgGoodStreak 0;',
     '  }',
     '} else={',
     '  :log info "on OVPN -- retesting billing-wg";',
@@ -186,9 +209,17 @@ export function failoverScriptSource({ staleAfter = '240s' } = {}) {
     '  :local age 1d;',
     '  :if ([:len $peer] > 0) do={ :set age [/interface wireguard peers get $peer last-handshake] };',
     `  :if ($age <= ${staleAfter}) do={`,
-    '    :log info "billing-wg recovered -- switching back from OVPN";',
-    '    /interface ovpn-client set $ovpn disabled=yes;',
+    '    :set wgGoodStreak ($wgGoodStreak + 1);',
+    `    :if ($wgGoodStreak >= ${confirmChecks}) do={`,
+    '      :log info "billing-wg confirmed recovered ($wgGoodStreak checks in a row) -- switching back from OVPN";',
+    '      /interface ovpn-client set $ovpn disabled=yes;',
+    '      :set wgGoodStreak 0;',
+    '    } else={',
+    '      :log info "billing-wg looks recovered ($age) -- confirming once more before committing";',
+    '      /interface wireguard set $wg disabled=yes;',
+    '    }',
     '  } else={',
+    '    :set wgGoodStreak 0;',
     '    :log info "billing-wg still down ($age) -- staying on OVPN";',
     '    /interface wireguard set $wg disabled=yes;',
     '  }',
@@ -196,12 +227,12 @@ export function failoverScriptSource({ staleAfter = '240s' } = {}) {
   ].join('\n');
 }
 
-export function failoverScript({ staleAfter = '240s' } = {}) {
+export function failoverScript({ staleAfter = '240s', confirmChecks = 2 } = {}) {
   return [
     '/system script',
     'remove [find name=billing-failover]',
     'add name=billing-failover policy=read,write,test source={',
-    failoverScriptSource({ staleAfter }),
+    failoverScriptSource({ staleAfter, confirmChecks }),
     '}',
     '',
     '/system scheduler',
