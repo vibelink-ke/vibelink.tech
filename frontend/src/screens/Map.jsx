@@ -552,7 +552,9 @@ export default function MapScreen() {
         const m = L.marker([r._lat, r._lng], {
           icon: down
             ? dot(color.rust, '#fff', 'vl-pulse')
-            : dot(r.status === 'up' ? color.ink : '#9aa39c', tool?.from === ref ? '#e08a00' : '#fff'),
+            : r.status === 'up'
+              ? dot(color.green, tool?.from === ref ? '#e08a00' : '#fff', 'vl-pulse-blue')
+              : dot('#9aa39c', tool?.from === ref ? '#e08a00' : '#fff'),
           draggable: editMode && !tool,
           zIndexOffset: down ? 1000 : 0,
         }).addTo(layer.current);
@@ -788,6 +790,7 @@ export default function MapScreen() {
       }
     >
       <style>{'@keyframes vlpulse{0%{box-shadow:0 0 0 0 rgba(192,57,43,.7)}100%{box-shadow:0 0 0 16px rgba(192,57,43,0)}}.vl-pulse{animation:vlpulse 1.4s infinite}'
+        + '@keyframes vlpulseblue{0%{box-shadow:0 0 0 0 rgba(22,82,217,.7)}100%{box-shadow:0 0 0 16px rgba(22,82,217,0)}}.vl-pulse-blue{animation:vlpulseblue 1.4s infinite}'
         + '@keyframes vlflow{to{stroke-dashoffset:-24}}.vl-flow{stroke-dasharray:6 10;animation:vlflow .9s linear infinite}'}</style>
 
       {offline.length + offlineRadios.length > 0 && (
@@ -882,7 +885,7 @@ export default function MapScreen() {
           <span><b style={{ color: color.amber }}>●</b> grace</span>
           <span><b style={{ color: '#c05a2e' }}>●</b> expired</span>
           <span><b style={{ color: color.rust }}>●</b> suspended</span>
-          <span><b style={{ color: color.ink }}>●</b> router online</span>
+          <span><b style={{ color: color.green }}>●</b> router online</span>
           <span><b style={{ color: color.rust }}>◉</b> router offline</span>
           <span><b style={{ color: FIBRE }}>━</b> fibre</span>
           <span><b style={{ color: WIRELESS }}>┅</b> wireless</span>
