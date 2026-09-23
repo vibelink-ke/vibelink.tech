@@ -928,12 +928,48 @@ async function countDeviceTraffic() {
   }
 }
 
+/**
+ * up/down bookkeeping shared by both ways a node gets checked below (a ping
+ * reaching its IP, or its MAC still being present on the router's bridge) —
+ * same debounce (2 misses before "down"), same OFFLINE_MINUTES-gated alert,
+ * same recovery notice, regardless of which signal decided `alive`.
+ */
+async function applyNodeResult(n, alive, label) {
+  if (alive) {
+    await pool.query(
+      `update network_nodes set status='up', last_seen=now(), offline_since=null, offline_notified=false, ping_fails=0 where id=$1`, [n.id]);
+    if (n.offline_notified) {
+      await notifyOwner(n.tenant_id, `${n.name} (${label}) is back online.`, { url: '/map' });
+    }
+    return;
+  }
+  const fails = Number(n.ping_fails) + 1;
+  if (fails < 2) {
+    await pool.query('update network_nodes set ping_fails=$2 where id=$1', [n.id, fails]);
+    return;
+  }
+  await pool.query(
+    `update network_nodes set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()) where id=$1`, [n.id, fails]);
+  const since = n.offline_since ? new Date(n.offline_since) : new Date();
+  if (!n.offline_notified && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
+    await pool.query('update network_nodes set offline_notified=true where id=$1', [n.id]);
+    await notifyOwner(n.tenant_id, `${n.name} (${label}) has stopped answering. Anything served through it may be offline.`, { url: '/map' });
+  }
+}
+
 async function watchRadios() {
+  // A node with an IP gets pinged from the router it's watched through — but a
+  // pure Layer-2 device (a repeater or a dumb "bridge" AP with no management
+  // interface of its own) has no address to ping at all. Its MAC still being
+  // present on the router's own bridge host table is the only signal there is
+  // for it, checked once per router alongside everything else that router watches.
   const { rows } = await pool.query(
-    `select n.id, n.tenant_id, n.name, n.details->>'ip' as ip, n.status, n.offline_since, n.offline_notified, n.ping_fails,
+    `select n.id, n.tenant_id, n.name, n.details->>'ip' as ip, n.details->>'mac' as mac,
+            n.status, n.offline_since, n.offline_notified, n.ping_fails,
             r.id as router_id, r.host, r.api_port, r.status as router_status, r.service_user, r.service_password_enc
        from network_nodes n join routers r on r.id = n.watch_router_id
-      where coalesce(n.details->>'ip', '') <> '' and n.tenant_id in (${enabledTenants})`, ['watchRadios']);
+      where (coalesce(n.details->>'ip', '') <> '' or coalesce(n.details->>'mac', '') <> '')
+        and n.tenant_id in (${enabledTenants})`, ['watchRadios']);
   if (!rows.length) return;
 
   const ros = await import('./routeros.js');
@@ -960,35 +996,29 @@ async function watchRadios() {
       if (!password) continue;
       conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password });
 
+      // IP-first: a node given both somehow still gets the more direct, faster check.
+      const ipNodes = nodes.filter((n) => String(n.ip ?? '').trim());
+      const macNodes = nodes.filter((n) => !String(n.ip ?? '').trim() && String(n.mac ?? '').trim());
+
       const CHUNK = 10;
-      for (let i = 0; i < nodes.length; i += CHUNK) {
-        const results = await Promise.all(nodes.slice(i, i + CHUNK).map(async (n) => {
+      for (let i = 0; i < ipNodes.length; i += CHUNK) {
+        const results = await Promise.all(ipNodes.slice(i, i + CHUNK).map(async (n) => {
           // Only a plain IPv4 address goes to the router.
           if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(n.ip).trim())) return [n, null];
           try { return [n, await ros.pingHost(conn, String(n.ip).trim(), 2)]; } catch { return [n, null]; }
         }));
         for (const [n, res] of results) {
           if (res === null) continue;
-          if (res.received > 0) {
-            await pool.query(
-              `update network_nodes set status='up', last_seen=now(), offline_since=null, offline_notified=false, ping_fails=0 where id=$1`, [n.id]);
-            if (n.offline_notified) {
-              await notifyOwner(n.tenant_id, `${n.name} (${n.ip}) is back online.`, { url: '/map' });
-            }
-            continue;
-          }
-          const fails = Number(n.ping_fails) + 1;
-          if (fails < 2) {
-            await pool.query('update network_nodes set ping_fails=$2 where id=$1', [n.id, fails]);
-            continue;
-          }
-          await pool.query(
-            `update network_nodes set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()) where id=$1`, [n.id, fails]);
-          const since = n.offline_since ? new Date(n.offline_since) : new Date();
-          if (!n.offline_notified && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
-            await pool.query('update network_nodes set offline_notified=true where id=$1', [n.id]);
-            await notifyOwner(n.tenant_id, `${n.name} (${n.ip}) has stopped answering. Anything served through it may be offline.`, { url: '/map' });
-          }
+          await applyNodeResult(n, res.received > 0, n.ip);
+        }
+      }
+
+      if (macNodes.length) {
+        // One bridge-host read covers every MAC-watched node on this router —
+        // no reason to ask separately per node the way an IP ping has to.
+        const live = new Set(await ros.bridgeHosts(conn));
+        for (const n of macNodes) {
+          await applyNodeResult(n, live.has(String(n.mac).trim().toUpperCase()), n.mac);
         }
       }
     } catch (e) {

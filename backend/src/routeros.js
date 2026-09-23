@@ -2642,6 +2642,22 @@ export async function pingHost(conn, address, count = 4) {
   };
 }
 
+/**
+ * Every MAC this router's bridge can currently see, across every bridge port —
+ * a pure Layer-2 device (a repeater or a dumb "bridge" AP extending hotspot
+ * coverage, with no management IP of its own to ping) has no other way to
+ * report itself as alive. RouterOS ages an entry out of this table on its
+ * own after a stretch of no traffic (a few minutes, by default) — the table
+ * simply not listing a MAC anymore already means "not seen recently," with
+ * no separate staleness window for a caller to compute on top of it. Read-only.
+ */
+export async function bridgeHosts(conn) {
+  const rows = await conn.write('/interface/bridge/host/print', []);
+  return rows
+    .map((r) => String(r['mac-address'] ?? '').toUpperCase())
+    .filter(Boolean);
+}
+
 export const close = (conn) => { try { conn.close(); } catch { /* already gone */ } };
 
 /**

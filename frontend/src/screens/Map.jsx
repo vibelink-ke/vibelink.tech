@@ -56,7 +56,12 @@ const KINDS = {
   splitter: { label: 'Splitter',        group: 'fibre',    letter: 'S', fill: FIBRE,    fields: [['ratio', 'Split ratio (e.g. 1:8)']] },
   closure:  { label: 'Closure / joint', group: 'fibre',    letter: 'C', fill: FIBRE,    fields: [['note', 'Note']] },
   onu:      { label: 'ONU / drop',      group: 'fibre',    letter: 'U', fill: FIBRE,    fields: [['serial', 'Serial or customer']] },
-  ap:       { label: 'Access point',    group: 'wireless', letter: 'A', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ssid', 'SSID'], ['ip', 'IP address']] },
+  // mac: for a pure bridge AP/repeater with no management IP of its own — its
+  // MAC still being seen on the watching router's bridge is the only signal
+  // there is for it (see watchRadios, jobs.js). Leave ip set instead when the
+  // device does have one; a node with an IP is watched by pinging it, faster
+  // and more direct than a bridge-table read.
+  ap:       { label: 'Access point',    group: 'wireless', letter: 'A', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ssid', 'SSID'], ['ip', 'IP address'], ['mac', 'MAC address (only if it has no IP)']] },
   ptp:      { label: 'Backhaul radio',  group: 'wireless', letter: 'P', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ip', 'IP address']] },
   station:  { label: 'Station / CPE',   group: 'wireless', letter: 'R', fill: WIRELESS, fields: [['model', 'Model'], ['ip', 'IP address'], ['customer', 'Customer']] },
   tower:    { label: 'Tower / mast',    group: 'site',     letter: 'T', fill: SITE,     fields: [['height', 'Height (m)'], ['note', 'Note']] },
@@ -126,6 +131,16 @@ const lengthM = (pts) => {
   return total;
 };
 const fmtLen = (m) => (m >= 1000 ? `${(m / 1000).toFixed(2)} km` : `${Math.round(m)} m`);
+
+/** How close a point is to the segment a-b, in the same (pixel) units as all three. */
+const distToSegment = (p, a, b) => {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lenSq = dx * dx + dy * dy;
+  let t = lenSq ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+};
 
 const ago = (iso) => {
   if (!iso) return 'a while ago';
@@ -384,6 +399,36 @@ export default function MapScreen() {
     return true;
   }, []);
 
+  /**
+   * Add a bend point to an already-drawn link, at wherever it was clicked along its
+   * own line — reshaping the route it takes without ever touching the two endpoints
+   * (a radio, a dish, a customer) it actually connects. Those positions are the real,
+   * physical thing; the path between them is only ever how it happens to be drawn.
+   */
+  const insertLinkPoint = useCallback(async (l, latlng) => {
+    const a = posOf(l.from_ref);
+    const b = posOf(l.to_ref);
+    if (!a || !b || !map.current) return;
+    const full = [a, ...(l.path ?? []), b];
+    const click = map.current.latLngToLayerPoint(latlng);
+    // Which existing segment the click landed closest to, so the new point lands in
+    // the right place along the route rather than just tacked on at the end.
+    let bestIdx = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < full.length - 1; i++) {
+      const d = distToSegment(click, map.current.latLngToLayerPoint(full[i]), map.current.latLngToLayerPoint(full[i + 1]));
+      if (d < bestDist) { bestDist = d; bestIdx = i; }
+    }
+    const newPath = [...(l.path ?? [])];
+    newPath.splice(bestIdx, 0, [latlng.lat, latlng.lng]);
+    try {
+      await api.updateNetLink(l.id, { path: newPath });
+      setNet((cur) => ({ ...cur, links: cur.links.map((x) => (x.id === l.id ? { ...x, path: newPath } : x)) }));
+    } catch (err) {
+      store.toast(`Could not add a point: ${err.message}`);
+    }
+  }, [posOf, store]);
+
   const framed = useRef(false);
   useEffect(() => {
     if (!map.current || !layer.current) return;
@@ -416,7 +461,49 @@ export default function MapScreen() {
           `${fibre ? 'Fibre' : 'Wireless'}${l.label ? ` · ${esc(l.label)}` : ''}${fibre ? ` · ${fmtLen(lengthM(pts))}` : ''}`
           + `${broken ? ' · a device on it is offline' : losIssue ? ' · line-of-sight issue' : clientDown ? ' · customer offline' : ''}`,
           { sticky: true });
-        line.on('click', (e) => { L.DomEvent.stopPropagation(e); if (!toolRef.current) setSelected({ type: 'link', id: l.id }); });
+        line.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (toolRef.current) return;
+          // Already the selected link, in edit mode — clicking along it adds a bend
+          // point right there instead of just re-selecting the same thing.
+          if (editMode && selected?.type === 'link' && selected.id === l.id) {
+            insertLinkPoint(l, e.latlng);
+            return;
+          }
+          setSelected({ type: 'link', id: l.id });
+        });
+
+        // The selected link's own waypoints, while editing — each one draggable to
+        // reshape the route, click to remove it. Never the endpoints themselves
+        // (posOf(from_ref)/posOf(to_ref) above); those move only by dragging the
+        // actual node/router/customer pin, same as anywhere else on this map.
+        if (editMode && !tool && selected?.type === 'link' && selected.id === l.id) {
+          (l.path ?? []).forEach((p, idx) => {
+            const pm = L.marker(p, { icon: dot('#e08a00', '#fff'), draggable: true, zIndexOffset: 2000 }).addTo(layer.current);
+            pm.bindTooltip('Drag to reshape · click to remove', { sticky: true });
+            pm.on('dragend', async () => {
+              const np = pm.getLatLng();
+              const newPath = (l.path ?? []).map((pt, i) => (i === idx ? [np.lat, np.lng] : pt));
+              try {
+                await api.updateNetLink(l.id, { path: newPath });
+                setNet((cur) => ({ ...cur, links: cur.links.map((x) => (x.id === l.id ? { ...x, path: newPath } : x)) }));
+              } catch (err) {
+                store.toast(`Could not move it: ${err.message}`);
+                pm.setLatLng(p);
+              }
+            });
+            pm.on('click', async (e) => {
+              L.DomEvent.stopPropagation(e);
+              const newPath = (l.path ?? []).filter((_, i) => i !== idx);
+              try {
+                await api.updateNetLink(l.id, { path: newPath });
+                setNet((cur) => ({ ...cur, links: cur.links.map((x) => (x.id === l.id ? { ...x, path: newPath } : x)) }));
+              } catch (err) {
+                store.toast(`Could not remove it: ${err.message}`);
+              }
+            });
+          });
+        }
       }
 
       // The cable being drawn right now.
@@ -550,7 +637,7 @@ export default function MapScreen() {
       // the Kenya view the map already opened with, rather than sitting at whatever zoom was last set.
       else framed.current = true;
     }
-  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, loadNet, store, onus, hasSmartOlt]);
+  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, insertLinkPoint, loadNet, store, onus, hasSmartOlt]);
 
   // ── editing ──
   const saveNode = async () => {
@@ -626,10 +713,12 @@ export default function MapScreen() {
     map.current?.flyTo([lat, lng], 16);
   };
 
-  // A radio with an IP address can be watched: the router chosen here pings it every minute.
-  const hasIp = (kind) => (KINDS[kind]?.fields ?? []).some(([k]) => k === 'ip');
-  const watchSelect = (kind, value, onChange) => hasIp(kind) && (
-    <Field label="Watched from" hint="The router that pings this IP every minute — pick the one on the same network. Leave it as Not watched to skip.">
+  // A radio with an IP address, or (for a pure bridge AP with none) a MAC, can be
+  // watched — the router chosen here checks on it every minute, by pinging the IP
+  // or by reading its own bridge host table for the MAC (watchRadios, jobs.js).
+  const isWatchable = (kind) => (KINDS[kind]?.fields ?? []).some(([k]) => k === 'ip' || k === 'mac');
+  const watchSelect = (kind, value, onChange) => isWatchable(kind) && (
+    <Field label="Watched from" hint="The router that checks on this every minute — pick the one on the same network as it (its bridge, for a MAC-only device). Leave it as Not watched to skip.">
       <Select
         value={value ?? ''}
         onChange={(e) => onChange(e.target.value)}
@@ -730,7 +819,7 @@ export default function MapScreen() {
       )}
 
       {editMode && (
-        <Card title="Draw your network" subtitle="Pick what to place, then click the map. Drag a customer, router or placed node to correct its location; click a node or link to edit or remove it.">
+        <Card title="Draw your network" subtitle="Pick what to place, then click the map. Drag a customer, router or placed node to correct its location; click a node or link to edit or remove it. With a link selected, click along its line to bend it, or drag/click a bend point to move or remove it — the radios or dishes it connects never move with it.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {['fibre', 'wireless', 'site'].map((group) => (
               <div key={group} style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -823,7 +912,7 @@ export default function MapScreen() {
                 <Field label="Name"><Input value={edit.name} disabled={!canEdit} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
                 {fieldsFor(KINDS[sel.kind]?.fields ?? [], edit.details, (d) => setEdit({ ...edit, details: d }))}
                 {watchSelect(sel.kind, edit.watchRouterId, (v) => setEdit({ ...edit, watchRouterId: v }))}
-                {hasIp(sel.kind) && (
+                {isWatchable(sel.kind) && (
                   <div style={{ fontSize: 13, color: sel.status === 'down' ? color.rust : color.muted, alignSelf: 'end', paddingBottom: 10 }}>
                     Status: <b>{statusOf(sel)}</b>
                   </div>
