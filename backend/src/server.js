@@ -9348,10 +9348,37 @@ app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(a
       where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3`,
     [req.tenant.id, nairobiMonthStart(now), tomorrowStart]);
 
+  // "Collections tracking · last 4 months" (Payments screen) — same story as
+  // everything above: was summed client-side from store.mpesaTx, which a tenant
+  // doing over 500 payments in a single MONTH (never mind four) blows through
+  // before the chart even gets to the second bar.
+  const nowNairobi = new Date(now.getTime() + 3 * 3600 * 1000);
+  let ly = nowNairobi.getUTCFullYear();
+  let lm = nowNairobi.getUTCMonth();   // 0-based
+  const last4Ym = [];
+  for (let i = 0; i < 4; i++) {
+    last4Ym.unshift(`${ly}-${String(lm + 1).padStart(2, '0')}`);
+    lm -= 1;
+    if (lm < 0) { lm = 11; ly -= 1; }
+  }
+  const { rows: monthlyRows } = await pool.query(
+    `select to_char(received_at at time zone 'Africa/Nairobi', 'YYYY-MM') as ym,
+            coalesce(sum(amount), 0)::float8 as total
+       from payments
+      where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3
+      group by 1`,
+    [req.tenant.id, nairobiMonthStart(new Date(`${last4Ym[0]}-01T12:00:00Z`)), tomorrowStart]);
+  const monthlyByYm = Object.fromEntries(monthlyRows.map((r) => [r.ym, r.total]));
+  const last4Months = last4Ym.map((ym) => {
+    const [y, m] = ym.split('-').map(Number);
+    return { year: y, month: m - 1, total: monthlyByYm[ym] ?? 0 };
+  });
+
   res.json({
     today: { total: todayTotal, pppoe: todayPppoe, channels: todayProviders.size },
     days,
     monthToDate: { total: monthRow.total, count: monthRow.count },
+    last4Months,
   });
 }));
 

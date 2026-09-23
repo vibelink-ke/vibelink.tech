@@ -156,21 +156,18 @@ export default function Payments() {
   const outstanding = openInvoices.reduce((a, i) => a + (Number(i.amount ?? 0) - Number(i.paid ?? 0)), 0);
   const matchRate = all.length ? Math.round(((all.length - unmatched.length) / all.length) * 100) : null;
 
+  // Real per-month totals (GET /api/dashboard/collections' last4Months), not summed
+  // client-side from store.mpesaTx — a tenant doing over 500 payments in a single
+  // month (this one does over 1,700) blows through that cap before the chart even
+  // gets to its second bar.
   const months = useMemo(() => {
-    const out = [];
-    for (let i = 3; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const label = d.toLocaleDateString('en-KE', { month: 'short' });
-      const inMonth = all.filter((p) => {
-        const t = new Date(p.received_at ?? 0);
-        return t.getMonth() === d.getMonth() && t.getFullYear() === d.getFullYear() && p.status === 'applied';
-      });
-      out.push({ label, month: d.getMonth(), year: d.getFullYear(), total: inMonth.reduce((a, p) => a + Number(p.amount ?? 0), 0) });
-    }
+    const out = (collections?.last4Months ?? []).map((m) => {
+      const label = new Date(Date.UTC(m.year, m.month, 15)).toLocaleDateString('en-KE', { month: 'short', timeZone: 'UTC' });
+      return { label, month: m.month, year: m.year, total: m.total };
+    });
     const peak = Math.max(1, ...out.map((m) => m.total));
     return out.map((m) => ({ ...m, pct: (m.total / peak) * 100 }));
-  }, [all]);
+  }, [collections]);
 
   // What the All-transactions table actually shows: everything, unless a chart click narrowed it to one day,
   // channel or month (chartFilter, set above from the query string a chart click navigated here with).
