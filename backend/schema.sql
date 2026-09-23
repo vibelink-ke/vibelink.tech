@@ -2903,3 +2903,12 @@ select st.tenant_id, st.id, st.name, st.phone, 'percent', 5, 'Every staff member
 -- staff member has actually finished, not merely been assigned. See PATCH /api/tickets/:id.
 alter table tickets add column if not exists resolved_at timestamptz;
 update tickets set resolved_at = updated_at where status = 'resolved' and resolved_at is null;
+
+-- Per-tenant licence cap on concurrent clients (PPPoE + hotspot combined, counted
+-- the same way the app already shows "online" elsewhere: an open radacct row
+-- updated in the last 15 minutes, or a live_sessions row seen in the last 5).
+-- null = unlimited. Enforced at RADIUS auth time itself (sites-available/billing),
+-- not just in the app, so a tenant over their cap cannot get a new device online
+-- by any path — PATCH /api/tenants/:id (Super Admin only) is the only way to set it.
+alter table tenants add column if not exists max_concurrent_clients int
+  check (max_concurrent_clients is null or max_concurrent_clients >= 0);

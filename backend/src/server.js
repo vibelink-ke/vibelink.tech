@@ -11743,9 +11743,16 @@ app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
-                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'settlement_time', 'flat_monthly_fee'];
+                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'settlement_time', 'flat_monthly_fee',
+                   'max_concurrent_clients'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  // null means unlimited — the RADIUS-side check (sites-available/billing) skips
+  // the cap entirely when it reads null, same convention as the MAC-lock check.
+  if ('max_concurrent_clients' in req.body && req.body.max_concurrent_clients !== null) {
+    const v = Number(req.body.max_concurrent_clients);
+    if (!Number.isInteger(v) || v < 0) return res.status(400).json({ error: 'The concurrent client cap must be zero or more, or left blank for unlimited.' });
+  }
   // What the platform charges this tenant, and how often it pays them out.
   if ('hotspot_commission_pct' in req.body) {
     const v = Number(req.body.hotspot_commission_pct);

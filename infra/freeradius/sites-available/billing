@@ -118,6 +118,34 @@ server billing {
             reject
         }
 
+        #
+        # Per-tenant licence cap on concurrent clients (tenants.max_concurrent_clients,
+        # set from Super Admin's Tenants screen). Counts PPPoE and hotspot together,
+        # using the exact same "online" definition the app's own dashboards use
+        # elsewhere — an open radacct row updated in the last 15 minutes, or a
+        # live_sessions row seen in the last 5 — so a tenant is never told a
+        # different number here than on their own Analytics screen.
+        #
+        # null means unlimited, and the outer if() below skips the whole check —
+        # same convention as the MAC-lock block just above. The count excludes this
+        # exact user, so a legitimate reconnect (old session not yet closed by the
+        # NAS) never blocks itself from getting back on.
+        #
+        # %{User-Name}, not %{SQL-User-Name} — same reason as the MAC-lock check
+        # above: SQL-User-Name is not reliably visible from a second, independent
+        # %{sql: ...} xlat, only from the module's own top-level query.
+        update control {
+            &Tmp-Integer-0 := "%{sql: SELECT max_concurrent_clients FROM tenants WHERE id = (SELECT tenant_id FROM routers WHERE host(host) = '%{Packet-Src-IP-Address}' LIMIT 1)}"
+        }
+        if (&control:Tmp-Integer-0 && &control:Tmp-Integer-0 != "") {
+            update control {
+                &Tmp-Integer-1 := "%{sql: SELECT (SELECT count(DISTINCT a.acctuniqueid) FROM radacct a JOIN routers r ON host(r.host) = host(a.nasipaddress) WHERE r.tenant_id = (SELECT tenant_id FROM routers WHERE host(host) = '%{Packet-Src-IP-Address}' LIMIT 1) AND a.acctstoptime IS NULL AND COALESCE(a.acctupdatetime, a.acctstarttime) > NOW() - INTERVAL '15 minutes' AND a.username <> '%{User-Name}') + (SELECT count(*) FROM live_sessions l WHERE l.tenant_id = (SELECT tenant_id FROM routers WHERE host(host) = '%{Packet-Src-IP-Address}' LIMIT 1) AND l.seen_at > NOW() - INTERVAL '5 minutes' AND l.username <> '%{User-Name}')}"
+            }
+            if (&control:Tmp-Integer-1 >= &control:Tmp-Integer-0) {
+                reject
+            }
+        }
+
         expiration
         logintime
 

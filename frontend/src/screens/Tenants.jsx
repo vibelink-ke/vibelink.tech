@@ -335,6 +335,7 @@ export default function Tenants() {
         settlement_frequency: editing.settlement_frequency,
         settlement_time: editing.settlement_time || '00:00',
         settlement_fee_mode: editing.settlement_fee_mode,
+        max_concurrent_clients: editing.max_concurrent_clients === '' ? null : Number(editing.max_concurrent_clients),
       });
       store.setCollection('tenants', (ts) => ts.map((t) => (t.id === updated.id ? { ...t, ...updated } : t)));
       store.toast(`${updated.name} updated`);
@@ -832,6 +833,7 @@ export default function Tenants() {
                         settlement_frequency: t.settlement_frequency ?? 'daily',
                         settlement_time: String(t.settlement_time ?? '00:00').slice(0, 5),
                         settlement_fee_mode: t.settlement_fee_mode ?? 'tiered',
+                        max_concurrent_clients: t.max_concurrent_clients ?? '',
                       })
                     }
                     style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
@@ -942,6 +944,7 @@ export default function Tenants() {
               </>
             )}
             <KV k="Status" v={viewing.status} />
+            <KV k="Concurrent client cap" v={viewing.max_concurrent_clients != null ? `${viewing.max_concurrent_clients} at once (PPPoE + hotspot)` : 'Unlimited'} />
             {viewing.flat_monthly_fee != null ? (
               <KV k="Charged" v={`Flat KES ${kes(viewing.flat_monthly_fee)} per month`} />
             ) : (
@@ -1011,6 +1014,20 @@ export default function Tenants() {
             </Field>
             <Field label="Support phone" span={2}>
               <Input value={editing.support_phone} onChange={(e) => setEditing((s) => ({ ...s, support_phone: e.target.value }))} />
+            </Field>
+            <Field
+              label="Concurrent client cap"
+              span={2}
+              hint="Max PPPoE + hotspot clients online at once, across their whole account. Blank = unlimited. Enforced at RADIUS login itself — the next device over the cap is rejected until someone disconnects."
+            >
+              <Input
+                type="number"
+                step="1"
+                min="0"
+                placeholder="Unlimited"
+                value={editing.max_concurrent_clients}
+                onChange={(e) => setEditing((s) => ({ ...s, max_concurrent_clients: e.target.value }))}
+              />
             </Field>
             {editing.hosting === 'self' && (
               <div style={{ gridColumn: '1 / -1', border: `1px solid ${color.line}`, borderRadius: radius.md, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 }}>
