@@ -410,15 +410,17 @@ export default function Dashboard() {
             watchdog alone is 1,440 a day — under a label promising
             "activations, suspends, SMS, receipts", so the number looked like
             work done for customers when it is the scheduler ticking. */}
-        <Tile
-          label="AUTOMATION RUNS (24H)"
-          value={runs?.total ?? '—'}
-          valueColor={runs?.failures ? color.rust : undefined}
-          hint={runs
-            ? (runs.failures ? `${runs.failures} failed` : 'background jobs, all succeeded')
-            : 'background jobs'}
-          onClick={() => navigate('/automation')}
-        />
+        {store.isPlatformOwner && (
+          <Tile
+            label="AUTOMATION RUNS (24H)"
+            value={runs?.total ?? '—'}
+            valueColor={runs?.failures ? color.rust : undefined}
+            hint={runs
+              ? (runs.failures ? `${runs.failures} failed` : 'background jobs, all succeeded')
+              : 'background jobs'}
+            onClick={() => navigate('/automation')}
+          />
+        )}
         <Tile
           label="NEEDS A HUMAN"
           value={store.unmatched.length}
@@ -428,7 +430,8 @@ export default function Dashboard() {
         />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: canSeeFinance ? 'minmax(0, 1.55fr) minmax(0, 1fr)' : '1fr', gap: 14 }}>
+      {(canSeeFinance || store.isPlatformOwner) && (
+      <div style={{ display: 'grid', gridTemplateColumns: canSeeFinance && store.isPlatformOwner ? 'minmax(0, 1.55fr) minmax(0, 1fr)' : '1fr', gap: 14 }}>
         {canSeeFinance && (
           <div style={{ ...card, gap: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -481,43 +484,46 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div style={{ ...card, gap: 14 }}>
-          <span style={{ fontSize: 14.5, fontWeight: 600 }}>Live automation feed</span>
-          {/* Real rows from job_runs. This was a fixed sentence saying nothing
-              had run yet, on a system where a job fires every minute — which
-              reads as automation having been switched off or taken away. */}
-          {recent === null ? (
-            <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
-              Reading the log…
-            </div>
-          ) : recent.length === 0 ? (
-            <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
-              Nothing has run in the last day. If that is unexpected, the API container may have
-              restarted recently — the schedule starts with it.
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
-              {recent.map((r, i) => (
-                <div
-                  key={`${r.job}-${r.ran_at}-${i}`}
-                  style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12.5 }}
-                >
-                  <span style={{ color: r.ok ? color.green : color.rust, fontWeight: 700 }}>
-                    {r.ok ? '✓' : '✕'}
-                  </span>
-                  <span style={{ fontWeight: 600 }}>{r.job}</span>
-                  <span style={{ color: color.muted }}>
-                    {r.error ? r.error.slice(0, 60) : `${r.ms ?? 0} ms`}
-                  </span>
-                  <span style={{ marginLeft: 'auto', color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}>
-                    {new Date(r.ran_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {store.isPlatformOwner && (
+          <div style={{ ...card, gap: 14 }}>
+            <span style={{ fontSize: 14.5, fontWeight: 600 }}>Live automation feed</span>
+            {/* Real rows from job_runs. This was a fixed sentence saying nothing
+                had run yet, on a system where a job fires every minute — which
+                reads as automation having been switched off or taken away. */}
+            {recent === null ? (
+              <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
+                Reading the log…
+              </div>
+            ) : recent.length === 0 ? (
+              <div style={{ padding: '26px 0', textAlign: 'center', fontSize: 12.5, color: color.muted }}>
+                Nothing has run in the last day. If that is unexpected, the API container may have
+                restarted recently — the schedule starts with it.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gap: 6, maxHeight: 320, overflowY: 'auto' }}>
+                {recent.map((r, i) => (
+                  <div
+                    key={`${r.job}-${r.ran_at}-${i}`}
+                    style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 12.5 }}
+                  >
+                    <span style={{ color: r.ok ? color.green : color.rust, fontWeight: 700 }}>
+                      {r.ok ? '✓' : '✕'}
+                    </span>
+                    <span style={{ fontWeight: 600 }}>{r.job}</span>
+                    <span style={{ color: color.muted }}>
+                      {r.error ? r.error.slice(0, 60) : `${r.ms ?? 0} ms`}
+                    </span>
+                    <span style={{ marginLeft: 'auto', color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}>
+                      {new Date(r.ran_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
         <div style={{ ...card, gap: 12 }}>

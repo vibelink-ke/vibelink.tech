@@ -12810,7 +12810,7 @@ const AUTOMATION_JOBS = [
  * covers every tenant at once. Only counts and job names are returned — nothing
  * here says anything about another tenant's customers or money.
  */
-app.get('/api/automation/runs', wrap(async (_req, res) => {
+app.get('/api/automation/runs', superAdminOnly, wrap(async (_req, res) => {
   const { rows } = await pool.query(`
     select job,
            count(*)::int                             runs,
@@ -12837,7 +12837,7 @@ app.get('/api/automation/runs', wrap(async (_req, res) => {
  * saying nothing had run yet — on a system where a job fires every minute. It
  * read as though automation had been switched off, or removed.
  */
-app.get('/api/automation/recent', wrap(async (_req, res) => {
+app.get('/api/automation/recent', superAdminOnly, wrap(async (_req, res) => {
   const { rows } = await pool.query(
     `select job, ok, error, ms, ran_at from job_runs order by ran_at desc limit 40`);
   res.json(rows);
