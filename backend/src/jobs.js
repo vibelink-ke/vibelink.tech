@@ -1,7 +1,8 @@
 import cron from 'node-cron';
 import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
-import { send } from './sms.js';
+import { send, sendViaPlatformGateway } from './sms.js';
+import * as email from './email.js';
 import { fmtNairobi, fmtNairobiDate } from './nairobi-time.js';
 import { generateDueBills } from './bills.js';
 import { walledGarden, forgetVoucherAccess, expireVoucherNow, disconnectVoucherSession, ensureHotspotProfiles, forgetSubscriberCredentials } from './radius.js';
@@ -1736,8 +1737,34 @@ async function ownerBrief() {
  *
  * Read-only rather than shut out: an operator who cannot see who owes them money
  * cannot collect it, and collecting it is how they renew.
+ *
+ * The owner is told by email and SMS before the switch, not after — otherwise
+ * the first they hear of it is staff hitting a wall mid-task with no warning
+ * it was coming. Sent through the platform's own gateways (sendViaPlatformGateway,
+ * email.sendSystem), not the tenant's own configured ones: this is the platform
+ * billing them, not them billing a customer, so it must go out even if their own
+ * SMTP/SMS credit happens to be the thing that's lapsed too, and its wording is
+ * not something a tenant's own template settings can rewrite. Best-effort — a
+ * failed send never blocks the actual switch, since letting a tenant with no
+ * working contact info keep full access indefinitely is worse than a missed notice.
  */
 export async function expireTenantLicences() {
+  const { rows: expiring } = await pool.query(`
+    select id, name, licence_ends from tenants
+     where status in ('active', 'trial')
+       and licence_ends is not null
+       and licence_ends < current_date`);
+
+  for (const t of expiring) {
+    const { rows: [owner] } = await pool.query(
+      "select phone, email from staff where tenant_id=$1 and role='owner' limit 1", [t.id]);
+    const body = `${t.name}: your Vibelink licence expired on ${fmtNairobiDate(t.licence_ends)}. Your account `
+      + 'is switching to read-only — customers and hotspot visitors are not affected, but staff cannot make '
+      + 'changes until you renew. Pay under Licence & billing to switch back on.';
+    if (owner?.email) await email.sendSystem(t.id, owner.email, `${t.name}: your licence has expired`, body).catch(() => {});
+    if (owner?.phone) await sendViaPlatformGateway(owner.phone, body).catch(() => {});
+  }
+
   await pool.query(`
     update tenants set status='readonly'
      where status in ('active', 'trial')
