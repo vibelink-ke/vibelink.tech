@@ -52,7 +52,6 @@ export const NAV_SECTIONS = [
     items: [
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
       { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length, perm: 'site_profiles.view' },
-      { to: '/automation', label: 'Automation' },
       { to: '/expenses', label: 'Expenses', count: (s) => s.expenses.filter((e) => e.status === 'pending').length },
     ],
   },
@@ -69,6 +68,7 @@ export const NAV_SECTIONS = [
       { to: '/platform', label: 'Platform monitor' },
       { to: '/tenants', label: 'ISP tenants', count: (s) => s.tenants.length },
       { to: '/saas-revenue', label: 'SaaS revenue' },
+      { to: '/automation', label: 'Automation' },
     ],
   },
   {

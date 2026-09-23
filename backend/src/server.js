@@ -12773,7 +12773,7 @@ app.get('/api/automation/recent', wrap(async (_req, res) => {
   res.json(rows);
 }));
 
-app.get('/api/automation', wrap(async (req, res) => {
+app.get('/api/automation', superAdminOnly, wrap(async (req, res) => {
   const { rows } = await pool.query(
     'select job, enabled, updated_at from automation_jobs where tenant_id=$1', [req.tenant.id]);
   const state = Object.fromEntries(rows.map((r) => [r.job, r]));
@@ -12784,7 +12784,7 @@ app.get('/api/automation', wrap(async (req, res) => {
   })));
 }));
 
-app.put('/api/automation/:job', requirePermission('settings.edit'), wrap(async (req, res) => {
+app.put('/api/automation/:job', superAdminOnly, wrap(async (req, res) => {
   const known = AUTOMATION_JOBS.find((j) => j.job === req.params.job);
   if (!known) return res.status(404).json({ error: 'unknown job' });
   // A platform-wide job cannot be switched off by one tenant. Refusing is
