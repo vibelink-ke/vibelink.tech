@@ -2965,8 +2965,15 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
            and username = s.pppoe_user
            and seen_at > now() - interval '5 minutes') live on true
      where s.tenant_id = $1
-     order by s.created_at desc
-     limit 200`, [req.tenant.id]);
+     -- No LIMIT. This used to stop at the newest 200 rows — fine for sample
+     -- data, silently wrong once a tenant passed 200 subscribers, since
+     -- everything downstream (the sidebar count, this whole screen, the Map,
+     -- Analytics' own Subscribers stat, the Messaging/Payments client
+     -- pickers) treats this response as the complete client list, not a
+     -- page of one. Past 200 real subscribers, the oldest ones simply
+     -- stopped existing anywhere in the app — not disconnected, just
+     -- invisible.
+     order by s.created_at desc`, [req.tenant.id]);
   res.json(rows);
 });
 
