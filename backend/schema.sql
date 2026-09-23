@@ -1224,6 +1224,21 @@ alter table payments drop constraint if exists payments_voucher_id_fkey;
 alter table payments add constraint payments_voucher_id_fkey
   foreign key (voucher_id) references vouchers on delete set null;
 
+-- Which service a payment was actually for, set once at apply time and never
+-- touched again — unlike inferring it from voucher_id/subscriber_id being
+-- non-null, which used to silently reclassify a payment as "other" the
+-- moment its voucher got auto-purged (nightly, 24h after expiry — the
+-- default for every tenant, see jobs.js's purgeExpiredVouchers) or its
+-- subscriber got deleted, both of which detach rather than cascade
+-- specifically so the payment record itself survives (see the comments just
+-- above). The record survived; every report that inferred its kind from
+-- those two columns did not — real hotspot and PPPoE revenue history was
+-- quietly draining into "other" within a day or two of being earned.
+alter table payments add column if not exists service text check (service in ('pppoe', 'hotspot'));
+update payments set service = case when voucher_id is not null then 'hotspot'
+                                    when subscriber_id is not null then 'pppoe' end
+ where service is null;
+
 alter table sessions drop constraint if exists sessions_voucher_id_fkey;
 alter table sessions add constraint sessions_voucher_id_fkey
   foreign key (voucher_id) references vouchers on delete set null;

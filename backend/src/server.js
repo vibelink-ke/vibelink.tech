@@ -4077,9 +4077,9 @@ app.get('/api/reports/profit-loss', requirePermission('profitloss.view'), wrap(a
 
   const { rows: income } = await pool.query(
     `select to_char(p.received_at at time zone 'Africa/Nairobi', 'YYYY-MM') as month,
-            coalesce(sum(p.amount) filter (where p.voucher_id is null and p.subscriber_id is not null), 0) as pppoe,
-            coalesce(sum(p.amount) filter (where p.voucher_id is not null), 0) as hotspot,
-            coalesce(sum(p.amount) filter (where p.voucher_id is null and p.subscriber_id is null), 0) as other
+            coalesce(sum(p.amount) filter (where p.service = 'pppoe'), 0) as pppoe,
+            coalesce(sum(p.amount) filter (where p.service = 'hotspot'), 0) as hotspot,
+            coalesce(sum(p.amount) filter (where p.service is null), 0) as other
        from payments p
       where p.tenant_id = $1 and p.status = 'applied'
         and p.received_at >= $2 and p.received_at < $3
@@ -9304,7 +9304,7 @@ app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(a
   const windowStart = nairobiMidnight(now, -6);   // today plus the 6 days before it — 7 days total
 
   const { rows } = await pool.query(
-    `select received_at, provider, amount, subscriber_id, voucher_id
+    `select received_at, provider, amount, service
        from payments
       where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3`,
     [req.tenant.id, windowStart, tomorrowStart]);
@@ -9324,7 +9324,11 @@ app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(a
     if (new Date(p.received_at) >= todayStart) {
       todayTotal += amount;
       todayProviders.add(p.provider);
-      if (p.subscriber_id && !p.voucher_id) todayPppoe += amount;
+      // p.service, not "has a subscriber_id and no voucher_id" — a voucher purged
+      // by the nightly job (24h after it expires — routine, same-day-or-next for
+      // most hotspot vouchers) sets voucher_id back to null, which used to make a
+      // genuine hotspot payment look exactly like a PPPoE one here.
+      if (p.service === 'pppoe') todayPppoe += amount;
     }
   }
 
@@ -9360,6 +9364,11 @@ app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(a
  * silently worse the longer the selected period claimed to cover. The
  * period selector itself never actually filtered anything either: every
  * period showed the same totals, just under a different label.
+ *
+ * A second, separate undercount lived here too, past that first fix: an
+ * inner join on vouchers, which drops a payment from this report entirely
+ * (not just miscounts it) the moment its voucher gets auto-purged — see the
+ * comment inline below.
  */
 app.get('/api/hotspot/revenue', wrap(async (req, res) => {
   const since = {
@@ -9369,11 +9378,27 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
     year: "date_trunc('year', now())",
   }[req.query.period] ?? "now() - interval '4 months'";
 
+  // The total/count/avg below deliberately do NOT join vouchers — a voucher
+  // purged by the nightly job (jobs.js's purgeExpiredVouchers, 24h after it
+  // expires, on by default) sets payments.voucher_id back to null, and an
+  // inner join on that column would silently drop the payment from this
+  // report entirely rather than merely miscount it. payments.service is
+  // set once at apply time and survives the purge, so the real total here
+  // no longer shrinks the longer ago a period reaches — only byPlan below
+  // still needs the join (a purged voucher's own plan_id genuinely isn't
+  // recoverable from anywhere else), so it alone stays a best-effort figure.
+  const { rows: [totals] } = await pool.query(
+    `select coalesce(sum(amount), 0)::float8 as total, count(*)::int as count
+       from payments
+      where tenant_id=$1 and status='applied' and service='hotspot'
+        and received_at >= ${since}`,
+    [req.tenant.id]);
+
   const { rows: sales } = await pool.query(`
     select v.plan_id, pay.amount
       from payments pay
       join vouchers v on v.id = pay.voucher_id
-     where pay.tenant_id=$1 and pay.status='applied' and pay.voucher_id is not null
+     where pay.tenant_id=$1 and pay.status='applied' and pay.service='hotspot'
        and pay.received_at >= ${since}`,
     [req.tenant.id]);
 
@@ -9381,16 +9406,14 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
     `select id, title, price from plans where tenant_id=$1 and service='hotspot'`, [req.tenant.id]);
 
   const byPlan = new Map(plans.map((p) => [p.id, { title: p.title, price: p.price, sold: 0, revenue: 0 }]));
-  let total = 0;
   for (const s of sales) {
-    total += Number(s.amount ?? 0);
     const row = byPlan.get(s.plan_id);
     if (row) { row.sold += 1; row.revenue += Number(s.amount ?? 0); }
   }
 
   res.json({
-    total, count: sales.length,
-    avg: sales.length ? Math.round(total / sales.length) : 0,
+    total: totals.total, count: totals.count,
+    avg: totals.count ? Math.round(totals.total / totals.count) : 0,
     byPlan: [...byPlan.values()].sort((a, b) => b.revenue - a.revenue),
   });
 }));
@@ -9412,7 +9435,7 @@ app.get('/api/hotspot/today', requirePermission('hotspot.view'), wrap(async (req
   const { rows: [rev] } = await pool.query(
     `select coalesce(sum(amount), 0)::float8 as revenue
        from payments
-      where tenant_id=$1 and status='applied' and voucher_id is not null
+      where tenant_id=$1 and status='applied' and service='hotspot'
         and received_at >= $2 and received_at < $3`,
     [req.tenant.id, todayStart, tomorrowStart]);
 

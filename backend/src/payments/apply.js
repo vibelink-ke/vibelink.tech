@@ -180,7 +180,7 @@ export async function applyPayment(tenantId, tx) {
     }
 
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
-    await c.query("update payments set status='applied', voucher_id=$2, applied_at=now() where id=$1", [paymentId, v.id]);
+    await c.query("update payments set status='applied', voucher_id=$2, service='hotspot', applied_at=now() where id=$1", [paymentId, v.id]);
     // Loyalty points for this purchase (off unless the tenant turned them on; never affects the payment).
     const loyalty = await awardForPayment(c, tenantId, { paymentId, phone: tx.phone, amount: tx.amount });
 
@@ -355,7 +355,7 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
       [inv.id, amount]
     );
   }
-  await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, applied_at=now() where id=$1",
+  await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, service='pppoe', applied_at=now() where id=$1",
     [paymentId, subId, inv?.id ?? null]);
 
   if (sub.referred_by) await creditReferral(c, tenantId, sub, subId, amount, paymentId);
