@@ -1,12 +1,23 @@
 #!/usr/bin/with-contenv bash
 #
-# The api container writes /config/wg_confs/wg0.conf whenever a peer is
-# created or deleted (wireguard.js's syncServer), but writing the file was
-# never the same as the live wg0 interface knowing about it — this
-# container is the only one with wg0 in its network namespace, and nothing
-# ran `wg syncconf` here automatically. A router handed a fresh peer script
-# would dial an interface that had never heard of its key, and the
-# handshake just never completed — the exact failure this loop closes.
+# The api container writes /config/wg_confs/sync/wg0.sync.conf whenever a
+# peer is created or deleted (wireguard.js's syncServer), but writing the
+# file was never the same as the live wg0 interface knowing about it —
+# this container is the only one with wg0 in its network namespace, and
+# nothing ran `wg syncconf` here automatically. A router handed a fresh
+# peer script would dial an interface that had never heard of its key,
+# and the handshake just never completed — the exact failure this loop
+# closes.
+#
+# The sync file lives in a subdirectory, not directly under wg_confs/ next
+# to wg0.conf — this image's own entrypoint globs every *.conf file
+# directly under wg_confs/ at boot and tries to activate each one as its
+# own tunnel. It used to find this file there too, try to bring up a
+# second interface from it, collide with wg0's own already-assigned
+# address, and tear wg0 back down along with it (that image treats any
+# one tunnel failing as a reason to stop every tunnel it just started) —
+# wg0 came up correctly on every boot, then was destroyed by the same
+# entrypoint moments later, for as long as this file existed next to it.
 #
 # Runs forever in the background so the image's own entrypoint still owns
 # bringing wg0 up at boot; this only keeps it in sync afterwards. Also
@@ -15,7 +26,7 @@
 # since `wg show` only ever means anything from inside this container.
 (
   while true; do
-    if [ -f /config/wg_confs/wg0.sync.conf ] && command -v wg >/dev/null 2>&1; then
+    if [ -f /config/wg_confs/sync/wg0.sync.conf ] && command -v wg >/dev/null 2>&1; then
       # wireguard.js's syncServer() writes this — already in the bare
       # [Interface]/[Peer] shape `wg syncconf` understands, and unlike
       # wg-quick strip on wg0.conf itself, it already includes a real
@@ -24,12 +35,12 @@
       # own comment for why). Stripping wg0.conf here instead used to undo
       # any fix to that gap every 15 seconds, regardless of what the api
       # side did — this file is the one place both sides agree on.
-      wg syncconf wg0 /config/wg_confs/wg0.sync.conf 2>/dev/null
+      wg syncconf wg0 /config/wg_confs/sync/wg0.sync.conf 2>/dev/null
 
       # syncconf never touches the kernel routing table — each peer's own
       # /32 AllowedIPs is also its tunnel address, and needs an explicit
       # route or nothing on this side can ever address a packet back to it.
-      grep '^AllowedIPs' /config/wg_confs/wg0.sync.conf 2>/dev/null \
+      grep '^AllowedIPs' /config/wg_confs/sync/wg0.sync.conf 2>/dev/null \
         | sed 's/^AllowedIPs = //' \
         | while read -r cidr; do
             [ -n "$cidr" ] && ip route replace "$cidr" dev wg0 metric 100 2>/dev/null
@@ -43,7 +54,7 @@
         && wg syncconf wg0 /tmp/wg0.stripped.conf 2>/dev/null
     fi
 
-    if [ -f /config/wg_confs/wg0.conf ] || [ -f /config/wg_confs/wg0.sync.conf ]; then
+    if [ -f /config/wg_confs/wg0.conf ] || [ -f /config/wg_confs/sync/wg0.sync.conf ]; then
       {
         printf '['
         first=1

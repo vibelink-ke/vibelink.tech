@@ -402,14 +402,31 @@ export async function syncServer() {
   // (Address, Table, PostUp/PostDown) with "Line unrecognized", which is
   // exactly the failure this used to hit unconditionally, for every peer,
   // regardless of which container ran it. Written into the same shared
-  // /config/wg_confs directory as configPath (not os.tmpdir(), which is
-  // private to this container) so infra/wireguard-init's own background
-  // sync loop can read the identical, already-correct file instead of
-  // deriving its own via `wg-quick strip` — which silently drops any peer
-  // kept out of a [Peer] block on purpose (see renderServerConfig's own
-  // comment for why some are), the exact failure that kept undoing this
-  // fix every 15 seconds until both sides read the same file.
-  const syncPath = path.join(path.dirname(configPath), 'wg0.sync.conf');
+  // /config/wg_confs tree as configPath (not os.tmpdir(), which is private
+  // to this container) so infra/wireguard-init's own background sync loop
+  // can read the identical, already-correct file instead of deriving its
+  // own via `wg-quick strip` — which silently drops any peer kept out of a
+  // [Peer] block on purpose (see renderServerConfig's own comment for why
+  // some are), the exact failure that kept undoing this fix every 15
+  // seconds until both sides read the same file.
+  //
+  // In a 'sync' subdirectory, not directly alongside wg0.conf — the base
+  // image's own entrypoint scans every *.conf file directly under
+  // wg_confs/ at container boot and tries to activate each one as its own
+  // independent tunnel. It found this file sitting next to wg0.conf,
+  // tried to bring up a second interface from it, collided with wg0's own
+  // already-assigned address, and — because that image treats any one
+  // tunnel failing as a reason to tear down every tunnel it just brought
+  // up — took the real wg0 down with it. Every boot, for as long as this
+  // file existed: wg0 came up correctly for a moment, then was destroyed
+  // by its own entrypoint script before anything ever got to use it. A
+  // subdirectory keeps it out of that scan while staying inside the same
+  // bind mount, so infra/wireguard-init/wg-sync-loop.sh (which reads it
+  // continuously, never at boot) still finds it exactly where it always
+  // did.
+  const syncDir = path.join(path.dirname(configPath), 'sync');
+  fs.mkdirSync(syncDir, { recursive: true });
+  const syncPath = path.join(syncDir, 'wg0.sync.conf');
 
   try {
     const { text, ips } = await renderSyncConfig(serverPrivateKey, port);
