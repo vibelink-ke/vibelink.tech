@@ -28,3 +28,12 @@ export function nairobiMidnight(d = new Date(), offsetDays = 0) {
   const get = (type) => Number(parts.find((p) => p.type === type).value);
   return new Date(Date.UTC(get('year'), get('month') - 1, get('day') + offsetDays, 0, 0, 0, 0) - 3 * 3600 * 1000);
 }
+
+/** The UTC instant of the 1st of d's own Nairobi calendar month, at Nairobi midnight. */
+export function nairobiMonthStart(d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, year: 'numeric', month: '2-digit',
+  }).formatToParts(d);
+  const get = (type) => Number(parts.find((p) => p.type === type).value);
+  return new Date(Date.UTC(get('year'), get('month') - 1, 1, 0, 0, 0, 0) - 3 * 3600 * 1000);
+}

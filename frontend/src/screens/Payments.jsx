@@ -90,6 +90,19 @@ export default function Payments() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // "Collected this month" — a real date-ranged query (GET /api/dashboard/collections),
+  // not summed from store.mpesaTx below, which caps at the 500 most recent payments of
+  // every kind. A previous fix here added the date filter but left that cap in place —
+  // "500 payments" in the hint was the tell that this was still quietly undercounting
+  // any month with real volume, the same bug the Dashboard's own tiles already had fixed.
+  const [collections, setCollections] = useState(null);
+  useEffect(() => {
+    const load = () => api.dashboardCollections().then(setCollections).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
+
   const unmatched = store.unmatched ?? [];
   const all = store.mpesaTx ?? [];
   const invoices = store.invoices ?? [];
@@ -137,18 +150,8 @@ export default function Payments() {
     }
   };
 
-  // Labeled "this month" but was summing every applied payment /api/payments
-  // returned (its last 500, of every kind, no date filter at all) — a
-  // lifetime-ish total masquerading as a monthly one, which is exactly why it
-  // never reconciled against Pending settlement (a true current snapshot).
-  const now = new Date();
-  const collected = all
-    .filter((p) => {
-      if (p.status !== 'applied') return false;
-      const t = new Date(p.received_at ?? 0);
-      return t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
-    })
-    .reduce((a, p) => a + Number(p.amount ?? 0), 0);
+  const collected = collections?.monthToDate?.total ?? 0;
+  const collectedCount = collections?.monthToDate?.count ?? 0;
   const openInvoices = invoices.filter((i) => i.status === 'open' || i.status === 'partial');
   const outstanding = openInvoices.reduce((a, i) => a + (Number(i.amount ?? 0) - Number(i.paid ?? 0)), 0);
   const matchRate = all.length ? Math.round(((all.length - unmatched.length) / all.length) * 100) : null;
@@ -389,7 +392,7 @@ export default function Payments() {
       }
     >
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
-        <Tile label="COLLECTED THIS MONTH" value={money(collected)} hint={collected ? `${all.length} payments` : 'no collections yet'} />
+        <Tile label="COLLECTED THIS MONTH" value={money(collected)} hint={collectedCount ? `${collectedCount} payments` : 'no collections yet'} />
         <Tile label="OUTSTANDING" value={money(outstanding)} dim hint={`${openInvoices.length} open invoices`} />
         <Tile label="ORG BALANCE (M-PESA)" value="KES 0" hint="utility acct · not synced" />
         <Tile label="AUTO-MATCH RATE" value={matchRate === null ? '—' : `${matchRate}%`} hint={`${unmatched.length} need a human`} />

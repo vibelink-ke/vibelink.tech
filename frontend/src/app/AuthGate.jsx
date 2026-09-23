@@ -112,6 +112,10 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  // A tenant's own uploaded favicon doubles as their sign-in logo — /api/public/favicon
+  // 404s when nothing has been uploaded, which is the signal to fall back to the plain
+  // letter badge rather than show a broken image.
+  const [logoOk, setLogoOk] = useState(true);
 
   // Mirror the server's normalisation as you type, so the field always shows what
   // will actually be stored rather than silently rewriting it on submit.
@@ -303,16 +307,19 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
               height: 34,
               flex: '0 0 34px',
               borderRadius: 9,
-              background: color.green,
+              background: logoOk ? '#fff' : color.green,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#fff',
               fontWeight: 700,
               fontSize: 15,
+              overflow: 'hidden',
             }}
           >
-            {brandName.charAt(0).toUpperCase()}
+            {logoOk
+              ? <img src="/api/public/favicon" alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setLogoOk(false)} />
+              : brandName.charAt(0).toUpperCase()}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
             <span style={{ fontSize: 15, fontWeight: 600, letterSpacing: '-.01em' }}>{brandName}</span>

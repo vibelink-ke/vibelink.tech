@@ -9,7 +9,7 @@ import { pool, tenantByHost, withTenant } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
-import { fmtNairobi, fmtNairobiIso, nairobiMidnight } from './nairobi-time.js';
+import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
 import { generateDueBills } from './bills.js';
 import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
@@ -9334,7 +9334,21 @@ app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(a
     days.push({ iso, byProvider: byDay.get(iso) ?? {} });
   }
 
-  res.json({ today: { total: todayTotal, pppoe: todayPppoe, channels: todayProviders.size }, days });
+  // "Collected this month" (Payments screen) — a separate query rather than folding
+  // into the 7-day window above, since a month can run past 30 days and the point
+  // of all this is specifically to stop trusting a capped/windowed list for a total
+  // that claims to cover a whole month.
+  const { rows: [monthRow] } = await pool.query(
+    `select coalesce(sum(amount), 0)::float8 as total, count(*)::int as count
+       from payments
+      where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3`,
+    [req.tenant.id, nairobiMonthStart(now), tomorrowStart]);
+
+  res.json({
+    today: { total: todayTotal, pppoe: todayPppoe, channels: todayProviders.size },
+    days,
+    monthToDate: { total: monthRow.total, count: monthRow.count },
+  });
 }));
 
 /**

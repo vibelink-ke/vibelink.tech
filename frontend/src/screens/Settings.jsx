@@ -120,8 +120,9 @@ function FaviconCard({ store, onChanged, version }) {
     <Card title="Browser tab icon">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
-          Shown in the browser tab on your sign-in screen, dashboard and hotspot pages.
-          PNG, ICO, SVG, JPEG or WebP, under 50KB.
+          Shown in the browser tab on your sign-in screen, dashboard and hotspot pages —
+          and doubles as your logo on the sign-in screen and the sidebar, in place of the
+          plain letter/WiFi mark. PNG, ICO, SVG, JPEG or WebP, under 50KB.
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           {!broken ? (

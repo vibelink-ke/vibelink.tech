@@ -91,6 +91,11 @@ export default function Sidebar() {
   const brandName = (s?.company || 'Vibelink').toUpperCase();
 
   const [showWhatsNew, setShowWhatsNew] = useState(false);
+  // A tenant's own uploaded favicon doubles as their logo here too — this square is
+  // the one piece of chrome on screen every single page. /api/public/favicon 404s
+  // when nothing has been uploaded, which is the signal to keep the generic WiFi
+  // mark below rather than show a broken image.
+  const [logoOk, setLogoOk] = useState(true);
 
   const name = s?.name || 'Set up your profile';
   // Just the role. The subdomain used to hang off it, which told the operator
@@ -147,25 +152,32 @@ export default function Sidebar() {
       <div style={{ padding: '20px 18px 16px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: `1px solid ${color.sideLine}` }}>
         {/* A WiFi mark instead of a plain letter tile — this is a WiFi
             billing platform, and the brand square is the one piece of
-            chrome on screen every single page, every single time. */}
+            chrome on screen every single page, every single time. A
+            tenant's own uploaded favicon takes over this square when
+            they have one; this generic mark is only the default. */}
         <div
           style={{
             width: 30,
             height: 30,
             flex: '0 0 30px',
             borderRadius: radius.md,
-            background: color.green,
+            background: logoOk ? '#fff' : color.green,
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            overflow: 'hidden',
           }}
         >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-            <path d="M4 8.5C9.5 3.5 14.5 3.5 20 8.5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.55" />
-            <path d="M6.8 12.3C10.5 9 13.5 9 17.2 12.3" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.8" />
-            <path d="M9.7 16C11.3 14.6 12.7 14.6 14.3 16" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
-            <circle cx="12" cy="19.3" r="1.4" fill="#fff" />
-          </svg>
+          {logoOk ? (
+            <img src="/api/public/favicon" alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={() => setLogoOk(false)} />
+          ) : (
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 8.5C9.5 3.5 14.5 3.5 20 8.5" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.55" />
+              <path d="M6.8 12.3C10.5 9 13.5 9 17.2 12.3" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" opacity="0.8" />
+              <path d="M9.7 16C11.3 14.6 12.7 14.6 14.3 16" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+              <circle cx="12" cy="19.3" r="1.4" fill="#fff" />
+            </svg>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
           <span
