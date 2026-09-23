@@ -1290,6 +1290,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     <div id="err0"></div>
     <div id="buyForm" style="display:none">
       <p class="label" id="deviceLabel">Which device is it?</p>
+      <input id="deviceFilter" type="text" placeholder="Type a name or part of the MAC to filter…" autocomplete="off" style="display:none">
       <div id="devices"></div>
       <p class="label" id="planLabel">Choose a bundle</p>
       <div id="plans"></div>
@@ -1312,6 +1313,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
     <button id="find">Find devices</button>
     <div id="err1"></div>
+    <input id="oldDeviceFilter" type="text" placeholder="Type a name or part of the MAC to filter…" autocomplete="off" style="display:none">
     <div id="list" style="display:none"></div>
   </div>
 
@@ -1378,16 +1380,37 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         document.getElementById('err0').innerHTML = '<p class="err">Could not reach the billing system from here.</p>';
       });
 
-    function renderDevices() {
+    // Above a handful of devices, a busy site's guest list gets long enough
+    // that scrolling past a dozen "Unknown device" rows to find one TV is
+    // its own kind of hard-to-use — a filter the guest can type into (a
+    // vendor name, or the last few digits of the MAC printed on the box)
+    // beats scanning silently. Hidden below that count: an extra input on
+    // a two- or three-device list only gets in the way.
+    function renderDevices(filter) {
+      var q = (filter || '').trim().toLowerCase();
+      var filterBox = document.getElementById('deviceFilter');
+      filterBox.style.display = devices.length > 5 ? 'block' : 'none';
+
+      var shown = devices.filter(function (d, i) {
+        d.__i = i;
+        if (!q) return true;
+        var hay = [d.knownLabel, d.vendor, d.hostname, d.mac, d.address].filter(Boolean).join(' ').toLowerCase();
+        return hay.indexOf(q) !== -1;
+      });
+
       var el = document.getElementById('devices');
-      el.innerHTML = devices.map(function (d, i) {
+      if (!shown.length) {
+        el.innerHTML = '<p class="hint">No device matches "' + esc(filter) + '".</p>';
+        return;
+      }
+      el.innerHTML = shown.map(function (d) {
         // A name typed in on a past purchase wins over the router's own
         // guess — the router has no memory of it at all, only the name a
         // customer actually chose says "this is my TV" rather than
         // "TCL" or a bare MAC.
         var name = esc(d.knownLabel || d.vendor || d.hostname || 'Unknown device');
         var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
-        return '<div class="device" data-i="' + i + '"><div><div class="device-name">' + name + '</div>' +
+        return '<div class="device" data-i="' + d.__i + '"><div><div class="device-name">' + name + '</div>' +
           '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div></div>';
       }).join('');
       el.querySelectorAll('.device').forEach(function (row) {
@@ -1401,8 +1424,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           document.getElementById('deviceName').value = pickedDevice.knownLabel || '';
         });
       });
-      if (devices.length === 1) el.querySelector('.device').click();
+      if (shown.length === 1) el.querySelector('.device').click();
     }
+    document.getElementById('deviceFilter').addEventListener('input', function (e) { renderDevices(e.target.value); });
 
     function renderPlans() {
       var el = document.getElementById('plans');
@@ -1493,33 +1517,52 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           if (!res.ok) { err.innerHTML = '<p class="err">' + (res.d.error || 'Could not check that code.') + '</p>'; return; }
-          renderOldList(res.d.devices, res.d.slotsLeft);
+          oldDevices = res.d.devices || [];
+          oldSlotsLeft = res.d.slotsLeft;
+          renderOldList();
         })
         .catch(function () { err.innerHTML = '<p class="err">Could not reach the billing system from here.</p>'; });
     });
 
-    function renderOldList(oldDevices, slotsLeft) {
+    var oldDevices = [], oldSlotsLeft = 0;
+    function renderOldList(filter) {
+      var q = (filter || '').trim().toLowerCase();
+      var filterBox = document.getElementById('oldDeviceFilter');
       var list = document.getElementById('list');
       list.style.display = 'block';
-      if (!slotsLeft) {
+      if (!oldSlotsLeft) {
+        filterBox.style.display = 'none';
         list.innerHTML = '<p class="hint">This code already has as many devices as it can take.</p>';
         return;
       }
       if (!oldDevices.length) {
+        filterBox.style.display = 'none';
         list.innerHTML = '<p class="hint">No other devices seen on this network yet — make sure the TV is connected to the WiFi first.</p>';
         return;
       }
-      list.innerHTML = oldDevices.map(function (d, i) {
+      filterBox.style.display = oldDevices.length > 5 ? 'block' : 'none';
+      var shown = oldDevices.filter(function (d, i) {
+        d.__i = i;
+        if (!q) return true;
+        var hay = [d.vendor, d.hostname, d.mac, d.address].filter(Boolean).join(' ').toLowerCase();
+        return hay.indexOf(q) !== -1;
+      });
+      if (!shown.length) {
+        list.innerHTML = '<p class="hint">No device matches "' + esc(filter) + '".</p>';
+        return;
+      }
+      list.innerHTML = shown.map(function (d) {
         var name = esc(d.vendor || d.hostname || 'Unknown device');
         var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
         return '<div class="device"><div><div class="device-name">' + name + '</div>' +
           '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div>' +
-          '<button class="add" data-i="' + i + '">Add</button></div>';
+          '<button class="add" data-i="' + d.__i + '">Add</button></div>';
       }).join('') + '<p class="hint" id="bindNote"></p>';
       list.querySelectorAll('.add').forEach(function (btn) {
         btn.addEventListener('click', function () { bind(oldDevices[Number(btn.getAttribute('data-i'))].mac, btn); });
       });
     }
+    document.getElementById('oldDeviceFilter').addEventListener('input', function (e) { renderOldList(e.target.value); });
 
     function bind(mac, btn) {
       var name = window.prompt('Name this device (optional) — e.g. "Living room TV"', '') || '';
