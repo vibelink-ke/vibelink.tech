@@ -137,7 +137,7 @@ export default function Analytics() {
         </Card>
       </div>
 
-      <Card title="Live load per router" subtitle="PPPoE and hotspot counted separately — how many belong to each router right now, and how many are actually connected this moment. Refreshes every 30s.">
+      <Card title="Live load per router" subtitle="Total = locked to that router right now (a PPPoE subscriber's account, or a currently-valid hotspot voucher). Online = of those, how many are actually connected this moment. Refreshes every 30s.">
         <Table
           toolbar="never"
           rowKey={(r) => r.id}
@@ -159,26 +159,28 @@ export default function Analytics() {
               ),
             },
             {
-              key: 'pppoe',
-              label: 'PPPoE',
+              key: 'pppoe_total',
+              label: 'PPPoE total',
               align: 'right',
-              render: (r) => (
-                <span style={{ fontFamily: font.mono }}>
-                  <b style={{ color: r.pppoe_online > 0 ? color.green : color.muted }}>{r.pppoe_online}</b>
-                  <span style={{ color: color.muted }}> / {r.pppoe_total} online</span>
-                </span>
-              ),
+              render: (r) => <span style={{ fontFamily: font.mono }}>{r.pppoe_total}</span>,
             },
             {
-              key: 'hotspot',
-              label: 'Hotspot',
+              key: 'pppoe_online',
+              label: 'PPPoE online',
               align: 'right',
-              render: (r) => (
-                <span style={{ fontFamily: font.mono }}>
-                  <b style={{ color: r.hotspot_online > 0 ? color.green : color.muted }}>{r.hotspot_online}</b>
-                  <span style={{ color: color.muted }}> / {r.hotspot_total} online</span>
-                </span>
-              ),
+              render: (r) => <span style={{ fontFamily: font.mono, color: r.pppoe_online > 0 ? color.green : color.muted, fontWeight: 600 }}>{r.pppoe_online}</span>,
+            },
+            {
+              key: 'hotspot_total',
+              label: 'Hotspot total',
+              align: 'right',
+              render: (r) => <span style={{ fontFamily: font.mono }}>{r.hotspot_total}</span>,
+            },
+            {
+              key: 'hotspot_online',
+              label: 'Hotspot online',
+              align: 'right',
+              render: (r) => <span style={{ fontFamily: font.mono, color: r.hotspot_online > 0 ? color.green : color.muted, fontWeight: 600 }}>{r.hotspot_online}</span>,
             },
           ]}
         />
