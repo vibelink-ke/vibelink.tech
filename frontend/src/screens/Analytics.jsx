@@ -18,6 +18,19 @@ export default function Analytics() {
   const [mrr, setMrr] = useState(null);
   useEffect(() => { api.mrrAnalytics().then(setMrr).catch(() => setMrr(null)); }, []);
 
+  // Real per-router, per-service counts — not store.clients/store.vouchers, both
+  // of which cap at a few hundred rows (GET /api/subscribers, GET /api/vouchers)
+  // and would quietly undercount a busy router the same way the Dashboard's own
+  // revenue tiles once did. Polled every 30s for "online right now" to actually
+  // mean that, not a number from whenever the page happened to load.
+  const [routerLoad, setRouterLoad] = useState(null);
+  useEffect(() => {
+    const load = () => api.routerLoad().then(setRouterLoad).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 30000);
+    return () => clearInterval(id);
+  }, []);
+
   const clients = store.clients ?? [];
   const routers = store.routers ?? [];
   const tickets = store.tickets ?? [];
@@ -123,6 +136,53 @@ export default function Analytics() {
           )}
         </Card>
       </div>
+
+      <Card title="Live load per router" subtitle="PPPoE and hotspot counted separately — how many belong to each router right now, and how many are actually connected this moment. Refreshes every 30s.">
+        <Table
+          toolbar="never"
+          rowKey={(r) => r.id}
+          empty={routerLoad === null ? 'Loading…' : 'No routers onboarded'}
+          rows={routerLoad ?? []}
+          columns={[
+            {
+              key: 'name',
+              label: 'Router',
+              render: (r) => (
+                <span
+                  onClick={() => navigate(`/clients?q=${encodeURIComponent(r.name)}`)}
+                  title={`See clients on ${r.name}`}
+                  style={{ fontWeight: 600, cursor: 'pointer' }}
+                >
+                  {r.name}
+                  {r.router_status === 'down' && <span style={{ color: color.rust, fontWeight: 400 }}> · offline</span>}
+                </span>
+              ),
+            },
+            {
+              key: 'pppoe',
+              label: 'PPPoE',
+              align: 'right',
+              render: (r) => (
+                <span style={{ fontFamily: font.mono }}>
+                  <b style={{ color: r.pppoe_online > 0 ? color.green : color.muted }}>{r.pppoe_online}</b>
+                  <span style={{ color: color.muted }}> / {r.pppoe_total} online</span>
+                </span>
+              ),
+            },
+            {
+              key: 'hotspot',
+              label: 'Hotspot',
+              align: 'right',
+              render: (r) => (
+                <span style={{ fontFamily: font.mono }}>
+                  <b style={{ color: r.hotspot_online > 0 ? color.green : color.muted }}>{r.hotspot_online}</b>
+                  <span style={{ color: color.muted }}> / {r.hotspot_total} online</span>
+                </span>
+              ),
+            },
+          ]}
+        />
+      </Card>
 
       <Card title="Tickets by priority">
         <Table

@@ -12076,6 +12076,65 @@ app.get('/api/analytics/mrr', requirePermission('analytics.view'), wrap(async (r
   });
 }));
 
+/**
+ * Per-router live load, split PPPoE/hotspot: how many belong to each router right
+ * now, and how many of those are actually connected this moment — not the client-side
+ * "Load per router" card above it, which just counts store.clients (capped at 200
+ * rows by GET /api/subscribers) and cannot tell online from merely-on-the-books.
+ *
+ * "Online" is computed the exact same way each service's own screen already does —
+ * PPPoE: GET /api/subscribers' own radacct/live_sessions check. Hotspot: GET
+ * /api/vouchers' own check, plus a bypass-bound device (a TV/console with no RADIUS
+ * login of its own) counting as online while its voucher is still valid, for the
+ * same reason that screen treats it that way. A hotspot "total" here means
+ * currently-valid vouchers on that router (status='in_use', not expired) — the
+ * live figure, not "every code this router has ever sold."
+ */
+app.get('/api/analytics/router-load', requirePermission('analytics.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select r.id, r.name, r.status as router_status,
+            coalesce(pp.total, 0)::int as pppoe_total, coalesce(pp.online, 0)::int as pppoe_online,
+            coalesce(hs.total, 0)::int as hotspot_total, coalesce(hs.online, 0)::int as hotspot_online
+       from routers r
+       left join lateral (
+         select count(*) as total,
+                count(*) filter (where (a.framedipaddress is not null or live.username is not null)) as online
+           from subscribers s
+           left join lateral (
+             select framedipaddress from radacct
+              where username = s.pppoe_user and acctstoptime is null
+                and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
+              order by acctstarttime desc limit 1) a on true
+           left join lateral (
+             select username from live_sessions
+              where tenant_id = s.tenant_id and username = s.pppoe_user
+                and seen_at > now() - interval '5 minutes') live on true
+          where s.router_id = r.id and s.service = 'pppoe' and s.pppoe_user is not null
+       ) pp on true
+       left join lateral (
+         select count(*) as total,
+                count(*) filter (where (a.framedipaddress is not null or live.username is not null
+                  or (dev.mac is not null))) as online
+           from vouchers v
+           left join lateral (
+             select framedipaddress from radacct
+              where username = v.code and acctstoptime is null
+                and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
+              order by acctstarttime desc limit 1) a on true
+           left join lateral (
+             select username from live_sessions
+              where tenant_id = v.tenant_id and username = v.code
+                and seen_at > now() - interval '5 minutes') live on true
+           left join lateral (
+             select mac from voucher_devices where voucher_id = v.id order by added_at desc limit 1) dev on true
+          where v.router_id = r.id and v.status = 'in_use' and (v.expires_at is null or v.expires_at > now())
+       ) hs on true
+      where r.tenant_id = $1
+      order by r.name`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
 /** Run enforcement now rather than waiting for the quarter-hour cron. */
 app.post('/api/fup-enforce', wrap(async (req, res) => {
   const { enforceForTenant } = await import('./fup.js');
