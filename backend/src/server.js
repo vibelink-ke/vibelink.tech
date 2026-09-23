@@ -12845,5 +12845,16 @@ app.use((err, req, res, _next) => {
 // Last line of defence: a stray rejection should be logged, not fatal.
 process.on('unhandledRejection', (e) => console.error('unhandled rejection:', describe(e)));
 
+// Best-effort, fire-and-forget: the sync file wg-sync-loop.sh reads (see its own
+// comment on why a missing one used to mean "wipe every peer" rather than "wait")
+// otherwise only gets (re)written the next time some router event happens to call
+// syncServer() itself — a fresh deploy or a wireguard container recreate could sit
+// with no sync file, and no peer able to actually reach the live interface, for
+// however long it takes before that next event, purely by chance. Every api start
+// closes that gap immediately instead of leaving it to chance.
+import('./wireguard.js').then((wg) => wg.syncServer())
+  .then((r) => console.log('wireguard syncServer on startup:', r))
+  .catch((e) => console.error('wireguard syncServer on startup failed:', e.message));
+
 startJobs();
 app.listen(process.env.PORT ?? 8080, () => console.log('billing api up'));

@@ -45,14 +45,24 @@
         | while read -r cidr; do
             [ -n "$cidr" ] && ip route replace "$cidr" dev wg0 metric 100 2>/dev/null
           done
-    elif [ -f /config/wg_confs/wg0.conf ] && command -v wg >/dev/null 2>&1; then
-      # Fallback only — correct for a plain WireGuard-only peer, but
-      # silently drops any peer kept out of a static [Peer] block on
-      # purpose. Only ever hit right after an upgrade, before the api
-      # container has run syncServer() once to produce wg0.sync.conf above.
-      wg-quick strip /config/wg_confs/wg0.conf > /tmp/wg0.stripped.conf 2>/dev/null \
-        && wg syncconf wg0 /tmp/wg0.stripped.conf 2>/dev/null
     fi
+    # No fallback for a missing sync file (there used to be one here: strip
+    # wg0.conf and syncconf from that instead). It read as merely incomplete
+    # — "correct for a plain WireGuard-only peer, but silently drops any peer
+    # kept out of a static [Peer] block on purpose" — but every peer in this
+    # codebase's own wg0.conf is added via PostUp shell commands, never as a
+    # [Peer] block (see renderServerConfig's own comment for why), so
+    # wg-quick strip on it produces zero peers every single time, with
+    # nothing plain-WireGuard-only about it to ever fall back to correctly.
+    # `wg syncconf` on a zero-peer file doesn't leave existing peers alone —
+    # it deletes every peer not in the file, which every one of them
+    # genuinely was not. On a box where the sync file happened to be
+    # missing or stale (exactly the state a manual recovery step leaves
+    # until the api side writes a fresh one), this ran every 15 seconds and
+    # wiped the interface's entire peer set each time, undoing PostUp's own
+    # work within moments of every boot. Missing sync file now means wait,
+    # not wipe — wg0.conf's own PostUp lines already got every peer onto
+    # the interface at boot; there is nothing here that does it better.
 
     if [ -f /config/wg_confs/wg0.conf ] || [ -f /config/wg_confs/sync/wg0.sync.conf ]; then
       {
