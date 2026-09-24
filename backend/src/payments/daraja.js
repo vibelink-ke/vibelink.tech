@@ -265,7 +265,108 @@ export async function b2b(tenantId, { amount, partyB, accountReference = '', rem
   return { conversationId: data.ConversationID, originatorId: data.OriginatorConversationID, raw: data };
 }
 
+/**
+ * Ask Safaricom for the organisation's account balances.
+ *
+ * Like a payout this is asynchronous: the call only reports "queued", and the
+ * figures arrive on /balance-result below, minutes or seconds later. The caller
+ * records the pending row (server.js) keyed by the returned conversationId, so
+ * this function itself touches no tables.
+ *
+ * IdentifierType 4 is a paybill's shortcode, which is what every gateway here
+ * is configured as. Needs the same initiator name/password as payouts, and that
+ * initiator must have the "balance query" role on the M-Pesa portal.
+ */
+export async function accountBalance(tenantId) {
+  const cfg = await resolveConfig(tenantId, 'daraja', false);
+  if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
+
+  const { initiator_name: initiator, initiator_password: initiatorPassword } = cfg.credentials ?? {};
+  if (!initiator || !initiatorPassword) {
+    throw new Error('Reading the balance needs an initiator name and password from the M-Pesa portal. '
+      + 'Add them under Settings → Payment gateways.');
+  }
+
+  const { securityCredential } = await import('./daraja-credential.js');
+  const { data } = await axios.post(`${BASE}/mpesa/accountbalance/v1/query`, {
+    Initiator: initiator,
+    SecurityCredential: securityCredential(initiatorPassword),
+    CommandID: 'AccountBalance',
+    PartyA: cfg.shortcode,
+    IdentifierType: '4',
+    Remarks: 'Balance',
+    QueueTimeOutURL: `${process.env.BASE_URL}/webhooks/daraja/balance-timeout`,
+    ResultURL: `${process.env.BASE_URL}/webhooks/daraja/balance-result`,
+  }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
+
+  if (data.ResponseCode && data.ResponseCode !== '0') {
+    throw new Error(data.ResponseDescription ?? data.errorMessage ?? 'M-Pesa refused the balance query.');
+  }
+  return { shortcode: cfg.shortcode, conversationId: data.ConversationID };
+}
+
+/**
+ * Safaricom reports balances as one string:
+ * "Working Account|KES|700000.00|700000.00|0.00|0.00&Utility Account|KES|…&…"
+ * — per account: name, currency, current, available, reserved, unavailable.
+ */
+export function parseBalance(str) {
+  const num = (v) => { const x = Number(v); return Number.isFinite(x) ? x : null; };
+  return String(str ?? '').split('&').filter(Boolean).map((seg) => {
+    const [name, currency, current, available, reserved, unavailable] = seg.split('|');
+    return { name, currency, current: num(current), available: num(available), reserved: num(reserved), unavailable: num(unavailable) };
+  });
+}
+
 export const router = express.Router();
+
+/**
+ * The answer to accountBalance(). Matched to the row server.js wrote when it
+ * asked, by ConversationID — a callback for anything we did not ask about is
+ * ignored, which is what stands in for a signature here (Safaricom does not
+ * sign these, same as b2c-result below).
+ */
+router.post('/balance-result', express.json(), async (req, res) => {
+  const r = req.body?.Result ?? {};
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
+  if (!r.ConversationID) return;
+
+  const { pool } = await import('../db.js');
+  // The answer can beat our own bookkeeping: Safaricom may call back within a
+  // second of replying "queued", before the row that names this conversation
+  // has been written. A few short retries cover that gap without holding
+  // anything up — the ack above has already gone.
+  let row;
+  for (let i = 0; i < 4 && !row; i += 1) {
+    ({ rows: [row] } = await pool.query(
+      "select id from mpesa_balances where conversation_id=$1 and status='pending'", [r.ConversationID]));
+    if (!row) await new Promise((ok) => setTimeout(ok, 1000));
+  }
+  if (!row) return;
+
+  if (Number(r.ResultCode) === 0) {
+    const items = Object.fromEntries(
+      (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
+    const accounts = parseBalance(items.AccountBalance);
+    const pick = (re) => {
+      const a = accounts.find((x) => re.test(x.name ?? ''));
+      return a ? (a.available ?? a.current) : null;
+    };
+    await pool.query(
+      "update mpesa_balances set status='ok', accounts=$2, utility=$3, working=$4, received_at=now() where id=$1",
+      [row.id, JSON.stringify(accounts), pick(/utility/i), pick(/working/i)]);
+  } else {
+    console.error('daraja balance query failed', r.ResultCode, r.ResultDesc);
+    await pool.query(
+      "update mpesa_balances set status='failed', error=$2, received_at=now() where id=$1",
+      [row.id, String(r.ResultDesc ?? 'M-Pesa refused the balance query').slice(0, 300)]);
+  }
+});
+
+router.post('/balance-timeout', express.json(), async (req, res) => {
+  console.warn('daraja balance query timed out', JSON.stringify(req.body ?? {}));
+  res.json({ ResultCode: 0, ResultDesc: 'Accepted' });
+});
 
 /**
  * Where a payout ends up.

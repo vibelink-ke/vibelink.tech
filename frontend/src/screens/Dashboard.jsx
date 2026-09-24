@@ -142,6 +142,26 @@ export default function Dashboard() {
   }, []);
 
   const clients = store.clients ?? [];
+
+  // New PPPoE services (subscriber rows) created this calendar month, Nairobi
+  // time, against last month. Month boundaries are read in Nairobi rather than
+  // the browser's own zone so a line added at 00:30 on the 1st counts toward
+  // the new month for everyone, wherever the dashboard happens to be open.
+  const newServices = useMemo(() => {
+    const ym = (d) => new Date(d).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }).slice(0, 7);
+    const thisYm = ym(new Date());
+    const [y, m] = thisYm.split('-').map(Number);
+    const lastYm = m === 1 ? `${y - 1}-12` : `${y}-${String(m - 1).padStart(2, '0')}`;
+    let cur = 0;
+    let prev = 0;
+    for (const c of clients) {
+      if (!c.created_at) continue;
+      const k = ym(c.created_at);
+      if (k === thisYm) cur += 1;
+      else if (k === lastYm) prev += 1;
+    }
+    return { cur, prev };
+  }, [clients]);
   /**
    * "Active" is entitlement, not connection: a PPPoE subscription in good
    * standing, or a hotspot code that is activated and not yet expired
@@ -373,6 +393,12 @@ export default function Dashboard() {
           label="ACTIVE"
           value={active.length}
           hint="paid & valid — online or not"
+        />
+        <Tile
+          label="NEW SERVICES THIS MONTH"
+          value={newServices.cur}
+          hint={`${newServices.prev} last month`}
+          onClick={() => navigate('/clients')}
         />
         {so?.enabled && (
           <>

@@ -36,8 +36,8 @@ const Row = ({ k, v }) => (
   </div>
 );
 
-const Tile = ({ label, value, hint, dim }) => (
-  <div style={card}>
+const Tile = ({ label, value, hint, dim, onClick }) => (
+  <div style={onClick ? { ...card, cursor: 'pointer' } : card} onClick={onClick}>
     <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>{label}</span>
     <span style={{ fontFamily: font.mono, fontSize: 24, color: dim ? color.neutralInk : color.ink }}>{value}</span>
     <span style={{ fontSize: 12.5, color: color.neutralInk }}>{hint}</span>
@@ -102,6 +102,58 @@ export default function Payments() {
     const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
     return () => clearInterval(id);
   }, []);
+
+  // The M-Pesa organisation balance. Safaricom only answers a balance query a
+  // little later, so this shows the last figure we have, says when it was read,
+  // and while a fresh one is on its way looks again every few seconds. It syncs
+  // itself when the figure is missing or over half an hour old (once per visit,
+  // so opening this screen is never a stream of Safaricom calls); the tile is
+  // also a button for reading it on demand.
+  const [orgBal, setOrgBal] = useState(null);
+  const [orgBusy, setOrgBusy] = useState(false);
+  const orgAutoAsked = useRef(false);
+  const loadOrgBal = () => api.orgBalance().then(setOrgBal).catch(() => {});
+  const refreshOrgBal = async () => {
+    setOrgBusy(true);
+    try {
+      await api.refreshOrgBalance();
+      await loadOrgBal();
+    } catch (e) {
+      store.toast(`Could not read the balance: ${e.message}`);
+    } finally {
+      setOrgBusy(false);
+    }
+  };
+  useEffect(() => { loadOrgBal(); }, []);
+  useEffect(() => {
+    if (!orgBal?.pending) return undefined;
+    const id = setInterval(loadOrgBal, 4000);
+    return () => clearInterval(id);
+  }, [orgBal?.pending]);
+  useEffect(() => {
+    if (!orgBal || orgAutoAsked.current || orgBal.pending || !orgBal.canQuery) return;
+    const at = orgBal.balance?.receivedAt;
+    const age = at ? Date.now() - new Date(at).getTime() : Infinity;
+    if (age > 30 * 60 * 1000) {
+      orgAutoAsked.current = true;
+      refreshOrgBal();
+    }
+  }, [orgBal]);
+  const orgHint = (() => {
+    if (!orgBal) return 'reading…';
+    if (orgBal.pending || orgBusy) return 'asking Safaricom…';
+    const b = orgBal.balance;
+    if (b) {
+      const t = new Date(b.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+      const working = b.working != null ? ` · working ${money(b.working)}` : '';
+      const failed = orgBal.lastError ? ' · latest refresh failed' : '';
+      return `utility acct${working} · read ${t}${failed}${orgBal.canQuery ? ' · tap to refresh' : ''}`;
+    }
+    if (!orgBal.configured) return 'no M-Pesa gateway set up yet';
+    if (!orgBal.canQuery) return 'add the initiator name & password in Settings → Payment gateways to sync';
+    if (orgBal.lastError) return `last try failed: ${orgBal.lastError}`;
+    return 'tap to read it from Safaricom';
+  })();
 
   const unmatched = store.unmatched ?? [];
   const all = store.mpesaTx ?? [];
@@ -391,7 +443,12 @@ export default function Payments() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
         <Tile label="COLLECTED THIS MONTH" value={money(collected)} hint={collectedCount ? `${collectedCount} payments` : 'no collections yet'} />
         <Tile label="OUTSTANDING" value={money(outstanding)} dim hint={`${openInvoices.length} open invoices`} />
-        <Tile label="ORG BALANCE (M-PESA)" value="KES 0" hint="utility acct · not synced" />
+        <Tile
+          label="ORG BALANCE (M-PESA)"
+          value={orgBal?.balance?.utility != null ? money(orgBal.balance.utility) : '—'}
+          hint={orgHint}
+          onClick={orgBal?.canQuery && !orgBal.pending && !orgBusy ? refreshOrgBal : undefined}
+        />
         <Tile label="AUTO-MATCH RATE" value={matchRate === null ? '—' : `${matchRate}%`} hint={`${unmatched.length} need a human`} />
         {settlements.length > 0 && (
           <Tile

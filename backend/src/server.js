@@ -5,7 +5,7 @@ import util from 'node:util';
 import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { pool, tenantByHost, withTenant } from './db.js';
+import { pool, tenantByHost, withTenant, config } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
@@ -9267,6 +9267,61 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
 }));
 
 // ── money (Payments screen) ───────────────────────
+/**
+ * The M-Pesa organisation balance on the Payments screen.
+ *
+ * Safaricom only answers a balance query asynchronously (see accountBalance in
+ * payments/daraja.js), so this never waits on it: GET returns the newest balance
+ * we have with whether a fresh one is still on its way, and POST /refresh fires
+ * a new query. The last good figure is kept even when a later refresh fails, so
+ * a bad afternoon at Safaricom does not blank the tile.
+ */
+app.get('/api/payments/org-balance', requirePermission('payments.view'), wrap(async (req, res) => {
+  const { rows: [ok] } = await pool.query(
+    `select utility, working, accounts, shortcode, received_at from mpesa_balances
+      where tenant_id=$1 and status='ok' order by requested_at desc limit 1`, [req.tenant.id]);
+  const { rows: [last] } = await pool.query(
+    `select status, error, requested_at from mpesa_balances
+      where tenant_id=$1 order by requested_at desc limit 1`, [req.tenant.id]);
+  const pending = last?.status === 'pending' && Date.now() - new Date(last.requested_at).getTime() < 3 * 60 * 1000;
+
+  let cfg = null;
+  try { cfg = await config(req.tenant.id, 'daraja'); } catch { cfg = null; }
+  const canQuery = !!(cfg?.credentials?.initiator_name && cfg?.credentials?.initiator_password);
+
+  res.json({
+    balance: ok ? {
+      utility: ok.utility == null ? null : Number(ok.utility),
+      working: ok.working == null ? null : Number(ok.working),
+      accounts: ok.accounts ?? [],
+      shortcode: ok.shortcode,
+      receivedAt: ok.received_at,
+    } : null,
+    pending,
+    lastError: last?.status === 'failed' ? last.error : null,
+    configured: !!cfg,
+    canQuery,
+  });
+}));
+
+app.post('/api/payments/org-balance/refresh', requirePermission('payments.view'), wrap(async (req, res) => {
+  const { rows: [inFlight] } = await pool.query(
+    `select 1 from mpesa_balances where tenant_id=$1 and status='pending'
+        and requested_at > now() - interval '3 minutes'`, [req.tenant.id]);
+  if (inFlight) return res.json({ pending: true });
+
+  let asked;
+  try {
+    asked = await mpesa.accountBalance(req.tenant.id);
+  } catch (e) {
+    return res.status(400).json({ error: e?.response?.data?.errorMessage ?? e.message });
+  }
+  await pool.query(
+    'insert into mpesa_balances (tenant_id, shortcode, conversation_id) values ($1,$2,$3)',
+    [req.tenant.id, asked.shortcode, asked.conversationId ?? null]);
+  res.json({ pending: true });
+}));
+
 app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
     select pay.*,

@@ -2920,3 +2920,26 @@ alter table tenants add column if not exists max_concurrent_clients int
 -- the label/username/password/speed already set up for it. See PATCH
 -- /api/hotspot/access-codes/:id.
 alter table hotspot_access_codes add column if not exists enabled boolean not null default true;
+
+-- The M-Pesa organisation balance the Payments screen shows. Safaricom answers
+-- an Account Balance query asynchronously — the request returns "queued" and the
+-- figures arrive later on the ResultURL — so each ask is a row that starts
+-- 'pending' and is filled in when the callback lands (matched by conversation_id).
+-- The screen reads the newest 'ok' row, so a slow or failed refresh never blanks
+-- the last known balance. utility/working are pulled out of `accounts` for
+-- convenience; `accounts` keeps every account Safaricom reported.
+create table if not exists mpesa_balances (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid not null references tenants on delete cascade,
+  shortcode       text not null,
+  conversation_id text,
+  status          text not null default 'pending',   -- pending | ok | failed
+  accounts        jsonb,
+  utility         numeric(14,2),
+  working         numeric(14,2),
+  error           text,
+  requested_at    timestamptz not null default now(),
+  received_at     timestamptz
+);
+create index if not exists mpesa_balances_tenant_idx on mpesa_balances (tenant_id, requested_at desc);
+create unique index if not exists mpesa_balances_conv_idx on mpesa_balances (conversation_id) where conversation_id is not null;
