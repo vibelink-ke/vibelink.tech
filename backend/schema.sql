@@ -2943,3 +2943,13 @@ create table if not exists mpesa_balances (
 );
 create index if not exists mpesa_balances_tenant_idx on mpesa_balances (tenant_id, requested_at desc);
 create unique index if not exists mpesa_balances_conv_idx on mpesa_balances (conversation_id) where conversation_id is not null;
+
+-- The balance also arrives without asking: every C2B confirmation Safaricom sends
+-- carries OrgAccountBalance, the paybill's utility balance right after that
+-- payment, and needs no initiator credentials at all. Those are kept as ONE row
+-- per tenant+shortcode (source 'c2b') that each payment overwrites — a row per
+-- payment would grow without bound — and as_of (the payment's own TransTime)
+-- stops a late-delivered older confirmation from overwriting a newer balance.
+alter table mpesa_balances add column if not exists source text not null default 'query';
+alter table mpesa_balances add column if not exists as_of timestamptz;
+create unique index if not exists mpesa_balances_c2b_idx on mpesa_balances (tenant_id, shortcode) where source = 'c2b';

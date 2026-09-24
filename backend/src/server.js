@@ -9278,8 +9278,9 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
  */
 app.get('/api/payments/org-balance', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows: [ok] } = await pool.query(
-    `select utility, working, accounts, shortcode, received_at from mpesa_balances
-      where tenant_id=$1 and status='ok' order by requested_at desc limit 1`, [req.tenant.id]);
+    `select utility, working, accounts, shortcode, source, coalesce(as_of, received_at) as received_at
+       from mpesa_balances
+      where tenant_id=$1 and status='ok' order by coalesce(as_of, received_at) desc limit 1`, [req.tenant.id]);
   const { rows: [last] } = await pool.query(
     `select status, error, requested_at from mpesa_balances
       where tenant_id=$1 order by requested_at desc limit 1`, [req.tenant.id]);
@@ -9295,6 +9296,7 @@ app.get('/api/payments/org-balance', requirePermission('payments.view'), wrap(as
       working: ok.working == null ? null : Number(ok.working),
       accounts: ok.accounts ?? [],
       shortcode: ok.shortcode,
+      source: ok.source,
       receivedAt: ok.received_at,
     } : null,
     pending,

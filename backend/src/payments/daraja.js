@@ -516,9 +516,47 @@ router.post('/validate', verifyWebhook, async (req, res) => {
  */
 const RESERVED_BILL_REFS = new Set(['SMSCREDIT', 'HOTSPOT']);
 
+/**
+ * Keep the paybill's balance from a C2B confirmation.
+ *
+ * Every confirmation carries OrgAccountBalance — the utility account's balance
+ * right after that payment — which is the same figure the Account Balance API
+ * returns, without needing the initiator credentials that API demands. It is
+ * only as fresh as the last payment (a payout since then is not reflected),
+ * which the screen says. One row per tenant+shortcode, overwritten by each
+ * payment; as_of is the payment's own TransTime (EAT), so a delayed older
+ * confirmation never replaces a newer balance.
+ */
+async function recordOrgBalance(b) {
+  const raw = b?.OrgAccountBalance;
+  if (raw == null || raw === '') return;
+  const amount = Number(String(raw).replace(/,/g, ''));
+  if (!Number.isFinite(amount)) return;
+
+  const shortcode = String(b.BusinessShortCode ?? '');
+  const tenantId = await tenantByShortcode('daraja', shortcode);
+  if (!tenantId) return;
+
+  const t = String(b.TransTime ?? '').match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/);
+  const asOf = t ? `${t[1]}-${t[2]}-${t[3]}T${t[4]}:${t[5]}:${t[6]}+03:00` : new Date().toISOString();
+
+  const { pool } = await import('../db.js');
+  await pool.query(
+    `insert into mpesa_balances (tenant_id, shortcode, status, utility, source, as_of, received_at)
+     values ($1,$2,'ok',$3,'c2b',$4,now())
+     on conflict (tenant_id, shortcode) where source = 'c2b' do update
+       set utility = excluded.utility, as_of = excluded.as_of, received_at = now(), requested_at = now()
+     where mpesa_balances.as_of is null or excluded.as_of >= mpesa_balances.as_of`,
+    [tenantId, shortcode, amount, asOf]);
+}
+
 router.post('/confirm', verifyWebhook, async (req, res) => {
   res.json({ ResultCode: 0, ResultDesc: 'Accepted' });      // ack first, work after
   const b = req.body;
+
+  // Before any routing below, and for every payment including the reserved
+  // references that return early: it is the paybill's balance either way.
+  recordOrgBalance(b).catch((e) => console.error('org balance not recorded:', e.message));
 
   if (RESERVED_BILL_REFS.has(String(b.BillRefNumber ?? '').trim().toUpperCase())) return;
 

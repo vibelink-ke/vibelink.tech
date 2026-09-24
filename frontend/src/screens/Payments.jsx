@@ -144,15 +144,19 @@ export default function Payments() {
     if (orgBal.pending || orgBusy) return 'asking Safaricom…';
     const b = orgBal.balance;
     if (b) {
-      const t = new Date(b.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
       const working = b.working != null ? ` · working ${money(b.working)}` : '';
       const failed = orgBal.lastError ? ' · latest refresh failed' : '';
-      return `utility acct${working} · read ${t}${failed}${orgBal.canQuery ? ' · tap to refresh' : ''}`;
+      const tap = orgBal.canQuery ? ' · tap to refresh' : '';
+      // Safaricom sends the paybill balance with every payment, so without a
+      // balance query it is exactly as fresh as the last payment — said so, since
+      // a payout made since then is not in it.
+      if (b.source === 'c2b') return `utility acct · as of the last payment, ${when(b.receivedAt)}${failed}${tap}`;
+      const t = new Date(b.receivedAt).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' });
+      return `utility acct${working} · read ${t}${failed}${tap}`;
     }
     if (!orgBal.configured) return 'no M-Pesa gateway set up yet';
-    if (!orgBal.canQuery) return 'add the initiator name & password in Settings → Payment gateways to sync';
-    if (orgBal.lastError) return `last try failed: ${orgBal.lastError}`;
-    return 'tap to read it from Safaricom';
+    if (orgBal.canQuery) return orgBal.lastError ? `last try failed: ${orgBal.lastError}` : 'tap to read it from Safaricom';
+    return 'appears with the next payment on your paybill';
   })();
 
   const unmatched = store.unmatched ?? [];
