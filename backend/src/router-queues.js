@@ -33,6 +33,35 @@ export function gatewayOf(cidr) {
 }
 
 const ipNumber = (a) => String(a).split('/')[0].split('.').reduce((n, o) => n * 256 + Number(o), 0);
+const numberIp = (n) => [Math.floor(n / 16777216) % 256, Math.floor(n / 65536) % 256, Math.floor(n / 256) % 256, n % 256].join('.');
+
+// RouterOS takes at most this many addresses in one queue target.
+const TARGET_LIMIT = 128;
+
+/**
+ * The smallest set of CIDR blocks that covers exactly these addresses (sorted, unique):
+ * runs of neighbours collapse into aligned blocks, so a busy pool of consecutive
+ * customers is a handful of entries instead of one each.
+ */
+function cidrBlocks(numbers) {
+  const blocks = [];
+  let i = 0;
+  while (i < numbers.length) {
+    const start = numbers[i];
+    let end = start;
+    while (i + 1 < numbers.length && numbers[i + 1] === end + 1) { i += 1; end = numbers[i]; }
+    i += 1;
+    let cur = start;
+    while (cur <= end) {
+      let size = 1;
+      while (cur % (size * 2) === 0 && cur + size * 2 - 1 <= end && size < 2 ** 31) size *= 2;
+      blocks.push({ start: cur, size });
+      cur += size;
+    }
+  }
+  return blocks;
+}
+const blockText = (b) => `${numberIp(b.start)}/${32 - Math.log2(b.size)}`;
 
 /** Every PPPoE customer on a router, with the address RADIUS gives them and their plan. */
 export async function customerLines(tenantId, routerId) {
@@ -91,15 +120,27 @@ export function queuePlan(lines) {
   const perBase = new Map();
   for (const g of contended.values()) perBase.set(base(g), (perBase.get(base(g)) ?? 0) + 1);
 
-  const groups = [...contended.values()].map((g) => {
+  // A group is one parent queue, unless its members need more than the 128 target entries
+  // RouterOS allows even after neighbouring addresses are merged into blocks: then it is
+  // split into parts (MAIN_TARIFF_12Mbps_1, _2 …), each holding its own share of the members.
+  const groups = [...contended.values()].flatMap((g) => {
     g.members.sort((a, b) => ipNumber(a.address) - ipNumber(b.address));
-    return {
-      name: perBase.get(base(g)) > 1 ? `${base(g)}_1to${g.ratio}` : base(g),
-      rateDown: g.members.reduce((n, m) => n + Number(m.rateDown), 0),
-      rateUp: g.members.reduce((n, m) => n + Number(m.rateUp), 0),
-      addresses: g.members.map((m) => m.address),
-      members: g.members,
-    };
+    const name = perBase.get(base(g)) > 1 ? `${base(g)}_1to${g.ratio}` : base(g);
+    const blocks = cidrBlocks([...new Set(g.members.map((m) => ipNumber(m.address)))]);
+    const parts = [];
+    for (let i = 0; i < blocks.length; i += TARGET_LIMIT) parts.push(blocks.slice(i, i + TARGET_LIMIT));
+    return parts.map((part, idx) => {
+      const members = parts.length === 1
+        ? g.members
+        : g.members.filter((m) => { const n = ipNumber(m.address); return part.some((b) => n >= b.start && n < b.start + b.size); });
+      return {
+        name: parts.length > 1 ? `${name}_${idx + 1}` : name,
+        rateDown: members.reduce((n, m) => n + Number(m.rateDown), 0),
+        rateUp: members.reduce((n, m) => n + Number(m.rateUp), 0),
+        targets: part.map(blockText),
+        members,
+      };
+    });
   }).sort((a, b) => a.name.localeCompare(b.name));
 
   return { groups, singles, drop };

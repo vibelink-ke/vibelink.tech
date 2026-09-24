@@ -1292,7 +1292,7 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
   const wantedParents = new Set(groups.map((g) => g.name));
   for (const g of groups) {
     const ok = await put(g.name, [
-      `=target=${g.addresses.map((a) => `${String(a).split('/')[0]}/32`).join(',')}`,
+      `=target=${g.targets.join(',')}`,
       `=max-limit=${queueRate(g.rateUp)}/${queueRate(g.rateDown)}`,
       '=parent=none',
       '=comment=',
