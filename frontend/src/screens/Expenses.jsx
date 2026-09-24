@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font } from '../theme/tokens';
+import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
@@ -92,13 +92,56 @@ export default function Expenses() {
           store.toast(`Expense logged, but the receipt didn't upload: ${e.message}`);
         }
       }
+      // Recorded and paid in one go: approve it, then send it. Each step is its own permission,
+      // and a failure leaves the expense logged (and approved) with the reason on it, to retry.
+      if (form.payNow) {
+        try {
+          await api.approveExpense(created.id);
+          await api.payExpense(created.id, form.payPhone ? { method: 'phone', phone: form.payPhone } : {});
+          store.toast('Expense logged and sent to M-Pesa — it shows as paid once M-Pesa confirms');
+        } catch (e) {
+          store.toast(`Expense logged, but not paid: ${e.message}`);
+        }
+      } else {
+        store.toast('Expense logged');
+      }
       await reload();
-      store.toast('Expense logged');
       setForm(null);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Where an approved expense would be sent, in words, for the confirmation.
+  const payTarget = (e) => {
+    if (e.staff_id) return `${e.staff_name ?? 'the staff member'}'s phone`;
+    if (e.supplier_paybill) return `${e.supplier_name ?? 'the supplier'} (paybill ${e.supplier_paybill})`;
+    if (e.supplier_till) return `${e.supplier_name ?? 'the supplier'} (till ${e.supplier_till})`;
+    if (e.supplier_phone) return `${e.supplier_name ?? 'the supplier'} (${e.supplier_phone})`;
+    return null;
+  };
+
+  // Send it from the M-Pesa paybill. Marked paid only when M-Pesa confirms, so this reports
+  // "on its way", not "paid".
+  const payNow = async (e) => {
+    let body = {};
+    let target = payTarget(e);
+    if (!target) {
+      const phone = window.prompt('Nowhere on file to send this. Phone number to pay (M-Pesa):', '');
+      if (!phone) return;
+      body = { method: 'phone', phone: phone.trim() };
+      target = phone.trim();
+    }
+    if (!window.confirm(`Send KES ${kes(e.amount)} from your M-Pesa paybill to ${target}?\n\nThis moves real money and cannot be undone here.`)) return;
+    try {
+      await api.payExpense(e.id, body);
+      await reload();
+      store.toast('Payment sent to M-Pesa — it shows as paid once M-Pesa confirms');
+    } catch (err) {
+      await reload().catch(() => {});
+      store.toast(`Could not pay: ${err.message}`);
     }
   };
 
@@ -233,8 +276,22 @@ export default function Expenses() {
                       <span onClick={() => remove(e)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Delete</span>
                     </>
                   )}
-                  {e.status === 'approved' && (
-                    <span onClick={() => markPaid(e)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Mark paid</span>
+                  {e.status === 'approved' && e.pay_state === 'processing' && (
+                    <span style={{ color: color.muted, fontSize: 12.5, fontWeight: 600 }}>Paying…</span>
+                  )}
+                  {e.status === 'approved' && e.pay_state !== 'processing' && (
+                    <>
+                      {perms['expenses.pay'] && (
+                        <span
+                          onClick={() => payNow(e)}
+                          title={e.pay_state === 'failed' ? `Last attempt failed: ${e.pay_error ?? ''}` : 'Send this from your M-Pesa paybill'}
+                          style={{ color: e.pay_state === 'failed' ? color.rust : color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
+                        >
+                          {e.pay_state === 'failed' ? 'Retry M-Pesa' : 'Pay via M-Pesa'}
+                        </span>
+                      )}
+                      <span onClick={() => markPaid(e)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Mark paid</span>
+                    </>
                   )}
                 </span>
               ),
@@ -292,6 +349,17 @@ export default function Expenses() {
             <Field label="Notes" span={2}>
               <Textarea rows={3} value={form.description} onChange={set('description')} placeholder="Any other detail worth keeping" />
             </Field>
+            {perms['expenses.pay'] && perms['expenses.approve'] && (
+              <Field label="Pay now" span={2} hint="Approves it and sends the money from your M-Pesa paybill now, to the supplier's paybill, till or phone, or to the staff member's phone">
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13.5 }}>
+                  <input type="checkbox" checked={!!form.payNow} onChange={(e) => setForm((s) => ({ ...s, payNow: e.target.checked }))} />
+                  Pay this straight away via M-Pesa
+                </label>
+                {form.payNow && !form.supplierId && !form.staffId && (
+                  <Input style={{ marginTop: 8 }} value={form.payPhone ?? ''} onChange={set('payPhone')} placeholder="Phone to pay, e.g. 0712345678" />
+                )}
+              </Field>
+            )}
             <Field label="Receipt" span={2} hint="Photo or PDF of the receipt, up to 5MB">
               <input
                 type="file"

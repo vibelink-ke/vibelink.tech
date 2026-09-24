@@ -2994,3 +2994,14 @@ alter table routers add column if not exists queue_shaping boolean not null defa
 -- and traffic is counted in both. Set by the queue pass; while it is set the Mikrotik-Group
 -- attribute belongs to that pass, not to syncSubscriberCredentials.
 alter table routers add column if not exists queue_profiles boolean not null default false;
+
+-- Paying an expense straight from the M-Pesa paybill (server.js POST /api/expenses/:id/pay).
+-- pay_state is 'processing' from the moment it is sent until Safaricom's result arrives, then
+-- cleared on success (the expense becomes 'paid') or 'failed' with the reason.
+alter table expenses add column if not exists pay_state text
+  check (pay_state is null or pay_state in ('processing','failed'));
+alter table expenses add column if not exists pay_method text;
+alter table expenses add column if not exists pay_conversation_id text;
+alter table expenses add column if not exists pay_error text;
+alter table expenses add column if not exists pay_reference text;
+create index if not exists expenses_pay_conversation_idx on expenses (pay_conversation_id) where pay_conversation_id is not null;

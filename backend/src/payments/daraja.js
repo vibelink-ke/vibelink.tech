@@ -408,6 +408,26 @@ router.post('/b2c-result', express.json(), async (req, res) => {
     return;
   }
 
+  // An expense paid from the Expenses screen (server.js POST /api/expenses/:id/pay). Only a
+  // successful result marks it paid; a failure leaves it approved with the reason on it.
+  const { rows: [expense] } = await pool.query(
+    "select id from expenses where pay_conversation_id=$1 and pay_state='processing'", [r.ConversationID]);
+  if (expense) {
+    if (Number(r.ResultCode) === 0) {
+      const items = Object.fromEntries(
+        (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
+      await pool.query(
+        "update expenses set status='paid', paid_at=now(), pay_state=null, pay_error=null, pay_reference=$2 where id=$1",
+        [expense.id, String(items.TransactionReceipt ?? items.TransID ?? r.ConversationID)]);
+    } else {
+      console.error('daraja payment failed', r.ResultCode, r.ResultDesc, 'expense', expense.id);
+      await pool.query(
+        "update expenses set pay_state='failed', pay_error=$2 where id=$1",
+        [expense.id, String(r.ResultDesc ?? 'M-Pesa payment failed').slice(0, 300)]);
+    }
+    return;
+  }
+
   // Not a settlement — check payroll (server.js's /payroll/runs/:id/disburse).
   // Unlike a settlement, a failed payroll payout is left 'failed' rather than
   // requeued: nothing here re-runs a payroll disbursement on its own the way

@@ -3988,6 +3988,8 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
             e.status, e.created_by, e.approved_by, e.paid_at, e.created_at,
             (e.receipt_data is not null) as has_receipt,
             e.supplier_id, e.recurring_bill_id, e.payout_id, e.reference,
+            e.pay_state, e.pay_error, e.pay_method, e.pay_reference,
+            sup.paybill as supplier_paybill, sup.till_number as supplier_till, sup.phone as supplier_phone,
             to_char(e.due_date, 'YYYY-MM-DD') as due_date,
             cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name,
             sup.name as supplier_name
@@ -4068,6 +4070,82 @@ app.post('/api/expenses/:id/mark-paid', requirePermission('expenses.approve'), w
     [req.params.id, req.tenant.id]);
   if (!e) return res.status(404).json({ error: 'No such approved expense' });
   res.json(e);
+}));
+
+/**
+ * Pay an approved expense straight from the tenant's own M-Pesa paybill: to a supplier's
+ * paybill (with its account number) or till, or to a phone (a staff member being
+ * reimbursed, or a supplier who takes M-Pesa). It goes out on the tenant's own Daraja
+ * app, never the platform's, and needs the initiator set up under Settings → Payment
+ * gateways, the same as payroll.
+ *
+ * The expense is marked 'paid' only when M-Pesa's result says the money moved
+ * (daraja.js /b2c-result). Until then it is 'processing' and cannot be sent again, so a
+ * double click or a slow answer cannot pay twice; a refusal leaves it approved, with
+ * the reason on it, to retry or to mark paid by hand.
+ */
+app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async (req, res) => {
+  const { rows: [e] } = await pool.query(
+    `select e.*, sup.name as supplier_name, sup.phone as supplier_phone, sup.paybill, sup.till_number, sup.account_ref,
+            coalesce(hp.payout_phone, sf.phone) as staff_phone
+       from expenses e
+       left join suppliers sup on sup.id = e.supplier_id
+       left join staff sf on sf.id = e.staff_id
+       left join hr_profiles hp on hp.staff_id = e.staff_id
+      where e.id=$1 and e.tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!e) return res.status(404).json({ error: 'No such expense' });
+  if (e.status !== 'approved') return res.status(409).json({ error: 'Approve the expense before paying it.' });
+  if (e.pay_state === 'processing') return res.status(409).json({ error: 'A payment for this expense is already on its way.' });
+
+  const amount = Number(e.amount);
+  if (!Number.isInteger(amount) || amount < 1) {
+    return res.status(400).json({ error: 'M-Pesa pays whole shillings. Change the amount to a whole number first.' });
+  }
+
+  const digits = (s) => String(s ?? '').replace(/[^0-9]/g, '');
+  const body = req.body ?? {};
+  const phone = body.phone || (e.staff_id ? e.staff_phone : null) || e.supplier_phone || null;
+  const method = body.method
+    || (e.staff_id ? 'phone' : e.paybill ? 'paybill' : e.till_number ? 'till' : phone ? 'phone' : null);
+  if (!method) {
+    return res.status(400).json({ error: 'There is nowhere to send this: give the supplier a paybill, till or phone, or enter a phone number.' });
+  }
+
+  const remarks = `${e.category ?? 'Expense'}${e.supplier_name ? ` - ${e.supplier_name}` : ''}`.slice(0, 90);
+  let send;
+  if (method === 'paybill') {
+    const partyB = digits(body.destination || e.paybill);
+    const accountRef = String(body.accountRef || e.account_ref || '').trim();
+    if (!/^[0-9]{5,7}$/.test(partyB)) return res.status(400).json({ error: 'That paybill number does not look right.' });
+    if (!accountRef) return res.status(400).json({ error: 'A paybill payment needs the account number to quote.' });
+    send = () => mpesa.b2b(req.tenant.id, { amount, partyB, accountReference: accountRef, remarks });
+  } else if (method === 'till') {
+    const partyB = digits(body.destination || e.till_number);
+    if (!/^[0-9]{5,7}$/.test(partyB)) return res.status(400).json({ error: 'That till number does not look right.' });
+    send = () => mpesa.b2b(req.tenant.id, { amount, partyB, remarks });
+  } else if (method === 'phone') {
+    const msisdn = mpesa.normalise(phone ?? '');
+    if (!/^254[17][0-9]{8}$/.test(String(msisdn))) return res.status(400).json({ error: 'That phone number does not look right.' });
+    send = () => mpesa.b2c(req.tenant.id, { phone: msisdn, amount, remarks, occasion: e.reference ?? '' });
+  } else {
+    return res.status(400).json({ error: 'Pay by paybill, till or phone.' });
+  }
+
+  // Claimed before anything is sent: only one request can move it to 'processing'.
+  const { rows: [claimed] } = await pool.query(
+    `update expenses set pay_state='processing', pay_method=$3, pay_error=null
+      where id=$1 and tenant_id=$2 and status='approved' and pay_state is distinct from 'processing' returning id`,
+    [e.id, req.tenant.id, method]);
+  if (!claimed) return res.status(409).json({ error: 'A payment for this expense is already on its way.' });
+
+  try {
+    const r = await send();
+    await pool.query('update expenses set pay_conversation_id=$2 where id=$1', [e.id, r.conversationId]);
+    res.json({ ok: true, state: 'processing', method });
+  } catch (err) {
+    await pool.query("update expenses set pay_state='failed', pay_error=$2 where id=$1", [e.id, String(err.message ?? err).slice(0, 300)]);
+    res.status(502).json({ error: err.message ?? 'M-Pesa refused the payment.' });
+  }
 }));
 
 const RECEIPT_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'application/pdf']);
