@@ -540,6 +540,21 @@ export default function ClientDetail() {
       autopay: editing.autopay || null,
       location: editing.location || null,
     };
+    // Sent only when changed: any credential change drops the customer's live
+    // session, so an untouched Save must not do that.
+    if (editing.service === 'pppoe') {
+      const orig = clients.find((c) => c.id === editing.id) ?? {};
+      const user = (editing.pppoe_user ?? '').trim();
+      const pass = (editing.pppoe_pass ?? '').trim();
+      if (user !== (orig.pppoe_user ?? '')) {
+        if (!/^[A-Za-z0-9]{2,12}$/.test(user)) return store.toast('PPPoE username must be 2-12 letters/digits');
+        patch.pppoe_user = user;
+      }
+      if (pass !== (orig.pppoe_pass ?? '')) {
+        if (!/^[A-Za-z0-9]{2,12}$/.test(pass)) return store.toast('PPPoE password must be 2-12 letters/digits');
+        patch.pppoe_pass = pass;
+      }
+    }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
       // Wallet is pooled per account_code — every sibling line sharing this
@@ -1280,6 +1295,33 @@ export default function ClientDetail() {
             <Field label="Status">
               <Select value={editing.status ?? 'active'} onChange={(e) => setEditing((s) => ({ ...s, status: e.target.value }))} options={['active', 'grace', 'expired', 'suspended']} />
             </Field>
+            {editing.service === 'pppoe' && (
+              <>
+                <Field label="PPPoE username" hint="2-12 letters/digits">
+                  <Input
+                    value={editing.pppoe_user ?? ''}
+                    onChange={(e) => setEditing((s) => ({ ...s, pppoe_user: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}
+                    style={{ fontFamily: font.mono }}
+                  />
+                </Field>
+                <Field label="PPPoE password" hint="2-12 letters/digits">
+                  <Input
+                    value={editing.pppoe_pass ?? ''}
+                    onChange={(e) => setEditing((s) => ({ ...s, pppoe_pass: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}
+                    style={{ fontFamily: font.mono }}
+                  />
+                </Field>
+                {(() => {
+                  const orig = clients.find((c) => c.id === editing.id) ?? {};
+                  const changed = (editing.pppoe_user ?? '') !== (orig.pppoe_user ?? '') || (editing.pppoe_pass ?? '') !== (orig.pppoe_pass ?? '');
+                  return changed ? (
+                    <div style={{ gridColumn: 'span 2', fontSize: 12, color: color.amberInk }}>
+                      Saving disconnects this customer now. Their router must be updated with the new details, or it will not reconnect.
+                    </div>
+                  ) : null;
+                })()}
+              </>
+            )}
             <Field label="Wallet balance (KES)" hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
               <Input type="number" value={editing.credit ?? 0} onChange={(e) => setEditing((s) => ({ ...s, credit: e.target.value }))} />
             </Field>

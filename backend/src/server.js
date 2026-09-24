@@ -8989,10 +8989,19 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
       [req.params.id, req.tenant.id]);
     previousUser = old?.pppoe_user ?? null;
   }
-  const { rows: [s] } = await pool.query(
-    `update subscribers set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}
-     where tenant_id=$1 and id=$2 returning *`,
-    [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]);
+  let s;
+  try {
+    ({ rows: [s] } = await pool.query(
+      `update subscribers set ${sets.map((k, i) => `${k}=$${i + 3}`).join(', ')}
+       where tenant_id=$1 and id=$2 returning *`,
+      [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])]));
+  } catch (e) {
+    // subscribers_pppoe_user_unique: two customers cannot dial in as the same name.
+    if (e.code === '23505' && sets.includes('pppoe_user')) {
+      return res.status(409).json({ error: `The PPPoE username ${req.body.pppoe_user} is already used by another customer.` });
+    }
+    throw e;
+  }
   if (!s) return res.status(404).json({ error: 'not found' });
 
   // A plan change moves the rate limit, which lives in radreply; a credential
@@ -9005,6 +9014,17 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
       await radius.forgetSubscriberCredentials(pool, previousUser, req.tenant.id);
     }
     await radius.syncSubscriberCredentials(pool, req.tenant.id, s.id);
+
+    // New credentials only apply at the next login, so a session already up
+    // under the old ones would carry on untouched. Drop it: the customer's
+    // router then redials, and only succeeds once it holds the new details.
+    if (sets.includes('pppoe_user') || sets.includes('pppoe_pass')) {
+      const { rows: [r] } = await pool.query('select host, secret from routers where id=$1', [s.router_id]);
+      if (r?.host) {
+        await radius.disconnectSubscriberSession(pool, r.host, r.secret, previousUser ?? s.pppoe_user)
+          .catch((e) => console.warn('credential change: disconnect failed —', e?.message ?? e));
+      }
+    }
   }
 
   /**
