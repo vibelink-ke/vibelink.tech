@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 const CODE = { COA_REQUEST: 43, COA_ACK: 44, COA_NAK: 45, DISCONNECT_REQUEST: 40, DISCONNECT_ACK: 41, DISCONNECT_NAK: 42 };
 
 // Standard attribute types we send.
-const ATTR = { USER_NAME: 1, NAS_IP_ADDRESS: 4, VENDOR_SPECIFIC: 26, ACCT_SESSION_ID: 44 };
+const ATTR = { USER_NAME: 1, NAS_IP_ADDRESS: 4, FRAMED_IP_ADDRESS: 8, VENDOR_SPECIFIC: 26, ACCT_SESSION_ID: 44 };
 
 // MikroTik's vendor space. Rate-Limit is the attribute that actually changes the
 // speed of a live session; the format is "upload/download" in bits, e.g. 5000k/10000k.
@@ -75,7 +75,7 @@ function authentic(reply, request, secret) {
  * running the fair-use sweep) and the database is already correct. A failed CoA
  * costs a delay until the subscriber reconnects, not a wrong bill.
  */
-export function send({ host, secret, username, rate, addressList, sessionId, nasIp,
+export function send({ host, secret, username, rate, addressList, sessionId, nasIp, framedIp,
                        disconnect = false, port, timeoutMs = 3000, retries = 2 }) {
   // routers.host is an inet and may carry a prefix; the wire wants the address.
   const target = String(host).split('/')[0];
@@ -89,6 +89,14 @@ export function send({ host, secret, username, rate, addressList, sessionId, nas
   if (nasIp) {
     const ip = Buffer.from(String(nasIp).split('/')[0].split('.').map(Number));
     if (ip.length === 4) attrs.push(tlv(ATTR.NAS_IP_ADDRESS, ip));
+  }
+  // A hotspot guest is found by address: without it the router logs "Radius with no ip
+  // provided" and cannot say which login this is for.
+  if (framedIp) {
+    const parts = String(framedIp).split('/')[0].split('.').map(Number);
+    if (parts.length === 4 && parts.every((n) => Number.isInteger(n) && n >= 0 && n <= 255)) {
+      attrs.push(tlv(ATTR.FRAMED_IP_ADDRESS, Buffer.from(parts)));
+    }
   }
   if (!disconnect) {
     if (rate) attrs.push(vendor(MIKROTIK, MT.RATE_LIMIT, rate));

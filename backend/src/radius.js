@@ -1071,7 +1071,9 @@ export async function extendVouchers(c, tenantId, ids, minutes) {
  * eventually ends it on its own schedule, which could be hours away.
  */
 export async function disconnectVoucherSession(c, host, secret, code) {
-  await coa(c, host, secret, code, null, undefined, true);
+  // Only when the guest is online somewhere we can see: a disconnect for a code with no session
+  // has nothing to hit, and the router answers each one with an error line in its log.
+  await coa(c, host, secret, code, null, undefined, true, { onlyIfOnline: true });
 }
 
 /**
@@ -1095,17 +1097,30 @@ export async function disconnectSubscriberSession(c, host, secret, username) {
  * thrown away — a CoA that never works is invisible otherwise, which is exactly
  * how it stayed broken before.
  */
-async function coa(c, host, secret, user, rate, mode, disconnect = false) {
+async function coa(c, host, secret, user, rate, mode, disconnect = false, { onlyIfOnline = false } = {}) {
   // Target the live session if there is one. Without a session id the NAS has to
-  // guess which login to change when a subscriber is connected more than once.
+  // guess which login to change when a subscriber is connected more than once, and its
+  // address is what a hotspot router matches a guest by.
   let sessionId;
+  let framedIp;
   try {
     const { rows: [row] } = await c.query(
-      `select acctsessionid from radacct
+      `select acctsessionid, host(framedipaddress) as ip from radacct
         where username = $1 and acctstoptime is null
         order by acctstarttime desc limit 1`, [user]);
     sessionId = row?.acctsessionid;
+    framedIp = row?.ip;
   } catch { /* radacct may be empty; CoA on username alone still works */ }
+  if (!framedIp) {
+    try {
+      const { rows: [live] } = await c.query(
+        `select host(address) as ip from live_sessions
+          where username = $1 and seen_at > now() - interval '15 minutes'
+          order by seen_at desc limit 1`, [user]);
+      framedIp = live?.ip;
+    } catch { /* the router-reported table may not have it either */ }
+  }
+  if (onlyIfOnline && !sessionId && !framedIp) return { ok: true, skipped: true };
 
   const result = await coaClient.send({
     host, secret, username: user, rate,
@@ -1115,6 +1130,7 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false) {
     // rather than only from its next reconnect.
     addressList: mode === 'expired' ? 'ispblocking' : undefined,
     sessionId,
+    framedIp,
     disconnect,
   });
 
