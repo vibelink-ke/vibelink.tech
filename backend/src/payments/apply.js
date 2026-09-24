@@ -440,8 +440,20 @@ async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
 /** Fuzzy match for till/typo'd references. Learns the payer phone on success. */
 async function match(c, tenantId, tx) {
   if (tx.rawAccount) {
-    const norm = String(tx.rawAccount).toUpperCase().replace(/[^A-Z0-9]/g, '')
-      .replace(/O/g, '0').replace(/[IL]/g, '1');
+    // What was typed, letters and digits only. Compared as it is first, and only then with the
+    // look-alikes folded (O to 0, I and L to 1): the fold used to be applied to the typed side alone,
+    // so an account number that itself contains an O, I or L (VBTL26139) could never match what its
+    // owner typed correctly, and went to Unmatched.
+    const plain = String(tx.rawAccount).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const norm = plain.replace(/O/g, '0').replace(/[IL]/g, '1');
+    if (plain) {
+      const { rows: exact } = await c.query(
+        `select id from subscribers
+          where tenant_id=$1 and upper(regexp_replace(account_code, '[^A-Za-z0-9]', '', 'g')) = $2
+          order by expires_at asc nulls first limit 1`,
+        [tenantId, plain]);
+      if (exact[0]) return { type: 'subscriber', id: exact[0].id };
+    }
     /**
      * One account number can now carry several lines — a house and a shop, or
      * a landlord's flats. M-Pesa gives us the account number and nothing else,
@@ -453,11 +465,15 @@ async function match(c, tenantId, tx) {
      * be the wrong guess every time.
      */
     const { rows } = await c.query(
-      `select id, expires_at, similarity(upper(replace(account_code,'-','')), $2) as score
+      `select id, expires_at,
+              greatest(
+                similarity(upper(regexp_replace(account_code, '[^A-Za-z0-9]', '', 'g')), $3),
+                similarity(translate(upper(regexp_replace(account_code, '[^A-Za-z0-9]', '', 'g')), 'OIL', '011'), $2)
+              ) as score
        from subscribers where tenant_id=$1
        order by score desc, expires_at asc nulls first
        limit 1`,
-      [tenantId, norm]
+      [tenantId, norm, plain]
     );
     if (rows[0] && rows[0].score > 0.75) return { type: 'subscriber', id: rows[0].id };
   }
