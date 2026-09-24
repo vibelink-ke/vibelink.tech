@@ -98,6 +98,10 @@ services:
       BASE_URL: https://${ROOT_DOMAIN}
       ROOT_DOMAIN: ${ROOT_DOMAIN}
       RADIUS_COA_PORT: ${RADIUS_COA_PORT:-3799}
+      # Which customers RADIUS sends to their own PPP profile (router-queues.js). Unset = nobody.
+      # QUEUE_PROFILE_USERS=user1,user2 to try a few; QUEUE_PROFILES=all once it has been seen to work.
+      QUEUE_PROFILES: ${QUEUE_PROFILES:-}
+      QUEUE_PROFILE_USERS: ${QUEUE_PROFILE_USERS:-}
       # Optional: a satellite-map provider with sharper imagery than the free default.
       MAPBOX_TOKEN: ${MAPBOX_TOKEN:-}
       MAPTILER_KEY: ${MAPTILER_KEY:-}
