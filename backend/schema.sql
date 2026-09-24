@@ -976,7 +976,15 @@ alter table routers add column if not exists pppoe_pool text;
 -- Configure, and a subscriber briefly on a pool address is online while one on
 -- a colliding address is not. scripts/sync-radius.mjs --apply writes back the
 -- ones that are genuinely in range.
-delete from radreply where attribute = 'Framed-IP-Address';
+-- NO LONGER RUN. This was a one-off upgrade step, but schema.sql is re-applied on
+-- every deploy, so it wiped every PPPoE customer's Framed-IP-Address each time and
+-- nothing put them back. The router's profile has no remote-address of its own, so
+-- any customer who redialled afterwards authenticated and was then dropped with no
+-- address ( "terminating... could not determine ... IP address" ), until a payment
+-- or an edit happened to rewrite their row. syncSubscriberCredentials now refuses to
+-- write an address outside the router's pool, so stale ones no longer need clearing.
+-- To repair a database this already ran on: node scripts/sync-radius.mjs --apply
+-- delete from radreply where attribute = 'Framed-IP-Address';
 
 -- Point existing vouchers at the hotspot profile the router push creates.
 --
