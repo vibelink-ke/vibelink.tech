@@ -108,97 +108,83 @@ export function startJobs() {
   // service per router, so it is deliberately paced rather than run on the
   // same tight loop as the ping watchdog.
   cron.schedule('*/10 * * * *', safely('detectUpstreamProviders', detectUpstreamProviders));
-  // Every 5 minutes, not on every RADIUS auth — this is a correction for
-  // something that happens rarely (a customer physically relocating), not
-  // a hot path, and a live session already tells us the moment it starts.
-  cron.schedule('*/5 * * * *', safely('autoRelocateSubscribers', autoRelocateSubscribers));
+  // Every minute: a customer dialling in from the wrong router is dropped a second after they
+  // authenticate and redials, so the sooner they are moved the sooner they stay up. Not on every
+  // RADIUS auth, which would put a database write on the hot path.
+  cron.schedule('* * * * *', safely('autoRelocateSubscribers', autoRelocateSubscribers));
   // Once, early on the 1st — last month is over by then in every timezone this platform runs in, so there is
   // nothing left to arrive that could change who won.
   cron.schedule('10 6 1 * *', safely('employeeOfTheMonth', employeeOfTheMonth));
 }
 
 /**
- * A PPPoE customer connected from a *different one of their own tenant's
- * routers* than the one on file — not a stranger's NAS, a genuinely known
- * sibling router on the same account — has almost certainly relocated: a
- * house move, a shop that changed premises, someone plugging into the
- * nearer tower after a cable got laid. Left as-is, every later sync still
- * resolves their pool and address against the OLD router, which is
- * exactly the "authenticated / connected / terminating" loop chased down
- * earlier — the session comes up, then gets handed an address from a pool
- * the router it is actually on does not own.
+ * A PPPoE customer with valid details who dials in from a router they are not assigned
+ * to is assigned to it: their router is set to the one they actually came from, and they
+ * are given an address from that router's pool. Two cases, one rule:
  *
- * Scoped to tenants with more than one router: a single-router tenant has
- * nowhere else a real session could come from, so there is nothing to
- * correct and no risk of matching a customer's own line against a router
- * they were never near.
+ *   - no router on file (never assigned, imported, or the router was deleted);
+ *   - a different one of the SAME tenant's routers than the one on file, which is almost
+ *     certainly a relocation (a house move, plugging into a nearer tower).
  *
- * activateSubscriber, not syncSubscriberCredentials — this subscriber has
- * a session open right now, and activateSubscriber is the one that also
- * recomputes their Framed-IP-Address for the new router's pool and forces
- * a reconnect via CoA when that address actually changes (Framed-IP-Address
- * cannot be handed to a live session any other way). syncSubscriberCredentials
- * deliberately skips CoA, for the opposite case — a subscriber with no
- * session yet to disturb.
+ * Only the tenant's own routers are ever matched — a NAS that belongs to nobody in the
+ * tenant is a stranger and is ignored. Left alone, every later sync resolves their pool
+ * and address against the wrong router, and the session comes up and is dropped a second
+ * later ("could not determine remote IP address"), which is also why this looks at
+ * sessions that have already ended: such a customer never holds one open. The most recent
+ * session decides, so a customer who is back on their own router is not moved again, and
+ * one moved in the last half hour is left where they are, so two routers dialling the same
+ * login cannot make it flip back and forth.
+ *
+ * activateSubscriber for a customer in service: it recomputes their Framed-IP-Address for
+ * the new router's pool and forces a reconnect by CoA when the address changes (it cannot
+ * be handed to a live session any other way). For anyone else (expired, paused, suspended)
+ * the walled garden is re-applied instead: activateSubscriber also lifts a block, and
+ * moving router must never do that.
  */
 export async function autoRelocateSubscribers() {
   const { rows } = await pool.query(
-    `select s.id as subscriber_id, s.tenant_id, s.pppoe_user,
-            old_r.name as old_router_name, new_r.id as new_router_id, new_r.name as new_router_name
+    `select distinct on (s.id)
+            s.id as subscriber_id, s.tenant_id, s.pppoe_user, s.status, s.account_code,
+            s.router_id as old_router_id, old_r.name as old_router_name,
+            new_r.id as new_router_id, new_r.name as new_router_name,
+            (select count(*) from routers r2 where r2.tenant_id = s.tenant_id) as tenant_routers
        from radacct a
-       join subscribers s on s.pppoe_user = a.username and s.pppoe_user is not null
+       join subscribers s on s.pppoe_user = a.username and s.pppoe_user is not null and s.service = 'pppoe'
        join routers new_r on new_r.tenant_id = s.tenant_id and host(new_r.host) = host(a.nasipaddress)
        left join routers old_r on old_r.id = s.router_id
-      where a.acctstoptime is null
-        and s.router_id is distinct from new_r.id
+      where (a.acctstoptime is null or a.acctstarttime > now() - interval '10 minutes')
         and s.tenant_id in (${enabledTenants})
-        and (select count(*) from routers r2 where r2.tenant_id = s.tenant_id) > 1`,
+      order by s.id, a.acctstarttime desc`,
     ['autoRelocateSubscribers']);
 
+  const { queueRouterSync } = await import('./router-queues.js');
   for (const row of rows) {
+    if (row.new_router_id === row.old_router_id) continue;
+    // A single-router tenant has nowhere else a real session could come from, unless the
+    // customer has no router at all.
+    if (Number(row.tenant_routers) <= 1 && row.old_router_id) continue;
+
+    const { rows: [recent] } = await pool.query(
+      `select 1 from activity_log
+        where subscriber_id=$1 and action='Moved to another router' and created_at > now() - interval '30 minutes'`,
+      [row.subscriber_id]);
+    if (recent) continue;
+
     await withTenant(row.tenant_id, async (c) => {
       await c.query('update subscribers set router_id=$2 where id=$1', [row.subscriber_id, row.new_router_id]);
-      await activateSubscriber(c, row.tenant_id, row.subscriber_id);
+      if (['active', 'grace'].includes(row.status)) await activateSubscriber(c, row.tenant_id, row.subscriber_id);
+      else await walledGarden(c, row.tenant_id, row.subscriber_id);
+      await c.query(
+        `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail)
+         values ($1,$2,$3,'system','Moved to another router',$4)`,
+        [row.tenant_id, row.subscriber_id, row.account_code,
+         `${row.old_router_name ?? 'No router on file'} → ${row.new_router_name} (dialled in from it)`]);
     });
+    // Both towers' queues follow the customer.
+    queueRouterSync(row.tenant_id, row.new_router_id);
+    if (row.old_router_id) queueRouterSync(row.tenant_id, row.old_router_id);
     console.log(`autoRelocateSubscribers: ${row.pppoe_user} moved from `
       + `${row.old_router_name ?? '(no router on file)'} to ${row.new_router_name}`);
-  }
-}
-
-/**
- * Keep routers.upstream_provider current without anyone typing it in.
- *
- * Only 'auto' rows are touched — a 'manual' one is an operator's deliberate
- * correction and stays put until they clear it themselves (PUT /api/routers/:id
- * resets it to 'auto' when the field is emptied). Re-checks every router on
- * this cadence rather than only once, since an ISP outage or a site moved to
- * a different upstream should eventually be reflected without anyone editing
- * it by hand.
- */
-export async function detectUpstreamProviders() {
-  const { rows } = await pool.query(
-    `select id, tenant_id, host, api_port, service_user, service_password_enc
-       from routers
-      where upstream_source = 'auto'
-        and status = 'up'
-        and service_user is not null
-        and service_password_enc is not null
-        -- a router with no answer yet is tried again every half hour; one that has an answer is re-checked every 6 hours
-        and ((upstream_provider is null and coalesce(upstream_tried_at, 'epoch') < now() - interval '30 minutes')
-          or (upstream_provider is not null and coalesce(upstream_checked_at, 'epoch') < now() - interval '6 hours'))
-        and tenant_id in (${enabledTenants})`, ['detectUpstreamProviders']);
-
-  const secrets = await import('./secrets.js');
-  const { detectRouterUpstream } = await import('./upstream.js');
-
-  for (const r of rows) {
-    const password = secrets.decrypt(r.service_password_enc);
-    await pool.query('update routers set upstream_tried_at = now() where id = $1', [r.id]);
-    const result = await detectRouterUpstream(r, password);
-    if (!result) continue;
-    await pool.query(
-      `update routers set upstream_provider=$2, upstream_checked_at=now(), upstream_public_ip=$3
-         where id=$1`, [r.id, result.provider, result.ip]);
   }
 }
 
