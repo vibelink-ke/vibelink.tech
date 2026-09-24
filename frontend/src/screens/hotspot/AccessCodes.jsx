@@ -316,7 +316,7 @@ export default function AccessCodes() {
             <Field label="Label" hint={'What you\'ll recognise it by — "Lounge WiFi", "Staff WiFi"'}>
               <Input value={creating.label} onChange={(e) => setCreating((s) => ({ ...s, label: e.target.value }))} autoFocus />
             </Field>
-            <Field label="Username" hint="4-12 letters/digits">
+            <Field label="Username" hint="2-12 letters/digits">
               <div style={{ display: 'flex', gap: 8 }}>
                 <Input
                   value={creating.username}
@@ -326,7 +326,7 @@ export default function AccessCodes() {
                 <Button onClick={genCredentials}>Generate</Button>
               </div>
             </Field>
-            <Field label="Password" hint="4-12 letters/digits">
+            <Field label="Password" hint="2-12 letters/digits">
               <Input
                 value={creating.password}
                 onChange={(e) => setCreating((s) => ({ ...s, password: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}

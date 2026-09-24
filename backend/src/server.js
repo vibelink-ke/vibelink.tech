@@ -10588,12 +10588,20 @@ app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wra
       return res.status(400).json({ error: 'Give both a download and an upload speed, between 0.1 and 1000 Mbps.' });
     }
   }
-  if (!/^[A-Za-z0-9]{4,12}$/.test(String(username ?? ''))) {
-    return res.status(400).json({ error: 'Username must be 4-12 letters/digits' });
+  // As short as two characters: a code for a lounge or a staff room that people
+  // type by hand. Short means guessable, which is the operator's call to make.
+  if (!/^[A-Za-z0-9]{2,12}$/.test(String(username ?? ''))) {
+    return res.status(400).json({ error: 'Username must be 2-12 letters/digits' });
   }
-  if (!/^[A-Za-z0-9]{4,12}$/.test(String(password ?? ''))) {
-    return res.status(400).json({ error: 'Password must be 4-12 letters/digits' });
+  if (!/^[A-Za-z0-9]{2,12}$/.test(String(password ?? ''))) {
+    return res.status(400).json({ error: 'Password must be 2-12 letters/digits' });
   }
+  // A code's login lives in the same RADIUS table as every voucher and PPPoE
+  // customer. Writing it over one of theirs would change that person's password,
+  // and the odds of a clash are far higher with two characters than with eight.
+  const { rows: [taken] } = await pool.query(
+    'select 1 from radcheck where tenant_id=$1 and username=$2 limit 1', [req.tenant.id, username]);
+  if (taken) return res.status(409).json({ error: 'That username is already used by another login — pick another.' });
   const devices = Math.round(Number(maxDevices));
   if (!Number.isFinite(devices) || devices < 1 || devices > 50) {
     return res.status(400).json({ error: 'Max devices must be between 1 and 50' });
