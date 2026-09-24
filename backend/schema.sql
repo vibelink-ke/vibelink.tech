@@ -949,7 +949,11 @@ alter table subscribers add column if not exists email text;
 -- thirty seconds while nobody could get online. Drop the attribute; the pushed
 -- PPPoE server's default-profile supplies addressing and the speed comes from
 -- Mikrotik-Rate-Limit.
-delete from radreply where attribute = 'Mikrotik-Group';
+-- Only the labels this system generated ("pppoe-..."). This ran against EVERY Mikrotik-Group on
+-- each deploy, because schema.sql is re-applied each time, which also wiped the hotspot access
+-- codes' and cookie profiles' groups and the per-customer PPP profiles (SiPLMT_US_...), none of
+-- which were what this was written to remove.
+delete from radreply where attribute = 'Mikrotik-Group' and value like 'pppoe-%';
 
 -- ─────────────── the address pool a router hands out ───────────────
 -- Recorded when the PPPoE server is configured, so RADIUS can tell whether a
