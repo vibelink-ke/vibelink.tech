@@ -153,6 +153,18 @@ export function queuePlan(lines) {
  * login, so a customer whose profile could not be written simply keeps the default
  * one — their traffic is then counted in the dynamic queue only.
  */
+/**
+ * Sending a customer to their own profile is opt-in. RADIUS naming a profile the router
+ * rejects drops that customer's login, so it is switched on for a few customers first:
+ * QUEUE_PROFILE_USERS=VBTL26118,VBTL26120 in the environment, or QUEUE_PROFILES=all once
+ * it has been seen to work. Left unset, profiles are still written to the router (they
+ * do nothing until named) and no customer is sent to one.
+ */
+function profileAllowed(user) {
+  if (String(process.env.QUEUE_PROFILES ?? '').toLowerCase() === 'all') return true;
+  return String(process.env.QUEUE_PROFILE_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean).includes(user);
+}
+
 async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
   const { rows: [r] } = await pool.query('select pppoe_pool from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
   const gateway = gatewayOf(r?.pppoe_pool);
@@ -163,6 +175,7 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
   const p = await ros.syncCustomerProfiles(conn, { wanted: names, gateway });
 
   const ok = entitled.filter((l) => p.ok.has(`${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`));
+  const sent = ok.filter((l) => profileAllowed(l.pppoe_user));
   if (ok.length) {
     // Group and speed together: a router that was switched to "queues only" earlier
     // had the speed removed from RADIUS, and it goes back in here.
@@ -170,7 +183,7 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
       `insert into radreply (tenant_id, username, attribute, op, value)
        select $1, u, 'Mikrotik-Group', ':=', $3 || u from unnest($2::text[]) as u
        on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-      [tenantId, ok.map((l) => l.pppoe_user), ros.SUB_QUEUE_PREFIX]);
+      [tenantId, sent.map((l) => l.pppoe_user), ros.SUB_QUEUE_PREFIX]);
     await pool.query(
       `insert into radreply (tenant_id, username, attribute, op, value)
        select $1, u, 'Mikrotik-Rate-Limit', ':=', rate
@@ -185,11 +198,11 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
       where tenant_id=$1 and attribute='Mikrotik-Group' and value like $4
         and username in (select pppoe_user from subscribers where tenant_id=$1 and router_id=$2 and pppoe_user is not null)
         and not (username = any($3::text[]))`,
-    [tenantId, routerId, ok.map((l) => l.pppoe_user), `${ros.SUB_QUEUE_PREFIX}%`]);
+    [tenantId, routerId, sent.map((l) => l.pppoe_user), `${ros.SUB_QUEUE_PREFIX}%`]);
   await pool.query('update routers set queue_profiles = true, queue_shaping = false where id=$1', [routerId]);
 
   return [`customer profiles: ${p.added} added, ${p.updated} updated, ${p.same} already correct, ${p.removed} removed`
-    + `; ${ok.length} customer(s) sent to their own profile`
+    + `; ${sent.length} customer(s) sent to their own profile`
     + (p.failed ? `; ${p.failed} failed (first: ${p.firstError})` : '')];
 }
 
