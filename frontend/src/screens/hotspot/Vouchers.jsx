@@ -31,6 +31,26 @@ export default function Vouchers() {
     }
   };
 
+  // How long a bought code nobody has used stays valid (expireUnusedVouchers,
+  // jobs.js). Blank is "never". Two figures because a code for a one-hour bundle
+  // goes stale much faster than a day pass does.
+  const unusedDays = store.hotspotSettings?.unused_expire_days ?? '';
+  const unusedShortDays = store.hotspotSettings?.unused_expire_short_days ?? '';
+  const saveUnused = async (days, shortDays) => {
+    const before = store.hotspotSettings;
+    store.setHotspotSettings((s) => ({ ...s, unused_expire_days: days === '' ? null : Number(days), unused_expire_short_days: shortDays === '' ? null : Number(shortDays) }));
+    try {
+      await api.setUnusedExpiry(days === '' ? null : Number(days), shortDays === '' ? null : Number(shortDays));
+    } catch (e) {
+      store.setHotspotSettings(() => before);
+      store.toast(`Could not save: ${e.message}`);
+    }
+  };
+  const DAY_CHOICES = [
+    { value: '', label: 'Never' },
+    ...[1, 2, 3, 5, 7, 14, 30].map((n) => ({ value: String(n), label: `${n} day${n === 1 ? '' : 's'}` })),
+  ];
+
   const vouchers = store.vouchers ?? [];
 
   // Coming from the top-bar search ("?open=<code>"): show just that code, whatever the status filters say, and drop
@@ -335,6 +355,22 @@ export default function Vouchers() {
             label="Auto-purge expired vouchers"
             detail="Deletes them, and their RADIUS access, a day after they expire — off leaves them for Purge expired above"
           />
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'flex-end', padding: '10px 0 6px' }}>
+            <Field label="Expire unused codes after" hint="Bought codes nobody has logged in with. Printed batches are never touched.">
+              <Select
+                value={String(unusedDays)}
+                onChange={(e) => saveUnused(e.target.value, String(unusedShortDays))}
+                options={DAY_CHOICES}
+              />
+            </Field>
+            <Field label="Bundles under a day" hint="1, 3, 6 and 12 hour bundles">
+              <Select
+                value={String(unusedShortDays)}
+                onChange={(e) => saveUnused(String(unusedDays), e.target.value)}
+                options={DAY_CHOICES}
+              />
+            </Field>
+          </div>
         </div>
       </Card>
 

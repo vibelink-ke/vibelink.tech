@@ -142,6 +142,7 @@ export const api = {
   compensateVouchers: (ids, hours) => post('/api/vouchers/compensate', { ids, hours }),
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),
   setAutoPurgeVouchers: (enabled) => patch('/api/hotspot/settings/auto-purge', { enabled }),
+  setUnusedExpiry: (days, shortDays) => patch('/api/hotspot/settings/unused-expiry', { days, shortDays }),
 
   // ── permanent hotspot access codes ("Lounge WiFi" etc.) ──
   hotspotAccessCodes: () => get('/api/hotspot/access-codes'),

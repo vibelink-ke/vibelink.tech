@@ -2953,3 +2953,14 @@ create unique index if not exists mpesa_balances_conv_idx on mpesa_balances (con
 alter table mpesa_balances add column if not exists source text not null default 'query';
 alter table mpesa_balances add column if not exists as_of timestamptz;
 create unique index if not exists mpesa_balances_c2b_idx on mpesa_balances (tenant_id, shortcode) where source = 'c2b';
+
+-- Let a bought code that nobody has typed in expire instead of sitting unused for ever.
+-- With "expire from first login" a code's clock only starts at login, so an unredeemed
+-- one never runs out on its own. These say how many days after purchase such a code
+-- stops working: one figure for ordinary plans, one for plans shorter than a day
+-- (1/3/6/12 hours), which go stale faster. null = never. Only codes bought through a
+-- payment are touched — a printed batch legitimately sits unused for weeks.
+alter table hotspot_settings add column if not exists unused_expire_days int
+  check (unused_expire_days is null or unused_expire_days between 1 and 365);
+alter table hotspot_settings add column if not exists unused_expire_short_days int
+  check (unused_expire_short_days is null or unused_expire_short_days between 1 and 365);

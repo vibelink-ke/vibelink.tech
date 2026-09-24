@@ -3324,6 +3324,33 @@ app.patch('/api/hotspot/settings/auto-purge', requirePermission('hotspot.edit'),
   res.json(s);
 }));
 
+/**
+ * How long a bought code that nobody has used stays valid — see
+ * expireUnusedVouchers in jobs.js. Its own route for the same reason as
+ * auto-purge above: the big PUT overwrites every column it lists, so a
+ * caller that does not send these would quietly reset them.
+ */
+app.patch('/api/hotspot/settings/unused-expiry', requirePermission('hotspot.edit'), wrap(async (req, res) => {
+  const days = (v) => {
+    if (v == null || v === '') return null;
+    const x = Math.round(Number(v));
+    return Number.isFinite(x) && x >= 1 && x <= 365 ? x : NaN;
+  };
+  const normal = days(req.body?.days);
+  const short = days(req.body?.shortDays);
+  if (Number.isNaN(normal) || Number.isNaN(short)) {
+    return res.status(400).json({ error: 'Days must be a whole number between 1 and 365, or blank for never.' });
+  }
+  const { rows: [r] } = await pool.query(
+    `insert into hotspot_settings (tenant_id, unused_expire_days, unused_expire_short_days) values ($1,$2,$3)
+     on conflict (tenant_id) do update
+       set unused_expire_days = excluded.unused_expire_days,
+           unused_expire_short_days = excluded.unused_expire_short_days
+     returning unused_expire_days, unused_expire_short_days`,
+    [req.tenant.id, normal, short]);
+  res.json(r);
+}));
+
 // ─────────────── email gateway ───────────────
 
 /** Config without the password, plus whether one is stored. Never returns it. */
@@ -12863,6 +12890,7 @@ const AUTOMATION_JOBS = [
   { job: 'dormantSweep', name: 'Dormant clients', cron: '0 4 * * *', detail: 'Marks a client dormant after 3 months blocked, then deletes them past 5 months and 30 days after the notice — never one with wallet credit or an unpaid invoice' },
   { job: 'generateMonthlyBills', name: 'Monthly bills', cron: '15 6 * * *', detail: 'Adds each active monthly bill to the expense log three days before it is due, and texts the owner which are coming up' },
   { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
+  { job: 'expireUnusedVouchers', name: 'Expire unused codes', cron: '*/30 * * * *', detail: 'Stops a bought code that nobody has used after the number of days set on Hotspot → Vouchers (one figure for plans under a day, one for the rest)' },
   { job: 'dataRetention', name: 'Old data clean-up', cron: '45 3 * * *', detail: 'Clears login attempts older than 30 days and finished accounting/session records older than 180 days' },
   { job: 'checkSlaBreaches', name: 'SLA breach alerts', cron: '*/5 * * * *', detail: 'Texts whoever an SLA policy names to escalate to (or the owner) the moment a ticket passes its resolve-by time' },
   { job: 'enforceHotspotDataCaps', name: 'Hotspot data caps', cron: '*/15 * * * *', detail: 'Tracks usage against a plan’s data cap and cuts a voucher off the moment it’s hit' },

@@ -87,6 +87,7 @@ export function startJobs() {
   // generation for the *next* day, so the dump reliably lands in the quiet gap.
   cron.schedule('0 3 * * *', safely('dbBackup', dbBackup));
   cron.schedule('30 3 * * *', safely('purgeExpiredVouchers', purgeExpiredVouchers));
+  cron.schedule('*/30 * * * *', safely('expireUnusedVouchers', expireUnusedVouchers));
   cron.schedule('45 3 * * *', safely('dataRetention', dataRetention));
   cron.schedule('0 4 * * *', safely('dormantSweep', dormantSweep));
   cron.schedule('15 6 * * *', safely('generateMonthlyBills', generateMonthlyBills));
@@ -479,6 +480,50 @@ async function purgeExpiredVouchers() {
   for (const [tenantId, { codes, macs }] of byTenant) {
     await forgetVoucherAccess(pool, codes, tenantId, macs);
   }
+}
+
+/**
+ * Expire bought codes that were never used.
+ *
+ * With voucher_expiry='login' a code's clock starts at first login, so a code
+ * nobody types in never runs out by itself and just accumulates. Hotspot →
+ * Vouchers lets a tenant say how long an unredeemed code stays valid: one figure
+ * for ordinary plans and a shorter one for plans under a day (an hour-long code
+ * is not worth holding for a week).
+ *
+ * Only codes that came from a payment are touched. A printed batch is expected
+ * to sit unused for as long as it takes to sell, and expiring it would quietly
+ * throw stock away. The customer's payment stays on record either way — the code
+ * simply stops being accepted, and the nightly purge removes it a day later like
+ * any other expired code.
+ */
+async function expireUnusedVouchers() {
+  const { rows } = await pool.query(
+    `select v.tenant_id, v.code
+       from vouchers v
+       join plans p on p.id = v.plan_id
+       join hotspot_settings hs on hs.tenant_id = v.tenant_id
+      cross join lateral (
+        select case when p.duration_min < 1440 then hs.unused_expire_short_days
+                    else hs.unused_expire_days end as days) d
+      where v.status = 'unused'
+        and d.days is not null
+        and v.created_at < now() - d.days * interval '1 day'
+        and exists (select 1 from payments pay where pay.voucher_id = v.id)
+        and v.tenant_id in (${enabledTenants})`,
+    ['expireUnusedVouchers']);
+
+  let expired = 0;
+  for (const v of rows) {
+    // Guarded on status again: a customer who logged in a moment ago must not be cut off.
+    const { rowCount } = await pool.query(
+      "update vouchers set status='expired', expires_at=now() where tenant_id=$1 and code=$2 and status='unused'",
+      [v.tenant_id, v.code]);
+    if (!rowCount) continue;
+    await expireVoucherNow(pool, v.tenant_id, v.code);
+    expired += 1;
+  }
+  if (expired) console.log(`expireUnusedVouchers: expired ${expired} unused code(s)`);
 }
 
 /**
