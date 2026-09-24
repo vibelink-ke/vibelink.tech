@@ -2978,3 +2978,9 @@ alter table hotspot_settings add column if not exists unused_expire_short_days i
 -- coalesce(custom_price, plan price), so a discount holds everywhere at once.
 alter table subscribers add column if not exists custom_price numeric(12,2)
   check (custom_price is null or custom_price >= 0);
+
+-- A router whose customers' speeds are held by its static queues (router-queues.js), not by
+-- the Mikrotik-Rate-Limit RADIUS sends at login. That attribute makes RouterOS build a dynamic
+-- queue matched ahead of the static ones, which would then never see a packet. Set by the queue
+-- pass once the queues are written; until then RADIUS keeps shaping.
+alter table routers add column if not exists queue_shaping boolean not null default false;

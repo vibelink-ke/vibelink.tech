@@ -1294,7 +1294,7 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
       `=target=${g.addresses.map((a) => `${String(a).split('/')[0]}/32`).join(',')}`,
       `=max-limit=${queueRate(g.rateUp)}/${queueRate(g.rateDown)}`,
       '=parent=none',
-      `=comment=${managed('ispContention pool')}`,
+      '=comment=',
     ], 'shared tariff queue');
     if (!ok) continue;
     for (const m of g.members) {
@@ -1302,7 +1302,7 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
         `=target=${String(m.address).split('/')[0]}/32`,
         `=max-limit=${queueRate(m.rateUp)}/${queueRate(m.rateDown)}`,
         `=parent=${g.name}`,
-        `=comment=${managed(m.customerName ? `ispContention member — ${m.customerName}` : 'ispContention member')}`,
+        `=comment=${m.customerName ?? ''}`,
       ], 'customer queue');
     }
   }

@@ -7,7 +7,7 @@
  *   - customers on a contended plan are grouped by (speed, contention ratio):
  *     one parent queue per group, MAIN_TARIFF_<speed>, targeting every member's
  *     address, its limit the combined rate of the members, and each member's own
- *     queue (SiPLMT_US_<username>) listed beneath it;
+ *     queue (SiPLMT_US_<username>, the customer's name as comment) listed beneath it;
  *   - every other customer entitled to service has one queue of their own,
  *     SiPLMT_US_<username>: their address, the plan's rate, their name as comment;
  *   - the speed cap of every hotspot device bound to a code that is still running.
@@ -121,6 +121,22 @@ export async function syncRouterQueues(conn, { tenantId, routerId, role, wipe = 
     // of a customer who is no longer entitled to service.
     const q = await ros.syncQueuePlan(conn, { ...plan, drop: wipe ? [] : plan.drop });
     const inGroups = plan.groups.reduce((n, g) => n + g.members.length, 0);
+    // The queues are what shape speed on this router, once they are known to be
+    // there: RADIUS stops sending each customer's rate (which RouterOS turns into
+    // a dynamic queue that is matched first and takes all the traffic). Switched
+    // on only after a clean write, so a router whose queues could not be built
+    // keeps the speed RADIUS gives it rather than running unlimited.
+    if (q.failed === 0) {
+      const { rows: [flipped] } = await pool.query(
+        'update routers set queue_shaping = true where id=$1 and not queue_shaping returning id', [routerId]);
+      if (flipped) {
+        const users = [...plan.singles, ...plan.groups.flatMap((g) => g.members)].map((m) => m.pppoeUser);
+        const { rowCount } = await pool.query(
+          `delete from radreply where tenant_id=$1 and attribute='Mikrotik-Rate-Limit' and username = any($2::text[])`,
+          [tenantId, users]);
+        out.push(`speeds now held by the queues: ${rowCount} customer(s) no longer sent a RADIUS rate limit`);
+      }
+    }
     out.push((wipe ? `queues cleared (${cleared}) and rewritten: ` : 'queues: ')
       + `${q.added} added, ${q.updated} updated, ${q.same} already correct, ${q.removed} removed`
       + (plan.groups.length ? `; ${plan.groups.length} shared tariff(s) holding ${inGroups} customer(s): ${plan.groups.map((g) => g.name).join(', ')}` : '')
