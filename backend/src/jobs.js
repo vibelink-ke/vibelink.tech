@@ -189,6 +189,43 @@ export async function autoRelocateSubscribers() {
 }
 
 /**
+ * Keep routers.upstream_provider current without anyone typing it in.
+ *
+ * Only 'auto' rows are touched — a 'manual' one is an operator's deliberate
+ * correction and stays put until they clear it themselves (PUT /api/routers/:id
+ * resets it to 'auto' when the field is emptied). Re-checks every router on
+ * this cadence rather than only once, since an ISP outage or a site moved to
+ * a different upstream should eventually be reflected without anyone editing
+ * it by hand.
+ */
+export async function detectUpstreamProviders() {
+  const { rows } = await pool.query(
+    `select id, tenant_id, host, api_port, service_user, service_password_enc
+       from routers
+      where upstream_source = 'auto'
+        and status = 'up'
+        and service_user is not null
+        and service_password_enc is not null
+        -- a router with no answer yet is tried again every half hour; one that has an answer is re-checked every 6 hours
+        and ((upstream_provider is null and coalesce(upstream_tried_at, 'epoch') < now() - interval '30 minutes')
+          or (upstream_provider is not null and coalesce(upstream_checked_at, 'epoch') < now() - interval '6 hours'))
+        and tenant_id in (${enabledTenants})`, ['detectUpstreamProviders']);
+
+  const secrets = await import('./secrets.js');
+  const { detectRouterUpstream } = await import('./upstream.js');
+
+  for (const r of rows) {
+    const password = secrets.decrypt(r.service_password_enc);
+    await pool.query('update routers set upstream_tried_at = now() where id = $1', [r.id]);
+    const result = await detectRouterUpstream(r, password);
+    if (!result) continue;
+    await pool.query(
+      `update routers set upstream_provider=$2, upstream_checked_at=now(), upstream_public_ip=$3
+         where id=$1`, [r.id, result.provider, result.ip]);
+  }
+}
+
+/**
  * wg_peers.last_handshake/rx_bytes/tx_bytes existed as columns and were
  * already returned by GET /api/routers/wg-peers, but nothing ever wrote to
  * them — `wg show` only means anything from inside the wireguard container,
