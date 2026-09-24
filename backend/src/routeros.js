@@ -1335,6 +1335,27 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
 /**
+ * One customer's queue counters, and their shared tariff's when they sit under one.
+ * Bytes are since the queue was written (or the router last restarted); rate is
+ * bits per second right now. Both are "upload/download" on the router.
+ */
+export async function subscriberQueueTraffic(conn, pppoeUser) {
+  const pair = (v) => {
+    const [a, b] = String(v ?? '').split('/').map((n) => Number(n));
+    return { up: Number.isFinite(a) ? a : 0, down: Number.isFinite(b) ? b : 0 };
+  };
+  const view = (q) => ({ name: q.name, limit: q['max-limit'] ?? null, bytes: pair(q.bytes), rate: pair(q.rate), dropped: pair(q.dropped) });
+  const q = (await conn.write('/queue/simple/print', [`?name=${SUB_QUEUE_PREFIX}${pppoeUser}`]))[0];
+  if (!q) return { found: false };
+  const out = { found: true, ...view(q), target: q.target ?? null, parent: null };
+  if (q.parent && q.parent !== 'none') {
+    const p = (await conn.write('/queue/simple/print', [`?name=${q.parent}`]))[0];
+    if (p) out.parent = view(p);
+  }
+  return out;
+}
+
+/**
  * Empty the Simple Queue list: what Refresh does before writing it fresh.
  *
  * Simple queues only — not the queue tree, interface queues or queue types —

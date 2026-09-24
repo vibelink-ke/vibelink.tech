@@ -9184,6 +9184,41 @@ app.get('/api/subscribers/:id/usage', requirePermission('clients.view'), wrap(as
 }));
 
 /**
+ * The customer's own queue on the router: how much it has carried and what it is
+ * carrying now, plus the shared tariff above it when there is one. Read live, on
+ * demand, so nothing is stored — RADIUS accounting (the Usage tab) is the record.
+ */
+app.get('/api/subscribers/:id/queue', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select s.pppoe_user, s.service, r.host, r.api_port, r.service_user, r.service_password_enc
+       from subscribers s left join routers r on r.id = s.router_id
+      where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'No such subscriber' });
+  if (s.service !== 'pppoe' || !s.pppoe_user) {
+    return res.status(400).json({ error: 'Queues are only kept for PPPoE lines.' });
+  }
+  if (!s.host || !s.service_user || !s.service_password_enc) {
+    return res.status(428).json({ error: 'This router has not been Configured yet.' });
+  }
+
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let conn;
+  try {
+    const password = secrets.decrypt(s.service_password_enc);
+    conn = await ros.connect({
+      host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
+      user: s.service_user, password, timeoutSec: 8,
+    });
+    res.json({ ...(await ros.subscriberQueueTraffic(conn, s.pppoe_user)), at: new Date().toISOString() });
+  } catch {
+    res.status(502).json({ error: 'The router could not be reached.' });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+/**
  * What's happened on this line — status changes, edits, credential resets —
  * for the Activity log tab. Matched by account_code too, not just
  * subscriber_id: a deleted line's own log rows have subscriber_id cleared

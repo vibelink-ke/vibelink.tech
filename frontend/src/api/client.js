@@ -82,6 +82,7 @@ export const api = {
     password ? { password } : {}),
   subscriberCredentials: (id) => get(`/api/subscribers/${id}/credentials`),
   subscriberUsage: (id) => get(`/api/subscribers/${id}/usage`),
+  subscriberQueue: (id) => get(`/api/subscribers/${id}/queue`),
   subscriberLiveTraffic: (id) => get(`/api/subscribers/${id}/live-traffic`),
   subscriberActivity: (id) => get(`/api/subscribers/${id}/activity`),
   smsPlaceholders: () => get('/api/sms/placeholders'),

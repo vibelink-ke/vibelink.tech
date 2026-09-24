@@ -8,6 +8,57 @@ import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
 import ClientOnu from './clients/ClientOnu';
 
+const fmtBytes = (n) => {
+  const v = Number(n) || 0;
+  if (v >= 1024 ** 3) return `${(v / 1024 ** 3).toFixed(2)} GB`;
+  if (v >= 1024 ** 2) return `${(v / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(v / 1024)} KB`;
+};
+const fmtBits = (n) => {
+  const v = Number(n) || 0;
+  return v >= 1e6 ? `${(v / 1e6).toFixed(1)} Mbps` : `${Math.round(v / 1e3)} kbps`;
+};
+
+/**
+ * What the customer's queue on the router has carried, read live every 20 seconds
+ * while the line is open. Beside it, the Usage tab shows the RADIUS accounting
+ * figure: two counters from two places, which can differ a little (a queue counts
+ * from when it was written, an accounting session from when it started).
+ */
+function QueueTraffic({ lineId }) {
+  const [q, setQ] = useState(undefined);   // undefined = loading
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    let dead = false;
+    const load = () => api.subscriberQueue(lineId)
+      .then((r) => { if (!dead) { setQ(r); setErr(''); } })
+      .catch((e) => { if (!dead) setErr(e.message); });
+    load();
+    const t = setInterval(load, 20000);
+    return () => { dead = true; clearInterval(t); };
+  }, [lineId]);
+
+  const muted = { color: color.muted };
+  if (err && !q) return <KV k="Queue traffic" v={<span style={muted}>{err}</span>} />;
+  if (q === undefined) return <KV k="Queue traffic" v={<span style={muted}>Reading the router…</span>} />;
+  if (!q.found) return <KV k="Queue traffic" v={<span style={muted}>No queue on the router yet — Refresh writes it</span>} />;
+  const both = (p) => `↑ ${fmtBytes(p.bytes.up)}   ↓ ${fmtBytes(p.bytes.down)}`;
+  const now = (p) => `↑ ${fmtBits(p.rate.up)}   ↓ ${fmtBits(p.rate.down)}`;
+  return (
+    <>
+      <KV k="Queue traffic" v={<span style={{ fontFamily: font.mono }}>{both(q)}</span>} />
+      <KV k="Queue right now" v={<span style={{ fontFamily: font.mono }}>{now(q)}{q.limit ? `  of ${q.limit}` : ''}</span>} />
+      {q.parent && (
+        <KV
+          k="Shared tariff"
+          v={<span style={{ fontFamily: font.mono }}>{q.parent.name} · {both(q.parent)} · now {now(q.parent)}</span>}
+        />
+      )}
+    </>
+  );
+}
+
+
 /** A draggable pin — click or drag to set the exact spot, same Leaflet
  * pattern the Map screen already uses (no react-leaflet dependency). */
 function LocationMap({ lat, lng, onChange }) {
@@ -736,6 +787,7 @@ export default function ClientDetail() {
                       {connectionStatus(line) && (
                         <KV k="Connection" v={<span style={{ color: connectionStatus(line).dot }}>{connectionStatus(line).text}</span>} />
                       )}
+                      {line.service === 'pppoe' && <QueueTraffic lineId={line.id} />}
                       <RowActions>
                         {line.id !== client.id && (
                           <RowAction onClick={() => navigate(`/clients/${line.id}`)} title="Open this line's own page — including its own Live data tab">
