@@ -22,6 +22,18 @@ export default function AccessCodes() {
   const [busy, setBusy] = useState(false);
   const [togglingId, setTogglingId] = useState(null);
 
+  // Who is connected on each code changes minute to minute, unlike the codes
+  // themselves, so the list is re-read on a timer (paused while the tab is
+  // hidden) rather than only when the screen opens.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      api.hotspotAccessCodes().then((fresh) => store.setCollection('accessCodes', () => fresh)).catch(() => {});
+    }, 30000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // One speed for every access code.
   const [all, setAll] = useState({ down: '', up: '', saved: null, busy: false });
   useEffect(() => {
@@ -186,6 +198,26 @@ export default function AccessCodes() {
             { key: 'username', label: 'Username', render: (c) => <span style={{ fontFamily: font.mono }}>{c.username}</span> },
             { key: 'password', label: 'Password', render: (c) => <span style={{ fontFamily: font.mono }}>{c.password}</span> },
             { key: 'max_devices', label: 'Max devices', align: 'right', render: (c) => c.max_devices },
+            {
+              key: 'online',
+              label: 'Online now',
+              render: (c) => {
+                const n = Number(c.online ?? 0);
+                if (c.enabled === false) return <span style={{ color: color.muted }}>—</span>;
+                const dot = (
+                  <span style={{
+                    display: 'inline-block', width: 8, height: 8, borderRadius: '50%', marginRight: 7,
+                    background: n > 0 ? color.green : color.muted,
+                  }}
+                  />
+                );
+                // One device per code: it is simply on or off. A shared code says how
+                // full it is, which is what tells you it is about to turn people away.
+                return c.max_devices > 1
+                  ? <span>{dot}<b style={{ fontWeight: 600 }}>{n}</b><span style={{ color: color.muted }}> of {c.max_devices}</span></span>
+                  : <span>{dot}{n > 0 ? 'Online' : <span style={{ color: color.muted }}>Offline</span>}</span>;
+              },
+            },
             {
               key: 'plan',
               label: 'Speed',

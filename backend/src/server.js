@@ -10381,7 +10381,21 @@ app.post('/api/vouchers/purge-expired', requirePermission('hotspot.delete'), wra
  */
 app.get('/api/hotspot/access-codes', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `select ac.*, p.title as plan_title, p.rate_up, p.rate_down
+    `select ac.*, p.title as plan_title, p.rate_up, p.rate_down,
+            -- Devices on this code right now. radacct has no tenant column, so its
+            -- sessions are tied to this tenant through the router they came in on;
+            -- the greatest of that and the router's own poll, since both describe
+            -- the same sessions and adding them would count a device twice.
+            greatest(
+              (select count(distinct coalesce(a.callingstationid, a.acctuniqueid))
+                 from radacct a
+                 join routers r on r.host = a.nasipaddress and r.tenant_id = ac.tenant_id
+                where a.username = ac.username and a.acctstoptime is null
+                  and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '15 minutes'),
+              (select count(*) from live_sessions l
+                where l.tenant_id = ac.tenant_id and l.username = ac.username
+                  and l.seen_at > now() - interval '5 minutes')
+            )::int as online
        from hotspot_access_codes ac
        left join plans p on p.id = ac.plan_id
       where ac.tenant_id=$1
