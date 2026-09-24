@@ -2568,7 +2568,7 @@ function hhmmssToSeconds(v) {
  * one question. A missing menu is not an error: a PPPoE-only box has no
  * /ip/hotspot/active and should still report its PPPoE sessions.
  */
-export async function activeSessions(conn) {
+export async function activeSessions(conn, { strict = false } = {}) {
   const out = [];
 
   const read = async (path, service) => {
@@ -2588,8 +2588,11 @@ export async function activeSessions(conn) {
         // against the hotspot server's own profile session-timeout, to work
         // out how much of that session's time a migrated guest has left.
         uptime: String(row.uptime ?? '').trim() || null,
+        sessionId: String(row['session-id'] ?? '').trim() || null,
       })).filter((r) => r.username);
-    } catch {
+    } catch (e) {
+      // strict: a PPP list that could not be read is an error, not "nobody is connected"
+      if (strict && service === 'pppoe') throw e;
       return [];
     }
   };
@@ -2598,6 +2601,8 @@ export async function activeSessions(conn) {
   out.push(...await read('/ip/hotspot/active/print', 'hotspot'));
   return out;
 }
+
+export const durationSeconds = (s) => parseRouterOSDuration(s);
 
 /**
  * RouterOS duration string -> seconds. Two shapes seen in the wild:

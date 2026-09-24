@@ -463,6 +463,10 @@ export default function Clients() {
       const parts = [`${res.online} connected on ${res.asked} router${res.asked === 1 ? '' : 's'}`];
       if (res.unreachable?.length) parts.push(`could not reach ${res.unreachable.join(', ')}`);
       if (res.noCredentials) parts.push(`${res.noCredentials} not configured yet`);
+      if (res.added) parts.push(`${res.added} newly recorded as online`);
+      if (res.closed) parts.push(`${res.closed} no longer connected`);
+      if (res.moved) parts.push(`${res.moved} moved to the router they are on`);
+      if (res.unknown) parts.push(`${res.unknown} connected but not in the system`);
       store.toast(parts.join(' — '));
     } catch (e) {
       store.toast(`Could not ask the routers: ${e.message}`);
@@ -480,9 +484,9 @@ export default function Clients() {
           <Button
             onClick={checkOnline}
             disabled={checking}
-            title="Ask each router who is connected, instead of waiting for RADIUS accounting"
+            title="Read every router's connected list now and update the system (this also runs by itself every 30 seconds)"
           >
-            {checking ? 'Asking routers…' : 'Check who is online'}
+            {checking ? 'Syncing routers…' : 'Sync online customers'}
           </Button>
           <Button
             onClick={() => setView((v) => (v === 'list' ? 'calendar' : 'list'))}

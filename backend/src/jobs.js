@@ -71,6 +71,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
+  // Every 30s, the routers' own lists of who is connected are written into the system, so nobody has to drop and redial to be seen.
+  cron.schedule('*/30 * * * * *', safely('syncOnlineCustomers', syncOnlineCustomersJob));
   // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
   cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
@@ -1869,6 +1871,30 @@ export async function expireTenantLicences() {
  * every half hour regardless, to catch a queue someone edited on the router itself.
  */
 let queuePassRunning = false;
+
+let presencePassRunning = false;
+async function syncOnlineCustomersJob() {
+  if (presencePassRunning) return;   // a slow pass must not stack another behind it
+  presencePassRunning = true;
+  try {
+    const { syncOnlineCustomers } = await import('./presence-sync.js');
+    const { rows } = await pool.query(
+      `select t.id from tenants t
+        where t.id in (${enabledTenants})
+          and exists (select 1 from routers r where r.tenant_id = t.id and r.status = 'up' and r.service_user is not null)`,
+      ['syncOnlineCustomers']);
+    for (const t of rows) {
+      try {
+        const s = await syncOnlineCustomers(t.id, { relocate: false });
+        if (s.added || s.closed) console.log(`syncOnlineCustomers: ${s.added} added, ${s.closed} closed`);
+      } catch (e) {
+        console.warn('syncOnlineCustomers:', e.message);
+      }
+    }
+  } finally {
+    presencePassRunning = false;
+  }
+}
 
 async function syncRouterQueuesJob() {
   if (queuePassRunning) return;   // a slow pass must not stack another behind it

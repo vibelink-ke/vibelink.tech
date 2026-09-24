@@ -3130,11 +3130,19 @@ app.post('/api/presence/refresh', wrap(async (req, res) => {
     "delete from live_sessions where tenant_id=$1 and seen_at < now() - interval '30 minutes'",
     [req.tenant.id]);
 
+  // And the same lists written into the system's sessions: address, router, and anyone the router no longer lists.
+  const { syncOnlineCustomers } = await import('./presence-sync.js');
+  const sync = await syncOnlineCustomers(req.tenant.id, { relocate: true }).catch((e) => ({ error: e.message }));
+
   res.json({
     online: seenUsers.size,
     asked: reachable.length,
     unreachable,
     noCredentials: routers.length - reachable.length,
+    added: sync.added ?? 0,
+    closed: sync.closed ?? 0,
+    moved: sync.moved ?? 0,
+    unknown: sync.unknown ?? 0,
   });
 }));
 
@@ -13239,6 +13247,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
+  { job: 'syncOnlineCustomers', name: 'Sync online customers', cron: '*/30 * * * * *', detail: 'Every 30 seconds, reads who each router says is connected and records it, so a customer who was already online is shown with the right address without having to disconnect and reconnect' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },
   { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },
   { job: 'generateMonthlyCharges', name: 'Tenant monthly statements', cron: '0 1 * * *', detail: 'Once a month has ended, works out each tenant\'s charge — a percentage of hotspot revenue plus a rate per active PPPoE client — and tells the platform owner' },
