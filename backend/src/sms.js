@@ -231,7 +231,7 @@ export const PLACEHOLDERS = [
 
 /** The joins a row needs before subscriberVars can fill every token. */
 export const SUBSCRIBER_VARS_SQL = `
-  s.*, p.title as plan_title, p.price as plan_price,
+  s.*, p.title as plan_title, coalesce(s.custom_price, p.price) as plan_price,
   p.rate_down, p.rate_up, r.name as router_name`;
 
 /** Build the token map for one subscriber. `org` is per-tenant and looked up once. */

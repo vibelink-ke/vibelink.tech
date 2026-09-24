@@ -289,7 +289,7 @@ async function renewFromWallet() {
        join account_wallets w on w.tenant_id = s.tenant_id and w.account_code = s.account_code
        join plans p on p.id = s.plan_id
       where s.status in ('active','grace','expired') and s.expires_at < now()
-        and p.price > 0 and w.balance > 0
+        and coalesce(s.custom_price, p.price) > 0 and w.balance > 0
         and s.tenant_id in (${enabledTenants})`, ['expireAndSuspend']);
 
   for (const { tenant_id, account_code } of accounts) {
@@ -302,7 +302,7 @@ async function renewFromWallet() {
           `select s.id from subscribers s join plans p on p.id=s.plan_id
              where s.tenant_id=$1 and s.account_code=$2
                and s.status in ('active','grace','expired') and s.expires_at < now()
-               and p.price > 0
+               and coalesce(s.custom_price, p.price) > 0
              order by s.expires_at asc limit 1`,
           [tenant_id, account_code]);
         if (!due) break;
@@ -696,7 +696,7 @@ async function generateInvoices() {
     insert into invoices (tenant_id, subscriber_id, plan_id, number, amount, due_date)
     select s.tenant_id, s.id, s.plan_id,
            'INV-' || to_char(now(),'YYMM') || '-' || substr(s.id::text,1,6),
-           p.price, (s.expires_at)::date
+           coalesce(s.custom_price, p.price), (s.expires_at)::date
     from subscribers s join plans p on p.id = s.plan_id
     where s.status in ('active','grace')
       and s.expires_at between now() and now() + interval '3 days'

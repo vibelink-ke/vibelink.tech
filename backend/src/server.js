@@ -2339,7 +2339,7 @@ async function portalSession(req) {
     `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
             sub.status, sub.expires_at, sub.service, sub.router_id,
             sub.portal_password_hash,
-            p.title as plan_title, p.price as plan_price, p.rate_down, p.rate_up
+            p.title as plan_title, coalesce(sub.custom_price, p.price) as plan_price, p.rate_down, p.rate_up
        from portal_sessions s
        join subscribers sub on sub.id = s.subscriber_id
        left join plans p on p.id = sub.plan_id
@@ -2663,7 +2663,7 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
   if (!s) return res.status(401).json({ error: 'not signed in' });
 
   const { rows: [sub] } = await pool.query(
-    `select sub.name, sub.phone, sub.account_code, sub.router_id, p.price as plan_price
+    `select sub.name, sub.phone, sub.account_code, sub.router_id, coalesce(sub.custom_price, p.price) as plan_price
        from subscribers sub left join plans p on p.id = sub.plan_id
       where sub.id=$1 and sub.tenant_id=$2`, [s.subscriber_id, s.tenant_id]);
   if (!sub) return res.status(404).json({ error: 'not found' });
@@ -8989,7 +8989,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -9040,6 +9040,15 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   }
   if (req.body.pppoe_pass != null && !/^[A-Za-z0-9]{2,12}$/.test(String(req.body.pppoe_pass))) {
     return res.status(400).json({ error: 'PPPoE password must be 2-12 letters/digits' });
+  }
+
+  // A price agreed for this customer alone. Empty clears it, back to the plan's own price.
+  if ('custom_price' in req.body) {
+    const v = req.body.custom_price;
+    if (v === '' || v == null) req.body.custom_price = null;
+    else if (!Number.isFinite(Number(v)) || Number(v) < 0 || Number(v) > 10_000_000) {
+      return res.status(400).json({ error: 'Price must be a number, zero or more' });
+    } else req.body.custom_price = Number(v);
   }
 
   // A username change leaves the old radcheck row behind, still valid. Anyone
@@ -9110,6 +9119,20 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
       await radius.disconnectSubscriberSession(pool, r.host, r.secret, s.pppoe_user)
         .catch((e) => console.warn('static IP change: disconnect failed —', e?.message ?? e));
     }
+  }
+
+  /**
+   * A new package has to reach the line that is online right now, not only the
+   * next time they dial in: activateSubscriber sends the CoA with the new rate
+   * and refreshes the customer's queue. Only for a line entitled to service —
+   * it also lifts any block on the account, which must not happen to someone
+   * who is expired or suspended.
+   */
+  if (sets.includes('plan_id') && !sets.includes('static_ip') && s.pppoe_user && ['active', 'grace'].includes(s.status)) {
+    const radius = await import('./radius.js');
+    const { withTenant } = await import('./db.js');
+    await withTenant(req.tenant.id, (c) => radius.activateSubscriber(c, req.tenant.id, s.id))
+      .catch((e) => console.warn('plan change: live session not updated —', e?.message ?? e));
   }
 
   // Which fields, not their values — a credential or balance change belongs
@@ -9903,7 +9926,7 @@ app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(as
  */
 app.post('/api/subscribers/:id/stk', requirePermission('payments.stk'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
-    `select s.name, s.phone, s.account_code, s.router_id, p.price as plan_price
+    `select s.name, s.phone, s.account_code, s.router_id, coalesce(s.custom_price, p.price) as plan_price
        from subscribers s left join plans p on p.id = s.plan_id
       where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
@@ -12399,7 +12422,7 @@ app.get('/api/fup-usage', wrap(async (req, res) => {
  */
 app.get('/api/analytics/mrr', requirePermission('analytics.view'), wrap(async (req, res) => {
   const { rows: [mrrRow] } = await pool.query(
-    `select coalesce(sum(p.price * (43200.0 / greatest(p.duration_min, 1))), 0) as mrr,
+    `select coalesce(sum(coalesce(s.custom_price, p.price) * (43200.0 / greatest(p.duration_min, 1))), 0) as mrr,
             count(*) as active_count
        from subscribers s join plans p on p.id = s.plan_id
       where s.tenant_id=$1 and s.status in ('active','grace')`,

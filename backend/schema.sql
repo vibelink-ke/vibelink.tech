@@ -2972,3 +2972,9 @@ alter table hotspot_settings add column if not exists unused_expire_days int
   check (unused_expire_days is null or unused_expire_days between 1 and 365);
 alter table hotspot_settings add column if not exists unused_expire_short_days int
   check (unused_expire_short_days is null or unused_expire_short_days between 1 and 365);
+
+-- A price agreed for one customer, in place of their plan's. null = the plan price.
+-- Renewal, invoices, autopay, the STK default and the reminder SMS all read
+-- coalesce(custom_price, plan price), so a discount holds everywhere at once.
+alter table subscribers add column if not exists custom_price numeric(12,2)
+  check (custom_price is null or custom_price >= 0);

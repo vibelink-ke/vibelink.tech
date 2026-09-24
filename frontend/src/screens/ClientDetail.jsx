@@ -527,6 +527,23 @@ export default function ClientDetail() {
     }
   };
 
+  const [switching, setSwitching] = useState(null);   // { line, planId, price } while the dialog is open
+  const saveSwitch = async () => {
+    const price = String(switching.price ?? '').trim();
+    if (price !== '' && !(Number(price) >= 0)) return store.toast('Price must be a number, zero or more');
+    try {
+      const updated = await api.updateSubscriber(switching.line.id, {
+        plan_id: switching.planId || null,
+        custom_price: price === '' ? null : Number(price),
+      });
+      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+      store.toast('Service changed');
+      setSwitching(null);
+    } catch (e) {
+      store.toast(`Could not change service: ${e.message}`);
+    }
+  };
+
   const saveEdit = async () => {
     const patch = {
       name: editing.name,
@@ -554,6 +571,11 @@ export default function ClientDetail() {
         if (!/^[A-Za-z0-9]{2,12}$/.test(pass)) return store.toast('PPPoE password must be 2-12 letters/digits');
         patch.pppoe_pass = pass;
       }
+      const price = String(editing.custom_price ?? '').trim();
+      if (price !== '' && !(Number(price) >= 0)) return store.toast('Price must be a number, zero or more');
+      const nextPrice = price === '' ? null : Number(price);
+      const wasPrice = orig.custom_price == null ? null : Number(orig.custom_price);
+      if (nextPrice !== wasPrice) patch.custom_price = nextPrice;
     }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -681,7 +703,9 @@ export default function ClientDetail() {
                     <span style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12.5, color: color.muted }}>
                       <span>{p?.title ?? 'No plan'}</span>
                       <span style={{ fontFamily: font.mono }}>{line.static_ip ?? line.current_ip ?? 'no IP'}</span>
-                      <span style={{ fontWeight: 600, color: color.ink }}>KES {kes(p?.price)}</span>
+                      <span style={{ fontWeight: 600, color: color.ink }} title={line.custom_price != null ? `Custom price — the plan's own is KES ${kes(p?.price)}` : undefined}>
+                        KES {kes(line.custom_price ?? p?.price)}{line.custom_price != null && <span style={{ fontSize: 10.5, fontWeight: 600, color: color.amberInk, marginLeft: 4 }}>custom</span>}
+                      </span>
                       <span>{isOpen ? '−' : '+'}</span>
                     </span>
                   </div>
@@ -732,6 +756,15 @@ export default function ClientDetail() {
                         )}
                         {line.service === 'pppoe' && line.locked_mac && (
                           <RowAction onClick={() => clearMacLock(line)}>Clear MAC lock</RowAction>
+                        )}
+                        {line.service === 'pppoe' && (
+                          <RowAction
+                            tone={color.green}
+                            onClick={() => setSwitching({ line, planId: line.plan_id ?? '', price: line.custom_price == null ? '' : String(Number(line.custom_price)) })}
+                            title="Move this line to a different package, and set its price"
+                          >
+                            Change service
+                          </RowAction>
                         )}
                         <RowAction tone={color.green} onClick={() => setEditing({ ...line, credit: line.wallet_balance ?? 0 })}>Edit</RowAction>
                         <RowAction
@@ -1233,6 +1266,42 @@ export default function ClientDetail() {
       </Modal>
 
       <Modal
+        open={!!switching}
+        title={`Change service — ${switching?.line?.line_label || switching?.line?.name || ''}`}
+        onClose={() => setSwitching(null)}
+        footer={
+          <>
+            <Button onClick={() => setSwitching(null)}>Cancel</Button>
+            <Button variant="primary" onClick={saveSwitch}>Save</Button>
+          </>
+        }
+      >
+        {switching && (
+          <div style={{ display: 'grid', gap: 12 }}>
+            <Field label="Package" hint="The speed changes straight away; their expiry date stays as it is">
+              <Select
+                value={switching.planId}
+                onChange={(e) => setSwitching((s) => ({ ...s, planId: e.target.value }))}
+                options={[
+                  { value: '', label: 'No plan' },
+                  ...(store.plans ?? []).filter((p) => p.service === switching.line.service)
+                    .map((p) => ({ value: p.id, label: `${p.title} · KES ${kes(p.price)}` })),
+                ]}
+              />
+            </Field>
+            <Field label="Price (KES)" hint={`Blank charges the package's price (KES ${kes(planById[switching.planId]?.price)}). Applies from their next renewal or invoice.`}>
+              <Input
+                type="number" min="0"
+                value={switching.price}
+                onChange={(e) => setSwitching((s) => ({ ...s, price: e.target.value }))}
+                placeholder={String(planById[switching.planId]?.price ?? '')}
+              />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
         open={!!editing}
         title={`Edit ${editing?.line_label || editing?.name || ''}`}
         onClose={() => setEditing(null)}
@@ -1309,6 +1378,14 @@ export default function ClientDetail() {
                     value={editing.pppoe_pass ?? ''}
                     onChange={(e) => setEditing((s) => ({ ...s, pppoe_pass: e.target.value.replace(/[^A-Za-z0-9]/g, '').slice(0, 12) }))}
                     style={{ fontFamily: font.mono }}
+                  />
+                </Field>
+                <Field label="Price (KES)" hint={`Blank charges the plan's price (KES ${kes(planById[editing.plan_id]?.price)})`}>
+                  <Input
+                    type="number" min="0"
+                    value={editing.custom_price ?? ''}
+                    onChange={(e) => setEditing((s) => ({ ...s, custom_price: e.target.value }))}
+                    placeholder={String(planById[editing.plan_id]?.price ?? '')}
                   />
                 </Field>
                 {(() => {

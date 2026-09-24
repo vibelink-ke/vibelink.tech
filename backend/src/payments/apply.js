@@ -298,7 +298,7 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
    * credit/expires_at up to the same standard.
    */
   const { rows: [sub] } = await c.query(
-    'select s.*, p.price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1 for update of s',
+    'select s.*, coalesce(s.custom_price, p.price) as price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1 for update of s',
     [subId]
   );
   // A specific invoice — the portal's own "pay this invoice" flow, or the
