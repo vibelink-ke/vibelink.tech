@@ -1178,6 +1178,113 @@ export async function removeContentionMember(conn, { pppoeUser }) {
 }
 
 /**
+ * One Simple Queue per customer, in the layout operators read in Winbox:
+ *
+ *   name     SiPLMT_US_<pppoe username>
+ *   target   the customer's address, /32
+ *   max-limit  plan upload/download
+ *   comment  the customer's full name — plain, so the queue list reads as a
+ *            list of people
+ *
+ * Ours are recognised by the name prefix, not by the comment tag other managed
+ * objects carry: the comment belongs to the customer's name here.
+ *
+ * This sits beside the Mikrotik-Rate-Limit RADIUS sends at login, which makes
+ * RouterOS create its own dynamic queue for the live session. The two agree
+ * (same plan rate); this one is the durable, visible, per-customer entry.
+ */
+export const SUB_QUEUE_PREFIX = 'SiPLMT_US_';
+
+// RouterOS prints 9000k as 9M. Writing it the way it prints lets unchanged()
+// see a re-push as a no-op instead of rewriting every queue each time.
+const queueRate = (k) => {
+  const n = Number(k);
+  return n > 0 && n % 1000 === 0 ? `${n / 1000}M` : `${n}k`;
+};
+
+const subQueueFields = ({ address, rateDown, rateUp, customerName }) => [
+  `=target=${String(address).split('/')[0]}/32`,
+  `=max-limit=${queueRate(rateUp)}/${queueRate(rateDown)}`,
+  ...(customerName ? [`=comment=${customerName}`] : []),
+];
+
+export async function ensureSubscriberQueue(conn, { pppoeUser, address, rateDown, rateUp, customerName }) {
+  const name = `${SUB_QUEUE_PREFIX}${pppoeUser}`;
+  const fields = subQueueFields({ address, rateDown, rateUp, customerName });
+  const found = (await conn.write('/queue/simple/print', [`?name=${name}`]))[0];
+  if (found) {
+    if (!unchanged(found, fields)) await cmd(conn, 'customer queue', '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
+    return { created: false };
+  }
+  await cmd(conn, 'customer queue', '/queue/simple/add', [`=name=${name}`, ...fields]);
+  return { created: true };
+}
+
+export async function removeSubscriberQueue(conn, { pppoeUser }) {
+  const rows = await conn.write('/queue/simple/print', [`?name=${SUB_QUEUE_PREFIX}${pppoeUser}`]);
+  for (const row of rows) {
+    if (!isDynamic(row)) await cmd(conn, 'remove customer queue', '/queue/simple/remove', [`=.id=${idOf(row)}`]);
+  }
+}
+
+/**
+ * The whole router in one pass — what Refresh runs. One print for every queue
+ * already there, then only the writes that would change something, since each
+ * write is a round trip over a tunnel.
+ *
+ * `wanted` is every customer who should have a queue; `drop` is customers this
+ * system knows who should not (expired, suspended, no plan), whose queue is
+ * removed. A SiPLMT_US_ queue matching neither is left alone and only counted:
+ * it may be someone the database has under another router, and deleting on a
+ * guess is not what a refresh is for.
+ */
+export async function syncSubscriberQueues(conn, { wanted, drop = [] }) {
+  const existing = await conn.write('/queue/simple/print', []);
+  const byName = new Map(existing
+    .filter((q) => typeof q.name === 'string' && q.name.startsWith(SUB_QUEUE_PREFIX) && !isDynamic(q))
+    .map((q) => [q.name, q]));
+  const out = { added: 0, updated: 0, same: 0, removed: 0, failed: 0, leftover: 0, firstError: null };
+
+  for (const w of wanted) {
+    const name = `${SUB_QUEUE_PREFIX}${w.pppoeUser}`;
+    const found = byName.get(name);
+    byName.delete(name);
+    const fields = subQueueFields(w);
+    try {
+      if (!found) {
+        await cmd(conn, 'customer queue', '/queue/simple/add', [`=name=${name}`, ...fields]);
+        out.added += 1;
+      } else if (!unchanged(found, fields)) {
+        await cmd(conn, 'customer queue', '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
+        out.updated += 1;
+      } else {
+        out.same += 1;
+      }
+    } catch (e) {
+      out.failed += 1;
+      out.firstError ??= `${w.pppoeUser}: ${e.message}`;
+    }
+  }
+
+  for (const user of drop) {
+    const name = `${SUB_QUEUE_PREFIX}${user}`;
+    const found = byName.get(name);
+    if (!found) continue;
+    byName.delete(name);
+    try {
+      await cmd(conn, 'remove customer queue', '/queue/simple/remove', [`=.id=${idOf(found)}`]);
+      out.removed += 1;
+    } catch (e) {
+      out.failed += 1;
+      out.firstError ??= `${user}: ${e.message}`;
+    }
+  }
+
+  out.leftover = byName.size;
+  return out;
+}
+
+/**
  * Re-applies just the billing-failover script/scheduler over the API — for
  * a router that already has WireGuard/OVPN set up and only needs the
  * failover logic itself refreshed (a staleAfter tuning change, say), with

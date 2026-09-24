@@ -245,7 +245,7 @@ export async function activateSubscriber(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate, tenantId]);
 
-  await applyContentionQueue(s).catch((e) =>
+  await applyContentionQueue(s, address).catch((e) =>
     console.warn('activateSubscriber: applyContentionQueue failed for', s.pppoe_user, '—', e.message));
 
   if (s.host) {
@@ -277,7 +277,7 @@ export async function activateSubscriber(c, tenantId, subId) {
  * Best-effort throughout: a router unreachable right now must never block
  * the RADIUS write that actually keeps a subscriber online.
  */
-export async function applyContentionQueue(s) {
+export async function applyContentionQueue(s, address) {
   if (!s.pppoe_user || !s.router_id || !s.service_user || !s.service_password_enc) return;
 
   const ros = await import('./routeros.js');
@@ -289,6 +289,20 @@ export async function applyContentionQueue(s) {
       host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
       user: s.service_user, password, timeoutSec: 8,
     });
+
+    // The customer's own queue (name, address, plan rate, their name as the
+    // comment) — present while they are entitled to service, gone when not.
+    // Skipped when the caller gave no address (the backfill script), which is
+    // not the same as "no address": it never asked.
+    if (address !== undefined) {
+      if (address && ['active', 'grace'].includes(s.status) && s.rate_down != null && s.rate_up != null) {
+        await ros.ensureSubscriberQueue(conn, {
+          pppoeUser: s.pppoe_user, address, rateDown: s.rate_down, rateUp: s.rate_up, customerName: s.name,
+        });
+      } else {
+        await ros.removeSubscriberQueue(conn, { pppoeUser: s.pppoe_user });
+      }
+    }
 
     if (!s.contention_ratio || s.contention_ratio <= 1 || !s.plan_id) {
       await ros.removeContentionMember(conn, { pppoeUser: s.pppoe_user });

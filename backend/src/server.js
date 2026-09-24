@@ -6423,6 +6423,69 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
       }
     }
     /**
+     * Queues, rebuilt from the database rather than left as they were: Refresh
+     * means "make the router match what this system knows", and a queue list
+     * that drifted (a customer added while the router was unreachable, a plan
+     * changed by hand in Winbox) is exactly the drift it exists to undo.
+     *
+     * Not fatal. Everything above is what keeps customers online; a queue
+     * problem is reported in the result but must not mark the whole push failed.
+     */
+    if (r.role === 'both' || r.role === 'pppoe') {
+      try {
+        const { rows: lines } = await pool.query(
+          `select s.pppoe_user, s.name, s.status, p.rate_down, p.rate_up, rr.value as address
+             from subscribers s
+             left join plans p on p.id = s.plan_id
+             left join radreply rr on rr.tenant_id = s.tenant_id and rr.username = s.pppoe_user
+                                  and rr.attribute = 'Framed-IP-Address'
+            where s.tenant_id=$1 and s.router_id=$2 and s.service='pppoe' and s.pppoe_user is not null`,
+          [req.tenant.id, r.id]);
+        const entitled = (l) => ['active', 'grace'].includes(l.status) && l.address && l.rate_down != null && l.rate_up != null;
+        const q = await tryStep('customer queues', () => ros.syncSubscriberQueues(conn, {
+          wanted: lines.filter(entitled).map((l) => ({
+            pppoeUser: l.pppoe_user, address: l.address, rateDown: l.rate_down, rateUp: l.rate_up, customerName: l.name,
+          })),
+          drop: lines.filter((l) => !entitled(l)).map((l) => l.pppoe_user),
+        }), 240000);
+        done.push(`customer queues: ${q.added} added, ${q.updated} updated, ${q.same} already correct, ${q.removed} removed`
+          + (q.leftover ? `; ${q.leftover} ${ros.SUB_QUEUE_PREFIX} queue(s) match no customer on this router and were left alone` : '')
+          + (q.failed ? `; ${q.failed} failed (first: ${q.firstError})` : ''));
+      } catch (e) {
+        done.push(`could not rebuild customer queues: ${e.message}`);
+      }
+    }
+    if (r.role === 'both' || r.role === 'hotspot') {
+      // Devices locked to a paid code get their speed cap from a queue of their
+      // own, since a bypassed device never goes through RADIUS. Re-applied for
+      // every device whose code is still running; one that is off the network
+      // has no lease to pin and is skipped, not an error.
+      try {
+        const { rows: devices } = await pool.query(
+          `select d.mac, v.code, d.label, p.rate_down, p.rate_up
+             from voucher_devices d
+             join vouchers v on v.id = d.voucher_id
+             left join plans p on p.id = v.plan_id
+            where d.router_id=$1 and d.unbound_at is null and v.tenant_id=$2
+              and v.status = 'in_use' and (v.expires_at is null or v.expires_at > now())`,
+          [r.id, req.tenant.id]);
+        let ok = 0; let skipped = 0;
+        for (const d of devices) {
+          try {
+            await ros.bindDeviceByMac(conn, {
+              mac: d.mac, downKbps: d.rate_down ?? 2000, upKbps: d.rate_up ?? 1000,
+              comment: d.label ? `${d.code} — ${d.label}` : d.code,
+            });
+            ok += 1;
+          } catch { skipped += 1; }
+        }
+        if (devices.length) done.push(`device speed caps: ${ok} re-applied${skipped ? `, ${skipped} skipped (not on the network right now)` : ''}`);
+      } catch (e) {
+        done.push(`could not rebuild device speed caps: ${e.message}`);
+      }
+    }
+
+    /**
      * Hotspot settings — DHCP, the hotspot server itself, its user profile,
      * the DNS proxy, the walled garden, the login page — used to be pushed
      * from here too, on every Configure/Refresh, for any router with role
