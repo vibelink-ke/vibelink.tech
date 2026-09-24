@@ -1285,6 +1285,32 @@ export async function syncSubscriberQueues(conn, { wanted, drop = [] }) {
 }
 
 /**
+ * Empty the Simple Queue list: what Refresh does before writing it fresh.
+ *
+ * Simple queues only — not the queue tree, interface queues or queue types —
+ * and not dynamic ones, which the router owns and refuses to remove. Ids go in
+ * batches of one call each; a batch the router will not take falls back to one
+ * at a time so a single stubborn entry cannot leave the rest behind.
+ */
+export async function wipeSimpleQueues(conn) {
+  const rows = await conn.write('/queue/simple/print', []);
+  const ids = rows.filter((q) => !isDynamic(q)).map(idOf).filter(Boolean);
+  let removed = 0;
+  for (let i = 0; i < ids.length; i += 40) {
+    const batch = ids.slice(i, i + 40);
+    try {
+      await cmd(conn, 'clear queues', '/queue/simple/remove', [`=.id=${batch.join(',')}`]);
+      removed += batch.length;
+    } catch {
+      for (const id of batch) {
+        try { await cmd(conn, 'clear queue', '/queue/simple/remove', [`=.id=${id}`]); removed += 1; } catch { /* left */ }
+      }
+    }
+  }
+  return removed;
+}
+
+/**
  * Re-applies just the billing-failover script/scheduler over the API — for
  * a router that already has WireGuard/OVPN set up and only needs the
  * failover logic itself refreshed (a staleAfter tuning change, say), with

@@ -6423,66 +6423,23 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
       }
     }
     /**
-     * Queues, rebuilt from the database rather than left as they were: Refresh
-     * means "make the router match what this system knows", and a queue list
-     * that drifted (a customer added while the router was unreachable, a plan
-     * changed by hand in Winbox) is exactly the drift it exists to undo.
+     * Queues: wiped and written fresh from the database. Refresh means "make the
+     * router match what this system knows", so nothing is left over from before —
+     * customers, contention pools and members, and the caps on bound hotspot
+     * devices are all rebuilt. Simple queues only; the queue tree and queue types
+     * are not touched.
      *
-     * Not fatal. Everything above is what keeps customers online; a queue
-     * problem is reported in the result but must not mark the whole push failed.
+     * Not fatal. Everything above is what keeps customers online; a queue problem
+     * is reported in the result but must not mark the whole push failed.
      */
-    if (r.role === 'both' || r.role === 'pppoe') {
-      try {
-        const { rows: lines } = await pool.query(
-          `select s.pppoe_user, s.name, s.status, p.rate_down, p.rate_up, rr.value as address
-             from subscribers s
-             left join plans p on p.id = s.plan_id
-             left join radreply rr on rr.tenant_id = s.tenant_id and rr.username = s.pppoe_user
-                                  and rr.attribute = 'Framed-IP-Address'
-            where s.tenant_id=$1 and s.router_id=$2 and s.service='pppoe' and s.pppoe_user is not null`,
-          [req.tenant.id, r.id]);
-        const entitled = (l) => ['active', 'grace'].includes(l.status) && l.address && l.rate_down != null && l.rate_up != null;
-        const q = await tryStep('customer queues', () => ros.syncSubscriberQueues(conn, {
-          wanted: lines.filter(entitled).map((l) => ({
-            pppoeUser: l.pppoe_user, address: l.address, rateDown: l.rate_down, rateUp: l.rate_up, customerName: l.name,
-          })),
-          drop: lines.filter((l) => !entitled(l)).map((l) => l.pppoe_user),
-        }), 240000);
-        done.push(`customer queues: ${q.added} added, ${q.updated} updated, ${q.same} already correct, ${q.removed} removed`
-          + (q.leftover ? `; ${q.leftover} ${ros.SUB_QUEUE_PREFIX} queue(s) match no customer on this router and were left alone` : '')
-          + (q.failed ? `; ${q.failed} failed (first: ${q.firstError})` : ''));
-      } catch (e) {
-        done.push(`could not rebuild customer queues: ${e.message}`);
-      }
-    }
-    if (r.role === 'both' || r.role === 'hotspot') {
-      // Devices locked to a paid code get their speed cap from a queue of their
-      // own, since a bypassed device never goes through RADIUS. Re-applied for
-      // every device whose code is still running; one that is off the network
-      // has no lease to pin and is skipped, not an error.
-      try {
-        const { rows: devices } = await pool.query(
-          `select d.mac, v.code, d.label, p.rate_down, p.rate_up
-             from voucher_devices d
-             join vouchers v on v.id = d.voucher_id
-             left join plans p on p.id = v.plan_id
-            where d.router_id=$1 and d.unbound_at is null and v.tenant_id=$2
-              and v.status = 'in_use' and (v.expires_at is null or v.expires_at > now())`,
-          [r.id, req.tenant.id]);
-        let ok = 0; let skipped = 0;
-        for (const d of devices) {
-          try {
-            await ros.bindDeviceByMac(conn, {
-              mac: d.mac, downKbps: d.rate_down ?? 2000, upKbps: d.rate_up ?? 1000,
-              comment: d.label ? `${d.code} — ${d.label}` : d.code,
-            });
-            ok += 1;
-          } catch { skipped += 1; }
-        }
-        if (devices.length) done.push(`device speed caps: ${ok} re-applied${skipped ? `, ${skipped} skipped (not on the network right now)` : ''}`);
-      } catch (e) {
-        done.push(`could not rebuild device speed caps: ${e.message}`);
-      }
+    try {
+      const { syncRouterQueues } = await import('./router-queues.js');
+      const lines = await tryStep('queues', () => syncRouterQueues(conn, {
+        tenantId: req.tenant.id, routerId: r.id, role: r.role, wipe: true,
+      }), 300000);
+      done.push(...lines);
+    } catch (e) {
+      done.push(`could not rebuild queues: ${e.message}`);
     }
 
     /**
@@ -9044,7 +9001,7 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
 
   // A bare date ("2026-10-01") is a day in Nairobi. Read as UTC it lands at
   // 03:00 there, which is how expiries kept ending up three hours past midnight.
-  if (typeof req.body.expires_at === 'string' && /^d{4}-d{2}-d{2}$/.test(req.body.expires_at)) {
+  if (typeof req.body.expires_at === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(req.body.expires_at)) {
     req.body.expires_at = new Date(`${req.body.expires_at}T00:00:00+03:00`).toISOString();
   }
 
@@ -13008,6 +12965,7 @@ const AUTOMATION_JOBS = [
    */
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
+  { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },
   { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },
   { job: 'generateMonthlyCharges', name: 'Tenant monthly statements', cron: '0 1 * * *', detail: 'Once a month has ended, works out each tenant\'s charge — a percentage of hotspot revenue plus a rate per active PPPoE client — and tells the platform owner' },
   { job: 'closeStaleSessions', name: 'Close dead sessions', cron: '*/5 * * * *', system: true, detail: 'Ends sessions a router stopped accounting for, so a customer who dropped off does not read as online for ever' },

@@ -70,6 +70,7 @@ export function startJobs() {
   cron.schedule('* * * * *', safely('smartoltEnforce', () => import('./smartolt.js').then((m) => m.enforceOnus())));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
+  cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
   cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
@@ -1825,4 +1826,67 @@ export async function expireTenantLicences() {
   // before there was a statement or reinstatement to settle it) is applied now.
   const { settleAllFromCredit } = await import('./charges.js');
   await settleAllFromCredit();
+}
+
+/**
+ * Every two minutes: each PPPoE router's queues, and its PPP profile, checked
+ * against the database.
+ *
+ * A change made in the app (a customer added, a plan or price changed, an address
+ * reassigned, service cut) reaches the router within two minutes rather than at
+ * the next Refresh. What it does not do is wipe: only Refresh clears the list and
+ * writes it fresh. This pass changes what differs and leaves any queue it does
+ * not recognise alone, so it is safe to run this often.
+ *
+ * The router is contacted every pass (cheap: one read of the PPP profile, whose
+ * local-address is put back if it has gone — its absence drops every login a second
+ * after it authenticates). The queue list is only read and compared when the
+ * customers, addresses or rates for that router changed since the last pass, or
+ * every half hour regardless, to catch a queue someone edited on the router itself.
+ */
+const queueState = new Map();   // routerId -> { sig, at }
+let queuePassRunning = false;
+
+async function syncRouterQueuesJob() {
+  if (queuePassRunning) return;   // a slow pass must not stack another behind it
+  queuePassRunning = true;
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const { customerLines, signature, syncRouterQueues, repairPppProfile } = await import('./router-queues.js');
+
+    const { rows } = await pool.query(
+      `select id, tenant_id, name, host, api_port, role, pppoe_pool, service_user, service_password_enc
+         from routers
+        where status = 'up' and autoconfig_last_ok = true and role in ('pppoe','both')
+          and service_user is not null and service_password_enc is not null
+          and tenant_id in (${enabledTenants})`, ['syncRouterQueues']);
+
+    for (const r of rows) {
+      let conn;
+      try {
+        const password = secrets.decrypt(r.service_password_enc);
+        if (!password) continue;
+        conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password, timeoutSec: 8 });
+
+        const fixed = await repairPppProfile(conn, r.pppoe_pool).catch(() => null);
+        if (fixed) console.warn('syncRouterQueues:', r.name, '—', fixed);
+
+        const lines = await customerLines(r.tenant_id, r.id);
+        const sig = signature(lines);
+        const prev = queueState.get(r.id);
+        if (prev && prev.sig === sig && Date.now() - prev.at < 30 * 60000) continue;
+
+        const out = await syncRouterQueues(conn, { tenantId: r.tenant_id, routerId: r.id, role: r.role, wipe: false, lines });
+        queueState.set(r.id, { sig, at: Date.now() });
+        if (out.some((l) => /[1-9][0-9]* (added|updated|removed|failed)/.test(l))) console.log('syncRouterQueues:', r.name, '—', out.join('; '));
+      } catch (e) {
+        console.warn('syncRouterQueues:', r.name, '—', e.message);
+      } finally {
+        if (conn) { try { (await import('./routeros.js')).close(conn); } catch { /* already gone */ } }
+      }
+    }
+  } finally {
+    queuePassRunning = false;
+  }
 }
