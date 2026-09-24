@@ -158,6 +158,7 @@ export const DEFAULT_PERMISSIONS = {
   'expenses.approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
   // Sends the money: an approved expense is paid out of the M-Pesa paybill. Separate from approving it.
   'expenses.pay': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'expenses.pay_approve': { owner: true, cashier: false, technician: false, support: false, sales: false },
   // Suppliers and monthly bills sit beside the expense log and follow it:
   // the same people who can log an expense can manage who they pay and what
   // recurs. Approving and paying what a bill produces is still expenses.approve.
@@ -270,7 +271,8 @@ export const PERMISSION_META = [
   { key: 'expenses.view',    page: 'Expenses', action: 'View' },
   { key: 'expenses.edit',    page: 'Expenses', action: 'Create / edit' },
   { key: 'expenses.approve', page: 'Expenses', action: 'Approve for payment' },
-  { key: 'expenses.pay', page: 'Expenses', action: 'Pay from M-Pesa' },
+  { key: 'expenses.pay', page: 'Expenses', action: 'Request an M-Pesa payment' },
+  { key: 'expenses.pay_approve', page: 'Expenses', action: 'Approve an M-Pesa payment (not your own)' },
   { key: 'suppliers.view',   page: 'Suppliers', action: 'View' },
   { key: 'suppliers.edit',   page: 'Suppliers', action: 'Create / edit' },
   { key: 'bills.view',       page: 'Monthly bills', action: 'View' },

@@ -3993,7 +3993,8 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
             e.status, e.created_by, e.approved_by, e.paid_at, e.created_at,
             (e.receipt_data is not null) as has_receipt,
             e.supplier_id, e.recurring_bill_id, e.payout_id, e.reference,
-            e.pay_state, e.pay_error, e.pay_method, e.pay_reference,
+            e.pay_state, e.pay_error, e.pay_method, e.pay_reference, e.pay_requested_by, e.pay_requested_at,
+            (select name from staff rq where rq.id = e.pay_requested_by) as pay_requested_by_name,
             sup.paybill as supplier_paybill, sup.till_number as supplier_till, sup.phone as supplier_phone,
             to_char(e.due_date, 'YYYY-MM-DD') as due_date,
             cs.name as created_by_name, ap.name as approved_by_name, sf.name as staff_name,
@@ -4089,7 +4090,7 @@ app.post('/api/expenses/:id/mark-paid', requirePermission('expenses.approve'), w
  * double click or a slow answer cannot pay twice; a refusal leaves it approved, with
  * the reason on it, to retry or to mark paid by hand.
  */
-app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async (req, res) => {
+async function handleExpensePay(req, res, approving) {
   const { rows: [e] } = await pool.query(
     `select e.*, sup.name as supplier_name, sup.phone as supplier_phone, sup.paybill, sup.till_number, sup.account_ref,
             coalesce(hp.payout_phone, sf.phone) as staff_phone
@@ -4101,6 +4102,8 @@ app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async 
   if (!e) return res.status(404).json({ error: 'No such expense' });
   if (e.status !== 'approved') return res.status(409).json({ error: 'Approve the expense before paying it.' });
   if (e.pay_state === 'processing') return res.status(409).json({ error: 'A payment for this expense is already on its way.' });
+  if (approving && e.pay_state !== 'awaiting') return res.status(409).json({ error: 'There is no payment waiting for approval on this expense.' });
+  const myId = req.session?.staff_id ?? null;
 
   const amount = Number(e.amount);
   if (!Number.isInteger(amount) || amount < 1) {
@@ -4108,7 +4111,7 @@ app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async 
   }
 
   const digits = (s) => String(s ?? '').replace(/[^0-9]/g, '');
-  const body = req.body ?? {};
+  const body = approving ? (e.pay_request ?? {}) : (req.body ?? {});
   const phone = body.phone || (e.staff_id ? e.staff_phone : null) || e.supplier_phone || null;
   const method = body.method
     || (e.staff_id ? 'phone' : e.paybill ? 'paybill' : e.till_number ? 'till' : phone ? 'phone' : null);
@@ -4136,10 +4139,29 @@ app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async 
     return res.status(400).json({ error: 'Pay by paybill, till or phone.' });
   }
 
+  if (!approving) {
+    // Two owners: this only records the request. Nothing is sent until a different owner approves it.
+    const { rows: [asked] } = await pool.query(
+      `update expenses set pay_state='awaiting', pay_method=$3, pay_error=null, pay_request=$4,
+              pay_requested_by=$5, pay_requested_at=now()
+        where id=$1 and tenant_id=$2 and status='approved' and pay_state is distinct from 'processing' returning id`,
+      [e.id, req.tenant.id, method, JSON.stringify(body), myId]);
+    if (!asked) return res.status(409).json({ error: 'A payment for this expense is already on its way.' });
+    return res.json({ ok: true, state: 'awaiting', method });
+  }
+
+  // The person who asked for a payment cannot also release it. If nobody else could approve (a sole
+  // owner), the request may be released by the same person, so a one-owner business is not locked out.
+  if (e.pay_requested_by && e.pay_requested_by === myId) {
+    const { rows: [o] } = await pool.query(
+      "select count(*)::int as n from staff where tenant_id=$1 and role='owner' and id <> $2", [req.tenant.id, myId]);
+    if (o.n > 0) return res.status(403).json({ error: 'You asked for this payment, so another owner has to approve it.' });
+  }
+
   // Claimed before anything is sent: only one request can move it to 'processing'.
   const { rows: [claimed] } = await pool.query(
     `update expenses set pay_state='processing', pay_method=$3, pay_error=null
-      where id=$1 and tenant_id=$2 and status='approved' and pay_state is distinct from 'processing' returning id`,
+      where id=$1 and tenant_id=$2 and status='approved' and pay_state = 'awaiting' returning id`,
     [e.id, req.tenant.id, method]);
   if (!claimed) return res.status(409).json({ error: 'A payment for this expense is already on its way.' });
 
@@ -4151,6 +4173,20 @@ app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap(async 
     await pool.query("update expenses set pay_state='failed', pay_error=$2 where id=$1", [e.id, String(err.message ?? err).slice(0, 300)]);
     res.status(502).json({ error: err.message ?? 'M-Pesa refused the payment.' });
   }
+}
+
+app.post('/api/expenses/:id/pay', requirePermission('expenses.pay'), wrap((req, res) => handleExpensePay(req, res, false)));
+
+// A different owner releases a requested payment; only then does the money move.
+app.post('/api/expenses/:id/pay/approve', requirePermission('expenses.pay_approve'), wrap((req, res) => handleExpensePay(req, res, true)));
+
+// Withdraw a request that is still waiting: whoever asked for it, or any approver, may cancel it.
+app.post('/api/expenses/:id/pay/cancel', requirePermission('expenses.pay'), wrap(async (req, res) => {
+  const { rows: [c] } = await pool.query(
+    `update expenses set pay_state=null, pay_request=null, pay_requested_by=null, pay_requested_at=null, pay_error=null
+      where id=$1 and tenant_id=$2 and pay_state='awaiting' returning id`, [req.params.id, req.tenant.id]);
+  if (!c) return res.status(409).json({ error: 'There is no payment waiting on this expense.' });
+  res.json({ ok: true });
 }));
 
 const RECEIPT_MIME = new Set(['image/png', 'image/jpeg', 'image/webp', 'application/pdf']);

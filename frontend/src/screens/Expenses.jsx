@@ -98,7 +98,7 @@ export default function Expenses() {
         try {
           await api.approveExpense(created.id);
           await api.payExpense(created.id, form.payPhone ? { method: 'phone', phone: form.payPhone } : {});
-          store.toast('Expense logged and sent to M-Pesa — it shows as paid once M-Pesa confirms');
+          store.toast('Expense logged — payment requested. Another owner has to approve it before it is sent.');
         } catch (e) {
           store.toast(`Expense logged, but not paid: ${e.message}`);
         }
@@ -134,14 +134,35 @@ export default function Expenses() {
       body = { method: 'phone', phone: phone.trim() };
       target = phone.trim();
     }
-    if (!window.confirm(`Send KES ${kes(e.amount)} from your M-Pesa paybill to ${target}?\n\nThis moves real money and cannot be undone here.`)) return;
+    if (!window.confirm(`Request a payment of KES ${kes(e.amount)} from your M-Pesa paybill to ${target}?\n\nNo money moves until another owner approves it.`)) return;
     try {
       await api.payExpense(e.id, body);
       await reload();
-      store.toast('Payment sent to M-Pesa — it shows as paid once M-Pesa confirms');
+      store.toast('Payment requested — another owner has to approve it before it is sent');
     } catch (err) {
       await reload().catch(() => {});
       store.toast(`Could not pay: ${err.message}`);
+    }
+  };
+
+  const approvePay = async (e) => {
+    if (!window.confirm(`Approve sending KES ${kes(e.amount)} from your M-Pesa paybill?\n\nThis moves real money and cannot be undone here.`)) return;
+    try {
+      await api.approveExpensePay(e.id);
+      await reload();
+      store.toast('Approved and sent to M-Pesa — it shows as paid once M-Pesa confirms');
+    } catch (err) {
+      await reload().catch(() => {});
+      store.toast(`Could not approve: ${err.message}`);
+    }
+  };
+
+  const cancelPay = async (e) => {
+    try {
+      await api.cancelExpensePay(e.id);
+      await reload();
+    } catch (err) {
+      store.toast(err.message);
     }
   };
 
@@ -279,7 +300,22 @@ export default function Expenses() {
                   {e.status === 'approved' && e.pay_state === 'processing' && (
                     <span style={{ color: color.muted, fontSize: 12.5, fontWeight: 600 }}>Paying…</span>
                   )}
-                  {e.status === 'approved' && e.pay_state !== 'processing' && (
+                  {e.status === 'approved' && e.pay_state === 'awaiting' && (
+                    <>
+                      <span style={{ color: color.muted, fontSize: 12.5, fontWeight: 600, marginRight: 10 }}>
+                        Asked by {e.pay_requested_by_name ?? 'an owner'}
+                      </span>
+                      {perms['expenses.pay_approve'] && (
+                        <span onClick={() => approvePay(e)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
+                          {e.pay_requested_by === store.session?.id ? 'Approve (needs another owner)' : 'Approve payment'}
+                        </span>
+                      )}
+                      {perms['expenses.pay'] && (
+                        <span onClick={() => cancelPay(e)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Cancel</span>
+                      )}
+                    </>
+                  )}
+                  {e.status === 'approved' && e.pay_state !== 'processing' && e.pay_state !== 'awaiting' && (
                     <>
                       {perms['expenses.pay'] && (
                         <span

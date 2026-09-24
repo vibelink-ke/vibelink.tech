@@ -221,6 +221,8 @@ export const api = {
   approveExpense: (id) => post(`/api/expenses/${id}/approve`, {}),
   markExpensePaid: (id) => post(`/api/expenses/${id}/mark-paid`, {}),
   payExpense: (id, body) => post(`/api/expenses/${id}/pay`, body ?? {}),
+  approveExpensePay: (id) => post(`/api/expenses/${id}/pay/approve`, {}),
+  cancelExpensePay: (id) => post(`/api/expenses/${id}/pay/cancel`, {}),
   uploadExpenseReceipt: (id, dataUrl) => put(`/api/expenses/${id}/receipt`, { dataUrl }),
   // ── suppliers and monthly bills ──
   suppliers: () => get('/api/suppliers'),

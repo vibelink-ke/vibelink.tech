@@ -2998,8 +2998,14 @@ alter table routers add column if not exists queue_profiles boolean not null def
 -- Paying an expense straight from the M-Pesa paybill (server.js POST /api/expenses/:id/pay).
 -- pay_state is 'processing' from the moment it is sent until Safaricom's result arrives, then
 -- cleared on success (the expense becomes 'paid') or 'failed' with the reason.
-alter table expenses add column if not exists pay_state text
-  check (pay_state is null or pay_state in ('processing','failed'));
+alter table expenses add column if not exists pay_state text;
+-- 'awaiting' = requested, waiting for a second owner to approve it before any money moves.
+alter table expenses drop constraint if exists expenses_pay_state_check;
+alter table expenses add constraint expenses_pay_state_check
+  check (pay_state is null or pay_state in ('awaiting','processing','failed'));
+alter table expenses add column if not exists pay_request jsonb;
+alter table expenses add column if not exists pay_requested_by uuid references staff on delete set null;
+alter table expenses add column if not exists pay_requested_at timestamptz;
 alter table expenses add column if not exists pay_method text;
 alter table expenses add column if not exists pay_conversation_id text;
 alter table expenses add column if not exists pay_error text;
