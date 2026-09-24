@@ -112,12 +112,12 @@ export function queuePlan(lines) {
  * login, so a customer whose profile could not be written simply keeps the default
  * one — their traffic is then counted in the dynamic queue only.
  */
-async function customerProfiles(conn, { tenantId, routerId, all }) {
+async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
   const { rows: [r] } = await pool.query('select pppoe_pool from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
   const gateway = gatewayOf(r?.pppoe_pool);
   if (!gateway) return ['customer profiles skipped: this router has no PPPoE address pool set'];
 
-  const entitled = all.filter((l) => l.entitled);
+  const entitled = all.filter((l) => l.entitled && queued.has(`${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`));
   const names = entitled.map((l) => `${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`);
   const p = await ros.syncCustomerProfiles(conn, { wanted: names, gateway });
 
@@ -170,12 +170,12 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
     const inGroups = plan.groups.reduce((n, g) => n + g.members.length, 0);
     // Each customer's own PPP profile, so RouterOS's dynamic queue for their session sits
     // under their static queue and traffic is counted in both.
-    if (q.failed === 0) {
-      try {
-        out.push(...await customerProfiles(conn, { tenantId, routerId, all }));
-      } catch (e) {
-        out.push(`could not write customer profiles: ${e.message}`);
-      }
+    // Not held up by a queue that failed elsewhere: a customer gets a profile when THEIR queue is
+    // on the router, which is what the profile's parent-queue names.
+    try {
+      out.push(...await customerProfiles(conn, { tenantId, routerId, all, queued: q.ok }));
+    } catch (e) {
+      out.push(`could not write customer profiles: ${e.message}`);
     }
     out.push((wipe ? `queues cleared (${cleared}) and rewritten: ` : 'queues: ')
       + `${q.added} added, ${q.updated} updated, ${q.same} already correct, ${q.removed} removed`

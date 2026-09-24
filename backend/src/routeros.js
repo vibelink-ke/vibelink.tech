@@ -1248,7 +1248,7 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
   const existing = await conn.write('/queue/simple/print', []);
   const statics = existing.filter((q) => typeof q.name === 'string' && !isDynamic(q));
   const byName = new Map(statics.map((q) => [q.name, q]));
-  const out = { added: 0, updated: 0, same: 0, removed: 0, failed: 0, leftover: 0, firstError: null };
+  const out = { added: 0, updated: 0, same: 0, removed: 0, failed: 0, leftover: 0, firstError: null, ok: new Set() };
   const fail = (what, e) => { out.failed += 1; out.firstError ??= `${what}: ${e.message}`; };
 
   const put = async (name, fields, label) => {
@@ -1264,6 +1264,7 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
       } else {
         out.same += 1;
       }
+      out.ok.add(name);   // present and correct on the router
       return true;
     } catch (e) {
       fail(name, e);
