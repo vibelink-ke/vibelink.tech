@@ -1406,12 +1406,12 @@ export default function ClientDetail() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Input
                   type="date"
-                  value={editing.expires_at ? new Date(editing.expires_at).toISOString().slice(0, 10) : ''}
+                  value={editing.expires_at ? new Date(editing.expires_at).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }) : ''}
                   onChange={(e) => setEditing((s) => ({ ...s, expires_at: e.target.value || null }))}
                   style={{ maxWidth: 170 }}
                 />
                 {[7, 30].map((days) => (
-                  <Button key={days} size="sm" onClick={() => setEditing((s) => ({ ...s, expires_at: new Date(Date.now() + days * 864e5).toISOString().slice(0, 10) }))}>
+                  <Button key={days} size="sm" onClick={() => setEditing((s) => ({ ...s, expires_at: new Date(Date.now() + days * 864e5).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }) }))}>
                     +{days}d from today
                   </Button>
                 ))}

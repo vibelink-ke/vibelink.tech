@@ -350,7 +350,7 @@ export default function Clients() {
         'phone_alt', 'email', 'status', 'expires_at', 'router', 'location', 'line_label', 'created_at'],
       ...rows.map((c) => [
         c.name, c.phone, c.account_code, planTitle(c) ?? '', c.service ?? 'pppoe', c.static_ip ?? '',
-        c.phone_alt ?? '', c.email ?? '', c.dormant_at ? 'dormant' : c.status, c.expires_at ? new Date(c.expires_at).toISOString().slice(0, 10) : '',
+        c.phone_alt ?? '', c.email ?? '', c.dormant_at ? 'dormant' : c.status, c.expires_at ? new Date(c.expires_at).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }) : '',
         c.router_name ?? '', c.location ?? '', c.line_label ?? '', c.created_at ? new Date(c.created_at).toISOString().slice(0, 10) : '',
       ]),
     ], { title: 'Clients', subtitle: count > 0 ? `${count} selected` : `showing: ${filter}` });
@@ -885,7 +885,7 @@ export default function Clients() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <Input
                   type="date"
-                  value={editing.expires_at ? new Date(editing.expires_at).toISOString().slice(0, 10) : ''}
+                  value={editing.expires_at ? new Date(editing.expires_at).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }) : ''}
                   onChange={(e) => setEditing((s) => ({ ...s, expires_at: e.target.value || null }))}
                   style={{ maxWidth: 170 }}
                 />
@@ -898,7 +898,7 @@ export default function Clients() {
                     size="sm"
                     onClick={() => setEditing((s) => ({
                       ...s,
-                      expires_at: new Date(Date.now() + days * 864e5).toISOString().slice(0, 10),
+                      expires_at: new Date(Date.now() + days * 864e5).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' }),
                     }))}
                   >
                     +{days}d from today

@@ -9042,6 +9042,12 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     return res.status(400).json({ error: 'PPPoE password must be 2-12 letters/digits' });
   }
 
+  // A bare date ("2026-10-01") is a day in Nairobi. Read as UTC it lands at
+  // 03:00 there, which is how expiries kept ending up three hours past midnight.
+  if (typeof req.body.expires_at === 'string' && /^d{4}-d{2}-d{2}$/.test(req.body.expires_at)) {
+    req.body.expires_at = new Date(`${req.body.expires_at}T00:00:00+03:00`).toISOString();
+  }
+
   // A price agreed for this customer alone. Empty clears it, back to the plan's own price.
   if ('custom_price' in req.body) {
     const v = req.body.custom_price;
@@ -9951,13 +9957,24 @@ app.post('/api/subscribers/:id/stk', requirePermission('payments.stk'), wrap(asy
 app.post('/api/subscribers/compensate', requirePermission('clients.compensate'), wrap(async (req, res) => {
   const { ids = [], days = 1 } = req.body;
   if (!ids.length) return res.status(400).json({ error: 'no subscribers selected' });
-  const { rows } = await pool.query(
-    `update subscribers
-       set expires_at = greatest(coalesce(expires_at, now()), now()) + ($3 || ' days')::interval
-     where tenant_id=$1 and id = any($2::uuid[])
-     returning id, name, expires_at, account_code`,
-    [req.tenant.id, ids, String(Number(days) || 1)]);
   const n = Number(days) || 1;
+  // Whole days from the later of now and the current expiry — and for PPPoE,
+  // on to Nairobi midnight like every other expiry. A lapsed customer used to
+  // get "now plus N days", ending at whatever time of day this was clicked.
+  const { ceilToMidnight } = await import('./payments/apply.js');
+  const { rows: current } = await pool.query(
+    'select id, service, expires_at from subscribers where tenant_id=$1 and id = any($2::uuid[])',
+    [req.tenant.id, ids]);
+  const rows = [];
+  for (const c of current) {
+    const base = Math.max(Date.now(), c.expires_at ? new Date(c.expires_at).getTime() : 0);
+    let next = new Date(base + n * 86400000);
+    if (c.service === 'pppoe') next = ceilToMidnight(next);
+    const { rows: [u] } = await pool.query(
+      'update subscribers set expires_at=$3 where tenant_id=$1 and id=$2 returning id, name, expires_at, account_code',
+      [req.tenant.id, c.id, next]);
+    rows.push(u);
+  }
   for (const r of rows) await logActivity(req, r.id, r.account_code, 'Extended', `${n} day${n === 1 ? '' : 's'}`);
   res.json({ compensated: rows.length, days: n, rows });
 }));
