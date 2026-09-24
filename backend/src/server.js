@@ -9,6 +9,7 @@ import { pool, tenantByHost, withTenant, config } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
+import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
 import { generateDueBills } from './bills.js';
@@ -1332,6 +1333,8 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
 
 // The visitor's own loyalty points on the hotspot login page (see loyalty.js): SMS code, then check and redeem.
 registerLoyaltyPublic(app, { pool, tenantByHost, wrap });
+// Sign in with the phone number that paid: an SMS code to that number, then the bundle it bought (phone-login.js).
+registerPhoneLogin(app, { pool, tenantByHost, wrap, limiter: loginLimiter });
 
 /**
  * Recover a voucher code from the M-Pesa transaction code alone — for a

@@ -547,6 +547,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     <p class="hint">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
     </p>
+    <p class="hint">
+      <a href="javascript:void(0)" id="phoneOpen">Paid with M-Pesa? Sign in with your phone number</a>
+    </p>
     <!--
       Recovers a voucher from the one thing a guest still has even when the
       SMS never arrived: Safaricom's own confirmation, which always carries
@@ -561,6 +564,21 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
              autocapitalize="characters" autocorrect="off" spellcheck="false">
       <button type="button" id="mpesaGo">Find my code</button>
       <p class="hint" id="mpesaNote"></p>
+    </div>
+    <!-- The number that paid, then a six-digit code texted to it (see phone-login.js): the code is
+         what proves the number is theirs. -->
+    <div class="reveal" id="phoneBox">
+      <div id="phoneStep1">
+        <label for="phoneNumber">Phone number you paid with</label>
+        <input id="phoneNumber" type="tel" inputmode="tel" placeholder="07xx xxx xxx" autocomplete="tel" maxlength="20">
+        <button type="button" id="phoneSend">Text me a code</button>
+      </div>
+      <div id="phoneStep2" style="display:none">
+        <label for="phoneOtp">6-digit code we texted you</label>
+        <input id="phoneOtp" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6">
+        <button type="button" id="phoneVerify">Sign in</button>
+      </div>
+      <p class="hint" id="phoneNote"></p>
     </div>
     ${codeBoxClose}
 
@@ -1204,6 +1222,40 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           submitHotspotLogin(res.d.code);
         })
         .catch(function () { mpesaNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+
+    // Sign in with the phone number that paid: text a code to it, then use the bundle it bought.
+    var phoneBox = document.getElementById('phoneBox');
+    var phoneNote = document.getElementById('phoneNote');
+    function phonePost(path, body) {
+      return fetch(API + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+    }
+    document.getElementById('phoneOpen').addEventListener('click', function () { phoneBox.classList.toggle('on'); });
+    document.getElementById('phoneSend').addEventListener('click', function () {
+      var phone = document.getElementById('phoneNumber').value.trim();
+      if (!phone) { phoneNote.textContent = 'Type the phone number you paid with.'; return; }
+      phoneNote.textContent = 'Sending…';
+      phonePost('/hotspot/phone-login/otp', { phone: phone })
+        .then(function (res) {
+          if (!res.ok) { phoneNote.textContent = (res.d && res.d.error) || 'Could not send a code.'; return; }
+          phoneNote.textContent = (res.d && res.d.message) || 'If that number has a bundle running, a code has been sent to it.';
+          document.getElementById('phoneStep2').style.display = 'block';
+        })
+        .catch(function () { phoneNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+    document.getElementById('phoneVerify').addEventListener('click', function () {
+      var phone = document.getElementById('phoneNumber').value.trim();
+      var otp = document.getElementById('phoneOtp').value.trim();
+      if (!otp) { phoneNote.textContent = 'Type the 6-digit code from the SMS.'; return; }
+      phoneNote.textContent = 'Checking…';
+      phonePost('/hotspot/phone-login/verify', { phone: phone, otp: otp })
+        .then(function (res) {
+          if (!res.ok || !res.d.code) { phoneNote.textContent = (res.d && res.d.error) || 'That did not work.'; return; }
+          phoneNote.textContent = 'Signed in — connecting…';
+          submitHotspotLogin(res.d.code);
+        })
+        .catch(function () { phoneNote.textContent = 'Could not reach the server. Try again.'; });
     });
   } catch (e) { /* toggle/recovery stay unresponsive; the voucher-code field above still works */ }
   </script>
