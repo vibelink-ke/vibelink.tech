@@ -59,6 +59,12 @@ export const DEFAULT_PERMISSIONS = {
 
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
+  // The field technician app (/field): jobs, photos, customer look-up, shift. Money is never part of it.
+  'field.use':       { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  // Where the team is right now (only while they are on shift).
+  'field.locations': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  // Closing a ticket normally needs a photo of the finished work; these roles work from the office.
+  'tickets.close_without_photo': { owner: true, cashier: true, technician: false, support: true, sales: false },
   'tickets.delete':  all(),
   // The whole team's job board — every ticket, who it is assigned to, how far along it is. Owner-level: a
   // technician's or support agent's own queue (tickets.view) is theirs to see; watching everyone's workload
@@ -234,6 +240,9 @@ export const PERMISSION_META = [
   { key: 'tr069.manage', page: 'TR-069', action: 'Set WiFi/PPPoE, reboot, factory reset and link devices' },
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
+  { key: 'field.use',      page: 'Field app', action: 'Use the technician app' },
+  { key: 'field.locations', page: 'Field app', action: 'See where technicians are' },
+  { key: 'tickets.close_without_photo', page: 'Tickets', action: 'Close a job without a photo' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },
   { key: 'tickets.view_team', page: 'Tickets', action: 'See every job across the team (Team jobs)' },
   { key: 'analytics.view', page: 'Analytics', action: 'View' },

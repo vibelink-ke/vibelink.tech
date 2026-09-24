@@ -3187,3 +3187,53 @@ create unique index if not exists tpc_one_default_per_provider_scope
 -- raised once per lead, and so converting the lead to a client can attach the new client to it.
 alter table tickets add column if not exists lead_id uuid references leads on delete set null;
 create index if not exists tickets_lead_idx on tickets (lead_id) where lead_id is not null;
+-- ─────────────── the field technician app ───────────────
+-- What sort of job a ticket is: a fault to repair, or a new customer to install.
+alter table tickets add column if not exists kind text not null default 'repair'
+  check (kind in ('repair','install'));
+
+-- Photos taken in the app against a job. A technician cannot close a job without an 'after' one.
+create table if not exists ticket_photos (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  ticket_id  uuid not null references tickets on delete cascade,
+  staff_id   uuid references staff on delete set null,
+  kind       text not null default 'other' check (kind in ('before','after','other')),
+  mime       text not null,
+  data       bytea not null,
+  lat        double precision,
+  lng        double precision,
+  taken_at   timestamptz not null default now()
+);
+create index if not exists ticket_photos_ticket_idx on ticket_photos (ticket_id, taken_at);
+
+-- A technician's working day. Location is only recorded while a shift is open.
+create table if not exists field_shifts (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  staff_id   uuid not null references staff on delete cascade,
+  started_at timestamptz not null default now(),
+  ended_at   timestamptz
+);
+create unique index if not exists field_shifts_open_idx on field_shifts (staff_id) where ended_at is null;
+
+-- The latest known position of each technician on shift, and a thin trail behind it.
+create table if not exists staff_locations (
+  staff_id   uuid primary key references staff on delete cascade,
+  tenant_id  uuid not null references tenants on delete cascade,
+  lat        double precision not null,
+  lng        double precision not null,
+  accuracy   real,
+  ticket_id  uuid references tickets on delete set null,
+  at         timestamptz not null default now()
+);
+create table if not exists staff_location_log (
+  id         bigserial primary key,
+  tenant_id  uuid not null references tenants on delete cascade,
+  staff_id   uuid not null references staff on delete cascade,
+  lat        double precision not null,
+  lng        double precision not null,
+  accuracy   real,
+  at         timestamptz not null default now()
+);
+create index if not exists staff_location_log_idx on staff_location_log (staff_id, at desc);

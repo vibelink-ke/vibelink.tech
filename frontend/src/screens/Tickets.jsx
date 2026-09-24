@@ -24,7 +24,7 @@ const overdue = (t) => t.due_at && t.status !== 'resolved' && new Date(t.due_at)
 export default function Tickets() {
   const store = useStore();
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', description: '' });
+  const [f, setF] = useState({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', kind: 'repair', description: '' });
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('open');
 
@@ -51,14 +51,14 @@ export default function Tickets() {
     if (!f.subject.trim()) return store.toast('Give the ticket a subject');
     setBusy(true);
     try {
-      const created = await api.createTicket({ subject: f.subject, subscriberId: f.subscriberId || null, priority: f.priority });
+      const created = await api.createTicket({ subject: f.subject, subscriberId: f.subscriberId || null, priority: f.priority, kind: f.kind });
       if (f.description.trim()) await api.updateTicket(created.id, { description: f.description });
       // From a won lead the installer it was assigned to is the one to send.
       if (f.assignTo) await api.updateTicket(created.id, { assigned_to: f.assignTo });
       store.setCollection('tickets', (ts) => [{ ...created, description: f.description || null, assigned_to: f.assignTo || created.assigned_to }, ...ts]);
       store.toast(`${created.number} raised`);
       setOpen(false);
-      setF({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', description: '' });
+      setF({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', kind: 'repair', description: '' });
     } catch (e) {
       store.toast(`Could not raise the ticket: ${e.message}`);
     } finally {
@@ -446,6 +446,9 @@ export default function Tickets() {
           </Field>
           <Field label="Priority">
             <Select value={f.priority} onChange={set('priority')} options={PRIORITIES} />
+          </Field>
+          <Field label="Job type" hint="An install is a new customer to connect; the technician also saves their location and takes photos">
+            <Select value={f.kind} onChange={set('kind')} options={[{ value: 'repair', label: 'Repair — a fault to fix' }, { value: 'install', label: 'Install — a new customer' }]} />
           </Field>
           <Field label="Description">
             <Textarea value={f.description} onChange={set('description')} rows={4} placeholder="What did the client report?" />

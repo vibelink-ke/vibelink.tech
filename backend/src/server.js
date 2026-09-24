@@ -27,7 +27,8 @@ import * as eotm from './eotm.js';
 import { settleStaffCommissionsForPayout } from './payments/apply.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
-import { requirePermission, loadPermissions, savePermissions, PERMISSION_META, ROLES } from './permissions.js';
+import { requirePermission, hasPermission, loadPermissions, savePermissions, PERMISSION_META, ROLES } from './permissions.js';
+import { registerField } from './field.js';
 import axios from 'axios';
 
 /**
@@ -95,6 +96,8 @@ app.use((req, res, next) => {
 // this narrower parser must be mounted before the global one below, since
 // whichever json parser consumes the request stream first wins.
 app.use('/api/expenses/:id/receipt', express.json({ limit: '8mb' }));
+// A job photo arrives as a base64 data URL (the app shrinks it first); same reasoning as the receipt above.
+app.use('/api/field/jobs/:id/photos', express.json({ limit: '8mb' }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use('/api', auditTap);
 
@@ -2423,6 +2426,46 @@ app.use((req, res, next) => {
 });
 
 /**
+ * A technician never sees money. Enforced here, whatever the permission matrix says: the routes that
+ * carry payments, invoices, payroll and revenue are refused outright, and every other answer has its
+ * money fields (prices, balances, amounts) removed before it leaves. The field app's own routes
+ * (/api/field) return service facts only; this is the backstop for everything else a technician's
+ * session could reach.
+ */
+const TECH_MONEY_KEYS = new Set([
+  'price', 'plan_price', 'wallet_balance', 'net_balance', 'credit', 'custom_price', 'amount',
+  'mpesa_ref', 'pay_provider', 'revenue', 'mrr', 'collected', 'balance',
+]);
+const TECH_BLOCKED = ['/api/payments', '/api/payment-methods', '/api/invoices', '/api/payroll', '/api/expenses',
+  '/api/suppliers', '/api/bills', '/api/dashboard/collections', '/api/analytics', '/api/settlements',
+  '/api/hotspot/revenue', '/api/referral-commissions'];
+function stripMoney(v) {
+  if (Array.isArray(v)) return v.map(stripMoney);
+  if (v && typeof v === 'object' && !(v instanceof Date) && !Buffer.isBuffer(v)) {
+    const out = {};
+    for (const [k, val] of Object.entries(v)) if (!TECH_MONEY_KEYS.has(k)) out[k] = stripMoney(val);
+    return out;
+  }
+  return v;
+}
+app.use('/api', (req, res, next) => {
+  if (req.session?.role !== 'technician' || req.session.is_super_admin) return next();
+  const path = req.originalUrl.split('?')[0];
+  if (TECH_BLOCKED.some((p) => path === p || path.startsWith(p + '/')) || path.includes('org-balance')) {
+    return res.status(403).json({ error: 'Not available to a technician login.' });
+  }
+  const send = res.json.bind(res);
+  res.json = (body) => send(stripMoney(body));
+  next();
+});
+
+// The field technician app's API (field.js). After the sign-in guard above: every route needs a session.
+registerField(app, {
+  pool, requirePermission, hasPermission, wrap,
+  radius: { disconnectSubscriberSession: async (...a) => (await import('./radius.js')).disconnectSubscriberSession(...a) },
+});
+
+/**
  * Gate a route to specific staff roles, on top of the plain "signed in" check
  * above. Platform owner (`is_super_admin`) always passes — they already have
  * unrestricted cross-tenant access elsewhere.
@@ -3819,6 +3862,7 @@ app.get('/api/tickets', requirePermission('tickets.view'), async (req, res) => {
 });
 app.post('/api/tickets', async (req, res) => {
   const { subject, subscriberId, priority = 'medium' } = req.body;
+  const kind = req.body?.kind === 'install' ? 'install' : 'repair';
 
   /**
    * sla_policies has always been fully configurable from Settings — name,
@@ -3836,10 +3880,10 @@ app.post('/api/tickets', async (req, res) => {
     [req.tenant.id, priority]);
 
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at)
-     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, $4, $5, $6) returning *`,
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at, kind)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, $4, $5, $6, $7) returning *`,
     [req.tenant.id, subject, subscriberId ?? null, priority,
-     policy?.id ?? null, policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null]);
+     policy?.id ?? null, policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null, kind]);
   res.json(t);
 });
 
@@ -11915,9 +11959,18 @@ app.delete('/api/staff/:id', requirePermission('staff.delete'), wrap(async (req,
 
 // ── tickets and leads: status changes ─────────────
 app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req, res) => {
-  const allowed = ['status', 'priority', 'assigned_to', 'subject', 'description', 'due_at'];
+  const allowed = ['status', 'priority', 'assigned_to', 'subject', 'description', 'due_at', 'kind'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+  // Closing a job needs a photo of the finished work, taken in the field app, unless this role works from the office.
+  if (sets.includes('status') && req.body.status === 'resolved') {
+    const skip = req.session?.is_super_admin || await hasPermission(req.tenant.id, req.session?.role, 'tickets.close_without_photo');
+    if (!skip) {
+      const { rows: [after] } = await pool.query(
+        "select 1 from ticket_photos where tenant_id=$1 and ticket_id=$2 and kind='after' limit 1", [req.tenant.id, req.params.id]);
+      if (!after) return res.status(409).json({ error: 'Closing a job needs an "after" photo taken in the field app.' });
+    }
+  }
   // Pushing the deadline out (or reopening a ticket) after checkSlaBreaches
   // already fired should let a genuinely new breach notify again, rather
   // than staying silently suppressed by a flag from before the edit.

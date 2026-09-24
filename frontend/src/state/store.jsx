@@ -226,6 +226,9 @@ export function StoreProvider({ children }) {
   const reload = useCallback(async ({ quiet = false } = {}) => {
     // Locked out: every one of these would be refused, so do not ask.
     if (session?.licenceExpired) { setLoading(false); return; }
+    // A technician uses the field app, which fetches its own (money-free) data; the office collections
+    // are neither needed nor allowed.
+    if (session?.role === 'technician' && !session.superAdmin) { setLoading(false); return; }
     if (!quiet) setLoading(true);
     // `tenants` is /api/tenants, superAdminOnly on the backend (see
     // server.js) — every tenant's own dashboard fetched it anyway, on every
@@ -408,6 +411,8 @@ export function StoreProvider({ children }) {
    */
   useEffect(() => {
     if (!session || session.licenceExpired) return undefined;
+    // A technician's phone is in a pocket for hours between jobs; the phone's own lock is the protection.
+    if (session.role === 'technician' && !session.superAdmin) return undefined;
 
     const LIMIT = 6 * 60 * 1000;
     const KEY = 'vibelink:last-active';
@@ -464,6 +469,7 @@ export function StoreProvider({ children }) {
    */
   useEffect(() => {
     if (!session || session.licenceExpired) return undefined;
+    if (session.role === 'technician' && !session.superAdmin) return undefined;
     let stop = false;
 
     const tick = async () => {

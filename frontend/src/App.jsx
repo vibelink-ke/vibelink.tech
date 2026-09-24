@@ -72,6 +72,8 @@ const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
 const Expenses = lazy(() => import('./screens/Expenses'));
 const Hr = lazy(() => import('./screens/Hr'));
+const FieldApp = lazy(() => import('./screens/field/FieldApp'));
+const FieldTeam = lazy(() => import('./screens/FieldTeam'));
 
 export default function App() {
   const { dark, session, signIn, reload } = useStore();
@@ -269,6 +271,16 @@ export default function App() {
   // (The platform owner is never locked out.)
   if (session.licenceExpired && !session.superAdmin) return <LicenceLocked />;
 
+  // The technician app. A technician login gets nothing else: no office pages, and none of their data
+  // is loaded. Anyone else who may use it (the owner, checking on it) reaches it at /field.
+  const technicianOnly = session.role === 'technician' && !session.superAdmin;
+  if (technicianOnly || (pathname.startsWith('/field') && !pathname.startsWith('/field-team') && session.perms?.['field.use'])) {
+    if (technicianOnly && !session.perms?.['field.use']) {
+      return <div style={{ padding: 24, fontFamily: font.sans }}>Your login is not set up for the field app. Ask the office to turn on “Use the technician app” for your role.</div>;
+    }
+    return <Suspense fallback={null}><FieldApp /></Suspense>;
+  }
+
   return (
     // `om-dark` is the mockup's rootClass: it inverts the whole tree, and
     // global.css inverts media back so photos stay right side up.
@@ -347,6 +359,7 @@ export default function App() {
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/saas-revenue" element={<SaasRevenue />} />
 
+            <Route path="/field-team" element={<FieldTeam />} />
             <Route path="/staff" element={<Staff />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/licence" element={<Licence />} />
