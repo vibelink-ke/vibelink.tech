@@ -13761,7 +13761,14 @@ app.get('/api/tickets/:id', requirePermission('tickets.view'), wrap(async (req, 
   // read back here as if it were this tenant's own.
   const { rows: notes } = await pool.query(
     'select * from ticket_notes where tenant_id=$1 and ticket_id=$2 order by at', [req.tenant.id, req.params.id]);
-  res.json({ ...t, notes });
+  // What the technician did in the field app: photos (the images are served by /api/field/photos/:id) and the
+  // equipment recorded, with any the office has to check.
+  const { rows: photos } = await pool.query(
+    'select id, kind, taken_at from ticket_photos where tenant_id=$1 and ticket_id=$2 order by taken_at', [req.tenant.id, req.params.id]);
+  const { rows: equipment } = await pool.query(
+    `select id, name, category, serial_number, mac_address, quantity, deducted, needs_review, review_reason, created_at
+       from job_equipment where tenant_id=$1 and ticket_id=$2 order by created_at`, [req.tenant.id, req.params.id]);
+  res.json({ ...t, notes, photos, equipment });
 }));
 
 app.post('/api/tickets/:id/notes', wrap(async (req, res) => {

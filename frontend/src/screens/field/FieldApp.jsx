@@ -7,7 +7,8 @@ import Toast from '../../app/Toast';
 import FieldJob from './FieldJob';
 import { FieldContext, useField } from './fieldContext';
 import { FieldCustomers, FieldCustomer } from './FieldCustomers';
-import { Btn, Chip, Dot, distanceKm, mapsLink, page, panel, prettyKm, timeAgo } from './fieldKit';
+import { Btn, Chip, Dot, distanceKm, page, panel, prettyKm, timeAgo } from './fieldKit';
+import { cachedGet, queueRemove, retryItem, useQueue } from './offline';
 
 /**
  * The technician app: the same site, installed on a phone (its own manifest, /manifest-field.json),
@@ -93,6 +94,8 @@ export default function FieldApp() {
           <Chip tone={shiftActive ? 'green' : 'neutral'}>{shiftActive ? 'On shift' : 'Off shift'}</Chip>
         </header>
 
+        <SyncBanner />
+
         <Routes>
           <Route path="/field" element={<Jobs />} />
           <Route path="/field/job/:id" element={<FieldJob />} />
@@ -124,15 +127,22 @@ function Jobs() {
   const [jobs, setJobs] = useState(null);
   const [error, setError] = useState('');
 
-  const load = useCallback(() => api.fieldJobs().then((j) => { setJobs(j); setError(''); }).catch((e) => setError(e.message)), []);
+  const [stale, setStale] = useState(false);
+  const { items: queued } = useQueue();
+  const load = useCallback(() => cachedGet('jobs', () => api.fieldJobs())
+    .then(({ value, stale: s }) => { setJobs(value); setStale(s); setError(''); })
+    .catch((e) => setError(e.message)), []);
   useEffect(() => {
     load();
     const id = setInterval(() => { if (!document.hidden) load(); }, 45000);
     return () => clearInterval(id);
   }, [load]);
 
-  const mine = (jobs ?? []).filter((j) => j.mine);
-  const open = (jobs ?? []).filter((j) => !j.mine);
+  // A job whose closing is waiting to send is done as far as this phone is concerned.
+  const closing = new Set(queued.filter((q) => q.type === 'close').map((q) => q.payload.jobId));
+  const live = (jobs ?? []).filter((j) => !closing.has(j.id));
+  const mine = live.filter((j) => j.mine);
+  const open = live.filter((j) => !j.mine);
 
   const card = (j) => {
     const km = distanceKm(pos, j.customer_lat != null ? { lat: Number(j.customer_lat), lng: Number(j.customer_lng) } : null);
@@ -158,6 +168,7 @@ function Jobs() {
   return (
     <div style={page}>
       <h2 style={{ margin: 0, fontSize: 20 }}>My jobs</h2>
+      {stale && <div style={{ ...panel, background: '#fbf0d9', borderColor: '#e9d29a', color: color.amberInk, fontSize: 13.5 }}>No signal — showing the jobs last saved on this phone.</div>}
       {error && <div style={{ ...panel, color: color.rust }}>{error}</div>}
       {jobs === null && !error && <div style={{ color: color.muted }}>Loading…</div>}
       {jobs && !mine.length && <div style={{ ...panel, color: color.muted }}>Nothing is assigned to you right now.</div>}
@@ -219,8 +230,49 @@ function Me() {
           In Chrome, open the menu and choose <b>Add to Home screen</b>. It then opens like any other app.
         </div>
       </div>
+      <WaitingList />
       {me?.role !== 'technician' && <Btn tone="quiet" href="/">Back to the office</Btn>}
       <Btn tone="quiet" onClick={() => store.signOut()}>Sign out</Btn>
+    </div>
+  );
+}
+
+/** Offline, or work waiting to be sent: always visible, so nobody wonders whether it went through. */
+function SyncBanner() {
+  const { online, waiting, failed } = useQueue();
+  if (online && !waiting && !failed.length) return null;
+  const text = !online
+    ? `No signal — ${waiting ? `${waiting} item${waiting === 1 ? '' : 's'} waiting to send` : 'what you do is saved on the phone and sent later'}`
+    : failed.length ? `${failed.length} item${failed.length === 1 ? '' : 's'} could not be sent — see Me` : `Sending ${waiting} item${waiting === 1 ? '' : 's'}…`;
+  return (
+    <div style={{ background: failed.length ? '#f9e4df' : '#fbf0d9', color: failed.length ? color.rust : color.amberInk, fontSize: 13, fontWeight: 600, padding: '8px 14px', textAlign: 'center' }}>
+      {text}
+    </div>
+  );
+}
+
+const LABEL = { start: 'Start job', note: 'Note', photo: 'Photo', equipment: 'Equipment', close: 'Close job' };
+
+function WaitingList() {
+  const { items, refresh } = useQueue();
+  if (!items.length) return null;
+  return (
+    <div style={panel}>
+      <div style={{ fontWeight: 600 }}>Waiting to send</div>
+      {items.map((i) => (
+        <div key={i.id} style={{ fontSize: 13.5, display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
+          <span>
+            {LABEL[i.type] ?? i.type} · {timeAgo(new Date(i.at).toISOString())}
+            {i.error && <div style={{ color: color.rust, fontSize: 12.5 }}>Refused: {i.error}</div>}
+          </span>
+          {i.error && (
+            <span style={{ display: 'flex', gap: 10, whiteSpace: 'nowrap' }}>
+              <span onClick={() => retryItem(i).then(refresh)} style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}>Retry</span>
+              <span onClick={() => { if (window.confirm('Throw this away? It will not be sent.')) queueRemove(i.id).then(refresh); }} style={{ color: color.rust, fontWeight: 600, cursor: 'pointer' }}>Discard</span>
+            </span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

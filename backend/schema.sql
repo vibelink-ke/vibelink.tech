@@ -3237,3 +3237,31 @@ create table if not exists staff_location_log (
   at         timestamptz not null default now()
 );
 create index if not exists staff_location_log_idx on staff_location_log (staff_id, at desc);
+
+-- ─────────────── equipment recorded on a field job ───────────────
+-- A photo of a device's serial-number label is a photo like any other, of its own kind.
+alter table ticket_photos drop constraint if exists ticket_photos_kind_check;
+alter table ticket_photos add constraint ticket_photos_kind_check check (kind in ('before','after','other','serial'));
+
+-- What a technician installed or swapped on a job. A serialized device is matched to the inventory
+-- item it is (by serial or MAC) and moved onto the customer; a counted item (cable, connectors) is
+-- deducted from stock. Nothing matched, or a device already in use elsewhere, is flagged for the office.
+create table if not exists job_equipment (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  ticket_id     uuid not null references tickets on delete cascade,
+  staff_id      uuid references staff on delete set null,
+  item_id       uuid references inventory_items on delete set null,
+  name          text,
+  category      text,
+  serial_number text,
+  mac_address   text,
+  quantity      integer not null default 1 check (quantity >= 1),
+  photo_id      uuid references ticket_photos on delete set null,
+  deducted      boolean not null default false,
+  needs_review  boolean not null default false,
+  review_reason text,
+  note          text,
+  created_at    timestamptz not null default now()
+);
+create index if not exists job_equipment_ticket_idx on job_equipment (ticket_id, created_at);

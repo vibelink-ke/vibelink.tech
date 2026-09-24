@@ -17,7 +17,7 @@ import crypto from 'node:crypto';
 
 const PHOTO_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PHOTO_MAX_BYTES = 4 * 1024 * 1024;   // the app shrinks photos well below this before sending
-const KINDS = new Set(['before', 'after', 'other']);
+const KINDS = new Set(['before', 'after', 'other']);   // 'serial' is only ever made by recording equipment
 
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
 const validLat = (v) => Number.isFinite(v) && v >= -90 && v <= 90;
@@ -154,7 +154,10 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     const { rows: [creds] } = await pool.query(
       `select s.pppoe_user, s.pppoe_pass from tickets t join subscribers s on s.id = t.subscriber_id
         where t.tenant_id=$1 and t.id=$2`, [req.tenant.id, job.id]);
-    res.json({ ...j, mine: j.assigned_to === me(req), notes, photos, pppoe_user: creds?.pppoe_user ?? null, pppoe_pass: creds?.pppoe_pass ?? null });
+    const { rows: equipment } = await pool.query(
+      `select id, name, category, serial_number, mac_address, quantity, deducted, needs_review, review_reason, created_at
+         from job_equipment where tenant_id=$1 and ticket_id=$2 order by created_at`, [req.tenant.id, job.id]);
+    res.json({ ...j, mine: j.assigned_to === me(req), notes, photos, equipment, pppoe_user: creds?.pppoe_user ?? null, pppoe_pass: creds?.pppoe_pass ?? null });
   }));
 
   // Take an unassigned job.
@@ -238,6 +241,14 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       if (!after) return res.status(409).json({ error: 'Take an "after" photo of the finished work before closing this job.' });
     }
 
+    // An install has to say what went in: a device recorded with its serial photo, or that none was used.
+    if (job.kind === 'install' && !skip) {
+      const { rows: [eq] } = await pool.query('select 1 from job_equipment where tenant_id=$1 and ticket_id=$2 limit 1', [req.tenant.id, job.id]);
+      if (!eq && !req.body?.noEquipment) {
+        return res.status(409).json({ error: 'Record the equipment you installed (a photo of its serial number), or say that none was used.', needsEquipment: true });
+      }
+    }
+
     // An install also leaves the customer's exact spot on the map.
     const lat = num(req.body?.lat); const lng = num(req.body?.lng);
     if (job.subscriber_id && validLat(lat) && validLng(lng) && req.body?.saveLocation) {
@@ -313,6 +324,203 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     if (!c?.pppoe_user || !c.host) return res.status(409).json({ error: 'This customer has no router or PPPoE login on file.' });
     await radius.disconnectSubscriberSession(pool, c.host, c.secret, c.pppoe_user);
     res.json({ ok: true });
+  }));
+
+  // ── equipment used on a job ────────────────────────────────────────────
+  // A MAC as twelve hex digits, however it was written (AA:BB:.., aa-bb-.., aabb..), or null.
+  const macOf = (v) => { const h = String(v ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase(); return h.length === 12 ? h : null; };
+  const colonMac = (h) => h.match(/.{2}/g).join(':');
+  const cleanSerial = (v) => { const t = String(v ?? '').trim().replace(/\s+/g, ''); return t.length >= 4 ? t.slice(0, 64) : null; };
+
+  /** Which customers this device (by MAC or serial) is already tied to, and how we know. */
+  async function deviceUsage(tenantId, { mac, serial }) {
+    const out = [];
+    const add = (rows, via) => rows.forEach((r) => out.push({ customerId: r.id, name: r.name, account: r.account_code, via, at: r.at ?? null }));
+    if (mac) {
+      const { rows: sess } = await pool.query(
+        `select s.id, s.name, s.account_code, max(a.acctstarttime) as at
+           from radacct a join subscribers s on s.pppoe_user = a.username and s.tenant_id = $1
+          where upper(regexp_replace(coalesce(a.callingstationid, ''), '[^0-9A-Fa-f]', '', 'g')) = $2
+            and a.acctstarttime > now() - interval '90 days'
+          group by s.id order by max(a.acctstarttime) desc limit 3`, [tenantId, mac]);
+      add(sess, 'has dialled in from this device');
+      const { rows: locked } = await pool.query(
+        `select id, name, account_code from subscribers
+          where tenant_id=$1 and upper(regexp_replace(coalesce(locked_mac::text, ''), '[^0-9A-Fa-f]', '', 'g')) = $2 limit 3`, [tenantId, mac]);
+      add(locked, 'has their router locked to this device');
+    }
+    if (serial) {
+      const { rows: onu } = await pool.query(
+        `select s.id, s.name, s.account_code from smartolt_onus o join subscribers s on s.id = o.subscriber_id
+          where o.tenant_id=$1 and lower(o.sn) = lower($2) limit 3`, [tenantId, serial]).catch(() => ({ rows: [] }));
+      add(onu, 'is linked to this ONU in SmartOLT');
+      const { rows: bySn } = await pool.query(
+        'select id, name, account_code from subscribers where tenant_id=$1 and lower(onu_sn) = lower($2) limit 3', [tenantId, serial]);
+      add(bySn, 'has this ONU serial on their account');
+    }
+    const { rows: inv } = await pool.query(
+      `select s.id, s.name, s.account_code from inventory_items i join subscribers s on s.id = i.subscriber_id
+        where i.tenant_id=$1 and i.status='installed'
+          and (($2::text is not null and upper(regexp_replace(coalesce(i.mac_address, ''), '[^0-9A-Fa-f]', '', 'g')) = $2)
+            or ($3::text is not null and lower(btrim(i.serial_number)) = lower($3))) limit 3`, [tenantId, mac ?? null, serial ?? null]);
+    add(inv, 'has this device installed (inventory)');
+    const seen = new Set();
+    return out.filter((u) => { const k = `${u.customerId}|${u.via}`; if (seen.has(k)) return false; seen.add(k); return true; });
+  }
+
+  /** The inventory item a scanned serial or MAC belongs to; the technician's own van stock first. */
+  async function findItem(tenantId, { id, mac, serial, staffId }) {
+    if (id) {
+      const { rows: [it] } = await pool.query('select * from inventory_items where tenant_id=$1 and id=$2', [tenantId, id]);
+      return it ?? null;
+    }
+    if (!mac && !serial) return null;
+    const { rows: [it] } = await pool.query(
+      `select * from inventory_items
+        where tenant_id=$1
+          and (($2::text is not null and upper(regexp_replace(coalesce(mac_address, ''), '[^0-9A-Fa-f]', '', 'g')) = $2)
+            or ($3::text is not null and lower(btrim(serial_number)) = lower($3)))
+        order by (assigned_staff_id = $4) desc nulls last, (status = 'in_stock') desc, created_at desc
+        limit 1`, [tenantId, mac ?? null, serial ?? null, staffId]);
+    return it ?? null;
+  }
+
+  const itemView = (it) => it && ({
+    id: it.id, name: it.name, category: it.category, tracking: it.tracking, status: it.status, location: it.location,
+    serial: it.serial_number, mac: it.mac_address, quantity: it.quantity, unit: it.unit,
+    inMyVan: it.assigned_staff_id != null,
+  });
+
+  // What the technician is carrying, and the counted stock they can draw on.
+  app.get('/api/field/inventory', use, wrap(async (req, res) => {
+    const { rows } = await pool.query(
+      `select * from inventory_items
+        where tenant_id=$1 and status = 'in_stock'
+          and ((tracking = 'serialized' and location = 'van' and assigned_staff_id = $2)
+            or (tracking = 'bulk' and quantity > 0))
+        order by tracking, name limit 200`, [req.tenant.id, me(req)]);
+    res.json(rows.map(itemView));
+  }));
+
+  // "What is this?" for a serial or MAC just read off a label: the inventory item, and who already uses the device.
+  app.post('/api/field/equipment/lookup', use, wrap(async (req, res) => {
+    const mac = macOf(req.body?.mac); const serial = cleanSerial(req.body?.serial);
+    if (!mac && !serial) return res.status(400).json({ error: 'Give a serial number or a MAC address.' });
+    const item = await findItem(req.tenant.id, { mac, serial, staffId: me(req) });
+    const usage = await deviceUsage(req.tenant.id, { mac: mac ?? macOf(item?.mac_address), serial: serial ?? item?.serial_number ?? null });
+    const jobCustomer = req.body?.jobId
+      ? (await pool.query('select subscriber_id from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.body.jobId])).rows[0]?.subscriber_id
+      : null;
+    const others = usage.filter((u) => u.customerId !== jobCustomer);
+    res.json({
+      item: itemView(item),
+      usage,
+      conflict: others.length > 0 || (item?.status === 'installed' && item.subscriber_id && item.subscriber_id !== jobCustomer),
+    });
+  }));
+
+  /**
+   * Record equipment on a job.
+   *
+   * A serialized device (router, ONU, CPE, anything with an identity) needs a photo of its serial
+   * label; the serial and MAC come from that photo (read in the app, confirmed by the technician),
+   * are matched to the inventory item, and the item is moved onto the customer: no longer in stock,
+   * tied to them, the move logged. A counted item (cable, connectors) is deducted by quantity, with
+   * no photo. A device the inventory does not know, or one already installed for someone else, is
+   * still recorded, but flagged for the office to check rather than silently guessed at.
+   */
+  app.post('/api/field/jobs/:id/equipment', use, wrap(async (req, res) => {
+    const job = await jobFor(req, res, req.params.id);
+    if (!job) return;
+    if (job.status === 'resolved') return res.status(409).json({ error: 'This job is already closed.' });
+
+    const body = req.body ?? {};
+    const mac = macOf(body.mac); const serial = cleanSerial(body.serial);
+    const item = await findItem(req.tenant.id, { id: body.inventoryItemId, mac, serial, staffId: me(req) });
+    const counted = item?.tracking === 'bulk';
+    const qty = counted ? Math.max(1, Math.trunc(Number(body.quantity)) || 1) : 1;
+
+    let photo = null;
+    if (!counted) {
+      photo = parsePhoto(body.photo);
+      if (!photo) return res.status(400).json({ error: 'Take a photo of the serial-number label on the device.' });
+      if (!mac && !serial && !(item?.serial_number || item?.mac_address)) {
+        return res.status(400).json({ error: 'Type or scan the serial number or MAC address from the label.' });
+      }
+    } else if (qty > item.quantity) {
+      return res.status(409).json({ error: `Only ${item.quantity}${item.unit ? ' ' + item.unit : ''} of that in stock.` });
+    }
+
+    // Where the device is already known to be, other than on this customer.
+    const useMac = mac ?? macOf(item?.mac_address); const useSerial = serial ?? item?.serial_number ?? null;
+    const usage = counted ? [] : await deviceUsage(req.tenant.id, { mac: useMac, serial: useSerial });
+    const others = usage.filter((u) => u.customerId !== job.subscriber_id);
+    const elsewhere = !counted && item?.status === 'installed' && item.subscriber_id && item.subscriber_id !== job.subscriber_id;
+    if ((others.length || elsewhere) && !body.acknowledgeConflict) {
+      return res.status(409).json({ error: 'This device is already in use by another customer.', conflict: true, usage: others });
+    }
+
+    const reasons = [];
+    if (!counted && !item) reasons.push('Not in inventory: nothing was deducted');
+    if (others.length) reasons.push(`Already used by ${others.map((o) => `${o.name} (${o.account})`).join(', ')}`);
+    if (elsewhere) reasons.push('Was recorded as installed for a different customer');
+    if (!counted && item && item.status !== 'in_stock' && item.status !== 'installed') reasons.push(`Was marked ${item.status}`);
+
+    const c = await pool.connect();
+    try {
+      await c.query('begin');
+      let photoId = null;
+      if (photo) {
+        const { rows: [p] } = await c.query(
+          `insert into ticket_photos (tenant_id, ticket_id, staff_id, kind, mime, data) values ($1,$2,$3,'serial',$4,$5) returning id`,
+          [req.tenant.id, job.id, me(req), photo.mime, photo.buf]);
+        photoId = p.id;
+      }
+      let deducted = false;
+      if (item && counted) {
+        await c.query('update inventory_items set quantity = quantity - $2, updated_at = now() where id=$1', [item.id, qty]);
+        await c.query(
+          `insert into inventory_movements (tenant_id, item_id, action, from_location, to_location, staff_id, subscriber_id, quantity, note)
+           values ($1,$2,'installed',$3,'premises',$4,$5,$6,$7)`,
+          [req.tenant.id, item.id, item.location, me(req), job.subscriber_id, qty, `Used on job ${job.number}`]);
+        deducted = true;
+      } else if (item) {
+        // Fill in whichever identifier the record lacked, from the label. A clash with another record is left alone.
+        const macText = useMac ? colonMac(useMac) : null;
+        // A savepoint, because a clash on the MAC would otherwise abort the whole transaction.
+        await c.query('savepoint fill');
+        try {
+          await c.query(
+            `update inventory_items set location='premises', status='installed', subscriber_id=$2, assigned_staff_id=null,
+                    mac_address = coalesce(mac_address, $3), serial_number = coalesce(serial_number, $4), updated_at = now()
+              where id=$1`, [item.id, job.subscriber_id, macText, useSerial]);
+          await c.query('release savepoint fill');
+        } catch (e) {
+          if (e.code !== '23505') throw e;
+          await c.query('rollback to savepoint fill');
+          await c.query(`update inventory_items set location='premises', status='installed', subscriber_id=$2, assigned_staff_id=null, updated_at=now() where id=$1`, [item.id, job.subscriber_id]);
+        }
+        await c.query(
+          `insert into inventory_movements (tenant_id, item_id, action, from_location, to_location, staff_id, subscriber_id, quantity, note)
+           values ($1,$2,'installed',$3,'premises',$4,$5,1,$6)`,
+          [req.tenant.id, item.id, item.location, me(req), job.subscriber_id, `Installed on job ${job.number}`]);
+        deducted = true;
+      }
+      const { rows: [row] } = await c.query(
+        `insert into job_equipment (tenant_id, ticket_id, staff_id, item_id, name, category, serial_number, mac_address, quantity,
+                                     photo_id, deducted, needs_review, review_reason, note)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning id`,
+        [req.tenant.id, job.id, me(req), item?.id ?? null, item?.name ?? (String(body.name ?? '').trim() || null), item?.category ?? (String(body.category ?? '').trim() || null),
+         useSerial, useMac ? colonMac(useMac) : null, qty, photoId, deducted, reasons.length > 0, reasons.join('; ') || null,
+         String(body.note ?? '').trim().slice(0, 500) || null]);
+      await c.query('commit');
+      res.json({ ok: true, id: row.id, matched: !!item, deducted, needsReview: reasons.length > 0, reasons });
+    } catch (e) {
+      await c.query('rollback').catch(() => {});
+      throw e;
+    } finally {
+      c.release();
+    }
   }));
 
   // ── the owner's view of the team ───────────────────────────────────────

@@ -2,7 +2,7 @@
 // name is how an installed PWA keeps serving yesterday's app shell forever,
 // since the browser only checks for a new service worker file, never
 // re-evaluates what an unchanged one already cached.
-const CACHE = 'vibelink-shell-v1';
+const CACHE = 'vibelink-shell-v2';
 
 // The app shell only — never API responses. Caching a GET to /api/... would
 // mean a customer's own billing data survives in a service worker cache
@@ -42,7 +42,15 @@ self.addEventListener('fetch', (event) => {
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/hotspot/')) return;
 
   event.respondWith(
-    fetch(event.request).catch(() => caches.match(event.request).then((r) => r ?? caches.match('/')))
+    fetch(event.request).then((res) => {
+      // Keep this app's own files as they load (the page and its hashed scripts and styles), so the
+      // field app still opens with no signal. Only successful, same-origin, non-API answers.
+      if (res.ok && (url.pathname === '/' || url.pathname.startsWith('/assets/') || url.pathname === '/field' || url.pathname.startsWith('/field/'))) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(url.pathname.startsWith('/field') ? '/' : event.request, copy)).catch(() => {});
+      }
+      return res;
+    }).catch(() => caches.match(event.request).then((r) => r ?? caches.match('/')))
   );
 });
 

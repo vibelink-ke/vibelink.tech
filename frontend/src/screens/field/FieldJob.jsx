@@ -5,6 +5,8 @@ import { api } from '../../api/client';
 import { useStore } from '../../state/store';
 import { useField } from './fieldContext';
 import { Btn, Chip, Dot, getPosition, mapsLink, page, panel, resizePhoto, timeAgo } from './fieldKit';
+import AddEquipment from './FieldEquipment';
+import { cachedGet, doOrQueue, useQueue } from './offline';
 
 const KINDS = [
   { kind: 'before', label: 'Before' },
@@ -26,8 +28,15 @@ export default function FieldJob() {
   const [saveLoc, setSaveLoc] = useState(true);
   const [showPass, setShowPass] = useState(false);
   const fileInputs = useRef({});
+  const [stale, setStale] = useState(false);
+  const [addingEquipment, setAddingEquipment] = useState(false);
+  const [noEquipment, setNoEquipment] = useState(false);
+  const { items: queued } = useQueue();
 
-  const load = useCallback(() => api.fieldJob(id).then((j) => { setJob(j); setError(''); }).catch((e) => setError(e.message)), [id]);
+  // The last copy seen when there is no signal.
+  const load = useCallback(() => cachedGet(`job:${id}`, () => api.fieldJob(id))
+    .then(({ value, stale: s }) => { setJob(value); setStale(s); setError(''); })
+    .catch((e) => setError(e.message)), [id]);
   useEffect(() => { load(); }, [load]);
   // The team map shows which job this technician is at.
   useEffect(() => { setTicketId(id); return () => setTicketId(null); }, [id, setTicketId]);
@@ -45,8 +54,8 @@ export default function FieldJob() {
     try {
       const dataUrl = await resizePhoto(file);
       const p = await getPosition().catch(() => null);
-      await api.fieldPhoto(id, { dataUrl, kind, lat: p?.lat, lng: p?.lng });
-      store.toast('Photo saved');
+      const r = await doOrQueue('photo', { jobId: id, body: { dataUrl, kind, lat: p?.lat, lng: p?.lng } });
+      store.toast(r.queued ? 'Photo kept on the phone — it sends when the signal returns' : 'Photo saved');
       await load();
     } catch (e) {
       store.toast(`Could not save the photo: ${e.message}`);
@@ -59,12 +68,13 @@ export default function FieldJob() {
     setBusy('close');
     try {
       const p = await getPosition().catch(() => null);
-      await api.fieldClose(id, {
+      const r = await doOrQueue('close', { jobId: id, body: {
         note: closeNote.trim() || undefined,
         lat: p?.lat, lng: p?.lng,
         saveLocation: !!(p && saveLoc),
-      });
-      store.toast('Job closed');
+        noEquipment: noEquipment || undefined,
+      } });
+      store.toast(r.queued ? 'Saved on the phone — the job closes when the signal returns' : 'Job closed');
       loadMe();
       navigate('/field', { replace: true });
     } catch (e) {
@@ -77,14 +87,20 @@ export default function FieldJob() {
   if (!job) return <div style={page}><div style={{ color: color.muted }}>Loading…</div></div>;
 
   const install = job.kind === 'install';
-  const afterCount = job.photos.filter((p) => p.kind === 'after').length;
-  const canClose = afterCount > 0;
+  const waitingHere = queued.filter((q) => q.payload?.jobId === id);
+  const waitingPhotos = waitingHere.filter((q) => q.type === 'photo');
+  const waitingEquip = waitingHere.filter((q) => q.type === 'equipment');
+  const afterCount = job.photos.filter((p) => p.kind === 'after').length + waitingPhotos.filter((q) => q.payload.body.kind === 'after').length;
+  const equipCount = (job.equipment?.length ?? 0) + waitingEquip.length;
+  const needsEquipment = install && equipCount === 0;
+  const canClose = afterCount > 0 && (!needsEquipment || noEquipment);
   const nav = mapsLink(job.customer_lat != null ? Number(job.customer_lat) : null, job.customer_lng != null ? Number(job.customer_lng) : null, job.customer_location);
   const resolved = job.status === 'resolved';
 
   return (
     <div style={page}>
       <button onClick={() => navigate('/field')} style={{ background: 'none', border: 'none', color: color.green, fontWeight: 600, fontSize: 14, textAlign: 'left', padding: 0, cursor: 'pointer' }}>← Jobs</button>
+      {stale && <div style={{ ...panel, background: '#fbf0d9', borderColor: '#e9d29a', color: color.amberInk, fontSize: 13.5 }}>No signal — showing what was saved on this phone. Anything you do is kept and sent later.</div>}
 
       <div style={panel}>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -99,7 +115,7 @@ export default function FieldJob() {
           <Btn busy={busy === 'claim'} onClick={() => run('claim', () => api.fieldClaim(id), 'The job is yours')}>Take this job</Btn>
         )}
         {job.mine && job.status === 'open' && (
-          <Btn busy={busy === 'start'} onClick={() => run('start', () => api.fieldStart(id), 'Job started')}>I have arrived — start</Btn>
+          <Btn busy={busy === 'start'} onClick={() => run('start', async () => { const r = await doOrQueue('start', { jobId: id }); if (r.queued) store.toast('Saved on the phone — sent when the signal returns'); }, 'Job started')}>I have arrived — start</Btn>
         )}
       </div>
 
@@ -144,8 +160,14 @@ export default function FieldJob() {
             </span>
           ))}
         </div>
-        {job.photos.length > 0 && (
+        {(job.photos.length > 0 || waitingPhotos.length > 0) && (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
+            {waitingPhotos.map((q) => (
+              <div key={q.id} style={{ position: 'relative' }}>
+                <img src={q.payload.body.dataUrl} alt={q.payload.body.kind} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8, display: 'block', opacity: 0.7 }} />
+                <span style={{ position: 'absolute', left: 4, bottom: 4 }}><Chip tone="amber">waiting to send</Chip></span>
+              </div>
+            ))}
             {job.photos.map((p) => (
               <a key={p.id} href={`/api/field/photos/${p.id}`} target="_blank" rel="noreferrer" style={{ position: 'relative' }}>
                 <img src={`/api/field/photos/${p.id}`} alt={p.kind} loading="lazy"
@@ -158,6 +180,26 @@ export default function FieldJob() {
       </div>
 
       <div style={panel}>
+        <div style={{ fontWeight: 600 }}>Equipment</div>
+        {equipCount === 0 && <div style={{ fontSize: 13.5, color: '#4a524c' }}>{install ? 'Record the router, ONU or CPE you install (photo of its serial number), and any cable used.' : 'Record any device you replace or fit, and cable used.'}</div>}
+        {(job.equipment ?? []).map((e) => (
+          <div key={e.id} style={{ fontSize: 13.5, borderLeft: `3px solid ${e.needs_review ? color.amberInk : color.green}`, paddingLeft: 10 }}>
+            <div><b>{e.name ?? e.category ?? 'Device'}</b>{e.quantity > 1 ? ` × ${e.quantity}` : ''}</div>
+            {(e.serial_number || e.mac_address) && <div style={{ fontFamily: 'monospace', fontSize: 12.5 }}>{e.serial_number}{e.serial_number && e.mac_address ? ' · ' : ''}{e.mac_address}</div>}
+            <div style={{ fontSize: 12, color: e.needs_review ? color.amberInk : color.muted }}>{e.needs_review ? `The office will check: ${e.review_reason}` : e.deducted ? 'Taken off stock' : 'Recorded'}</div>
+          </div>
+        ))}
+        {waitingEquip.map((q) => (
+          <div key={q.id} style={{ fontSize: 13.5, borderLeft: `3px solid ${color.amberInk}`, paddingLeft: 10 }}>
+            <div>{q.payload.body.serial || q.payload.body.mac || 'Equipment'}</div>
+            <div style={{ fontSize: 12, color: color.amberInk }}>waiting to send</div>
+          </div>
+        ))}
+        {!resolved && job.mine && !addingEquipment && <Btn tone="quiet" onClick={() => setAddingEquipment(true)}>Add equipment</Btn>}
+        {addingEquipment && <AddEquipment job={job} onCancel={() => setAddingEquipment(false)} onDone={() => { setAddingEquipment(false); load(); }} />}
+      </div>
+
+      <div style={panel}>
         <div style={{ fontWeight: 600 }}>Notes</div>
         {job.notes.map((n) => (
           <div key={n.id} style={{ fontSize: 13.5, borderLeft: `3px solid ${color.line}`, paddingLeft: 10 }}>
@@ -165,12 +207,18 @@ export default function FieldJob() {
             <div style={{ fontSize: 11.5, color: color.muted }}>{n.author} · {timeAgo(n.at)}</div>
           </div>
         ))}
+        {waitingHere.filter((q) => q.type === 'note').map((q) => (
+          <div key={q.id} style={{ fontSize: 13.5, borderLeft: `3px solid ${color.amberInk}`, paddingLeft: 10 }}>
+            <div>{q.payload.body}</div>
+            <div style={{ fontSize: 11.5, color: color.amberInk }}>waiting to send</div>
+          </div>
+        ))}
         {!resolved && (
           <>
             <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="What did you find or do?"
               style={{ width: '100%', boxSizing: 'border-box', borderRadius: 10, border: `1px solid ${color.line}`, padding: 10, fontSize: 15, fontFamily: 'inherit' }} />
             <Btn tone="quiet" busy={busy === 'note'} disabled={!note.trim()}
-              onClick={() => run('note', async () => { await api.fieldNote(id, note.trim()); setNote(''); }, 'Note added')}>Add note</Btn>
+              onClick={() => run('note', async () => { const r = await doOrQueue('note', { jobId: id, body: note.trim() }); setNote(''); if (r.queued) store.toast('Saved on the phone — sent when the signal returns'); }, 'Note added')}>Add note</Btn>
           </>
         )}
       </div>
@@ -180,8 +228,15 @@ export default function FieldJob() {
           <div style={{ fontWeight: 600 }}>Finish</div>
           {!closing ? (
             <>
+              {needsEquipment && (
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
+                  <input type="checkbox" checked={noEquipment} onChange={(e) => setNoEquipment(e.target.checked)} />
+                  No equipment was installed on this job
+                </label>
+              )}
               <Btn disabled={!canClose} onClick={() => setClosing(true)}>Close this job</Btn>
-              {!canClose && <div style={{ fontSize: 13, color: color.amberInk }}>Take an “after” photo first.</div>}
+              {afterCount === 0 && <div style={{ fontSize: 13, color: color.amberInk }}>Take an “after” photo first.</div>}
+              {afterCount > 0 && needsEquipment && !noEquipment && <div style={{ fontSize: 13, color: color.amberInk }}>Record the equipment you installed, or say none was used.</div>}
             </>
           ) : (
             <>

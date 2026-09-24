@@ -349,6 +349,30 @@ export default function Tickets() {
               </div>
             )}
 
+            {((detail.photos ?? []).length > 0 || (detail.equipment ?? []).length > 0) && (
+              <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>FIELD WORK</span>
+                {(detail.equipment ?? []).map((e) => (
+                  <div key={e.id} style={{ background: e.needs_review ? '#fbf0d9' : color.tileBg, borderRadius: 8, padding: '9px 11px', fontSize: 12.5 }}>
+                    <b>{e.name ?? e.category ?? 'Device'}</b>{e.quantity > 1 ? ` × ${e.quantity}` : ''}
+                    {(e.serial_number || e.mac_address) && <div style={{ fontFamily: 'monospace' }}>{[e.serial_number, e.mac_address].filter(Boolean).join(' · ')}</div>}
+                    <div style={{ color: e.needs_review ? color.amberInk : color.muted }}>
+                      {e.needs_review ? `Needs checking: ${e.review_reason}` : e.deducted ? 'Taken off stock' : 'Recorded'}
+                    </div>
+                  </div>
+                ))}
+                {(detail.photos ?? []).length > 0 && (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(84px, 1fr))', gap: 6 }}>
+                    {detail.photos.map((p) => (
+                      <a key={p.id} href={`/api/field/photos/${p.id}`} target="_blank" rel="noreferrer" title={`${p.kind} · ${when(p.taken_at)}`}>
+                        <img src={`/api/field/photos/${p.id}`} alt={p.kind} loading="lazy" style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 6, display: 'block' }} />
+                      </a>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
               <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted }}>
                 NOTES ({detail.notes?.length ?? 0})
