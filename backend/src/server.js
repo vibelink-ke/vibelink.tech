@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant, config } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
+import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
 import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
@@ -396,6 +397,34 @@ app.get('/api/auth/session', wrap(async (req, res) => {
 // Sign in with a fingerprint: reachable before a session exists, like the password login below.
 app.use('/api/auth/passkey', passkeyRouter({ pool, auth, tenantByHost, limiter: loginLimiter }));
 
+// Authenticator-app codes: turning it on and off, and the second step of signing in.
+app.use('/api/auth/totp', totpRouter({ pool, auth, limiter: loginLimiter, finishSignIn: (...a) => finishSignIn(...a) }));
+
+/** Opens the session once every step of signing in has passed (password, and the authenticator code if it is on). */
+async function finishSignIn(req, res, staffId, tenantId, remember) {
+  const tenant = await tenantByHost(req.hostname)
+    ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
+  const { token, expiresAt } = await auth.createSession(staffId, tenantId, { remember });
+  auth.setSessionCookie(res, token, expiresAt);
+  await pool.query('update staff set last_seen = now() where id = $1', [staffId]);
+  auth.pruneSessions();
+  auth.pruneHandoffs();
+
+  const s = await auth.readSession(token);
+
+  // Only reached when no tenant resolved from this hostname above (the apex,
+  // local dev) — send them on to their own portal rather than leaving them
+  // signed in on a domain that owns no tenant at all.
+  let redirectTo = null;
+  const root = process.env.ROOT_DOMAIN?.trim();
+  if (!tenant && root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
+    const handoff = await auth.createHandoff(token);
+    redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
+  }
+
+  return { ...(await auth.publicSession(s)), redirectTo };
+}
+
 app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   // `identifier` is the email-or-username field; `email` stays accepted so an
   // older client keeps working.
@@ -443,25 +472,12 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   if (acct.tenant_status === 'suspended')
     return res.status(402).json({ error: 'This account is suspended. Contact support@vibelink.co.ke.' });
 
-  const { token, expiresAt } = await auth.createSession(acct.id, acct.tenant_id, { remember });
-  auth.setSessionCookie(res, token, expiresAt);
-  await pool.query('update staff set last_seen = now() where id = $1', [acct.id]);
-  auth.pruneSessions();
-  auth.pruneHandoffs();
-
-  const s = await auth.readSession(token);
-
-  // Only reached when no tenant resolved from this hostname above (the apex,
-  // local dev) — send them on to their own portal rather than leaving them
-  // signed in on a domain that owns no tenant at all.
-  let redirectTo = null;
-  const root = process.env.ROOT_DOMAIN?.trim();
-  if (!tenant && root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
-    const handoff = await auth.createHandoff(token);
-    redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
+  if (await totpEnabled(pool, acct.id)) {
+    // Password right, but this account also wants a code from its authenticator app: no session yet.
+    return res.json({ twoStep: true, challengeId: issueChallenge(acct.id, acct.tenant_id, remember) });
   }
 
-  res.json({ ...(await auth.publicSession(s)), redirectTo });
+  res.json(await finishSignIn(req, res, acct.id, acct.tenant_id, remember));
 }));
 
 /** Provisions a tenant plus its owner in one transaction. */
@@ -740,6 +756,8 @@ app.post('/api/auth/magic-link', loginLimiter, wrap(async (req, res) => {
 
 /** Where the link in that email actually lands: redeem the token, set the cookie, go to the dashboard. */
 app.get('/api/auth/magic', wrap(async (req, res) => {
+  const peeked = await auth.peekLoginToken(req.query.token, 'magic');
+  if (peeked && await totpEnabled(pool, peeked)) return res.redirect(302, '/?magicError=1');
   const staffId = await auth.consumeLoginToken(req.query.token, 'magic');
   if (!staffId) return res.redirect(302, '/?magicError=1');
 

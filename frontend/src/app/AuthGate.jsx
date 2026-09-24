@@ -112,6 +112,9 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  // Set when the password was right but the account also wants a code from its authenticator app.
+  const [challenge, setChallenge] = useState(null);
+  const [code, setCode] = useState('');
   // A tenant's own uploaded favicon doubles as their sign-in logo — /api/public/favicon
   // 404s when nothing has been uploaded, which is the signal to fall back to the plain
   // letter badge rather than show a broken image.
@@ -148,6 +151,11 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     try {
       const session = await api.login({ identifier: f.identifier, password: f.password, remember: f.remember });
       clearSecrets();
+      if (session.twoStep) {
+        setChallenge(session.challengeId);
+        setCode('');
+        return;
+      }
 
       // Same reasoning as signup's redirect below: email/username are unique
       // platform-wide, not per tenant, so credentials for a different tenant
@@ -164,6 +172,25 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
       onSignedIn(session, `Signed in as ${session.company}`);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitCode = async () => {
+    if (!code.trim()) return setError('Enter the code from your authenticator app.');
+    setBusy(true);
+    setError('');
+    try {
+      const session = await api.totpLogin({ challengeId: challenge, code });
+      if (session.redirectTo) {
+        window.location.assign(session.redirectTo);
+        return;
+      }
+      onSignedIn(session, `Signed in as ${session.company}`);
+    } catch (e) {
+      setError(e.message);
+      if (e.body?.expired) setChallenge(null);
     } finally {
       setBusy(false);
     }
@@ -355,7 +382,33 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
             </div>
           )}
 
-          {mode === 'login' ? (
+          {mode === 'login' && challenge ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-.01em' }}>Two-step sign-in</span>
+                <span style={{ fontSize: 12.5, color: color.neutralInk }}>
+                  Open your authenticator app and enter the 6-digit code. Lost your phone? Use one of your backup codes.
+                </span>
+              </div>
+              <Field text="Code">
+                <input
+                  value={code}
+                  onChange={(e) => { setCode(e.target.value); setError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') submitCode(); }}
+                  placeholder="123456"
+                  inputMode="text"
+                  autoComplete="one-time-code"
+                  autoFocus
+                  style={input}
+                />
+              </Field>
+              {error && <div style={{ fontSize: 12.5, color: color.rust }}>{error}</div>}
+              <button onClick={submitCode} disabled={busy} style={{ height: 44, borderRadius: 10, border: 'none', background: color.green, color: '#fff', fontWeight: 600, fontSize: 14.5, cursor: 'pointer' }}>
+                {busy ? 'Checking…' : 'Verify and sign in'}
+              </button>
+              <span onClick={() => { setChallenge(null); setError(''); }} style={{ fontSize: 12.5, fontWeight: 600, color: color.green, cursor: 'pointer', textAlign: 'center' }}>Back</span>
+            </div>
+          ) : mode === 'login' ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 <span style={{ fontSize: 18, fontWeight: 600, letterSpacing: '-.01em' }}>Sign in to your portal</span>

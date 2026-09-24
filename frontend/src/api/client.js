@@ -54,6 +54,12 @@ export const api = {
   // itself, before there's anyone signed in to know a tenant from.
   publicBrand: () => get('/api/public/brand'),
   login: (creds) => post('/api/auth/login', creds),
+  totpLogin: (b) => post('/api/auth/totp/login', b),
+  totpStatus: () => get('/api/auth/totp'),
+  totpSetup: () => post('/api/auth/totp/setup', {}),
+  totpEnable: (code) => post('/api/auth/totp/enable', { code }),
+  totpDisable: (b) => post('/api/auth/totp/disable', b),
+  totpBackupCodes: (b) => post('/api/auth/totp/backup-codes', b),
   passkeys: () => get('/api/auth/passkey'),
   passkeyRegisterOptions: () => post('/api/auth/passkey/register/options', {}),
   passkeyRegisterVerify: (b) => post('/api/auth/passkey/register/verify', b),

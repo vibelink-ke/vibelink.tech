@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { passkeySupported, enablePasskey, forgetPasskeyFlag } from '../lib/passkey';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
@@ -640,6 +641,8 @@ export default function Settings() {
 
           <PasskeyCard store={store} />
 
+          <AuthenticatorCard store={store} />
+
           <NotificationsCard store={store} />
         </div>
       )}
@@ -1058,6 +1061,107 @@ export default function Settings() {
         </Card>
       )}
     </Screen>
+  );
+}
+
+/**
+ * Two-step sign-in with an authenticator app: scan a QR code once, confirm with a code, and keep the backup codes.
+ * After that a password alone no longer opens the account.
+ */
+function AuthenticatorCard({ store }) {
+  const [st, setSt] = useState(null);
+  const [setup, setSetup] = useState(null);       // { secret, uri, qr }
+  const [code, setCode] = useState('');
+  const [codes, setCodes] = useState(null);       // backup codes, shown once
+  const [off, setOff] = useState(null);           // null | { password, code, mode: 'off' | 'codes' }
+  const [busy, setBusy] = useState(false);
+
+  const load = () => api.totpStatus().then(setSt).catch(() => setSt({ enabled: false, backupLeft: 0 }));
+  useEffect(() => { load(); }, []);
+
+  const start = async () => {
+    setBusy(true);
+    try {
+      const s = await api.totpSetup();
+      setSetup({ ...s, qr: await QRCode.toDataURL(s.uri, { margin: 1, width: 200 }) });
+      setCode('');
+    } catch (e) { store.toast(e.message); } finally { setBusy(false); }
+  };
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      const r = await api.totpEnable(code);
+      setSetup(null);
+      setCodes(r.backupCodes);
+      await load();
+    } catch (e) { store.toast(e.message); } finally { setBusy(false); }
+  };
+
+  const submitOff = async () => {
+    setBusy(true);
+    try {
+      if (off.mode === 'off') {
+        await api.totpDisable({ password: off.password, code: off.code });
+        store.toast('Two-step sign-in is off');
+      } else {
+        setCodes((await api.totpBackupCodes({ password: off.password, code: off.code })).backupCodes);
+      }
+      setOff(null);
+      await load();
+    } catch (e) { store.toast(e.message); } finally { setBusy(false); }
+  };
+
+  const box = { height: 40, borderRadius: 8, border: '1px solid #d9ddd6', padding: '0 10px', fontSize: 14, boxSizing: 'border-box', width: '100%' };
+
+  return (
+    <Card title="Authenticator app" subtitle="Ask for a 6-digit code from Google Authenticator, Microsoft Authenticator or Authy when you sign in with your password">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {codes && (
+          <div style={{ background: '#fbf0d9', borderRadius: 10, padding: 12, fontSize: 13 }}>
+            <b>Save these backup codes now.</b> Each works once if you lose your phone. They are not shown again.
+            <div style={{ fontFamily: 'monospace', fontSize: 14, columns: 2, marginTop: 8 }}>{codes.map((c) => <div key={c}>{c}</div>)}</div>
+            <div style={{ marginTop: 8 }}><Button size="sm" onClick={() => setCodes(null)}>I have saved them</Button></div>
+          </div>
+        )}
+        {st && !st.enabled && !setup && (
+          <Button variant="primary" onClick={start} disabled={busy}>Set up an authenticator app</Button>
+        )}
+        {setup && (
+          <>
+            <span style={{ fontSize: 13 }}>1. Scan this with your authenticator app (or type the key in).</span>
+            <img src={setup.qr} alt="QR code" width={200} height={200} />
+            <span style={{ fontFamily: 'monospace', fontSize: 13, wordBreak: 'break-all' }}>{setup.secret}</span>
+            <span style={{ fontSize: 13 }}>2. Enter the 6-digit code it shows.</span>
+            <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" maxLength={7} placeholder="123456" style={box} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="primary" onClick={confirm} disabled={busy || code.replace(/\s/g, '').length < 6}>Turn on</Button>
+              <Button onClick={() => setSetup(null)}>Cancel</Button>
+            </div>
+          </>
+        )}
+        {st?.enabled && !off && (
+          <>
+            <span style={{ fontSize: 13 }}>On. {st.backupLeft} backup code{st.backupLeft === 1 ? '' : 's'} left.</span>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button size="sm" onClick={() => setOff({ mode: 'codes', password: '', code: '' })}>New backup codes</Button>
+              <Button size="sm" onClick={() => setOff({ mode: 'off', password: '', code: '' })}>Turn off</Button>
+            </div>
+          </>
+        )}
+        {off && (
+          <>
+            <span style={{ fontSize: 13 }}>Confirm it is you: your password and a current code (or a backup code).</span>
+            <input type="password" value={off.password} onChange={(e) => setOff({ ...off, password: e.target.value })} placeholder="Password" style={box} autoComplete="current-password" />
+            <input value={off.code} onChange={(e) => setOff({ ...off, code: e.target.value })} placeholder="Code" style={box} autoComplete="one-time-code" />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button variant="primary" onClick={submitOff} disabled={busy || !off.password || !off.code}>{off.mode === 'off' ? 'Turn off' : 'Make new codes'}</Button>
+              <Button onClick={() => setOff(null)}>Cancel</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 

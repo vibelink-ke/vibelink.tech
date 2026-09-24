@@ -3011,3 +3011,21 @@ alter table expenses add column if not exists pay_conversation_id text;
 alter table expenses add column if not exists pay_error text;
 alter table expenses add column if not exists pay_reference text;
 create index if not exists expenses_pay_conversation_idx on expenses (pay_conversation_id) where pay_conversation_id is not null;
+
+-- Authenticator-app sign-in (totp.js). The secret is encrypted; last_step stops a code being used twice.
+create table if not exists staff_totp (
+  staff_id     uuid primary key references staff on delete cascade,
+  tenant_id    uuid not null references tenants on delete cascade,
+  secret_enc   text not null,
+  enabled      boolean not null default false,
+  last_step    bigint,
+  created_at   timestamptz not null default now(),
+  confirmed_at timestamptz
+);
+create table if not exists staff_backup_codes (
+  id        uuid primary key default gen_random_uuid(),
+  staff_id  uuid not null references staff on delete cascade,
+  code_hash text not null,
+  used_at   timestamptz
+);
+create index if not exists staff_backup_codes_staff on staff_backup_codes (staff_id);
