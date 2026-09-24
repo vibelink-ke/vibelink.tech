@@ -2362,11 +2362,21 @@ app.post('/portal/login', loginLimiter, wrap(async (req, res) => {
   const wrong = { error: 'Wrong account number or password.' };
   if (!account || !password) return res.status(400).json(wrong);
 
-  const { rows: [s] } = await pool.query(
-    'select id, portal_password_hash from subscribers where tenant_id=$1 and account_code=$2',
+  // A multi-service account has one portal password but a row per line, and each row
+  // carries its own copy of the hash. Any line's copy signs the customer in. This used
+  // to read whichever row the database returned first, so a password set on one line
+  // of a seventeen-line account was "wrong" whenever another line came back first.
+  const { rows: lines } = await pool.query(
+    'select id, portal_password_hash from subscribers where tenant_id=$1 and account_code=$2 and portal_password_hash is not null order by created_at',
     [req.tenant.id, account]);
-  if (!s?.portal_password_hash) return res.status(401).json(wrong);
-  if (!(await auth.verifyPassword(password, s.portal_password_hash))) return res.status(401).json(wrong);
+  let s = null;
+  const tried = new Set();
+  for (const l of lines) {
+    if (tried.has(l.portal_password_hash)) continue;   // lines sharing a hash are checked once
+    tried.add(l.portal_password_hash);
+    if (await auth.verifyPassword(password, l.portal_password_hash)) { s = l; break; }
+  }
+  if (!s) return res.status(401).json(wrong);
 
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = new Date(Date.now() + PORTAL_DAYS * 864e5);
@@ -2406,26 +2416,34 @@ app.post('/portal/recover', loginLimiter, wrap(async (req, res) => {
   if (!phone) return res.json(generic);
 
   const normalised = phone.replace(/^\+?(?:254)?0?/, '254');
-  const { rows: [s] } = await pool.query(
-    `select id, account_code, phone, email from subscribers
-      where tenant_id=$1 and (phone=$2 or phone_alt=$2)`, [req.tenant.id, normalised]);
-  if (!s) return res.json(generic);
+  // Every account on this number, not the first row that happens to match: one phone can
+  // hold several accounts, and only one of them used to be reset and texted, so the other
+  // stayed locked out. One row per account is enough; the reset covers all its lines.
+  const { rows: people } = await pool.query(
+    `select distinct on (account_code) id, account_code, phone, email from subscribers
+      where tenant_id=$1 and (phone=$2 or phone_alt=$2)
+      order by account_code, created_at limit 5`, [req.tenant.id, normalised]);
+  if (!people.length) return res.json(generic);
+  const company = req.tenant.name ?? 'your provider';
+  for (const s of people) {
+    const password = String(100000 + crypto.randomInt(0, 900000));
+    const secrets = await import('./secrets.js');
+    // Every line of the account, so the sign-in finds the new password whichever it reads.
+    await pool.query(
+      'update subscribers set portal_password_hash=$3, portal_password_enc=$4 where tenant_id=$1 and account_code=$2',
+      [req.tenant.id, s.account_code, await auth.hashPassword(password),
+       secrets.configured() ? secrets.encrypt(password) : null]);
 
-  const password = String(100000 + crypto.randomInt(0, 900000));
-  const secrets = await import('./secrets.js');
-  await pool.query(
-    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
-    [s.id, await auth.hashPassword(password),
-     secrets.configured() ? secrets.encrypt(password) : null]);
-
-  const sms = await import('./sms.js');
-  const body = `Your portal login: account ${s.account_code}, password ${password}.`;
-  sms.send(req.tenant.id, s.phone, 'custom', { body }).catch(() => {});
-  if (s.email) {
-    const email = await import('./email.js');
-    const t = await email.template(req.tenant.id, 'customer_credentials');
-    const vars = { company: req.tenant.name ?? '', account: s.account_code, password };
-    email.send(req.tenant.id, s.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
+    const sms = await import('./sms.js');
+    // To the number that was typed: it is the one on the account, and the one they can read.
+    const body = `Your ${company} account portal: login ${s.account_code}, password ${password}`;
+    sms.send(req.tenant.id, normalised, 'custom', { body }).catch(() => {});
+    if (s.email) {
+      const email = await import('./email.js');
+      const t = await email.template(req.tenant.id, 'customer_credentials');
+      const vars = { company: req.tenant.name ?? '', account: s.account_code, password };
+      email.send(req.tenant.id, s.email, email.fill(t.subject, vars), email.fill(t.body, vars)).catch(() => {});
+    }
   }
 
   res.json(generic);
@@ -2456,9 +2474,10 @@ app.post('/portal/change-password', loginLimiter, wrap(async (req, res) => {
 
   const secrets = await import('./secrets.js');
   await pool.query(
-    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+    `update subscribers set portal_password_hash=$2, portal_password_enc=$3
+      where tenant_id=$4 and account_code = (select account_code from subscribers where id=$1)`,
     [s.subscriber_id, await auth.hashPassword(next),
-     secrets.configured() ? secrets.encrypt(next) : null]);
+     secrets.configured() ? secrets.encrypt(next) : null, s.tenant_id]);
   res.json({ ok: true });
 }));
 
@@ -8804,11 +8823,25 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
   // creation over it would be worse still — being able to add a customer must
   // not depend on an optional convenience being configured.
   const secrets = await import('./secrets.js');
-  const portalPassword = String(100000 + crypto.randomInt(0, 900000));
-  await pool.query(
-    'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
-    [s.id, await auth.hashPassword(portalPassword),
-     secrets.configured() ? secrets.encrypt(portalPassword) : null]);
+  // A further line on an existing account signs in with that account's password, so it takes a
+  // copy of the hash already there instead of minting a second password for the same login.
+  const { rows: [sibling] } = sameAccount.length
+    ? await pool.query(
+      'select portal_password_hash, portal_password_enc from subscribers where tenant_id=$1 and account_code=$2 and id <> $3 and portal_password_hash is not null limit 1',
+      [req.tenant.id, s.account_code, s.id])
+    : { rows: [] };
+  let portalPassword = null;
+  if (sibling) {
+    await pool.query('update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+      [s.id, sibling.portal_password_hash, sibling.portal_password_enc]);
+    try { portalPassword = sibling.portal_password_enc ? secrets.decrypt(sibling.portal_password_enc) : null; } catch { /* unreadable */ }
+  } else {
+    portalPassword = String(100000 + crypto.randomInt(0, 900000));
+    await pool.query(
+      'update subscribers set portal_password_hash=$2, portal_password_enc=$3 where id=$1',
+      [s.id, await auth.hashPassword(portalPassword),
+       secrets.configured() ? secrets.encrypt(portalPassword) : null]);
+  }
 
   res.json({ ...s, portal_password: portalPassword });
 
@@ -9302,11 +9335,14 @@ app.post('/api/subscribers/:id/portal-password', requirePermission('clients.rese
   const secrets = await import('./secrets.js');
   const hash = await auth.hashPassword(password);
   const { rows: [s] } = await pool.query(
-    `update subscribers set portal_password_hash=$3, portal_password_enc=$4
-      where id=$1 and tenant_id=$2 returning name, phone, account_code`,
-    [req.params.id, req.tenant.id, hash,
-     secrets.configured() ? secrets.encrypt(password) : null]);
+    'select name, phone, account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!s) return res.status(404).json({ error: 'not found' });
+  // The account's password, on every line of it: a customer signs in with the account number,
+  // and a reset that touched one line left the sign-in reading another's old hash.
+  await pool.query(
+    'update subscribers set portal_password_hash=$3, portal_password_enc=$4 where tenant_id=$1 and account_code=$2',
+    [req.tenant.id, s.account_code, hash, secrets.configured() ? secrets.encrypt(password) : null]);
+  const company = req.tenant.name ?? 'your provider';
 
   await logActivity(req, req.params.id, s.account_code, 'Portal password reset');
   res.json({ password, account: s.account_code });
@@ -9314,7 +9350,8 @@ app.post('/api/subscribers/:id/portal-password', requirePermission('clients.rese
   // Texted as well as shown: the operator generating it is rarely the person who
   // needs it, and reading a code back over the phone is how it gets mistyped.
   notifySubscriber(req.tenant.id, req.params.id, 'custom', {
-    body: `Your ${'{company}'} account portal: login ${s.account_code}, password ${password}`,
+    // The name itself, not a {company} token: a custom body is sent as written.
+    body: `Your ${company} account portal: login ${s.account_code}, password ${password}`,
   }).catch(() => {});
 }));
 
