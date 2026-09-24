@@ -1,4 +1,4 @@
-import { queueRouterSync } from './router-queues.js';
+import { queueRouterSync, speedInQueues } from './router-queues.js';
 import * as coaClient from './coa.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -199,7 +199,7 @@ export async function activateSubscriber(c, tenantId, subId) {
   // from clearing the block or refreshing the password/IP.
   const { rows: [s] } = await c.query(
     `select s.*, p.radius_profile, p.rate_down, p.rate_up, p.contention_ratio,
-            r.host, r.secret, r.pppoe_pool, r.api_port, r.service_user, r.service_password_enc
+            r.host, r.secret, r.pppoe_pool, r.queue_shaping, r.api_port, r.service_user, r.service_password_enc
      from subscribers s left join plans p on p.id = s.plan_id
      left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
 
@@ -243,17 +243,25 @@ export async function activateSubscriber(c, tenantId, subId) {
   }
 
   const rate = `${s.rate_up}k/${s.rate_down}k`;
-  await c.query(
-    `insert into radreply (tenant_id, username, attribute, op, value)
-     values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
-     on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [s.pppoe_user, rate, tenantId]);
+  // On a router whose speeds are held by the static queues (see router-queues.js) no rate is
+  // sent: RouterOS would build a dynamic queue from it, matched first, and the customer's own
+  // queue would show no traffic.
+  if (speedInQueues(s)) {
+    await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+      [s.pppoe_user, 'Mikrotik-Rate-Limit', tenantId]);
+  } else {
+    await c.query(
+      `insert into radreply (tenant_id, username, attribute, op, value)
+       values ($3,$1,'Mikrotik-Rate-Limit',':=',$2)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [s.pppoe_user, rate, tenantId]);
+  }
 
   await applyContentionQueue(s, address).catch((e) =>
     console.warn('activateSubscriber: applyContentionQueue failed for', s.pppoe_user, '—', e.message));
 
   if (s.host) {
-    await coa(c, s.host, s.secret, s.pppoe_user, rate);
+    if (!speedInQueues(s)) await coa(c, s.host, s.secret, s.pppoe_user, rate);
     // A live session cannot be handed a new Framed-IP-Address by CoA — that
     // attribute only applies at the start of a session — so if they were
     // parked on the expired pool, force a reconnect now rather than leaving
@@ -339,7 +347,7 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
     // from a credentials problem.
     `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac, s.router_id, s.status,
             p.rate_down, p.rate_up, p.radius_profile,
-            r.pppoe_pool, r.queue_profiles
+            r.pppoe_pool, r.queue_profiles, r.queue_shaping
        from subscribers s
        left join plans p on p.id = s.plan_id
        left join routers r on r.id = s.router_id
@@ -381,8 +389,15 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
 
   // No plan yet means no rate to enforce. A "nullk/nullk" rate limit is rejected
   // by the router and takes the whole login down with it.
-  await upsert('Mikrotik-Rate-Limit',
-    s.rate_up != null && s.rate_down != null ? `${s.rate_up}k/${s.rate_down}k` : null);
+  // Held by the router's static queues instead (see activateSubscriber): nothing to send for a
+  // customer in service. Anyone else keeps what they were given, so a walled-garden 1k rate is
+  // not undone by a password edit.
+  if (speedInQueues(s) && ['active', 'grace'].includes(s.status)) {
+    await upsert('Mikrotik-Rate-Limit', null);
+  } else {
+    await upsert('Mikrotik-Rate-Limit',
+      s.rate_up != null && s.rate_down != null ? `${s.rate_up}k/${s.rate_down}k` : null);
+  }
 
   /**
    * The address the system assigned — but only if the router can give it out.

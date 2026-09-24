@@ -165,6 +165,33 @@ function profileAllowed(user) {
   return String(process.env.QUEUE_PROFILE_USERS ?? '').split(',').map((s) => s.trim()).filter(Boolean).includes(user);
 }
 
+/**
+ * Speed held by the static queues, so they carry the customer's live traffic.
+ *
+ * With a rate in RADIUS, RouterOS builds its own dynamic queue for every PPP session,
+ * matched ahead of the static ones, and the static queue (name, address, plan speed)
+ * never sees a packet. The PPP interface still shows live traffic either way; this is
+ * what makes the queue show it too. For a customer whose queue is on the router the
+ * RADIUS rate is removed, and the router is marked so it is not sent again.
+ *
+ * Only customers whose queue is actually there, and never one sent to their own profile
+ * (there the dynamic queue is deliberately kept, as the child of the static one).
+ * A session already up keeps its dynamic queue until it next reconnects.
+ */
+export function speedInQueues(s) { return !!s.queue_shaping && !profileAllowed(s.pppoe_user); }
+
+async function holdSpeedInQueues({ tenantId, routerId, all, queued }) {
+  const users = all
+    .filter((l) => l.entitled && queued.has(`${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`) && !profileAllowed(l.pppoe_user))
+    .map((l) => l.pppoe_user);
+  await pool.query('update routers set queue_shaping = true where id=$1', [routerId]);
+  if (!users.length) return null;
+  const { rowCount } = await pool.query(
+    "delete from radreply where tenant_id=$1 and attribute='Mikrotik-Rate-Limit' and username = any($2::text[])",
+    [tenantId, users]);
+  return rowCount ? `speeds now held by the queues: ${rowCount} customer(s) no longer sent a RADIUS rate limit` : null;
+}
+
 async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
   const { rows: [r] } = await pool.query('select pppoe_pool from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
   const gateway = gatewayOf(r?.pppoe_pool);
@@ -176,9 +203,9 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
 
   const ok = entitled.filter((l) => p.ok.has(`${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`));
   const sent = ok.filter((l) => profileAllowed(l.pppoe_user));
-  if (ok.length) {
-    // Group and speed together: a router that was switched to "queues only" earlier
-    // had the speed removed from RADIUS, and it goes back in here.
+  if (sent.length) {
+    // Group and speed together: a customer on their own profile keeps a RADIUS rate, because
+    // their dynamic queue is the child of their static one and holds the speed.
     await pool.query(
       `insert into radreply (tenant_id, username, attribute, op, value)
        select $1, u, 'Mikrotik-Group', ':=', $3 || u from unnest($2::text[]) as u
@@ -189,7 +216,7 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
        select $1, u, 'Mikrotik-Rate-Limit', ':=', rate
          from unnest($2::text[], $3::text[]) as t(u, rate)
        on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-      [tenantId, ok.map((l) => l.pppoe_user), ok.map((l) => `${l.rate_up}k/${l.rate_down}k`)]);
+      [tenantId, sent.map((l) => l.pppoe_user), sent.map((l) => `${l.rate_up}k/${l.rate_down}k`)]);
   }
   // Anyone on this router no longer entitled (or whose profile could not be written)
   // goes back to the default profile at their next login.
@@ -199,7 +226,7 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
         and username in (select pppoe_user from subscribers where tenant_id=$1 and router_id=$2 and pppoe_user is not null)
         and not (username = any($3::text[]))`,
     [tenantId, routerId, sent.map((l) => l.pppoe_user), `${ros.SUB_QUEUE_PREFIX}%`]);
-  await pool.query('update routers set queue_profiles = true, queue_shaping = false where id=$1', [routerId]);
+  await pool.query('update routers set queue_profiles = true where id=$1', [routerId]);
 
   return [`customer profiles: ${p.added} added, ${p.updated} updated, ${p.same} already correct, ${p.removed} removed`
     + `; ${sent.length} customer(s) sent to their own profile`
@@ -230,6 +257,12 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
       out.push(...await customerProfiles(conn, { tenantId, routerId, all, queued: q.ok }));
     } catch (e) {
       out.push(`could not write customer profiles: ${e.message}`);
+    }
+    try {
+      const held = await holdSpeedInQueues({ tenantId, routerId, all, queued: q.ok });
+      if (held) out.push(held);
+    } catch (e) {
+      out.push(`could not move speeds to the queues: ${e.message}`);
     }
     out.push((wipe ? `queues cleared (${cleared}) and rewritten: ` : 'queues: ')
       + `${q.added} added, ${q.updated} updated, ${q.same} already correct, ${q.removed} removed`
