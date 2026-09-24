@@ -658,30 +658,38 @@ export default function Clients() {
                         };
                         const conn = connection(c);
                         const tint = multi ? { bg: color.tileBg, fg: color.green } : CONN_PILL[conn.kind];
+                        // A multi-service account stacks: the pill, then one dot per line
+                        // beneath it. A single line keeps its one dot beside the package.
+                        const dots = multi ? (
+                          <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 3 }}>
+                            {lines.slice(0, 8).map((l) => {
+                              const k = connection(l);
+                              return <span key={l.id} title={k.label}><ConnDot kind={k.kind} /></span>;
+                            })}
+                          </span>
+                        ) : (
+                          <span title={conn.label}><ConnDot kind={conn.kind} /></span>
+                        );
+                        const pill = (
+                          <span
+                            onClick={() => navigate(`/clients/${c.id}?tab=services`)}
+                            title={multi
+                              ? lines.map((l) => `${planTitle(l) ?? 'no package'} — ${connection(l).label}`).join('\n')
+                              : conn.label}
+                            style={{
+                              display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
+                              fontSize: 11.5, fontWeight: 600, background: tint.bg, color: tint.fg, cursor: 'pointer',
+                            }}
+                          >
+                            {multi ? `${lines.length} services` : (planTitle(c) ?? '1 service')}
+                          </span>
+                        );
                         return (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                            {multi ? (
-                              <span style={{ display: 'inline-flex', gap: 3 }}>
-                                {lines.slice(0, 8).map((l) => {
-                                  const k = connection(l);
-                                  return <span key={l.id} title={k.label}><ConnDot kind={k.kind} /></span>;
-                                })}
-                              </span>
-                            ) : (
-                              <span title={conn.label}><ConnDot kind={conn.kind} /></span>
-                            )}
-                            <span
-                              onClick={() => navigate(`/clients/${c.id}?tab=services`)}
-                              title={multi
-                                ? lines.map((l) => `${planTitle(l) ?? 'no package'} — ${connection(l).label}`).join('\n')
-                                : conn.label}
-                              style={{
-                                display: 'inline-flex', padding: '3px 10px', borderRadius: radius.pill,
-                                fontSize: 11.5, fontWeight: 600, background: tint.bg, color: tint.fg, cursor: 'pointer',
-                              }}
-                            >
-                              {multi ? `${lines.length} services` : (planTitle(c) ?? '1 service')}
-                            </span>
+                          <span style={{
+                            display: 'inline-flex', gap: multi ? 6 : 7,
+                            flexDirection: multi ? 'column' : 'row', alignItems: multi ? 'flex-start' : 'center',
+                          }}>
+                            {multi ? <>{pill}{dots}</> : <>{dots}{pill}</>}
                           </span>
                         );
                       })()}
