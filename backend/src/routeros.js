@@ -2294,6 +2294,64 @@ export async function nearbyDevices(conn) {
 }
 
 /**
+ * Order devices by how quickly they answer a ping, closest first, so a guest's own TV
+ * (on the same access point, a few milliseconds away) comes ahead of the fifty other
+ * devices on a busy site. One ping each, ten at a time, and a device that does not
+ * answer (asleep, or blocking it) simply sorts after every one that does, most recently
+ * active first. Results are kept for twenty seconds per router so a page reload does not
+ * ping everyone again.
+ */
+const pingCache = new Map();   // "<router>|<address>" -> { ms, at }
+
+function rosTimeToMs(v) {
+  // RouterOS answers "3ms", "500us" or "1ms234us" (older builds "3ms" only).
+  const s = String(v ?? '');
+  const sec = /(\d+(?:\.\d+)?)s(?!.)/.exec(s.replace(/\d+ms/g, '').replace(/\d+us/g, ''));
+  const ms = /(\d+(?:\.\d+)?)ms/.exec(s);
+  const us = /(\d+(?:\.\d+)?)us/.exec(s);
+  if (!ms && !us && !sec) return null;
+  return (sec ? Number(sec[1]) * 1000 : 0) + (ms ? Number(ms[1]) : 0) + (us ? Number(us[1]) / 1000 : 0);
+}
+
+export const byLatency = (a, b) => {
+  const pa = a.pingMs, pb = b.pingMs;
+  if (pa != null && pb != null) return pa - pb;
+  if (pa != null) return -1;
+  if (pb != null) return 1;
+  return (a.idleSeconds ?? Infinity) - (b.idleSeconds ?? Infinity);
+};
+
+export async function rankByLatency(conn, devices, routerKey = '') {
+  const now = Date.now();
+  const out = devices.map((d) => ({ ...d, pingMs: null }));
+  const todo = [];
+  for (const d of out) {
+    const hit = d.address ? pingCache.get(`${routerKey}|${d.address}`) : null;
+    if (hit && now - hit.at < 20000) d.pingMs = hit.ms;
+    else if (d.address) todo.push(d);
+  }
+  let next = 0;
+  const worker = async () => {
+    while (next < todo.length) {
+      const d = todo[next++];
+      try {
+        const rows = await Promise.race([
+          conn.write('/ping', [`=address=${d.address}`, '=count=1']),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500)),
+        ]);
+        const reply = rows.find((r) => r.time != null && r.time !== '');
+        d.pingMs = reply ? rosTimeToMs(reply.time) : null;
+      } catch {
+        d.pingMs = null;
+      }
+      pingCache.set(`${routerKey}|${d.address}`, { ms: d.pingMs, at: Date.now() });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(10, todo.length) }, worker));
+  return out.sort(byLatency);
+}
+
+/**
  * Get a device online with no login step at all — the actual answer for a TV
  * with no browser, as opposed to nearbyDevices()/the shared-code path, which
  * still needs *some* browser to submit the form.

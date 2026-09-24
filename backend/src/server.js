@@ -1538,7 +1538,8 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
         user: r.service_user, password, timeoutSec: 8,
       });
       try {
-        const found = await ros.nearbyDevices(conn);
+        // Closest first: the portal shows only the nearest few until someone searches.
+        const found = await ros.rankByLatency(conn, await ros.nearbyDevices(conn), r.id);
         for (const d of found) {
           devices.push({ ...d, routerId: r.id, knownLabel: labelByMac.get(String(d.mac).toUpperCase()) ?? null });
         }
@@ -1550,6 +1551,7 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
     }
   }
 
+  devices.sort(ros.byLatency);   // across every router of the site
   res.json({ devices, plans });
 }));
 
@@ -1790,7 +1792,7 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
       user: r.service_user, password, timeoutSec: 8,
     });
     let devices;
-    try { devices = await ros.nearbyDevices(conn); } finally { ros.close(conn); }
+    try { devices = await ros.rankByLatency(conn, await ros.nearbyDevices(conn), r.id); } finally { ros.close(conn); }
     res.json({ devices: devices.filter((d) => !taken.has(d.mac)), slotsLeft });
   } catch (e) {
     res.status(502).json({ error: `Could not read the router: ${e.message}` });

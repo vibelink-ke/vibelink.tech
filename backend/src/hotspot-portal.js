@@ -1386,42 +1386,62 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     // vendor name, or the last few digits of the MAC printed on the box)
     // beats scanning silently. Hidden below that count: an extra input on
     // a two- or three-device list only gets in the way.
+    // The list arrives closest-first (the server pings each device). Until someone searches only
+    // the nearest few are shown: on a busy site the other dozens are not theirs, and scrolling past
+    // them is what made this hard. Everything stays searchable. Once a device is picked the rest
+    // are hidden, with a way back.
+    var TOP = 5;
+    var locked = null;
+    function deviceName(d) { return esc(d.knownLabel || d.vendor || d.hostname || 'Unknown device'); }
+    function deviceMeta(d) { return esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · ')) || esc(d.mac); }
+
     function renderDevices(filter) {
       var q = (filter || '').trim().toLowerCase();
       var filterBox = document.getElementById('deviceFilter');
-      filterBox.style.display = devices.length > 5 ? 'block' : 'none';
+      var el = document.getElementById('devices');
 
-      var shown = devices.filter(function (d, i) {
-        d.__i = i;
+      if (locked !== null && devices[locked]) {
+        var d0 = devices[locked];
+        filterBox.style.display = 'none';
+        el.innerHTML = '<div class="device on"><div><div class="device-name">' + deviceName(d0) + '</div>' +
+          '<div class="device-meta">' + deviceMeta(d0) + '</div></div></div>' +
+          '<p class="hint"><a href="#" id="changeDevice">Not this one? Choose another</a></p>';
+        document.getElementById('changeDevice').addEventListener('click', function (ev) {
+          ev.preventDefault();
+          locked = null; pickedDevice = null; filterBox.value = '';
+          renderDevices();
+        });
+        return;
+      }
+
+      filterBox.style.display = devices.length > TOP ? 'block' : 'none';
+      devices.forEach(function (d, i) { d.__i = i; });
+      var matches = devices.filter(function (d) {
         if (!q) return true;
         var hay = [d.knownLabel, d.vendor, d.hostname, d.mac, d.address].filter(Boolean).join(' ').toLowerCase();
         return hay.indexOf(q) !== -1;
       });
+      var shown = q ? matches.slice(0, 12) : matches.slice(0, TOP);
 
-      var el = document.getElementById('devices');
       if (!shown.length) {
         el.innerHTML = '<p class="hint">No device matches "' + esc(filter) + '".</p>';
         return;
       }
       el.innerHTML = shown.map(function (d) {
-        // A name typed in on a past purchase wins over the router's own
-        // guess — the router has no memory of it at all, only the name a
-        // customer actually chose says "this is my TV" rather than
-        // "TCL" or a bare MAC.
-        var name = esc(d.knownLabel || d.vendor || d.hostname || 'Unknown device');
-        var meta = esc([d.hostname && d.vendor ? d.hostname : null, d.address].filter(Boolean).join(' · '));
-        return '<div class="device" data-i="' + d.__i + '"><div><div class="device-name">' + name + '</div>' +
-          '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div></div>';
-      }).join('');
+        return '<div class="device" data-i="' + d.__i + '"><div><div class="device-name">' + deviceName(d) + '</div>' +
+          '<div class="device-meta">' + deviceMeta(d) + '</div></div></div>';
+      }).join('') + (!q && devices.length > TOP
+        ? '<p class="hint">Showing the ' + TOP + ' closest of ' + devices.length + ' devices. Type a name or part of the MAC to search the rest.</p>'
+        : (q && matches.length > 12 ? '<p class="hint">Showing the first 12 of ' + matches.length + ' matches. Type a little more to narrow it.</p>' : ''));
       el.querySelectorAll('.device').forEach(function (row) {
         row.addEventListener('click', function () {
-          el.querySelectorAll('.device').forEach(function (r) { r.classList.remove('on'); });
-          row.classList.add('on');
-          pickedDevice = devices[Number(row.getAttribute('data-i'))];
-          // Pre-filled, not locked — a returning device shows the name it
-          // already has so the guest is not asked to retype it every time,
-          // but the field stays editable for anyone who wants to rename it.
+          var i = Number(row.getAttribute('data-i'));
+          pickedDevice = devices[i];
+          // Pre-filled, not locked: a returning device shows the name it already has so the guest
+          // is not asked to retype it, but the field stays editable.
           document.getElementById('deviceName').value = pickedDevice.knownLabel || '';
+          locked = i;
+          renderDevices();
         });
       });
       if (shown.length === 1) el.querySelector('.device').click();
@@ -1541,12 +1561,14 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         return;
       }
       filterBox.style.display = oldDevices.length > 5 ? 'block' : 'none';
-      var shown = oldDevices.filter(function (d, i) {
+      // Closest five until someone searches; the rest stay searchable.
+      var matchedOld = oldDevices.filter(function (d, i) {
         d.__i = i;
         if (!q) return true;
         var hay = [d.vendor, d.hostname, d.mac, d.address].filter(Boolean).join(' ').toLowerCase();
         return hay.indexOf(q) !== -1;
       });
+      var shown = q ? matchedOld.slice(0, 12) : matchedOld.slice(0, 5);
       if (!shown.length) {
         list.innerHTML = '<p class="hint">No device matches "' + esc(filter) + '".</p>';
         return;
@@ -1557,7 +1579,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         return '<div class="device"><div><div class="device-name">' + name + '</div>' +
           '<div class="device-meta">' + (meta || esc(d.mac)) + '</div></div>' +
           '<button class="add" data-i="' + d.__i + '">Add</button></div>';
-      }).join('') + '<p class="hint" id="bindNote"></p>';
+      }).join('') + (!q && oldDevices.length > 5
+        ? '<p class="hint">Showing the 5 closest of ' + oldDevices.length + ' devices. Type a name or part of the MAC to search the rest.</p>'
+        : '') + '<p class="hint" id="bindNote"></p>';
       list.querySelectorAll('.add').forEach(function (btn) {
         btn.addEventListener('click', function () { bind(oldDevices[Number(btn.getAttribute('data-i'))].mac, btn); });
       });
