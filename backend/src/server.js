@@ -9018,11 +9018,13 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   // holding the previous credentials would keep getting online after support
   // "changed" them, which is exactly what changing them is meant to prevent.
   let previousUser = null;
-  if (req.body.pppoe_user != null) {
+  let previousRouter = null;
+  if (req.body.pppoe_user != null || 'router_id' in req.body) {
     const { rows: [old] } = await pool.query(
-      'select pppoe_user from subscribers where id=$1 and tenant_id=$2',
+      'select pppoe_user, router_id from subscribers where id=$1 and tenant_id=$2',
       [req.params.id, req.tenant.id]);
-    previousUser = old?.pppoe_user ?? null;
+    previousUser = req.body.pppoe_user != null ? (old?.pppoe_user ?? null) : null;
+    previousRouter = old?.router_id ?? null;
   }
   let s;
   try {
@@ -9102,6 +9104,14 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   // in the log as the fact that it happened, not as a second place a
   // password or a customer's new balance sits in plain text.
   await logActivity(req, s.id, s.account_code, 'Edited', [...sets, ...(settingCredit ? ['credit'] : [])].join(', '));
+
+  // Whatever was edited, the router's queues are brought in line a few seconds from now — and the
+  // old router too when the customer moved between towers.
+  {
+    const { queueRouterSync } = await import('./router-queues.js');
+    queueRouterSync(req.tenant.id, s.router_id);
+    if (previousRouter && previousRouter !== s.router_id) queueRouterSync(req.tenant.id, previousRouter);
+  }
 
   res.json({ ...s, ...(settingCredit ? { wallet_balance: walletBalance } : {}) });
 }));
@@ -9363,6 +9373,7 @@ app.post('/api/subscribers/:id/access', requirePermission('clients.suspend'), wr
   }).catch((e) => console.warn('access change: radius not updated —', e?.message ?? e));
 
   await logActivity(req, s.id, s.account_code, { pause: 'Paused', suspend: 'Suspended', resume: 'Resumed' }[action]);
+  { const { queueRouterSync } = await import('./router-queues.js'); queueRouterSync(req.tenant.id, s.router_id); }
   res.json(s);
 }));
 
@@ -9371,7 +9382,7 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
   // RADIUS credentials back to, and a deleted customer whose credentials still
   // authenticate is a customer still getting free service.
   const { rows: [s] } = await pool.query(
-    'select pppoe_user, account_code, line_label from subscribers where tenant_id=$1 and id=$2',
+    'select pppoe_user, account_code, line_label, router_id from subscribers where tenant_id=$1 and id=$2',
     [req.tenant.id, req.params.id]);
   if (!s) return res.status(404).json({ error: 'No such client' });
 
@@ -9394,6 +9405,7 @@ app.delete('/api/subscribers/:id', requirePermission('clients.delete'), wrap(asy
   // so the row is filed under account_code alone — still findable from the
   // account's Activity log even though the line itself no longer exists.
   await logActivity(req, null, s.account_code, 'Service deleted', s.line_label ? `Line "${s.line_label}"` : null);
+  { const { queueRouterSync } = await import('./router-queues.js'); queueRouterSync(req.tenant.id, s.router_id); }
   res.json({ ok: true });
 }));
 

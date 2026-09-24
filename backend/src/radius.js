@@ -1,3 +1,4 @@
+import { queueRouterSync } from './router-queues.js';
 import * as coaClient from './coa.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -208,6 +209,9 @@ export async function activateSubscriber(c, tenantId, subId) {
   // that triggered this.
   if (!s?.pppoe_user) return;
 
+  // The router's queues follow this customer a few seconds from now (see router-queues.js).
+  queueRouterSync(tenantId, s.router_id);
+
   await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value)
      values ($3,$1,'Cleartext-Password',':=',$2)
@@ -350,6 +354,7 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
        left join routers r on r.id = s.router_id
       where s.id = $1 and s.tenant_id = $2`, [subId, tenantId]);
   if (!s?.pppoe_user || !s.pppoe_pass) return false;
+  queueRouterSync(tenantId, s.router_id);
 
   await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value)

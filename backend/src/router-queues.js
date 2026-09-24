@@ -110,7 +110,7 @@ export function queuePlan(lines) {
  * problem: those are reported, so the customers-stay-online work around it is not
  * marked failed for the sake of a list.
  */
-export async function syncRouterQueues(conn, { tenantId, routerId, role, wipe = false, lines = null }) {
+async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe = false, lines = null }) {
   const out = [];
 
   if (role === 'both' || role === 'pppoe') {
@@ -187,4 +187,87 @@ export async function repairPppProfile(conn, pppoePool, profileName = 'vibelink-
   if (!profile || profile['local-address']) return null;
   await conn.write('/ppp/profile/set', [`=.id=${profile['.id']}`, `=local-address=${gateway}`]);
   return `PPP profile ${profileName} had no local-address; set it to ${gateway}`;
+}
+
+// One router is only ever being rewritten by one caller at a time: Refresh, the
+// two-minute pass and the pass a customer change triggers would otherwise add the
+// same queue twice. Later callers wait their turn.
+const chain = new Map();
+function serial(routerId, fn) {
+  const prev = chain.get(routerId) ?? Promise.resolve();
+  const next = prev.catch(() => {}).then(fn);
+  chain.set(routerId, next);
+  next.catch(() => {}).finally(() => { if (chain.get(routerId) === next) chain.delete(routerId); });
+  return next;
+}
+
+export function syncRouterQueues(conn, opts) {
+  return serial(opts.routerId, () => syncRouterQueuesUnlocked(conn, opts));
+}
+
+// routerId -> what the router was last brought to, so an unchanged one is skipped.
+const state = new Map();
+
+/**
+ * Connect to a PPPoE router and bring its PPP profile and queues in line with the
+ * database. Not a wipe: only what differs is written, and a queue this does not
+ * recognise is left alone. Skipped, returning null, when nothing about the
+ * router's customers changed since the last time and it was checked recently —
+ * unless `force`, which a customer change uses.
+ */
+export async function syncRouterNow(r, { force = false } = {}) {
+  const secrets = await import('./secrets.js');
+  const password = secrets.decrypt(r.service_password_enc);
+  if (!password) return null;
+  let conn;
+  try {
+    conn = await ros.connect({
+      host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+      user: r.service_user, password, timeoutSec: 8,
+    });
+    const fixed = await repairPppProfile(conn, r.pppoe_pool).catch(() => null);
+    if (fixed) console.warn('router queues:', r.name, '—', fixed);
+
+    const lines = await customerLines(r.tenant_id, r.id);
+    const sig = signature(lines);
+    const prev = state.get(r.id);
+    if (!force && prev && prev.sig === sig && Date.now() - prev.at < 30 * 60000) return null;
+
+    const out = await syncRouterQueues(conn, { tenantId: r.tenant_id, routerId: r.id, role: r.role, wipe: false, lines });
+    state.set(r.id, { sig, at: Date.now() });
+    return out;
+  } finally {
+    if (conn) { try { ros.close(conn); } catch { /* already gone */ } }
+  }
+}
+
+const timers = new Map();
+
+/**
+ * A customer was added, edited, paid, paused, moved or deleted: bring that
+ * router's queues in line a few seconds later. The delay collects a burst of
+ * changes (an import, a bulk edit, a batch of payments) into one pass instead of
+ * one connection each. Nothing here can fail the change that triggered it.
+ */
+export function queueRouterSync(tenantId, routerId, delayMs = 4000) {
+  if (!routerId) return;
+  clearTimeout(timers.get(routerId));
+  const t = setTimeout(async () => {
+    timers.delete(routerId);
+    try {
+      const { rows: [r] } = await pool.query(
+        `select id, tenant_id, name, host, api_port, role, pppoe_pool, service_user, service_password_enc
+           from routers
+          where id=$1 and tenant_id=$2 and status = 'up' and autoconfig_last_ok = true
+            and role in ('pppoe','both') and service_user is not null and service_password_enc is not null`,
+        [routerId, tenantId]);
+      if (!r) return;
+      const out = await syncRouterNow(r, { force: true });
+      if (out?.length) console.log('router queues after a customer change:', r.name, '—', out.join('; '));
+    } catch (e) {
+      console.warn('router queues: refresh after a customer change failed —', e?.message ?? e);
+    }
+  }, delayMs);
+  t.unref?.();
+  timers.set(routerId, t);
 }
