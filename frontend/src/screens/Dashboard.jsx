@@ -113,6 +113,15 @@ export default function Dashboard() {
   // back than that has no rows left in the capped list at all, reading as
   // revenue crashing to zero when it was actually climbing.
   const [collections, setCollections] = useState(null);
+  // The hotspot half of Active and Online, counted by the server (see /api/dashboard/hotspot): the
+  // vouchers list this used to count is capped at the newest 1000.
+  const [hsCounts, setHsCounts] = useState(null);
+  useEffect(() => {
+    const load = () => api.dashboardHotspot().then(setHsCounts).catch(() => setHsCounts(null));
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     const load = () => api.dashboardCollections().then(setCollections).catch(() => {});
     load();
@@ -191,6 +200,11 @@ export default function Dashboard() {
    */
   const hotspotOnline = hotspotActive.filter((v) => v.online);
   const online = [...pppoeOnline, ...hotspotOnline];
+  // The server's exact count when it answered; the capped list only as a fallback.
+  const hotspotOnlineN = hsCounts ? hsCounts.online : hotspotOnline.length;
+  const hotspotActiveN = hsCounts ? hsCounts.active : hotspotActive.length;
+  const onlineN = pppoeOnline.length + hotspotOnlineN;
+  const activeN = clients.filter((c) => c.status === 'active').length + hotspotActiveN;
 
   // "Collected today" / PPPoE-only / channels used — from the real date-ranged
   // query above (collections), not summed from store.mpesaTx, which quietly
@@ -277,7 +291,7 @@ export default function Dashboard() {
       ['metric', 'value'],
       ['range', range],
       ...(canSeeFinance ? [['collected', collected]] : []),
-      ['online', active.length],
+      ['online', activeN],
       ['unmatched', store.unmatched.length],
     ];
     const blob = new Blob([rows.map((r) => r.join(',')).join('\n')], { type: 'text/csv' });
@@ -386,12 +400,12 @@ export default function Dashboard() {
         )}
         <Tile
           label="ONLINE NOW"
-          value={online.length}
-          hint={`${pppoeOnline.length} PPPoE · ${hotspotOnline.length} hotspot connected right now`}
+          value={onlineN}
+          hint={`${pppoeOnline.length} PPPoE · ${hotspotOnlineN} hotspot connected right now`}
         />
         <Tile
           label="ACTIVE"
-          value={active.length}
+          value={activeN}
           hint="paid & valid — online or not"
         />
         <Tile

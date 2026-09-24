@@ -95,6 +95,7 @@ export const api = {
   payments: () => get('/api/payments'),
   paymentsBySite: () => get('/api/payments/by-site'),
   dashboardCollections: () => get('/api/dashboard/collections'),
+  dashboardHotspot: () => get('/api/dashboard/hotspot'),
   orgBalance: () => get('/api/payments/org-balance'),
   refreshOrgBalance: () => post('/api/payments/org-balance/refresh', {}),
   hotspotRevenue: (period) => get(`/api/hotspot/revenue?period=${encodeURIComponent(period)}`),

@@ -9624,6 +9624,59 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
  * apply.js's ceilToMidnight already gives for why this isn't left to the
  * database to decide.
  */
+/**
+ * The hotspot half of the dashboard's Active and Online tiles, counted here rather than in the browser.
+ *
+ * The tiles used to count the vouchers list, which is capped at the newest 1000: a busy site's
+ * printed batches and a week of sales push still-running bundles off the end, so the numbers
+ * fell short whenever there was a lot of history. Counted in the database it is exact.
+ *
+ *   active   bundles running now (in use and not expired), plus paid ones not yet signed in to,
+ *            which is what the tile means by "paid and valid"
+ *   online   of the running ones, those with a RADIUS session seen in the last 15 minutes or the
+ *            router's own report in the last 5, plus permanent access codes in use right now.
+ *            A TV bound to a bundle is not counted here: it never appears in RADIUS, so there is
+ *            no way to tell it is on, and counting it as online for as long as the bundle is valid
+ *            is what made the figure too high.
+ *   devices  TVs and consoles bound to a running bundle, reported on their own
+ */
+app.get('/api/dashboard/hotspot', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    `select
+       (select count(*) from vouchers v
+         where v.tenant_id=$1 and v.status='in_use' and (v.expires_at is null or v.expires_at > now()))::int as running,
+       (select count(*) from vouchers v
+         where v.tenant_id=$1 and v.status='unused'
+           and exists (select 1 from payments p where p.voucher_id = v.id and p.status='applied'))::int as paid_unused,
+       (select count(*) from vouchers v
+         where v.tenant_id=$1 and v.status='in_use' and (v.expires_at is null or v.expires_at > now())
+           and (exists (select 1 from radacct a
+                          join routers r on r.tenant_id = v.tenant_id and host(r.host) = host(a.nasipaddress)
+                         where a.username in (v.code, upper(v.mac::text)) and a.acctstoptime is null
+                           and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '15 minutes')
+             or exists (select 1 from live_sessions l
+                         where l.tenant_id = v.tenant_id and l.username = v.code
+                           and l.seen_at > now() - interval '5 minutes')))::int as running_online,
+       (select count(*) from hotspot_access_codes ac
+         where ac.tenant_id=$1 and ac.enabled
+           and (exists (select 1 from radacct a
+                          join routers r on r.tenant_id = ac.tenant_id and host(r.host) = host(a.nasipaddress)
+                         where a.username = ac.username and a.acctstoptime is null
+                           and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '15 minutes')
+             or exists (select 1 from live_sessions l
+                         where l.tenant_id = ac.tenant_id and l.username = ac.username
+                           and l.seen_at > now() - interval '5 minutes')))::int as access_online,
+       (select count(distinct d.mac) from voucher_devices d join vouchers v on v.id = d.voucher_id
+         where v.tenant_id=$1 and d.unbound_at is null and v.status='in_use'
+           and (v.expires_at is null or v.expires_at > now()))::int as devices`,
+    [req.tenant.id]);
+  res.json({
+    active: r.running + r.paid_unused,
+    online: r.running_online + r.access_online,
+    devices: r.devices,
+  });
+}));
+
 app.get('/api/dashboard/collections', requirePermission('payments.view'), wrap(async (req, res) => {
   const now = new Date();
   const todayStart = nairobiMidnight(now, 0);
