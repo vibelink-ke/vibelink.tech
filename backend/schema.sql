@@ -2984,3 +2984,9 @@ alter table subscribers add column if not exists custom_price numeric(12,2)
 -- queue matched ahead of the static ones, which would then never see a packet. Set by the queue
 -- pass once the queues are written; until then RADIUS keeps shaping.
 alter table routers add column if not exists queue_shaping boolean not null default false;
+
+-- A router on which every customer has a PPP profile of their own (SiPLMT_US_<username>) whose
+-- parent-queue is their static queue, so RouterOS's dynamic queue for the session sits under it
+-- and traffic is counted in both. Set by the queue pass; while it is set the Mikrotik-Group
+-- attribute belongs to that pass, not to syncSubscriberCredentials.
+alter table routers add column if not exists queue_profiles boolean not null default false;

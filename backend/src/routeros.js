@@ -1356,6 +1356,62 @@ export async function subscriberQueueTraffic(conn, pppoeUser) {
 }
 
 /**
+ * One PPP profile per customer, named like their queue (SiPLMT_US_<username>), whose
+ * parent-queue is that queue. A session that dials in on it gets RouterOS's own
+ * dynamic queue (`<pppoe-username>`, holding the speed RADIUS sends) placed UNDER
+ * the customer's static queue, so a packet is counted in both: the dynamic queue
+ * shows this customer's live traffic, the static queue above it the same traffic,
+ * and the shared tariff above that the whole group's.
+ *
+ * `wanted` is the profile names to have; the rest of the SiPLMT_US_ profiles are
+ * removed (a profile in use by a live session refuses, and is left). Returns the
+ * names that exist afterwards, so RADIUS is only told to use a profile that is
+ * really there — naming one that is missing rejects the login outright.
+ */
+export async function syncCustomerProfiles(conn, { wanted, gateway }) {
+  const existing = await conn.write('/ppp/profile/print', []);
+  const byName = new Map(existing
+    .filter((p) => typeof p.name === 'string' && p.name.startsWith(SUB_QUEUE_PREFIX))
+    .map((p) => [p.name, p]));
+  const out = { added: 0, updated: 0, same: 0, removed: 0, failed: 0, firstError: null, ok: new Set() };
+
+  for (const name of wanted) {
+    const found = byName.get(name);
+    byName.delete(name);
+    const fields = [
+      `=local-address=${gateway}`,
+      `=parent-queue=${name}`,
+      '=use-compression=no',
+      '=use-encryption=no',
+      '=only-one=yes',
+    ];
+    try {
+      if (!found) {
+        await cmd(conn, 'customer profile', '/ppp/profile/add', [`=name=${name}`, ...fields]);
+        out.added += 1;
+      } else if (!unchanged(found, fields)) {
+        await cmd(conn, 'customer profile', '/ppp/profile/set', [`=.id=${idOf(found)}`, ...fields]);
+        out.updated += 1;
+      } else {
+        out.same += 1;
+      }
+      out.ok.add(name);
+    } catch (e) {
+      out.failed += 1;
+      out.firstError ??= `${name}: ${e.message}`;
+    }
+  }
+
+  for (const p of byName.values()) {
+    try {
+      await cmd(conn, 'remove customer profile', '/ppp/profile/remove', [`=.id=${idOf(p)}`]);
+      out.removed += 1;
+    } catch { /* in use by a live session: left until it ends */ }
+  }
+  return out;
+}
+
+/**
  * Empty the Simple Queue list: what Refresh does before writing it fresh.
  *
  * Simple queues only — not the queue tree, interface queues or queue types —

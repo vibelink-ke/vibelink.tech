@@ -106,6 +106,53 @@ export function queuePlan(lines) {
 }
 
 /**
+ * Per-customer PPP profiles, and the RADIUS attributes that put each customer on
+ * theirs. Order matters: a profile is created on the router first, and only then is
+ * RADIUS told to use it. Naming a profile the router does not have rejects the
+ * login, so a customer whose profile could not be written simply keeps the default
+ * one — their traffic is then counted in the dynamic queue only.
+ */
+async function customerProfiles(conn, { tenantId, routerId, all }) {
+  const { rows: [r] } = await pool.query('select pppoe_pool from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
+  const gateway = gatewayOf(r?.pppoe_pool);
+  if (!gateway) return ['customer profiles skipped: this router has no PPPoE address pool set'];
+
+  const entitled = all.filter((l) => l.entitled);
+  const names = entitled.map((l) => `${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`);
+  const p = await ros.syncCustomerProfiles(conn, { wanted: names, gateway });
+
+  const ok = entitled.filter((l) => p.ok.has(`${ros.SUB_QUEUE_PREFIX}${l.pppoe_user}`));
+  if (ok.length) {
+    // Group and speed together: a router that was switched to "queues only" earlier
+    // had the speed removed from RADIUS, and it goes back in here.
+    await pool.query(
+      `insert into radreply (tenant_id, username, attribute, op, value)
+       select $1, u, 'Mikrotik-Group', ':=', $3 || u from unnest($2::text[]) as u
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [tenantId, ok.map((l) => l.pppoe_user), ros.SUB_QUEUE_PREFIX]);
+    await pool.query(
+      `insert into radreply (tenant_id, username, attribute, op, value)
+       select $1, u, 'Mikrotik-Rate-Limit', ':=', rate
+         from unnest($2::text[], $3::text[]) as t(u, rate)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
+      [tenantId, ok.map((l) => l.pppoe_user), ok.map((l) => `${l.rate_up}k/${l.rate_down}k`)]);
+  }
+  // Anyone on this router no longer entitled (or whose profile could not be written)
+  // goes back to the default profile at their next login.
+  await pool.query(
+    `delete from radreply
+      where tenant_id=$1 and attribute='Mikrotik-Group' and value like $4
+        and username in (select pppoe_user from subscribers where tenant_id=$1 and router_id=$2 and pppoe_user is not null)
+        and not (username = any($3::text[]))`,
+    [tenantId, routerId, ok.map((l) => l.pppoe_user), `${ros.SUB_QUEUE_PREFIX}%`]);
+  await pool.query('update routers set queue_profiles = true, queue_shaping = false where id=$1', [routerId]);
+
+  return [`customer profiles: ${p.added} added, ${p.updated} updated, ${p.same} already correct, ${p.removed} removed`
+    + `; ${ok.length} customer(s) sent to their own profile`
+    + (p.failed ? `; ${p.failed} failed (first: ${p.firstError})` : '')];
+}
+
+/**
  * Returns the sentences a Configure result shows. Never throws for a queue-level
  * problem: those are reported, so the customers-stay-online work around it is not
  * marked failed for the sake of a list.
@@ -121,20 +168,13 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
     // of a customer who is no longer entitled to service.
     const q = await ros.syncQueuePlan(conn, { ...plan, drop: wipe ? [] : plan.drop });
     const inGroups = plan.groups.reduce((n, g) => n + g.members.length, 0);
-    // The queues are what shape speed on this router, once they are known to be
-    // there: RADIUS stops sending each customer's rate (which RouterOS turns into
-    // a dynamic queue that is matched first and takes all the traffic). Switched
-    // on only after a clean write, so a router whose queues could not be built
-    // keeps the speed RADIUS gives it rather than running unlimited.
+    // Each customer's own PPP profile, so RouterOS's dynamic queue for their session sits
+    // under their static queue and traffic is counted in both.
     if (q.failed === 0) {
-      const { rows: [flipped] } = await pool.query(
-        'update routers set queue_shaping = true where id=$1 and not queue_shaping returning id', [routerId]);
-      if (flipped) {
-        const users = [...plan.singles, ...plan.groups.flatMap((g) => g.members)].map((m) => m.pppoeUser);
-        const { rowCount } = await pool.query(
-          `delete from radreply where tenant_id=$1 and attribute='Mikrotik-Rate-Limit' and username = any($2::text[])`,
-          [tenantId, users]);
-        out.push(`speeds now held by the queues: ${rowCount} customer(s) no longer sent a RADIUS rate limit`);
+      try {
+        out.push(...await customerProfiles(conn, { tenantId, routerId, all }));
+      } catch (e) {
+        out.push(`could not write customer profiles: ${e.message}`);
       }
     }
     out.push((wipe ? `queues cleared (${cleared}) and rewritten: ` : 'queues: ')
