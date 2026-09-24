@@ -1205,6 +1205,7 @@ const queueRate = (k) => {
 const subQueueFields = ({ address, rateDown, rateUp, customerName }) => [
   `=target=${String(address).split('/')[0]}/32`,
   `=max-limit=${queueRate(rateUp)}/${queueRate(rateDown)}`,
+  '=parent=none',
   ...(customerName ? [`=comment=${customerName}`] : []),
 ];
 
@@ -1228,61 +1229,110 @@ export async function removeSubscriberQueue(conn, { pppoeUser }) {
 }
 
 /**
- * The whole router in one pass — what Refresh runs. One print for every queue
- * already there, then only the writes that would change something, since each
- * write is a round trip over a tunnel.
+ * The whole router in one pass — what Refresh and the two-minute job run.
  *
- * `wanted` is every customer who should have a queue; `drop` is customers this
- * system knows who should not (expired, suspended, no plan), whose queue is
- * removed. A SiPLMT_US_ queue matching neither is left alone and only counted:
- * it may be someone the database has under another router, and deleting on a
- * guess is not what a refresh is for.
+ * `groups` are the shared tariffs: one parent queue per (speed, contention ratio)
+ * whose target is the addresses of every customer in it and whose limit is their
+ * combined rate, with each customer's own queue listed under it as a child.
+ * `singles` are customers on an uncontended plan, one queue each, no parent.
+ * `drop` names customers this system knows should have no queue (expired,
+ * suspended, no plan); their queue is removed. A queue in this namespace that
+ * matches nothing is counted and left, not deleted, since it may belong to a
+ * customer the database has under another router.
+ *
+ * One read of the whole queue list, then only the writes that would change
+ * something, since each write is a round trip over a tunnel. A group's parent is
+ * written before its children so a child never names a parent that is not there.
  */
-export async function syncSubscriberQueues(conn, { wanted, drop = [] }) {
+export async function syncQueuePlan(conn, { groups = [], singles = [], drop = [] }) {
   const existing = await conn.write('/queue/simple/print', []);
-  const byName = new Map(existing
-    .filter((q) => typeof q.name === 'string' && q.name.startsWith(SUB_QUEUE_PREFIX) && !isDynamic(q))
-    .map((q) => [q.name, q]));
+  const statics = existing.filter((q) => typeof q.name === 'string' && !isDynamic(q));
+  const byName = new Map(statics.map((q) => [q.name, q]));
   const out = { added: 0, updated: 0, same: 0, removed: 0, failed: 0, leftover: 0, firstError: null };
+  const fail = (what, e) => { out.failed += 1; out.firstError ??= `${what}: ${e.message}`; };
 
-  for (const w of wanted) {
-    const name = `${SUB_QUEUE_PREFIX}${w.pppoeUser}`;
+  const put = async (name, fields, label) => {
     const found = byName.get(name);
     byName.delete(name);
-    const fields = subQueueFields(w);
     try {
       if (!found) {
-        await cmd(conn, 'customer queue', '/queue/simple/add', [`=name=${name}`, ...fields]);
+        await cmd(conn, label, '/queue/simple/add', [`=name=${name}`, ...fields]);
         out.added += 1;
       } else if (!unchanged(found, fields)) {
-        await cmd(conn, 'customer queue', '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
+        await cmd(conn, label, '/queue/simple/set', [`=.id=${idOf(found)}`, ...fields]);
         out.updated += 1;
       } else {
         out.same += 1;
       }
+      return true;
     } catch (e) {
-      out.failed += 1;
-      out.firstError ??= `${w.pppoeUser}: ${e.message}`;
+      fail(name, e);
+      return false;
     }
+  };
+  const remove = async (q) => {
+    try {
+      await cmd(conn, 'remove queue', '/queue/simple/remove', [`=.id=${idOf(q)}`]);
+      out.removed += 1;
+    } catch (e) {
+      fail(q.name, e);
+    }
+  };
+
+  // The shapes earlier versions wrote — a pool per plan named contention-<id>, and
+  // members named after the username — are ours and are replaced by the groups below.
+  for (const q of statics) {
+    const c = String(q.comment ?? '');
+    const legacyPool = q.name.startsWith('contention-') && isManaged(q);
+    const legacyMember = isManaged(q) && c.startsWith('ispContention member') && !q.name.startsWith(SUB_QUEUE_PREFIX);
+    if (legacyPool || legacyMember) { byName.delete(q.name); await remove(q); }
+  }
+
+  const wantedParents = new Set(groups.map((g) => g.name));
+  for (const g of groups) {
+    const ok = await put(g.name, [
+      `=target=${g.addresses.map((a) => `${String(a).split('/')[0]}/32`).join(',')}`,
+      `=max-limit=${queueRate(g.rateUp)}/${queueRate(g.rateDown)}`,
+      '=parent=none',
+      `=comment=${managed('ispContention pool')}`,
+    ], 'shared tariff queue');
+    if (!ok) continue;
+    for (const m of g.members) {
+      await put(`${SUB_QUEUE_PREFIX}${m.pppoeUser}`, [
+        `=target=${String(m.address).split('/')[0]}/32`,
+        `=max-limit=${queueRate(m.rateUp)}/${queueRate(m.rateDown)}`,
+        `=parent=${g.name}`,
+        `=comment=${managed(m.customerName ? `ispContention member — ${m.customerName}` : 'ispContention member')}`,
+      ], 'customer queue');
+    }
+  }
+
+  for (const s of singles) {
+    await put(`${SUB_QUEUE_PREFIX}${s.pppoeUser}`, [
+      `=target=${String(s.address).split('/')[0]}/32`,
+      `=max-limit=${queueRate(s.rateUp)}/${queueRate(s.rateDown)}`,
+      '=parent=none',
+      ...(s.customerName ? [`=comment=${s.customerName}`] : []),
+    ], 'customer queue');
   }
 
   for (const user of drop) {
-    const name = `${SUB_QUEUE_PREFIX}${user}`;
-    const found = byName.get(name);
-    if (!found) continue;
-    byName.delete(name);
-    try {
-      await cmd(conn, 'remove customer queue', '/queue/simple/remove', [`=.id=${idOf(found)}`]);
-      out.removed += 1;
-    } catch (e) {
-      out.failed += 1;
-      out.firstError ??= `${user}: ${e.message}`;
-    }
+    const q = byName.get(`${SUB_QUEUE_PREFIX}${user}`);
+    if (!q) continue;
+    byName.delete(q.name);
+    await remove(q);
   }
 
-  out.leftover = byName.size;
+  // A shared-tariff queue nobody is in any more.
+  for (const q of [...byName.values()]) {
+    if (q.name.startsWith(MAIN_TARIFF_PREFIX)) { byName.delete(q.name); await remove(q); }
+  }
+
+  out.leftover = [...byName.keys()].filter((n) => n.startsWith(SUB_QUEUE_PREFIX)).length;
   return out;
 }
+
+export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
 /**
  * Empty the Simple Queue list: what Refresh does before writing it fresh.

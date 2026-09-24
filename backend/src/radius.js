@@ -279,6 +279,13 @@ export async function activateSubscriber(c, tenantId, subId) {
  */
 export async function applyContentionQueue(s, address) {
   if (!s.pppoe_user || !s.router_id || !s.service_user || !s.service_password_enc) return;
+  // A customer on a contended plan sits under a shared tariff queue that is built
+  // for the whole router at once (router-queues.js: Refresh and the two-minute
+  // pass), because that queue's target and limit depend on who else is in it.
+  // Only a customer on a plan of their own is handled here.
+  if (s.plan_id && Number(s.contention_ratio) > 1) return;
+  // Not the same as "no address": the backfill script never asked.
+  if (address === undefined) return;
 
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
@@ -289,33 +296,14 @@ export async function applyContentionQueue(s, address) {
       host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
       user: s.service_user, password, timeoutSec: 8,
     });
-
-    // The customer's own queue (name, address, plan rate, their name as the
-    // comment) — present while they are entitled to service, gone when not.
-    // Skipped when the caller gave no address (the backfill script), which is
-    // not the same as "no address": it never asked.
-    if (address !== undefined) {
-      if (address && ['active', 'grace'].includes(s.status) && s.rate_down != null && s.rate_up != null) {
-        await ros.ensureSubscriberQueue(conn, {
-          pppoeUser: s.pppoe_user, address, rateDown: s.rate_down, rateUp: s.rate_up, customerName: s.name,
-        });
-      } else {
-        await ros.removeSubscriberQueue(conn, { pppoeUser: s.pppoe_user });
-      }
+    // The customer's own queue while they are entitled to service, gone when not.
+    if (address && ['active', 'grace'].includes(s.status) && s.rate_down != null && s.rate_up != null) {
+      await ros.ensureSubscriberQueue(conn, {
+        pppoeUser: s.pppoe_user, address, rateDown: s.rate_down, rateUp: s.rate_up, customerName: s.name,
+      });
+    } else {
+      await ros.removeSubscriberQueue(conn, { pppoeUser: s.pppoe_user });
     }
-
-    if (!s.contention_ratio || s.contention_ratio <= 1 || !s.plan_id) {
-      await ros.removeContentionMember(conn, { pppoeUser: s.pppoe_user });
-      return;
-    }
-
-    await ros.ensureContentionPool(conn, {
-      name: `contention-${s.plan_id}`, rateDown: s.rate_down, rateUp: s.rate_up,
-    });
-    await ros.ensureContentionMember(conn, {
-      poolName: `contention-${s.plan_id}`, pppoeUser: s.pppoe_user,
-      rateDown: s.rate_down, rateUp: s.rate_up, customerName: s.name,
-    });
   } finally {
     if (conn) ros.close(conn);
   }
