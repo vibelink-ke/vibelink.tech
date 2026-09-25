@@ -517,6 +517,26 @@ async function framedAddress(c, tenantId, subId, s) {
   // setup, and checking both meant a subscriber's genuinely valid,
   // correctly-pooled static IP kept failing this check and being silently
   // reassigned a new one on every sync for no reason visible anywhere.
+  // Addresses somebody else is using right now: a session that is live on a router (accounting, or the router's own
+  // list), or one RADIUS has been told to hand to another login. A customer the router gave a pool address to
+  // itself has no record of it anywhere else, so without this the same address was given out a second time and the
+  // two devices fought over it, one of them connected with no internet.
+  const busyAddresses = async () => {
+    const { rows } = await c.query(
+      `select host(framedipaddress) as a from radacct
+        where acctstoptime is null and framedipaddress is not null
+          and coalesce(acctupdatetime, acctstarttime) > now() - interval '30 minutes' and username is distinct from $1
+       union
+       select host(address) from live_sessions
+        where tenant_id = $2 and address is not null and seen_at > now() - interval '15 minutes' and username is distinct from $1
+       union
+       select value from radreply
+        where tenant_id = $2 and attribute = 'Framed-IP-Address' and username is distinct from $1`,
+      [s.pppoe_user ?? null, tenantId]);
+    return rows.map((r) => r.a).filter(Boolean);
+  };
+  const busy = await busyAddresses();
+
   if (s.static_ip) {
     const { rows: [held] } = await c.query(
       `select host($1::inet) as a,
@@ -525,7 +545,7 @@ async function framedAddress(c, tenantId, subId, s) {
               host($1::inet) = host(broadcast($2::cidr)) as is_broadcast`,
       [s.static_ip, pool.cidr]);
     if (held?.a && !held.is_network && !held.is_gateway && !held.is_broadcast
-        && inPool(held.a, pool.cidr)) {
+        && inPool(held.a, pool.cidr) && !busy.includes(held.a)) {
       return held.a;
     }
   }
@@ -559,7 +579,8 @@ async function framedAddress(c, tenantId, subId, s) {
       where host(addr) not in (
         select host(static_ip) from subscribers
          where tenant_id=$2 and static_ip is not null and id <> $3)
-      limit 1`, [pool.cidr, tenantId, subId]);
+        and host(addr) <> all($4::text[])
+      limit 1`, [pool.cidr, tenantId, subId, busy]);
   if (!free?.a) return null;
 
   // Recorded on the subscriber, so the same line keeps the same address and the
