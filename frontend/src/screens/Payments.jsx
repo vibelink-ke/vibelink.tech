@@ -447,8 +447,8 @@ export default function Payments() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
         <Tile label="COLLECTED THIS MONTH" value={money(collected)} hint={collectedCount ? `${collectedCount} payments` : 'no collections yet'} />
         <Tile label="OUTSTANDING" value={money(outstanding)} dim hint={`${openInvoices.length} open invoices`} />
-        {/* Only for an ISP with a paybill of its own: with none, there is no balance of theirs to show. */}
-        {orgBal?.configured && (
+        {/* Every ISP has this tile. Only the platform owner's own portal hides it when it has no paybill of its own: the platform's balance is in /admin. */}
+        {!(store.session?.superAdmin && orgBal && !orgBal.configured) && (
           <Tile
             label="ORG BALANCE (M-PESA)"
             value={orgBal?.balance?.utility != null ? money(orgBal.balance.utility) : '—'}
