@@ -519,10 +519,124 @@ export async function authorizeOnu(tenantId, f) {
   const form = {
     olt_id: f.olt_id, pon_type: f.pon_type || 'gpon', board: f.board, port: f.port, sn: f.sn,
     onu_type: f.onu_type, onu_mode: f.onu_mode || 'Routing', custom_profile: f.custom_profile,
-    cvlan: f.vlan, svlan: f.vlan, zone: f.zone, odb: f.odb, name: f.name, address: f.address,
+    vlan: f.vlan, zone: f.zone, odb: f.odb, name: f.name, address_or_comment: f.address, onu_external_id: f.onu_external_id,
     upload_speed_profile_name: f.upload_speed_profile, download_speed_profile_name: f.download_speed_profile,
   };
   return call(cfg, 'POST', '/onu/authorize_onu', { form });
+}
+
+
+/** The VLANs defined on one OLT (SmartOLT → OLT → VLANs): id, number, description and scope (internet, mgmt/voip, iptv, lan_to_lan). */
+export async function oltVlans(tenantId, oltId) {
+  const cfg = await loadConfig(tenantId);
+  if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
+  return list(await call(cfg, 'GET', `/olt/get_vlans/${encodeURIComponent(oltId)}`)).map((o) => ({
+    id: text(first(o, 'id')), vlan: text(first(o, 'vlan')), description: text(first(o, 'description')), scope: text(first(o, 'scope')),
+  })).filter((o) => o.vlan);
+}
+
+// ── authorise and set up in one go ────────────────────────────────────────────────────────────────
+//
+// Authorising is the first step; the rest (management VLAN, other VLANs, the customer's PPPoE login on the ONU's WAN,
+// the WiFi name and password, and the message to the customer) are separate SmartOLT calls that only work once the OLT
+// has finished applying the authorisation, so each is retried a few times and its result is kept for the screen to show.
+// The progress lives in memory (an hour): it is only there to be watched while it happens.
+
+const jobs = new Map();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const alnum = (s) => String(s ?? '').replace(/[^A-Za-z0-9]/g, '');
+
+export function getProvision(tenantId, id) {
+  const j = jobs.get(String(id));
+  return j && j.tenantId === tenantId ? { steps: j.steps, done: j.done } : null;
+}
+
+/**
+ * Authorise the ONU (an error here is thrown: nothing else is attempted), then set it up in the background.
+ * ctx: { pppoe: {user, pass} | null, wifi: {ssid, password, band5} | null, phone, customerName, notify }
+ * Returns the id to poll with getProvision.
+ */
+export async function provisionOnu(tenantId, f, ctx = {}) {
+  const cfg = await loadConfig(tenantId);
+  if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
+  const externalId = alnum(f.sn);
+  await authorizeOnu(tenantId, { ...f, onu_external_id: externalId });
+
+  const routing = String(f.onu_mode || 'Routing') !== 'Bridging';
+  const post = (path, form) => () => call(cfg, 'POST', `/onu/${path}/${encodeURIComponent(externalId)}`, { form });
+  const steps = [{ key: 'authorize', label: 'Authorised on the OLT', state: 'ok', message: '' }];
+  const runs = [];
+
+  if (f.mgmt_vlan) {
+    steps.push({ key: 'mgmt', label: `Management VLAN ${f.mgmt_vlan}`, state: 'pending' });
+    runs.push(post('set_onu_mgmt_ip_dhcp', { vlan: f.mgmt_vlan }));
+  }
+  const others = (Array.isArray(f.other_vlans) ? f.other_vlans : []).map(String).filter((v) => /^[0-9]+$/.test(v) && v !== String(f.vlan) && v !== String(f.mgmt_vlan));
+  if (others.length) {
+    steps.push({ key: 'vlans', label: `Other VLANs ${others.join(', ')}`, state: 'pending' });
+    runs.push(post('update_attached_vlans', { add_vlans: others.join(',') }));
+  }
+  if (ctx.pppoe?.user && routing) {
+    steps.push({ key: 'pppoe', label: `PPPoE login ${ctx.pppoe.user} on the ONU`, state: 'pending' });
+    runs.push(async () => {
+      // SmartOLT accepts letters and digits only, up to 64
+      if (!/^[A-Za-z0-9]{1,64}$/.test(ctx.pppoe.user) || !/^[A-Za-z0-9]{1,64}$/.test(String(ctx.pppoe.pass ?? ''))) {
+        throw new Error('SmartOLT only accepts letters and digits in a PPPoE username and password.');
+      }
+      return post('set_onu_wan_mode_pppoe', { username: ctx.pppoe.user, password: ctx.pppoe.pass, configuration_method: 'OMCI', ip_protocol: 'ipv4' })();
+    });
+  }
+  const wifiCall = (port, ssid) => post(routing ? 'set_wifi_port_lan' : 'set_wifi_port_access', {
+    wifi_port: port, ssid, password: ctx.wifi.password, authentication_mode: 'WPA2', dhcp: 'No control',
+    ...(routing ? {} : { vlan: f.vlan }),
+  });
+  if (ctx.wifi) {
+    steps.push({ key: 'wifi', label: `WiFi name "${ctx.wifi.ssid}"`, state: 'pending' });
+    runs.push(wifiCall('wifi_0/1', ctx.wifi.ssid));
+    if (ctx.wifi.band5) {
+      steps.push({ key: 'wifi5', label: `5 GHz WiFi name "${ctx.wifi.ssid}_5G"`, state: 'pending' });
+      runs.push(wifiCall('wifi_0/5', `${ctx.wifi.ssid}_5G`));
+    }
+  }
+  const smsWanted = !!(ctx.wifi && ctx.phone && ctx.notify !== false);
+  if (smsWanted) steps.push({ key: 'sms', label: 'Message to the customer with the WiFi name and password', state: 'pending' });
+
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const job = { tenantId, steps, done: false, at: Date.now() };
+  jobs.set(id, job);
+  for (const [k, v] of jobs) if (Date.now() - v.at > 3600000) jobs.delete(k);
+
+  (async () => {
+    await sleep(6000);   // the OLT is still applying the authorisation
+    let index = 1;
+    for (const run of runs) {
+      const step = steps[index++];
+      step.state = 'running';
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try { await run(); step.state = 'ok'; step.message = ''; break; }
+        catch (e) { step.state = 'failed'; step.message = e.message; if (attempt < 3) await sleep(8000); }
+      }
+    }
+    const sms = steps.find((s) => s.key === 'sms');
+    if (sms) {
+      const wifiOk = steps.filter((s) => s.key === 'wifi' || s.key === 'wifi5').every((s) => s.state === 'ok');
+      if (!wifiOk) { sms.state = 'skipped'; sms.message = 'Not sent: the WiFi was not set.'; }
+      else {
+        try {
+          const { send } = await import('./sms.js');
+          const first = String(ctx.customerName ?? '').trim().split(/\s+/)[0];
+          await send(tenantId, ctx.phone, 'custom', {
+            body: `Hello${first ? ` ${first}` : ''}, your internet is ready. WiFi name: ${ctx.wifi.ssid}  Password: ${ctx.wifi.password}. Please keep these safe.`,
+          });
+          sms.state = 'ok';
+        } catch (e) { sms.state = 'failed'; sms.message = e.message; }
+      }
+    }
+    job.done = true;
+    syncTenant(tenantId, 'full').catch(() => {});
+  })().catch((e) => { job.done = true; steps.push({ key: 'error', label: 'Setting up', state: 'failed', message: e.message }); });
+
+  return id;
 }
 
 /** Give SmartOLT's answer to a key/subdomain a tenant has typed but not saved yet. */

@@ -188,13 +188,12 @@ function ClientPicker({ onPick }) {
   const [q, setQ] = useState('');
   const matches = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (s.length < 2) return [];
-    return (store.clients ?? []).filter((c) => `${c.name} ${c.account_code} ${c.phone}`.toLowerCase().includes(s)).slice(0, 8);
+    return (store.clients ?? []).filter((c) => !s || `${c.name} ${c.account_code} ${c.phone}`.toLowerCase().includes(s)).slice(0, 12);
   }, [q, store.clients]);
   return (
     <div>
-      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Type a name, account number or phone…" autoFocus />
-      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column' }}>
+      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Choose a client — or type a name, account number or phone…" autoFocus />
+      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', maxHeight: 260, overflowY: 'auto', border: `1px solid ${color.line}`, borderRadius: 8 }}>
         {matches.map((c) => (
           <button key={c.id} type="button" onClick={() => onPick(c)} style={{ textAlign: 'left', padding: '8px 10px', background: 'none', border: 0, borderTop: `1px solid ${color.line}`, cursor: 'pointer', color: color.ink, fontFamily: 'inherit', fontSize: 13 }}>
             <b>{c.name}</b> <span style={{ color: color.muted }}>· {c.account_code} · {c.phone}</span>
@@ -386,6 +385,8 @@ function Authorise() {
   const [busy, setBusy] = useState(false);
   const [opts, setOpts] = useState({ onu_types: [], zones: [], speed_profiles: [] });
   const [client, setClient] = useState(null);
+  const [vlans, setVlans] = useState(null);   // the chosen OLT's VLANs; null while loading
+  const [job, setJob] = useState(null);       // what is being set up after authorising
 
   const load = useCallback(() => {
     setRows(null); setErr('');
@@ -396,13 +397,43 @@ function Authorise() {
     ['onu_types', 'zones', 'speed_profiles'].forEach((w) => api.smartoltLookup(w).then((l) => setOpts((o) => ({ ...o, [w]: l }))).catch(() => {}));
   }, [load]);
 
+  useEffect(() => {
+    if (!form?.olt_id) return;
+    setVlans(null);
+    api.smartoltVlans(form.olt_id).then(setVlans).catch(() => setVlans([]));
+  }, [form?.olt_id]);
+
+  useEffect(() => {
+    if (!job?.id || job.done) return undefined;
+    const t = setInterval(() => api.smartoltProvision(job.id).then((j) => setJob({ id: job.id, ...j })).catch(() => {}), 2000);
+    return () => clearInterval(t);
+  }, [job?.id, job?.done]);
+
+  const genPass = () => {
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint8Array(10);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => chars[b % chars.length]).join('');
+  };
+
+  // Picking the client fills in what can be worked out: the name on SmartOLT, a WiFi name and a fresh WiFi password.
+  const pick = (c) => {
+    setClient(c);
+    const ssid = String(c.name ?? '').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 24) || String(c.account_code ?? '');
+    setForm((f) => ({ ...f, name: f.name || c.account_code || '', wifiSsid: f.wifiSsid || ssid, wifiPassword: f.wifiPassword || genPass() }));
+  };
+
+  const closeModal = () => { setForm(null); setClient(null); setJob(null); load(); };
+
   const submit = async () => {
+    if (!form.name.trim()) return store.toast('Give the ONU a name (often the client\'s account number)');
+    if (!form.zone.trim()) return store.toast('Choose the zone');
+    if (!String(form.vlan).trim()) return store.toast('Choose the PPPoE VLAN');
     setBusy(true);
     try {
-      await api.smartoltAuthorize({ ...form, subscriberId: client?.id ?? null });
-      store.toast(`${form.sn} authorised`);
-      setForm(null); setClient(null);
-      load();
+      const r = await api.smartoltAuthorize({ ...form, subscriberId: client?.id ?? null });
+      store.toast(`${form.sn} authorised — setting it up`);
+      setJob({ id: r.jobId, steps: [{ key: 'authorize', label: 'Authorised on the OLT', state: 'ok' }], done: false });
     } catch (e) {
       store.toast(`SmartOLT: ${e.message}`);
     } finally {
@@ -411,6 +442,13 @@ function Authorise() {
   };
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const list = (id, items) => <datalist id={id}>{items.map((o) => <option key={`${o.id}-${o.name}`} value={o.name} />)}</datalist>;
+  const vlanLabel = (v) => `${v.vlan}${v.description ? ` — ${v.description}` : ''} (${v.scope ?? 'vlan'})`;
+  const hasVlans = !!vlans && vlans.length > 0;
+  const vlanOptions = (first) => [{ value: '', label: hasVlans ? 'Choose…' : '' }, ...[...(vlans ?? [])]
+    .sort((a, b) => (b.scope === first) - (a.scope === first))
+    .map((v) => ({ value: v.vlan, label: vlanLabel(v) }))];
+  const toggleOther = (v) => setForm((f) => ({ ...f, other_vlans: f.other_vlans.includes(v) ? f.other_vlans.filter((x) => x !== v) : [...f.other_vlans, v] }));
+  const stateMark = { ok: '✓', failed: '✗', running: '…', pending: '·', skipped: '–' };
 
   return (
     <>
@@ -427,27 +465,76 @@ function Authorise() {
               { key: 'olt', label: 'OLT', render: (r) => r.olt_name ?? r.olt_id ?? '—' },
               { key: 'port', label: 'Board / port', render: (r) => `${r.board ?? '?'} / ${r.port ?? '?'}` },
               { key: 'type', label: 'Type', render: (r) => r.onu_type ?? '—' },
-              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '' }); }}>Authorise</Button> },
+              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setJob(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', mgmt_vlan: '', other_vlans: [], zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '', wifiSsid: '', wifiPassword: '', wifi5: false, pushPppoe: true, sendSms: true }); }}>Authorise</Button> },
             ]}
           />
         )}
       </Card>
 
-      <Modal open={!!form} title={form ? `Authorise ${form.sn}` : ''} onClose={() => !busy && setForm(null)} width={620}
-        footer={<><Button onClick={() => setForm(null)} disabled={busy}>Cancel</Button><Button variant="primary" onClick={submit} disabled={busy}>{busy ? 'Authorising…' : 'Authorise'}</Button></>}>
-        {form && (
+      <Modal open={!!form} title={form ? `Authorise ${form.sn}` : ''} onClose={() => !busy && closeModal()} width={680}
+        footer={job
+          ? <Button variant="primary" onClick={closeModal}>{job.done ? 'Done' : 'Close (it carries on)'}</Button>
+          : <><Button onClick={closeModal} disabled={busy}>Cancel</Button><Button variant="primary" onClick={submit} disabled={busy}>{busy ? 'Authorising…' : 'Authorise and set up'}</Button></>}>
+        {form && job && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13.5 }}>
+            {job.steps.map((s) => (
+              <div key={s.key} style={{ display: 'flex', gap: 10, alignItems: 'baseline', color: s.state === 'failed' ? color.rust : s.state === 'ok' ? color.green : color.muted }}>
+                <span style={{ width: 16, fontWeight: 700 }}>{stateMark[s.state] ?? '·'}</span>
+                <span style={{ color: color.ink }}>{s.label}{s.message ? <div style={{ color: color.rust, fontSize: 12.5 }}>{s.message}</div> : null}</span>
+              </div>
+            ))}
+            {!job.done && <div style={{ color: color.muted, fontSize: 12.5 }}>The OLT takes a little while to apply each step; this updates by itself.</div>}
+            {job.done && job.steps.some((s) => s.state === 'failed') && <div style={{ color: color.rust, fontSize: 12.5 }}>Some steps did not go through. The ONU is authorised; the ones marked ✗ can be set again from SmartOLT.</div>}
+          </div>
+        )}
+        {form && !job && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             {list('so-types', opts.onu_types)}{list('so-zones', opts.zones)}{list('so-speeds', opts.speed_profiles)}
-            <Field label="Client" span={2} hint="Optional — the client this ONU belongs to">
+            <Field label="Client" span={2} hint="Their PPPoE login and phone are used below">
               {client ? (
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}><b>{client.name}</b> <span style={{ color: color.muted }}>{client.account_code}</span><Button size="sm" onClick={() => setClient(null)}>Change</Button></div>
-              ) : <ClientPicker onPick={setClient} />}
+              ) : <ClientPicker onPick={pick} />}
             </Field>
             <Field label="Name on SmartOLT" hint="Often the client's account number"><Input value={form.name} onChange={set('name')} placeholder={client?.account_code ?? ''} /></Field>
             <Field label="ONU type"><Input value={form.onu_type} onChange={set('onu_type')} list="so-types" /></Field>
-            <Field label="Mode"><Select value={form.onu_mode} onChange={set('onu_mode')} options={['Routing', 'Bridging']} /></Field>
-            <Field label="VLAN"><Input value={form.vlan} onChange={set('vlan')} /></Field>
+            <Field label="Mode" hint={form.onu_mode === 'Bridging' ? 'Bridging: the customer router does the PPPoE' : undefined}><Select value={form.onu_mode} onChange={set('onu_mode')} options={['Routing', 'Bridging']} /></Field>
             <Field label="Zone"><Input value={form.zone} onChange={set('zone')} list="so-zones" /></Field>
+
+            <Field label="PPPoE VLAN" hint={vlans === null ? 'Loading this OLT\'s VLANs…' : 'The internet VLAN the ONU carries'}>
+              {hasVlans ? <Select value={form.vlan} onChange={set('vlan')} options={vlanOptions('internet')} /> : <Input value={form.vlan} onChange={set('vlan')} />}
+            </Field>
+            <Field label="Management VLAN" hint="Optional — for managing the ONU itself">
+              {hasVlans ? <Select value={form.mgmt_vlan} onChange={set('mgmt_vlan')} options={vlanOptions('mgmt/voip')} /> : <Input value={form.mgmt_vlan} onChange={set('mgmt_vlan')} />}
+            </Field>
+            {hasVlans && (
+              <Field label="Other VLANs on this OLT" span={2} hint="Optional — attached to the ONU as well (IPTV, voice…)">
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+                  {vlans.filter((v) => v.vlan !== String(form.vlan) && v.vlan !== String(form.mgmt_vlan)).map((v) => (
+                    <label key={v.id ?? v.vlan} style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
+                      <input type="checkbox" checked={form.other_vlans.includes(v.vlan)} onChange={() => toggleOther(v.vlan)} /> {vlanLabel(v)}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+            )}
+
+            <div style={{ gridColumn: '1 / -1', borderTop: `1px solid ${color.line}`, paddingTop: 10, fontSize: 12, letterSpacing: '.06em', fontWeight: 600, color: color.muted }}>SET UP ON THE ONU</div>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <Toggle checked={!!form.pushPppoe} onChange={(v) => setForm((f) => ({ ...f, pushPppoe: v }))} label="Send the client's PPPoE username and password to the ONU"
+                detail={client ? (form.onu_mode === 'Bridging' ? 'Not used in Bridging mode' : 'Done automatically once the ONU is authorised') : 'Choose a client above to use this'} />
+            </div>
+            <Field label="WiFi name"><Input value={form.wifiSsid} onChange={set('wifiSsid')} maxLength={32} /></Field>
+            <Field label="WiFi password" hint="8 or more characters">
+              <div style={{ display: 'flex', gap: 6 }}>
+                <Input value={form.wifiPassword} onChange={set('wifiPassword')} />
+                <Button size="sm" onClick={() => setForm((f) => ({ ...f, wifiPassword: genPass() }))}>New</Button>
+              </div>
+            </Field>
+            <div style={{ gridColumn: '1 / -1' }}>
+              <Toggle checked={!!form.wifi5} onChange={(v) => setForm((f) => ({ ...f, wifi5: v }))} label="Also set the 5 GHz WiFi" detail="Same password, name ends _5G. Only for dual-band ONUs" />
+              <Toggle checked={!!form.sendSms} onChange={(v) => setForm((f) => ({ ...f, sendSms: v }))} label="Message the customer their WiFi name and password when it is done" detail={client?.phone ? `Goes to ${client.phone}` : 'Needs a client with a phone number'} />
+            </div>
+
             <Field label="Address"><Input value={form.address} onChange={set('address')} /></Field>
             <Field label="Download speed profile"><Input value={form.download_speed_profile} onChange={set('download_speed_profile')} list="so-speeds" /></Field>
             <Field label="Upload speed profile"><Input value={form.upload_speed_profile} onChange={set('upload_speed_profile')} list="so-speeds" /></Field>

@@ -8079,17 +8079,51 @@ app.get('/api/smartolt/lookup/:what', requirePermission('smartolt.manage'), wrap
   try { res.json(await m.lookup(req.tenant.id, req.params.what)); } catch (e) { res.json([]); }
 }));
 
+app.get('/api/smartolt/vlans/:oltId', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  try { res.json(await m.oltVlans(req.tenant.id, req.params.oltId)); } catch (e) { res.json([]); }
+}));
+
+app.get('/api/smartolt/provision/:id', requirePermission('smartolt.manage'), wrap(async (req, res) => {
+  const m = await smartolt();
+  const j = m.getProvision(req.tenant.id, req.params.id);
+  if (!j) return res.status(404).json({ error: 'Nothing to show for that any more.' });
+  res.json(j);
+}));
+
+/**
+ * Authorise an ONU and set it up: the client's PPPoE login and the WiFi name and password go onto the ONU, its VLANs are
+ * attached, and the customer is sent a message with the WiFi details once it is done. Authorising itself is answered
+ * straight away; the rest carries on in the background and is followed through /provision/:id.
+ */
 app.post('/api/smartolt/authorize', requirePermission('smartolt.manage'), wrap(async (req, res) => {
   const m = await smartolt();
+  const b = req.body ?? {};
   try {
-    const out = await m.authorizeOnu(req.tenant.id, req.body ?? {});
-    if (req.body?.subscriberId && req.body?.sn) {
-      await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2', [req.tenant.id, req.body.subscriberId, String(req.body.sn).trim()]);
+    let sub = null;
+    if (b.subscriberId) {
+      const { rows: [s] } = await pool.query(
+        'select id, name, phone, pppoe_user, pppoe_pass from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, b.subscriberId]);
+      if (!s) return res.status(404).json({ error: 'No such client.' });
+      sub = s;
     }
-    // pick the new ONU up without waiting for the hourly list
-    const { rows: [c] } = await pool.query('select last_details_at from smartolt_config where tenant_id=$1', [req.tenant.id]);
-    if (!c?.last_details_at || Date.now() - new Date(c.last_details_at) > 3 * 60000) m.syncTenant(req.tenant.id, 'full').catch(() => {});
-    res.json({ ok: true, response: out });
+    let wifi = null;
+    if (String(b.wifiSsid ?? '').trim() || b.wifiPassword) {
+      wifi = { ssid: String(b.wifiSsid ?? '').trim(), password: String(b.wifiPassword ?? ''), band5: !!b.wifi5 };
+      if (!wifi.ssid || wifi.ssid.length > 32) return res.status(400).json({ error: 'The WiFi name must be 1 to 32 characters.' });
+      if (wifi.password.length < 8 || wifi.password.length > 63) return res.status(400).json({ error: 'The WiFi password must be 8 to 63 characters.' });
+    }
+    const jobId = await m.provisionOnu(req.tenant.id, b, {
+      pppoe: b.pushPppoe !== false && sub?.pppoe_user ? { user: sub.pppoe_user, pass: sub.pppoe_pass } : null,
+      wifi,
+      phone: sub?.phone,
+      customerName: sub?.name,
+      notify: b.sendSms !== false,
+    });
+    if (sub && b.sn) {
+      await pool.query('update subscribers set onu_sn=$3 where tenant_id=$1 and id=$2', [req.tenant.id, sub.id, String(b.sn).trim()]);
+    }
+    res.json({ ok: true, jobId });
   } catch (e) { soFail(res, e); }
 }));
 
