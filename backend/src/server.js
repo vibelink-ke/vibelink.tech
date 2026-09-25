@@ -12643,6 +12643,9 @@ app.post('/api/fup-policies', wrap(async (req, res) => {
   if (!f.name?.trim()) return res.status(400).json({ error: 'Name the policy' });
   if (!Number.isFinite(f.dataCapGb) || f.dataCapGb <= 0)
     return res.status(400).json({ error: 'Data cap must be a positive number of GB' });
+  // RouterOS reads a rate of 0 as "no limit", the opposite of a throttle.
+  if (!(f.throttleDown > 0) || !(f.throttleUp > 0))
+    return res.status(400).json({ error: 'Set the speed to throttle to, for download and upload' });
   const { rows: [row] } = await pool.query(
     `insert into fup_policies (tenant_id, name, applies_to, plan_id, data_cap_gb,
        window_period, throttle_down, throttle_up, notify_at_pct, enabled)
@@ -12654,6 +12657,8 @@ app.post('/api/fup-policies', wrap(async (req, res) => {
 
 app.put('/api/fup-policies/:id', wrap(async (req, res) => {
   const f = fupBody(req.body);
+  if (!(f.throttleDown > 0) || !(f.throttleUp > 0))
+    return res.status(400).json({ error: 'Set the speed to throttle to, for download and upload' });
   const { rows: [row] } = await pool.query(
     `update fup_policies set name=$3, applies_to=$4, plan_id=$5, data_cap_gb=$6,
        window_period=$7, throttle_down=$8, throttle_up=$9, notify_at_pct=$10, enabled=$11

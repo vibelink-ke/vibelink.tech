@@ -17,7 +17,8 @@ const WINDOWS = [
   { value: 'monthly', label: 'Per calendar month' },
 ];
 
-const THROTTLE_PRESETS = [512, 1024, 2048, 4096];
+// kbps. A speed outside this list is typed in under "Custom".
+const THROTTLE_PRESETS = [256, 512, 1000, 1024, 2000, 2048, 3000, 4000, 4096, 5000, 6000, 8000, 10000];
 
 const BLANK = {
   name: '',
@@ -32,6 +33,33 @@ const BLANK = {
 
 const mbps = (kbps) => (kbps ? `${(kbps / 1000).toFixed(kbps % 1000 ? 1 : 0)} Mbps` : '—');
 const windowLabel = (w) => WINDOWS.find((x) => x.value === w)?.label ?? w;
+
+/** A speed in kbps: pick a common one, or choose Custom and type it in Mbps (1.5 is fine). */
+function SpeedPick({ value, onChange }) {
+  const v = Number(value) || 0;
+  const [custom, setCustom] = useState(!THROTTLE_PRESETS.includes(v));
+  const [text, setText] = useState(v ? String(v / 1000) : '');
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <Select
+        value={custom ? 'custom' : String(v)}
+        onChange={(e) => {
+          if (e.target.value === 'custom') { setCustom(true); return; }
+          setCustom(false);
+          onChange(Number(e.target.value));
+        }}
+        options={[...THROTTLE_PRESETS.map((k) => ({ value: String(k), label: mbps(k) })), { value: 'custom', label: 'Custom…' }]}
+      />
+      {custom && (
+        <Input
+          type="number" min="0.1" step="0.1" placeholder="Speed in Mbps"
+          value={text}
+          onChange={(e) => { setText(e.target.value); onChange(Math.round(Number(e.target.value) * 1000) || 0); }}
+        />
+      )}
+    </div>
+  );
+}
 
 export default function Fup() {
   const store = useStore();
@@ -121,6 +149,7 @@ export default function Fup() {
   const save = async () => {
     if (!form.name.trim()) return store.toast('Name the policy');
     if (!Number(form.dataCapGb)) return store.toast('Set a data cap in GB');
+    if (!(Number(form.throttleDown) > 0) || !(Number(form.throttleUp) > 0)) return store.toast('Set the speed to throttle to, for download and upload');
     setBusy(true);
     try {
       const saved = form.id ? await api.updateFupPolicy(form.id, form) : await api.createFupPolicy(form);
@@ -388,18 +417,10 @@ export default function Fup() {
             </Field>
 
             <Field label="Throttle download to" hint={mbps(form.throttleDown)}>
-              <Select
-                value={String(form.throttleDown)}
-                onChange={set('throttleDown')}
-                options={THROTTLE_PRESETS.map((k) => ({ value: String(k), label: mbps(k) }))}
-              />
+              <SpeedPick value={form.throttleDown} onChange={(k) => setForm((s) => ({ ...s, throttleDown: k }))} />
             </Field>
             <Field label="Throttle upload to" hint={mbps(form.throttleUp)}>
-              <Select
-                value={String(form.throttleUp)}
-                onChange={set('throttleUp')}
-                options={THROTTLE_PRESETS.map((k) => ({ value: String(k), label: mbps(k) }))}
-              />
+              <SpeedPick value={form.throttleUp} onChange={(k) => setForm((s) => ({ ...s, throttleUp: k }))} />
             </Field>
 
             <Field label="Warn the client at (% of cap)" span={2} hint={
