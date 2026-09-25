@@ -447,12 +447,15 @@ export default function Payments() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14 }}>
         <Tile label="COLLECTED THIS MONTH" value={money(collected)} hint={collectedCount ? `${collectedCount} payments` : 'no collections yet'} />
         <Tile label="OUTSTANDING" value={money(outstanding)} dim hint={`${openInvoices.length} open invoices`} />
-        <Tile
-          label="ORG BALANCE (M-PESA)"
-          value={orgBal?.balance?.utility != null ? money(orgBal.balance.utility) : '—'}
-          hint={orgHint}
-          onClick={orgBal?.canQuery && !orgBal.pending && !orgBusy ? refreshOrgBal : undefined}
-        />
+        {/* Only for an ISP with a paybill of its own: with none, there is no balance of theirs to show. */}
+        {orgBal?.configured && (
+          <Tile
+            label="ORG BALANCE (M-PESA)"
+            value={orgBal?.balance?.utility != null ? money(orgBal.balance.utility) : '—'}
+            hint={orgHint}
+            onClick={orgBal?.canQuery && !orgBal.pending && !orgBusy ? refreshOrgBal : undefined}
+          />
+        )}
         <Tile label="AUTO-MATCH RATE" value={matchRate === null ? '—' : `${matchRate}%`} hint={`${unmatched.length} need a human`} />
         {settlements.length > 0 && (
           <Tile

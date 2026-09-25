@@ -277,8 +277,11 @@ export async function b2b(tenantId, { amount, partyB, accountReference = '', rem
  * is configured as. Needs the same initiator name/password as payouts, and that
  * initiator must have the "balance query" role on the M-Pesa portal.
  */
-export async function accountBalance(tenantId) {
-  const cfg = await resolveConfig(tenantId, 'daraja', false);
+export async function accountBalance(tenantId, { platform = false } = {}) {
+  // The platform's own paybill is queried only from the platform console; every other caller asks for the tenant's own.
+  const cfg = platform
+    ? ((await platformCollectConfig(tenantId, 'daraja')) ?? (await config(tenantId, 'daraja')))
+    : await resolveConfig(tenantId, 'daraja', false);
   if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
 
   const { initiator_name: initiator, initiator_password: initiatorPassword } = cfg.credentials ?? {};

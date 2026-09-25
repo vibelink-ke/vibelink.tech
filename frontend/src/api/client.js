@@ -104,6 +104,8 @@ export const api = {
   dashboardHotspot: () => get('/api/dashboard/hotspot'),
   orgBalance: () => get('/api/payments/org-balance'),
   refreshOrgBalance: () => post('/api/payments/org-balance/refresh', {}),
+  platformOrgBalance: () => get('/api/platform/org-balance'),
+  refreshPlatformOrgBalance: () => post('/api/platform/org-balance/refresh', {}),
   hotspotRevenue: (period) => get(`/api/hotspot/revenue?period=${encodeURIComponent(period)}`),
   hotspotToday: () => get('/api/hotspot/today'),
   unmatchedPayments: () => get('/api/payments/unmatched'),

@@ -5,7 +5,7 @@ import util from 'node:util';
 import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { pool, tenantByHost, withTenant, config } from './db.js';
+import { pool, tenantByHost, withTenant, config, platformCollectConfig } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
@@ -9644,10 +9644,14 @@ app.get('/api/payments/org-balance', requirePermission('payments.view'), wrap(as
   const { rows: [ok] } = await pool.query(
     `select utility, working, accounts, shortcode, source, coalesce(as_of, received_at) as received_at
        from mpesa_balances
-      where tenant_id=$1 and status='ok' order by coalesce(as_of, received_at) desc limit 1`, [req.tenant.id]);
+      where tenant_id=$1 and status='ok'
+        and shortcode in (select shortcode from tenant_payment_config where tenant_id=$1 and scope='tenant' and shortcode is not null)
+      order by coalesce(as_of, received_at) desc limit 1`, [req.tenant.id]);
   const { rows: [last] } = await pool.query(
     `select status, error, requested_at from mpesa_balances
-      where tenant_id=$1 order by requested_at desc limit 1`, [req.tenant.id]);
+      where tenant_id=$1
+        and shortcode in (select shortcode from tenant_payment_config where tenant_id=$1 and scope='tenant' and shortcode is not null)
+      order by requested_at desc limit 1`, [req.tenant.id]);
   const pending = last?.status === 'pending' && Date.now() - new Date(last.requested_at).getTime() < 3 * 60 * 1000;
 
   let cfg = null;
@@ -9684,6 +9688,53 @@ app.post('/api/payments/org-balance/refresh', requirePermission('payments.view')
   }
   await pool.query(
     'insert into mpesa_balances (tenant_id, shortcode, conversation_id) values ($1,$2,$3)',
+    [req.tenant.id, asked.shortcode, asked.conversationId ?? null]);
+  res.json({ pending: true });
+}));
+
+/**
+ * The platform's own paybill balance, for the platform console only: the same read as an ISP's, but of the paybill
+ * kept under Payment gateways in /admin, not of anything the platform owner's own ISP portal has.
+ */
+app.get('/api/platform/org-balance', superAdminOnly, wrap(async (req, res) => {
+  let cfg = null;
+  try { cfg = (await platformCollectConfig(req.tenant.id, 'daraja')) ?? (await config(req.tenant.id, 'daraja')); } catch { cfg = null; }
+  const code = cfg?.shortcode ?? null;
+  const { rows: [ok] } = code ? await pool.query(
+    `select utility, working, accounts, shortcode, source, coalesce(as_of, received_at) as received_at
+       from mpesa_balances where tenant_id=$1 and shortcode=$2 and status='ok'
+      order by coalesce(as_of, received_at) desc limit 1`, [req.tenant.id, code]) : { rows: [] };
+  const { rows: [last] } = code ? await pool.query(
+    `select status, error, requested_at from mpesa_balances where tenant_id=$1 and shortcode=$2
+      order by requested_at desc limit 1`, [req.tenant.id, code]) : { rows: [] };
+  const pending = last?.status === 'pending' && Date.now() - new Date(last.requested_at).getTime() < 3 * 60 * 1000;
+  res.json({
+    balance: ok ? {
+      utility: ok.utility == null ? null : Number(ok.utility),
+      working: ok.working == null ? null : Number(ok.working),
+      accounts: ok.accounts ?? [],
+      shortcode: ok.shortcode,
+      source: ok.source,
+      receivedAt: ok.received_at,
+    } : null,
+    pending,
+    lastError: last?.status === 'failed' ? last.error : null,
+    configured: !!cfg,
+    canQuery: !!(cfg?.credentials?.initiator_name && cfg?.credentials?.initiator_password),
+  });
+}));
+
+app.post('/api/platform/org-balance/refresh', superAdminOnly, wrap(async (req, res) => {
+  const { rows: [inFlight] } = await pool.query(
+    `select 1 from mpesa_balances where tenant_id=$1 and status='pending' and requested_at > now() - interval '3 minutes'`, [req.tenant.id]);
+  if (inFlight) return res.json({ pending: true });
+  let asked;
+  try {
+    asked = await mpesa.accountBalance(req.tenant.id, { platform: true });
+  } catch (e) {
+    return res.status(400).json({ error: e?.response?.data?.errorMessage ?? e.message });
+  }
+  await pool.query('insert into mpesa_balances (tenant_id, shortcode, conversation_id) values ($1,$2,$3)',
     [req.tenant.id, asked.shortcode, asked.conversationId ?? null]);
   res.json({ pending: true });
 }));

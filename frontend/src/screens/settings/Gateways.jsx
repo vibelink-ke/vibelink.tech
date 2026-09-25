@@ -92,6 +92,46 @@ const blankFor = (provider) => ({
   enabledHotspot: CHANNELS[provider].services.hotspot,
 });
 
+/** The platform paybill's balance, on the platform console. */
+function PlatformBalance() {
+  const store = useStore();
+  const [b, setB] = useState(undefined);
+  const [busy, setBusy] = useState(false);
+  const load = () => api.platformOrgBalance().then(setB).catch(() => setB(null));
+  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    if (!b?.pending) return undefined;
+    const t = setTimeout(load, 5000);
+    return () => clearTimeout(t);
+  }, [b]);
+  const refresh = async () => {
+    setBusy(true);
+    try { await api.refreshPlatformOrgBalance(); await load(); } catch (e) { store.toast(e.message); } finally { setBusy(false); }
+  };
+  const kes = (n) => `KES ${Number(n).toLocaleString('en-KE')}`;
+  const bal = b?.balance;
+  return (
+    <Card
+      title="Platform paybill balance"
+      subtitle={bal?.shortcode ? `Paybill ${bal.shortcode}` : 'The balance of the platform paybill below'}
+      actions={b?.canQuery ? <Button size="sm" onClick={refresh} disabled={busy || b.pending}>{b.pending ? 'Asking Safaricom…' : 'Refresh'}</Button> : null}
+    >
+      {b === undefined ? <span style={{ color: color.muted, fontSize: 13 }}>Reading…</span> : !b?.configured ? (
+        <span style={{ color: color.muted, fontSize: 13 }}>No platform paybill saved yet. Add one below.</span>
+      ) : (
+        <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', alignItems: 'baseline' }}>
+          <div><div style={{ fontSize: 24, fontWeight: 600 }}>{bal?.utility != null ? kes(bal.utility) : '—'}</div><div style={{ fontSize: 12, color: color.muted }}>utility account</div></div>
+          {bal?.working != null && <div><div style={{ fontSize: 24, fontWeight: 600 }}>{kes(bal.working)}</div><div style={{ fontSize: 12, color: color.muted }}>working account</div></div>}
+          <div style={{ fontSize: 12, color: color.muted }}>
+            {bal ? (bal.source === 'c2b' ? 'as of the last payment, ' : 'read ') + new Date(bal.receivedAt).toLocaleString('en-KE') : (b.canQuery ? 'Press Refresh to read it from Safaricom.' : 'Appears with the next payment on the paybill.')}
+            {b.lastError ? ` · latest refresh failed: ${b.lastError}` : ''}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function Gateways({ platform = false }) {
   const store = useStore();
   const [gateways, setGateways] = useState([]);
@@ -452,6 +492,8 @@ export default function Gateways({ platform = false }) {
           </div>
         </Card>
       )}
+
+      {platform && <PlatformBalance />}
 
       {!platform && store.session?.superAdmin && (
         <Card
