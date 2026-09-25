@@ -386,11 +386,23 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
  */
 export async function repairPppProfile(conn, pppoePool, profileName = 'vibelink-pppoe') {
   const gateway = gatewayOf(pppoePool);
-  if (!gateway) return null;
   const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
-  if (!profile || profile['local-address']) return null;
-  await conn.write('/ppp/profile/set', [`=.id=${profile['.id']}`, `=local-address=${gateway}`]);
-  return `PPP profile ${profileName} had no local-address; set it to ${gateway}`;
+  if (!profile) return null;
+  const said = [];
+  const set = [];
+  if (gateway && !profile['local-address']) {
+    set.push(`=local-address=${gateway}`);
+    said.push(`had no local-address; set it to ${gateway}`);
+  }
+  // Without a DNS server in the profile a customer's ONU or router connects, gets an address and cannot
+  // resolve a single name: "connected, no internet".
+  if (!profile['dns-server']) {
+    set.push(`=dns-server=${ros.DEFAULT_PPP_DNS}`);
+    said.push(`had no DNS server; set it to ${ros.DEFAULT_PPP_DNS}`);
+  }
+  if (!set.length) return null;
+  await conn.write('/ppp/profile/set', [`=.id=${profile['.id']}`, ...set]);
+  return `PPP profile ${profileName} ${said.join(' and ')}`;
 }
 
 // One router is only ever being rewritten by one caller at a time: Refresh, the

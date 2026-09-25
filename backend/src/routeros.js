@@ -1335,6 +1335,9 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
+/** The DNS servers a PPPoE session is told to use when the profile names none. */
+export const DEFAULT_PPP_DNS = '8.8.8.8,1.1.1.1';
+
 /** Every entry of the block list except the one this system manages (the expired range): dynamic ones and stray ones. */
 export async function dropBlockEntries(conn) {
   const rows = await conn.write('/ip/firewall/address-list/print', ['?list=ispblocking']);
@@ -2145,7 +2148,8 @@ export async function applyPppoeServer(conn, {
   ];
   const profile = (await conn.write('/ppp/profile/print', [`?name=${profileName}`]))[0];
   if (profile) {
-    const want = [...profileFields, '=!remote-address='];
+    // A DNS server an operator set is left alone; a profile with none is given one.
+    const want = [...profileFields, '=!remote-address=', ...(profile['dns-server'] ? [] : [`=dns-server=${DEFAULT_PPP_DNS}`])];
     if (!unchanged(profile, want)) {
       await cmd(conn, 'PPP profile', '/ppp/profile/set', [`=.id=${idOf(profile)}`, ...want]);
     }
@@ -2155,7 +2159,7 @@ export async function applyPppoeServer(conn, {
     // `!remote-address=` there — "unset" only makes sense against something
     // that could already hold a value.
     const addFields = gateway ? profileFields : profileFields.filter((f) => f !== '=!local-address=');
-    await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...addFields]);
+    await cmd(conn, 'PPP profile', '/ppp/profile/add', [`=name=${profileName}`, ...addFields, `=dns-server=${DEFAULT_PPP_DNS}`]);
   }
 
   const serverFields = [
