@@ -1886,7 +1886,7 @@ async function syncOnlineCustomersJob() {
     for (const t of rows) {
       try {
         const s = await syncOnlineCustomers(t.id, { relocate: false });
-        if (s.added || s.closed) console.log(`syncOnlineCustomers: ${s.added} added, ${s.closed} closed`);
+        if (s.added || s.closed || s.unblocked) console.log(`syncOnlineCustomers: ${s.added} added, ${s.closed} closed, ${s.unblocked} taken off the block list`);
       } catch (e) {
         console.warn('syncOnlineCustomers:', e.message);
       }

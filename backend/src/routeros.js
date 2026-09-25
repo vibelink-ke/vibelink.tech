@@ -1335,6 +1335,27 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
+/**
+ * Takes customers who are entitled to service off the block list they are still sitting on.
+ *
+ * A customer put on the block list while expired gets a dynamic entry on the router for their live session (from the
+ * RADIUS attribute or the CoA). Paying and being activated clears the RADIUS side, but the router keeps that entry until
+ * the session ends, so the customer stays connected, holds an address and shows online, with no internet. Only dynamic
+ * entries for one of the given single addresses are removed; the block on the whole expired range is left alone.
+ */
+export async function clearBlocksFor(conn, addresses) {
+  if (!addresses?.size) return 0;
+  const rows = await conn.write('/ip/firewall/address-list/print', ['?list=ispblocking']);
+  let removed = 0;
+  for (const r of rows) {
+    const raw = String(r.address ?? '');
+    if (String(r.dynamic) !== 'true' || (raw.includes('/') && !raw.endsWith('/32'))) continue;
+    if (!addresses.has(raw.split('/')[0])) continue;
+    try { await conn.write('/ip/firewall/address-list/remove', [`=.id=${idOf(r)}`]); removed += 1; } catch { /* the next pass tries again */ }
+  }
+  return removed;
+}
+
 /** Every customer queue's running byte counters ("upload/download" on the router), one entry per queue. */
 export async function queueByteCounters(conn) {
   const rows = await conn.write('/queue/simple/print', []);

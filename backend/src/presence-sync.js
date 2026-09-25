@@ -28,12 +28,12 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
     [tenantId]);
 
   const { rows: subs } = await pool.query(
-    "select id, pppoe_user, router_id from subscribers where tenant_id=$1 and service='pppoe' and pppoe_user is not null",
+    "select id, pppoe_user, router_id, status from subscribers where tenant_id=$1 and service='pppoe' and pppoe_user is not null",
     [tenantId]);
   const known = new Set(subs.map((s) => s.pppoe_user));
   const before = new Map(subs.map((s) => [s.id, s.router_id]));
 
-  const summary = { routers: [], online: 0, added: 0, closed: 0, moved: 0, unknown: 0 };
+  const summary = { routers: [], online: 0, added: 0, closed: 0, moved: 0, unknown: 0, unblocked: 0 };
 
   await Promise.all(routers.map(async (r) => {
     const entry = { name: r.name, ok: false, online: 0, added: 0, closed: 0 };
@@ -41,6 +41,7 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
     const nas = String(r.host).split('/')[0];
     let sessions;
     let counters = null;
+    let unblocked = 0;
     try {
       const password = secrets.decrypt(r.service_password_enc);
       if (!password) throw new Error('no stored password');
@@ -48,6 +49,10 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
       try {
         sessions = await ros.activeSessions(conn, { strict: true });
         counters = await ros.queueByteCounters(conn).catch(() => null);
+        // Anyone who is entitled to service but still sits on the router's block list gets off it.
+        const entitled = new Set(subs.filter((s) => ['active', 'grace'].includes(s.status)).map((s) => s.pppoe_user));
+        const clear = new Set(sessions.filter((s) => s.service === 'pppoe' && s.address && entitled.has(s.username)).map((s) => s.address));
+        unblocked = await ros.clearBlocksFor(conn, clear).catch(() => 0);
       } finally {
         ros.close(conn);
       }
@@ -56,6 +61,7 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
       return;
     }
     entry.ok = true;
+    entry.unblocked = unblocked;
     entry.online = sessions.length;
 
     for (const s of sessions) {
@@ -130,7 +136,7 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
       'delete from live_sessions where tenant_id=$1 and router_id=$2 and seen_at < $3', [tenantId, r.id, new Date(startedAt)]);
   }));
 
-  for (const e of summary.routers) { summary.online += e.online; summary.added += e.added; summary.closed += e.closed; }
+  for (const e of summary.routers) { summary.online += e.online; summary.added += e.added; summary.closed += e.closed; summary.unblocked += e.unblocked ?? 0; }
 
   if (relocate && summary.added) {
     const { autoRelocateSubscribers } = await import('./jobs.js');
