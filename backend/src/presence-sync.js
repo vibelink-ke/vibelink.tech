@@ -40,12 +40,14 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
     summary.routers.push(entry);
     const nas = String(r.host).split('/')[0];
     let sessions;
+    let counters = null;
     try {
       const password = secrets.decrypt(r.service_password_enc);
       if (!password) throw new Error('no stored password');
       const conn = await ros.connect({ host: nas, port: r.api_port ?? 8728, user: r.service_user, password, timeoutSec: 8 });
       try {
         sessions = await ros.activeSessions(conn, { strict: true });
+        counters = await ros.queueByteCounters(conn).catch(() => null);
       } finally {
         ros.close(conn);
       }
@@ -63,6 +65,34 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
          on conflict (tenant_id, username) do update
             set router_id = excluded.router_id, address = excluded.address, service = excluded.service, seen_at = now()`,
         [tenantId, r.id, s.username, s.address, s.service]);
+    }
+
+    // Usage from the router's own queue counters, for fair use: it does not depend on accounting reaching us.
+    try {
+      const qs = counters ?? [];
+      if (qs.length) {
+        await pool.query(
+          `with cur as (select * from unnest($2::text[], $3::bigint[], $4::bigint[]) as t(name, up, down)),
+                delta as (
+                  select c.name,
+                         case when p.queue_name is null then 0 when c.up   >= p.up   then c.up   - p.up   else c.up   end
+                       + case when p.queue_name is null then 0 when c.down >= p.down then c.down - p.down else c.down end as bytes
+                    from cur c left join queue_counters p on p.router_id = $1 and p.queue_name = c.name),
+                upd as (
+                  insert into queue_counters (router_id, queue_name, up, down)
+                  select $1, name, up, down from cur
+                  on conflict (router_id, queue_name) do update set up = excluded.up, down = excluded.down
+                  returning 1)
+             insert into subscriber_usage_daily (tenant_id, subscriber_id, day, queue_bytes)
+             select $5, s.id, current_date, sum(d.bytes)
+               from delta d join subscribers s on s.tenant_id = $5 and s.pppoe_user = substr(d.name, $6)
+              where d.bytes > 0
+              group by s.id
+             on conflict (subscriber_id, day) do update set queue_bytes = subscriber_usage_daily.queue_bytes + excluded.queue_bytes`,
+          [r.id, qs.map((q) => q.name), qs.map((q) => q.up), qs.map((q) => q.down), tenantId, ros.SUB_QUEUE_PREFIX.length + 1]);
+      }
+    } catch (e) {
+      entry.usageError = e.message;
     }
 
     const pppoe = sessions.filter((s) => s.service === 'pppoe');

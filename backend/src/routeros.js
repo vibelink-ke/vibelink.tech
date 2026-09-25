@@ -1335,6 +1335,17 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
+/** Every customer queue's running byte counters ("upload/download" on the router), one entry per queue. */
+export async function queueByteCounters(conn) {
+  const rows = await conn.write('/queue/simple/print', []);
+  return rows
+    .filter((q) => typeof q.name === 'string' && q.name.startsWith(SUB_QUEUE_PREFIX))
+    .map((q) => {
+      const [a, b] = String(q.bytes ?? '').split('/').map((n) => Number(n));
+      return { name: q.name, user: q.name.slice(SUB_QUEUE_PREFIX.length), up: Number.isFinite(a) ? a : 0, down: Number.isFinite(b) ? b : 0 };
+    });
+}
+
 /**
  * One customer's queue counters, and their shared tariff's when they sit under one.
  * Bytes are since the queue was written (or the router last restarted); rate is

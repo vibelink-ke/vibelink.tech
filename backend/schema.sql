@@ -706,6 +706,18 @@ create table if not exists subscriber_usage_daily (
   primary key (subscriber_id, day)
 );
 create index if not exists subscriber_usage_daily_tenant on subscriber_usage_daily (tenant_id, day);
+-- The same usage as the routers' own queue counters saw it (presence-sync.js), which does not depend on RADIUS
+-- accounting reaching the server. Fair use takes the larger of the two.
+alter table subscriber_usage_daily add column if not exists queue_bytes bigint not null default 0;
+-- Where each customer queue's counter stood when last read, so only the growth is added (a counter that went down
+-- was reset by a rewritten queue or a router restart, and starts again from its new value).
+create table if not exists queue_counters (
+  router_id  uuid not null references routers on delete cascade,
+  queue_name text not null,
+  up         bigint not null default 0,
+  down       bigint not null default 0,
+  primary key (router_id, queue_name)
+);
 
 create or replace function sync_session_from_radacct() returns trigger as $$
 declare

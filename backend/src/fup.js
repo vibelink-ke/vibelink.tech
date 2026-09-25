@@ -53,7 +53,7 @@ async function measure(tenantId, windowPeriod) {
        limit 1
      ) f on true
      left join lateral (
-       select sum(d.bytes) bytes
+       select greatest(coalesce(sum(d.bytes), 0), coalesce(sum(d.queue_bytes), 0)) bytes
        from subscriber_usage_daily d
        where d.subscriber_id = s.id and d.day >= ${start}::date
      ) u on true
