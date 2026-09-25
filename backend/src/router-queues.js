@@ -66,7 +66,7 @@ const blockText = (b) => `${numberIp(b.start)}/${32 - Math.log2(b.size)}`;
 /** Every PPPoE customer on a router, with the address RADIUS gives them and their plan. */
 export async function customerLines(tenantId, routerId) {
   const { rows } = await pool.query(
-    `select s.pppoe_user, s.name, s.status, s.plan_id,
+    `select s.id as subscriber_id, s.pppoe_user, s.name, s.status, s.plan_id,
             -- A customer over their fair-use cap is held to the policy's throttle speed, on a queue of their own
             -- (out of any shared group, so the cap is real) until the window ends.
             coalesce(th.throttle_down, p.rate_down) as rate_down,
@@ -245,6 +245,54 @@ async function customerProfiles(conn, { tenantId, routerId, all, queued }) {
     + (p.failed ? `; ${p.failed} failed (first: ${p.firstError})` : '')];
 }
 
+const inCidr = (address, cidr) => {
+  const [base, bits] = String(cidr).split('/');
+  const size = 2 ** (32 - Number(bits ?? 32));
+  const start = ipNumber(base) - (ipNumber(base) % size);
+  const n = ipNumber(address);
+  return Number.isFinite(n) && n >= start && n < start + size;
+};
+
+/**
+ * The block list, wiped and written fresh like the queues.
+ *
+ * Only blocked addresses belong on it, and a blocked customer belongs in the expired range. So: every entry that
+ * is not the expired range itself goes (the dynamic ones a live session leaves behind included); a blocked
+ * customer connected on an address outside the range has RADIUS pointed at an address inside it and is sent back
+ * to dial in again; and one who cannot be moved is blocked by address until the next Refresh. A paid-up customer
+ * ends up on no list at all.
+ */
+async function refreshBlockList(conn, { tenantId, routerId, all }) {
+  const { rows: [range] } = await pool.query(
+    `select cidr from ip_pools where tenant_id=$1 and service='pppoe' and purpose='expired' and (router_id = $2 or router_id is null)
+      order by (router_id = $2) desc nulls last limit 1`, [tenantId, routerId]);
+  if (!range) return ['address lists: this router has no expired range yet, so the block list was left as it is'];
+
+  const removed = await ros.dropBlockEntries(conn);
+  const sessions = await ros.activeSessionsByName(conn);
+  const { walledGarden } = await import('./radius.js');
+  const { withTenant } = await import('./db.js');
+
+  let moved = 0;
+  const held = [];
+  for (const l of all.filter((x) => ['expired', 'suspended', 'paused'].includes(x.status) && x.pppoe_user)) {
+    const s = sessions.get(l.pppoe_user);
+    if (!s || !s.address || inCidr(s.address, range.cidr)) continue;
+    try {
+      // what RADIUS gives them next has to be inside the range
+      if (!l.address || !inCidr(l.address, range.cidr)) await withTenant(tenantId, (c) => walledGarden(c, tenantId, l.subscriber_id));
+      await ros.removeSession(conn, s.id);
+      moved += 1;
+    } catch {
+      held.push(s.address);
+    }
+  }
+  if (held.length) await ros.addBlockAddresses(conn, held);
+  return [`address lists: ${removed} old entr${removed === 1 ? 'y' : 'ies'} removed and written fresh; the expired range ${range.cidr} is blocked`
+    + `; ${moved} blocked customer(s) outside it sent back to dial into it`
+    + (held.length ? `; ${held.length} could not be moved and are blocked by address` : '')];
+}
+
 /**
  * Returns the sentences a Configure result shows. Never throws for a queue-level
  * problem: those are reported, so the customers-stay-online work around it is not
@@ -297,12 +345,9 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
       out.push(`DNS: could not be set: ${e.message}`);
     }
     try {
-      const all = lines ?? await customerLines(tenantId, routerId);
-      const addresses = new Set(all.filter((l) => l.entitled && ['active', 'grace'].includes(l.status)).map((l) => l.address).filter(Boolean));
-      const freed = await ros.clearBlocksFor(conn, addresses);
-      out.push(`address lists: ${freed} paid-up customer(s) taken off the block list`);
+      out.push(...await refreshBlockList(conn, { tenantId, routerId, all: lines ?? await customerLines(tenantId, routerId) }));
     } catch (e) {
-      out.push(`address lists: could not be checked: ${e.message}`);
+      out.push(`address lists: could not be rewritten: ${e.message}`);
     }
   }
 

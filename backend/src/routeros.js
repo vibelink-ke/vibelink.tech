@@ -1335,6 +1335,32 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
+/** Every entry of the block list except the one this system manages (the expired range): dynamic ones and stray ones. */
+export async function dropBlockEntries(conn) {
+  const rows = await conn.write('/ip/firewall/address-list/print', ['?list=ispblocking']);
+  let removed = 0;
+  for (const r of rows) {
+    if (isManaged(r)) continue;
+    try { await conn.write('/ip/firewall/address-list/remove', [`=.id=${idOf(r)}`]); removed += 1; } catch { /* left; the next Refresh tries again */ }
+  }
+  return removed;
+}
+
+/** Who is connected right now: username -> { id, address }. */
+export async function activeSessionsByName(conn) {
+  const rows = await conn.write('/ppp/active/print', []);
+  return new Map(rows.filter((r) => r.name).map((r) => [String(r.name), { id: idOf(r), address: String(r.address ?? '') }]));
+}
+
+export const removeSession = (conn, id) => conn.write('/ppp/active/remove', [`=.id=${id}`]);
+
+/** Block single addresses by hand (a blocked customer that could not be sent back to the expired range). */
+export async function addBlockAddresses(conn, addresses) {
+  for (const a of addresses) {
+    await conn.write('/ip/firewall/address-list/add', ['=list=ispblocking', `=address=${a}`, '=comment=vibelink: blocked, not yet in the expired range']);
+  }
+}
+
 /**
  * Lets the router answer DNS questions from its customers (/ip dns set allow-remote-requests=yes).
  * A PPPoE customer is usually told to use the router as its DNS server; with this off, names do not
