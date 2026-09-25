@@ -417,7 +417,9 @@ async function finishSignIn(req, res, staffId, tenantId, remember) {
   // signed in on a domain that owns no tenant at all.
   let redirectTo = null;
   const root = process.env.ROOT_DOMAIN?.trim();
-  if (!tenant && root && s.subdomain && req.hostname !== `${s.subdomain}.${root}`) {
+  // The platform owner signing in on the root domain stays there: that is the admin console, not a stray portal login.
+  const onRoot = !!root && [root.toLowerCase(), `www.${root.toLowerCase()}`].includes(String(req.hostname).toLowerCase());
+  if (!tenant && root && s.subdomain && req.hostname !== `${s.subdomain}.${root}` && !(onRoot && s.is_super_admin)) {
     const handoff = await auth.createHandoff(token);
     redirectTo = `https://${s.subdomain}.${root}/api/auth/handoff?token=${encodeURIComponent(handoff)}`;
   }
@@ -471,6 +473,9 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
     return res.status(401).json({ error: 'That password is not correct.' });
   if (acct.tenant_status === 'suspended')
     return res.status(402).json({ error: 'This account is suspended. Contact support@vibelink.co.ke.' });
+  // The platform console (<root domain>/admin) is for the platform owner only: nobody else gets a session from it.
+  if (req.body?.console && !acct.is_super_admin)
+    return res.status(403).json({ error: 'This sign-in is for the platform owner. Use your own portal address.' });
 
   if (await totpEnabled(pool, acct.id)) {
     // Password right, but this account also wants a code from its authenticator app: no session yet.

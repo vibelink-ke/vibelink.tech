@@ -100,7 +100,7 @@ const cta = {
 // passes it down — this default is only what's shown while that fetch is
 // still in flight, or on the platform's own marketing domain, which belongs
 // to no tenant at all.
-export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = null }) {
+export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = null, consoleLogin = false }) {
   // Offered only on a device where fingerprint sign-in has been turned on (My account -> Fingerprint sign-in).
   const fingerprintOffered = passkeySupported() && passkeyOnThisDevice();
   // `only` pins the card to one purpose: sign-in on a tenant's own subdomain,
@@ -149,7 +149,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     setBusy(true);
     setError('');
     try {
-      const session = await api.login({ identifier: f.identifier, password: f.password, remember: f.remember });
+      const session = await api.login({ identifier: f.identifier, password: f.password, remember: f.remember, ...(consoleLogin ? { console: true } : {}) });
       clearSecrets();
       if (session.twoStep) {
         setChallenge(session.challengeId);

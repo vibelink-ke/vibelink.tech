@@ -64,6 +64,7 @@ const SiteProfiles = lazy(() => import('./screens/SiteProfiles'));
 const Inventory = lazy(() => import('./screens/Inventory'));
 const Automation = lazy(() => import('./screens/Automation'));
 const Tenants = lazy(() => import('./screens/Tenants'));
+const AdminConsole = lazy(() => import('./screens/AdminConsole'));
 const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
 const Expenses = lazy(() => import('./screens/Expenses'));
@@ -204,6 +205,24 @@ export default function App() {
    * after. Showing a sign-in card here would reject everyone who tried it.
    */
   if (isPlatformHost()) {
+    // <root domain>/admin: the platform owner's console. Sign-in only, and only for the platform owner.
+    if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+      if (session === null) {
+        return (
+          <AuthGate
+            onSignedIn={(s, m) => { signIn(s, m); navigate('/admin', { replace: true }); }}
+            only="login"
+            brandName="Vibelink Admin"
+            consoleLogin
+          />
+        );
+      }
+      return (
+        <Suspense fallback={null}>
+          <AdminConsole />
+        </Suspense>
+      );
+    }
     if (pathname === '/signup' || pathname === '/register') {
       return <AuthGate onSignedIn={signIn} only="signup" />;
     }
