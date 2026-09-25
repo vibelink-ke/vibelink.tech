@@ -286,6 +286,26 @@ async function syncRouterQueuesUnlocked(conn, { tenantId, routerId, role, wipe =
     out.push(`queues cleared (${cleared})`);
   }
 
+  // A Refresh also puts the rest of what a PPPoE customer needs in order: the router answering their DNS
+  // questions, and nobody entitled to service left on the block list.
+  if (wipe && (role === 'both' || role === 'pppoe')) {
+    try {
+      const dns = await ros.allowDnsRequests(conn);
+      out.push(dns === 'enabled' ? 'DNS: the router now answers its customers (allow-remote-requests turned on)'
+        : dns === 'already' ? 'DNS: already answering customers' : 'DNS: could not be read');
+    } catch (e) {
+      out.push(`DNS: could not be set: ${e.message}`);
+    }
+    try {
+      const all = lines ?? await customerLines(tenantId, routerId);
+      const addresses = new Set(all.filter((l) => l.entitled && ['active', 'grace'].includes(l.status)).map((l) => l.address).filter(Boolean));
+      const freed = await ros.clearBlocksFor(conn, addresses);
+      out.push(`address lists: ${freed} paid-up customer(s) taken off the block list`);
+    } catch (e) {
+      out.push(`address lists: could not be checked: ${e.message}`);
+    }
+  }
+
   // Devices locked to a paid code get their cap from a queue of their own, since
   // a bypassed device never goes through RADIUS. A wipe removes those, so they are
   // written back here; on the routine pass they are not touched at all.

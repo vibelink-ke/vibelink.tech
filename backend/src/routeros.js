@@ -1336,6 +1336,19 @@ export async function syncQueuePlan(conn, { groups = [], singles = [], drop = []
 export const MAIN_TARIFF_PREFIX = 'MAIN_TARIFF_';
 
 /**
+ * Lets the router answer DNS questions from its customers (/ip dns set allow-remote-requests=yes).
+ * A PPPoE customer is usually told to use the router as its DNS server; with this off, names do not
+ * resolve and the line is "connected with no internet". Returns 'already', 'enabled' or 'unknown'.
+ */
+export async function allowDnsRequests(conn) {
+  const [d] = await conn.write('/ip/dns/print', []);
+  if (!d) return 'unknown';
+  if (String(d['allow-remote-requests']) === 'true') return 'already';
+  await conn.write('/ip/dns/set', ['=allow-remote-requests=yes']);
+  return 'enabled';
+}
+
+/**
  * Takes customers who are entitled to service off the block list they are still sitting on.
  *
  * A customer put on the block list while expired gets a dynamic entry on the router for their live session (from the
