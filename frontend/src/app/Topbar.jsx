@@ -6,6 +6,7 @@ import { useStore } from '../state/store';
 import { useMediaQuery } from './useMediaQuery';
 import { api } from '../api/client';
 import useLicence from './useLicence';
+import { isPlatformHost } from './host';
 import { Button, Drawer, Field, Input, Textarea } from '../ui/primitives';
 
 const chip = {
@@ -424,7 +425,7 @@ export default function Topbar() {
 
       {/* Only a super admin can actually reach the platform screens, so the
           toggle is theirs alone — everyone else just sees their tenant. */}
-      {store.session?.superAdmin ? (
+      {store.session?.superAdmin && isPlatformHost() ? (
         <div
           onClick={() => store.setRole(store.role === 'owner' ? 'tenant' : 'owner')}
           title="Switch between platform-owner and tenant view"

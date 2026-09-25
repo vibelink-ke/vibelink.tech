@@ -1,6 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import { isPlatformHost } from '../app/host';
 
 /**
  * The single app store. This is the React equivalent of the DCLogic `state`
@@ -232,7 +233,9 @@ export function StoreProvider({ children }) {
     // (Tenants.jsx) that only a platform owner can even reach. For anyone
     // else that was a guaranteed 403 on a timer, forever, for a collection
     // never once read. Same condition as isPlatformOwner below.
-    const isPlatformOwner = !!session?.superAdmin && session?.role === 'owner';
+    // Only on the platform's own console (<root domain>/admin): a portal on a tenant address, the platform
+    // owner's own included, is an ordinary ISP portal.
+    const isPlatformOwner = isPlatformHost() && !!session?.superAdmin && session?.role === 'owner';
     const entries = Object.entries(COLLECTIONS).filter(([key]) => key !== 'tenants' || isPlatformOwner);
     const settled = await Promise.allSettled(entries.map(([, fn]) => fn()));
     // Starts from EMPTY, not {}: a skipped collection (tenants, for anyone
@@ -529,7 +532,7 @@ export function StoreProvider({ children }) {
       // role on the one tenant that happens to be flagged super-admin, not
       // just the company owner who holds that account. The backend enforces
       // this too — see superAdminOnly in server.js.
-      isPlatformOwner: !!session?.superAdmin && session?.role === 'owner' && role === 'owner',
+      isPlatformOwner: isPlatformHost() && !!session?.superAdmin && session?.role === 'owner',
       // Staff who may take service away from a customer. Suspend is destructive
       // enough that a support agent should not have it to hand.
       isAdmin: ['owner', 'admin'].includes(session?.role ?? role),

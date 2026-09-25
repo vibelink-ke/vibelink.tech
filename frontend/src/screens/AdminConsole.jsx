@@ -8,6 +8,7 @@ import ErrorBoundary from '../ui/boundary';
 const Tenants = lazy(() => import('./Tenants'));
 const PlatformMonitor = lazy(() => import('./PlatformMonitor'));
 const SaasRevenue = lazy(() => import('./SaasRevenue'));
+const Gateways = lazy(() => import('./settings/Gateways'));
 
 /**
  * The platform owner's console, at <root domain>/admin.
@@ -22,6 +23,7 @@ const TABS = [
   { to: '/admin', label: 'ISP tenants', view: Tenants },
   { to: '/admin/monitor', label: 'Platform monitor', view: PlatformMonitor },
   { to: '/admin/revenue', label: 'SaaS revenue', view: SaasRevenue },
+  { to: '/admin/gateways', label: 'Payment gateways', view: Gateways },
 ];
 
 export default function AdminConsole() {
@@ -35,7 +37,7 @@ export default function AdminConsole() {
 
   if (!session?.superAdmin) {
     return (
-      <div style={{ ...shell, display: 'grid', placeItems: 'center', padding: 24 }}>
+      <div className={store.dark ? 'om-dark' : undefined} style={{ ...shell, display: 'grid', placeItems: 'center', padding: 24 }}>
         <div style={{ maxWidth: 420, textAlign: 'center' }}>
           <h1 style={{ fontSize: 21, margin: '0 0 8px' }}>Platform owner only</h1>
           <p style={{ color: color.muted, fontSize: 14.5, lineHeight: 1.55 }}>
@@ -51,7 +53,7 @@ export default function AdminConsole() {
   const View = active.view;
 
   return (
-    <div style={shell}>
+    <div className={store.dark ? 'om-dark' : undefined} style={shell}>
       <header style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap', padding: '12px 22px', background: '#fff', borderBottom: `1px solid ${color.line}` }}>
         <span style={{ fontWeight: 700, fontSize: 16, letterSpacing: '-.01em' }}>Vibelink Admin</span>
         <nav style={{ display: 'flex', gap: 4, flexWrap: 'wrap', flex: 1 }}>
@@ -69,6 +71,9 @@ export default function AdminConsole() {
             </button>
           ))}
         </nav>
+        <button type="button" onClick={() => store.setDark(!store.dark)} style={{ height: 32, padding: '0 12px', borderRadius: 8, border: `1px solid ${color.line}`, background: '#fff', cursor: 'pointer', fontSize: 13 }}>
+          {store.dark ? '☀ Light' : '☾ Dark'}
+        </button>
         <span style={{ fontSize: 12.5, color: color.muted }}>{session.name ?? session.email}</span>
         {session.subdomain && (
           <a href={`https://${session.subdomain}.${root}`} style={{ fontSize: 12.5, fontWeight: 600, color: color.green }}>My ISP portal</a>
