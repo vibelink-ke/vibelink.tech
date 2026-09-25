@@ -64,7 +64,7 @@ export async function tenantByHost(host) {
 export async function config(tenantId, provider) {
   const { rows } = await pool.query(
     `select * from tenant_payment_config
-     where tenant_id=$1 and provider=$2
+     where tenant_id=$1 and provider=$2 and scope = 'tenant'
      order by is_default desc, id
      limit 1`,
     [tenantId, provider]
@@ -103,7 +103,8 @@ export async function configForRouter(tenantId, provider, routerId) {
  */
 export async function platformCollectConfig(tenantId, provider) {
   const { rows } = await pool.query(
-    `select * from tenant_payment_config where tenant_id=$1 and provider=$2 and is_platform_collect limit 1`,
+    `select * from tenant_payment_config where tenant_id=$1 and provider=$2 and (scope = 'platform' or is_platform_collect)
+      order by (scope = 'platform') desc, is_platform_collect desc, id limit 1`,
     [tenantId, provider]
   );
   return rows[0] ?? null;

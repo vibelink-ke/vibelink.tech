@@ -23,7 +23,8 @@ const TABS = [
   { to: '/admin', label: 'ISP tenants', view: Tenants },
   { to: '/admin/monitor', label: 'Platform monitor', view: PlatformMonitor },
   { to: '/admin/revenue', label: 'SaaS revenue', view: SaasRevenue },
-  { to: '/admin/gateways', label: 'Payment gateways', view: Gateways },
+  { to: '/admin/gateways', label: 'Payment gateways', view: Gateways, props: { platform: true },
+    note: 'The platform\'s own paybill: it takes the fees ISPs pay the platform and the payments of ISPs who collect through it. It is kept here and appears in no ISP\'s own settings.' },
 ];
 
 export default function AdminConsole() {
@@ -83,7 +84,8 @@ export default function AdminConsole() {
       <main style={{ padding: 26, display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0, maxWidth: 1400, margin: '0 auto' }}>
         <ErrorBoundary resetKey={pathname}>
           <Suspense fallback={null}>
-            <View />
+            {active.note && <p style={{ margin: 0, fontSize: 13.5, color: color.muted, lineHeight: 1.5 }}>{active.note}</p>}
+            <View {...(active.props ?? {})} />
           </Suspense>
         </ErrorBoundary>
       </main>

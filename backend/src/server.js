@@ -2536,7 +2536,7 @@ app.get('/portal/me', wrap(async (req, res) => {
        left join site_profiles sp on sp.router_id = sub.router_id and sp.tenant_id = sub.tenant_id
        left join lateral (
          select shortcode from tenant_payment_config
-          where tenant_id=sub.tenant_id and shortcode is not null
+          where tenant_id=sub.tenant_id and shortcode is not null and scope = 'tenant'
             and (case when sub.service='pppoe' then enabled_pppoe else enabled_hotspot end)
           order by is_default desc nulls last limit 1
        ) tpc on true
@@ -2966,7 +2966,7 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
         -- have its till outrank Daraja here and show PPPoE customers a paybill
         -- they can't actually pay into.
         select shortcode from tenant_payment_config
-         where tenant_id=s.tenant_id and shortcode is not null and enabled_pppoe
+         where tenant_id=s.tenant_id and shortcode is not null and enabled_pppoe and scope = 'tenant'
          order by is_default desc nulls last limit 1
       ) tpc on true
       left join lateral (
@@ -3488,7 +3488,7 @@ app.get('/api/email/history', wrap(async (req, res) => {
 app.get('/api/payment-methods', requirePermission('payment_gateways.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select id, provider, label, shortcode, is_default, enabled_pppoe, enabled_hotspot
-       from tenant_payment_config where tenant_id=$1 order by provider, is_default desc, id`,
+       from tenant_payment_config where tenant_id=$1 and scope = 'tenant' order by provider, is_default desc, id`,
     [req.tenant.id]);
   res.json(rows);
 }));
@@ -10271,7 +10271,7 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
     // A tenant can hold more than one gateway per provider now (e.g. an
     // ordinary Daraja paybill plus a dedicated platform-collect one) — this
     // tests the default, same as config() would pick for an ordinary charge.
-    'select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2 order by is_default desc, id limit 1',
+    'select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2 and scope = \'tenant\' order by is_default desc, id limit 1',
     [req.tenant.id, req.params.provider]);
   if (!cfg) return res.status(404).json({ error: 'Not configured yet — save credentials first.' });
 
@@ -12973,11 +12973,13 @@ app.delete('/api/tenants/:id', superAdminOnly, wrap(async (_req, res) => {
 
 // ── payment gateways: several per provider ────────
 app.get('/api/payment-gateways', requirePermission('payment_gateways.view'), wrap(async (req, res) => {
+  // The platform's own paybill is listed only to the platform owner, and only when asked for.
+  const scope = req.query.scope === 'platform' && req.session?.is_super_admin ? 'platform' : 'tenant';
   const { rows } = await pool.query(
     `select id, provider, label, shortcode, is_default, is_platform_collect, enabled_pppoe, enabled_hotspot,
             last_callback_at, credentials
-     from tenant_payment_config where tenant_id=$1
-     order by provider, is_default desc, label nulls last`, [req.tenant.id]);
+     from tenant_payment_config where tenant_id=$1 and scope=$2
+     order by provider, is_default desc, label nulls last`, [req.tenant.id, scope]);
   // Report which secrets are set without ever sending them back to the browser.
   res.json(rows.map(({ credentials, ...g }) => ({
     ...g,
@@ -12987,27 +12989,40 @@ app.get('/api/payment-gateways', requirePermission('payment_gateways.view'), wra
   })));
 }));
 
+/**
+ * The platform owner's own ISP portal decides how it collects, like any other ISP: through the platform's paybill, or
+ * its own. (Every other ISP's setting is changed by the platform owner under ISP tenants.) With a paybill of its own
+ * saved, that paybill is used either way.
+ */
+app.put('/api/payment-gateways/collection', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
+  if (!req.session?.is_super_admin) return res.status(403).json({ error: 'Your collection method is set by the platform owner.' });
+  await pool.query('update tenants set platform_collect_enabled=$2 where id=$1', [req.tenant.id, !!req.body?.platform]);
+  res.json({ ok: true, platform: !!req.body?.platform });
+}));
+
 app.post('/api/payment-gateways', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
   const { provider, label, shortcode, credentials = {}, enabledPppoe = false, enabledHotspot = false, isDefault } = req.body;
+  // The platform's own paybill (platform owner only): kept apart from the owner's ISP gateways.
+  const platform = req.body.platform === true && !!req.session?.is_super_admin;
   if (!provider || !shortcode) return res.status(400).json({ error: 'Channel and shortcode are required' });
   if (provider === 'kopokopo' && enabledPppoe)
     return res.status(400).json({ error: 'KopoKopo is hotspot-only' });
 
   const { rows: [existing] } = await pool.query(
-    'select 1 from tenant_payment_config where tenant_id=$1 and provider=$2 limit 1', [req.tenant.id, provider]);
-  const makeDefault = isDefault ?? !existing;   // first one in is the default
+    "select 1 from tenant_payment_config where tenant_id=$1 and provider=$2 and scope = 'tenant' limit 1", [req.tenant.id, provider]);
+  const makeDefault = platform ? false : (isDefault ?? !existing);   // first one in is the default
 
   const c = await pool.connect();
   try {
     await c.query('begin');
     if (makeDefault)
-      await c.query('update tenant_payment_config set is_default=false where tenant_id=$1 and provider=$2',
+      await c.query("update tenant_payment_config set is_default=false where tenant_id=$1 and provider=$2 and scope = 'tenant'",
         [req.tenant.id, provider]);
     const { rows: [g] } = await c.query(
       `insert into tenant_payment_config (tenant_id, provider, label, shortcode, credentials,
-         enabled_pppoe, enabled_hotspot, is_default)
-       values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
-      [req.tenant.id, provider, label ?? null, shortcode, credentials, enabledPppoe, enabledHotspot, makeDefault]);
+         enabled_pppoe, enabled_hotspot, is_default, scope)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+      [req.tenant.id, provider, label ?? null, shortcode, credentials, enabledPppoe, enabledHotspot, makeDefault, platform ? 'platform' : 'tenant']);
     await c.query('commit');
     res.json({ id: g.id, ok: true });
   } catch (e) {

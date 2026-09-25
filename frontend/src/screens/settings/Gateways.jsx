@@ -92,7 +92,7 @@ const blankFor = (provider) => ({
   enabledHotspot: CHANNELS[provider].services.hotspot,
 });
 
-export default function Gateways() {
+export default function Gateways({ platform = false }) {
   const store = useStore();
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +133,7 @@ export default function Gateways() {
 
   const load = async () => {
     try {
-      setGateways(await api.paymentGateways());
+      setGateways(await api.paymentGateways(platform ? 'platform' : undefined));
     } catch (e) {
       store.toast(`Could not load gateways: ${e.message}`);
     } finally {
@@ -218,7 +218,7 @@ export default function Gateways() {
     setBusy(true);
     try {
       if (form.id) await api.updateGateway(form.id, form);
-      else await api.createGateway(form);
+      else await api.createGateway(platform ? { ...form, platform: true } : form);
       await load();
       store.toast(form.id ? 'Gateway updated' : `${ch.name} added`);
       setForm(null);
@@ -362,7 +362,7 @@ export default function Gateways() {
         </Card>
       )}
 
-      {store.session?.platformCollectEnabled && (
+      {!platform && store.session?.platformCollectEnabled && (
         <Card
           title="Settlement payout method"
           subtitle="We collect your customers' payments on our own paybill and pay you out in full — nothing is taken from your payouts. Our fees are billed to you monthly instead. Choose when and where you are paid — set it yourself; we never enter it for you."
@@ -453,7 +453,29 @@ export default function Gateways() {
         </Card>
       )}
 
-      {Object.entries(CHANNELS).map(([provider, ch]) => {
+      {!platform && store.session?.superAdmin && (
+        <Card
+          title="How this ISP collects"
+          subtitle="This portal is an ISP like any other: collect through the platform's paybill, or through a paybill of its own below. If a paybill of its own is saved, it is used."
+        >
+          <Toggle
+            checked={!!store.session?.platformCollectEnabled}
+            onChange={async (v) => {
+              try {
+                await api.setCollectionMode(v);
+                store.signIn(await api.session());
+                store.toast(v ? 'Collecting through the platform paybill' : 'Collecting on this ISP\'s own paybill');
+              } catch (e) {
+                store.toast(`Could not save: ${e.message}`);
+              }
+            }}
+            label="Collect through the platform's paybill"
+            detail="Only used while there is no paybill of its own below"
+          />
+        </Card>
+      )}
+
+      {Object.entries(CHANNELS).filter(([p]) => !platform || p === 'daraja').map(([provider, ch]) => {
         const rows = gateways.filter((g) => g.provider === provider);
         return (
           <Card
@@ -535,18 +557,9 @@ export default function Gateways() {
                           Register URLs
                         </span>
                       )}
-                      {!g.is_default && (
+                      {!platform && !g.is_default && (
                         <span onClick={() => makeDefault(g)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
                           Make default
-                        </span>
-                      )}
-                      {store.isPlatformOwner && g.provider === 'daraja' && (
-                        <span
-                          onClick={() => togglePlatformCollect(g)}
-                          title="The paybill used when a gatewayless tenant collects on our behalf"
-                          style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
-                        >
-                          {g.is_platform_collect ? 'Stop platform-collect' : 'Use for platform-collect'}
                         </span>
                       )}
                       <span onClick={() => test(g)} style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>Test</span>

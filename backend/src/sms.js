@@ -278,7 +278,7 @@ export async function orgVars(tenantId) {
     'select name, support_phone, subdomain, platform_collect_enabled from tenants where id=$1', [tenantId]);
   const { rows: gws } = await pool.query(
     `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
-      where tenant_id=$1 and shortcode is not null
+      where tenant_id=$1 and shortcode is not null and scope = 'tenant'
       order by is_default desc nulls last`, [tenantId]).catch(() => ({ rows: [] }));
   const { rows: [hs] } = await pool.query(
     'select payment_method from hotspot_settings where tenant_id=$1', [tenantId]).catch(() => ({ rows: [] }));
@@ -308,7 +308,7 @@ export async function orgVars(tenantId) {
       const { rows: ownerGws } = await pool.query(
         `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
           where tenant_id=$1 and shortcode is not null
-          order by is_default desc nulls last`, [owner.tenant_id]).catch(() => ({ rows: [] }));
+          order by (scope = 'platform') desc, is_default desc nulls last`, [owner.tenant_id]).catch(() => ({ rows: [] }));
       if (!paybillPppoe) paybillPppoe = ownerGws.find((g) => g.enabled_pppoe)?.shortcode ?? '';
       if (!paybillHotspot) {
         paybillHotspot = ownerGws.find((g) => g.provider === hotspotProvider)?.shortcode

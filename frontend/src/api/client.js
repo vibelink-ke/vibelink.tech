@@ -286,7 +286,8 @@ export const api = {
   restoreFupSpeed: (subscriberId) => post(`/api/fup-usage/${subscriberId}/restore`, {}),
 
   // ── payment gateways (several per provider) ──
-  paymentGateways: () => get('/api/payment-gateways'),
+  paymentGateways: (scope) => get(`/api/payment-gateways${scope ? `?scope=${scope}` : ''}`),
+  setCollectionMode: (platform) => put('/api/payment-gateways/collection', { platform }),
   createGateway: (g) => post('/api/payment-gateways', g),
   updateGateway: (id, g) => put(`/api/payment-gateways/${id}`, g),
   makeGatewayDefault: (id) => post(`/api/payment-gateways/${id}/default`, {}),

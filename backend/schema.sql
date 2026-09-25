@@ -1972,6 +1972,15 @@ alter table tenant_payment_config add column if not exists is_platform_collect b
 create unique index if not exists tpc_one_platform_collect_per_provider
   on tenant_payment_config (tenant_id, provider) where is_platform_collect;
 
+-- Whose a gateway is. 'platform' rows are the platform's own paybill (collecting ISPs' fees and payments for tenants
+-- who collect through the platform): kept in the platform owner's console, and never seen or used as the owner's own
+-- ISP portal's gateway. Everything else is 'tenant': an ISP's own paybill, the platform owner's ISP included.
+alter table tenant_payment_config add column if not exists scope text not null default 'tenant';
+alter table tenant_payment_config drop constraint if exists tpc_scope_valid;
+alter table tenant_payment_config add constraint tpc_scope_valid check (scope in ('tenant', 'platform'));
+-- What was designated the platform-collect paybill before this existed is the platform's.
+update tenant_payment_config set scope = 'platform' where is_platform_collect and scope = 'tenant';
+
 -- Safaricom charges the *sending* paybill a B2C transaction fee, tiered by
 -- amount, on every payout — separate from settlement_commission_pct, which is
 -- Vibelink's own cut. Per tenant, whether that Safaricom-side cost is passed
