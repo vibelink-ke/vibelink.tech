@@ -675,9 +675,15 @@ export async function forgetVoucherAccess(c, codes, tenantId, macs = []) {
  */
 export async function applyFupThrottle(c, tenantId, subId, downKbps, upKbps) {
   const { rows: [s] } = await c.query(
-    'select s.pppoe_user, r.host, r.secret from subscribers s left join routers r on r.id=s.router_id where s.id=$1',
+    'select s.pppoe_user, s.router_id, r.host, r.secret, r.queue_shaping from subscribers s left join routers r on r.id=s.router_id where s.id=$1',
     [subId]);
   if (!s?.pppoe_user) return false;
+  // On a router whose speeds live in queues the throttle is the customer's queue (router-queues.js reads it from
+  // fup_state), not a RADIUS rate limit: that is removed on every queue sync and would never take hold.
+  if (speedInQueues(s)) {
+    queueRouterSync(tenantId, s.router_id, 1500);
+    return true;
+  }
   const rate = `${upKbps}k/${downKbps}k`;
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value)
@@ -685,16 +691,22 @@ export async function applyFupThrottle(c, tenantId, subId, downKbps, upKbps) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate, tenantId]);
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
+  if (s.router_id) queueRouterSync(tenantId, s.router_id);
   return true;
 }
 
 /** Put a throttled subscriber back on their plan's full rate (new window, or a top-up). */
 export async function clearFupThrottle(c, tenantId, subId) {
   const { rows: [s] } = await c.query(
-    `select s.pppoe_user, p.rate_down, p.rate_up, r.host, r.secret
+    `select s.pppoe_user, s.router_id, p.rate_down, p.rate_up, r.host, r.secret, r.queue_shaping
      from subscribers s join plans p on p.id = s.plan_id
      left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
   if (!s?.pppoe_user) return false;
+  if (speedInQueues(s)) {
+    // The queue goes back to the plan's rate once fup_state no longer says throttled.
+    queueRouterSync(tenantId, s.router_id, 1500);
+    return true;
+  }
   const rate = `${s.rate_up}k/${s.rate_down}k`;
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value)
@@ -702,6 +714,7 @@ export async function clearFupThrottle(c, tenantId, subId) {
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [s.pppoe_user, rate, tenantId]);
   if (s.host) await coa(c, s.host, s.secret, s.pppoe_user, rate);
+  if (s.router_id) queueRouterSync(tenantId, s.router_id);
   return true;
 }
 

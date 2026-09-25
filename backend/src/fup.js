@@ -53,9 +53,9 @@ async function measure(tenantId, windowPeriod) {
        limit 1
      ) f on true
      left join lateral (
-       select sum(coalesce(sess.bytes_in,0) + coalesce(sess.bytes_out,0)) bytes
-       from sessions sess
-       where sess.subscriber_id = s.id and sess.started_at >= ${start}
+       select sum(d.bytes) bytes
+       from subscriber_usage_daily d
+       where d.subscriber_id = s.id and d.day >= ${start}::date
      ) u on true
      left join fup_state st
        on st.subscriber_id = s.id and st.window_start = ${start}::date
@@ -119,21 +119,26 @@ export async function enforceForTenant(tenantId) {
     }
   }
 
-  // New window: anyone throttled under an older window goes back to full speed.
+  // A new window: anyone whose throttle belongs to an earlier window of THEIR policy goes back to full speed
+  // (a daily cap clears at midnight, a weekly one on Monday, a monthly one on the 1st).
   const { rows: stale } = await pool.query(
     `select distinct st.subscriber_id from fup_state st
-     where st.tenant_id = $1 and st.throttled
-       and st.window_start < date_trunc('month', now())::date
-       and not exists (
-         select 1 from fup_state cur
-         where cur.subscriber_id = st.subscriber_id
-           and cur.window_start >= date_trunc('month', now())::date
-           and cur.throttled)`,
+       left join fup_policies f on f.id = st.policy_id
+      where st.tenant_id = $1 and st.throttled
+        and st.window_start < (case coalesce(f.window_period, 'monthly') when 'daily' then current_date when 'weekly' then date_trunc('week', now())::date else date_trunc('month', now())::date end)
+        and not exists (
+          select 1 from fup_state cur left join fup_policies cf on cf.id = cur.policy_id
+           where cur.subscriber_id = st.subscriber_id and cur.throttled
+             and cur.window_start >= (case coalesce(cf.window_period, 'monthly') when 'daily' then current_date when 'weekly' then date_trunc('week', now())::date else date_trunc('month', now())::date end))`,
     [tenantId]
   );
   for (const s of stale) {
     const ok = await withTenant(tenantId, (c) => clearFupThrottle(c, tenantId, s.subscriber_id)).catch(() => false);
-    if (ok) summary.restored++;
+    if (ok) {
+      // Only stale rows are left throttled for this person (the query above), so all of them are finished.
+      await pool.query('update fup_state set throttled=false where subscriber_id=$1 and throttled', [s.subscriber_id]);
+      summary.restored++;
+    }
   }
 
   return summary;

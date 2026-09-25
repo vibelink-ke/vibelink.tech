@@ -695,6 +695,18 @@ create index if not exists radacct_username on radacct (username);
  * FUP enforcement sums sessions.bytes_in/out; without this it would always read
  * zero no matter how much traffic flowed.
  */
+-- What each subscriber has used per day, added up from the growth of their accounting sessions. Fair-use windows
+-- (daily, weekly, monthly) are measured from this: a session's own counters say "so far, in total", so a customer who
+-- stays connected across midnight or the 1st cannot be measured from sessions started inside the window.
+create table if not exists subscriber_usage_daily (
+  tenant_id     uuid not null references tenants on delete cascade,
+  subscriber_id uuid not null references subscribers on delete cascade,
+  day           date not null,
+  bytes         bigint not null default 0,
+  primary key (subscriber_id, day)
+);
+create index if not exists subscriber_usage_daily_tenant on subscriber_usage_daily (tenant_id, day);
+
 create or replace function sync_session_from_radacct() returns trigger as $$
 declare
   v_tenant uuid;
@@ -743,6 +755,17 @@ begin
     set stopped_at = excluded.stopped_at,
         bytes_in   = excluded.bytes_in,
         bytes_out  = excluded.bytes_out;
+
+  -- This update's growth, on today's row for the subscriber. Never allowed to break accounting itself.
+  if v_sub is not null and (coalesce(v_in, 0) > 0 or coalesce(v_out, 0) > 0) then
+    begin
+      insert into subscriber_usage_daily (tenant_id, subscriber_id, day, bytes)
+      values (v_tenant, v_sub, current_date, coalesce(v_in, 0) + coalesce(v_out, 0))
+      on conflict (subscriber_id, day) do update set bytes = subscriber_usage_daily.bytes + excluded.bytes;
+    exception when others then
+      null;
+    end;
+  end if;
   return new;
 end;
 $$ language plpgsql;
@@ -759,6 +782,16 @@ create unique index if not exists sessions_radius_unique on sessions (radius_uni
 drop trigger if exists radacct_to_sessions on radacct;
 create trigger radacct_to_sessions after insert or update on radacct
   for each row execute function sync_session_from_radacct();
+
+-- Once, when the table is new: what the sessions already hold for the recent past, on the day each session started.
+insert into subscriber_usage_daily (tenant_id, subscriber_id, day, bytes)
+select s.tenant_id, s.subscriber_id, s.started_at::date, sum(coalesce(s.bytes_in, 0) + coalesce(s.bytes_out, 0))
+  from sessions s
+ where s.subscriber_id is not null
+   and s.started_at >= date_trunc('month', now()) - interval '7 days'
+   and not exists (select 1 from subscriber_usage_daily)
+ group by 1, 2, 3
+on conflict do nothing;
 
 -- ─────────────── OVPN credentials ───────────────
 -- The tunnel password is shown once in the generated MikroTik script and stored

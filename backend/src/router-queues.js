@@ -66,10 +66,22 @@ const blockText = (b) => `${numberIp(b.start)}/${32 - Math.log2(b.size)}`;
 /** Every PPPoE customer on a router, with the address RADIUS gives them and their plan. */
 export async function customerLines(tenantId, routerId) {
   const { rows } = await pool.query(
-    `select s.pppoe_user, s.name, s.status, s.plan_id, p.rate_down, p.rate_up, p.contention_ratio,
+    `select s.pppoe_user, s.name, s.status, s.plan_id,
+            -- A customer over their fair-use cap is held to the policy's throttle speed, on a queue of their own
+            -- (out of any shared group, so the cap is real) until the window ends.
+            coalesce(th.throttle_down, p.rate_down) as rate_down,
+            coalesce(th.throttle_up, p.rate_up) as rate_up,
+            case when th.throttle_down is not null then null else p.contention_ratio end as contention_ratio,
+            (th.throttle_down is not null) as throttled,
             rr.value as address
        from subscribers s
        left join plans p on p.id = s.plan_id
+       left join lateral (
+         select f.throttle_down, f.throttle_up
+           from fup_state st join fup_policies f on f.id = st.policy_id
+          where st.subscriber_id = s.id and st.throttled and f.throttle_down > 0 and f.throttle_up > 0
+            and st.window_start >= (case coalesce(f.window_period, 'monthly') when 'daily' then current_date when 'weekly' then date_trunc('week', now())::date else date_trunc('month', now())::date end)
+          limit 1) th on true
        left join radreply rr on rr.tenant_id = s.tenant_id and rr.username = s.pppoe_user
                             and rr.attribute = 'Framed-IP-Address'
       where s.tenant_id=$1 and s.router_id=$2 and s.service='pppoe' and s.pppoe_user is not null`,
