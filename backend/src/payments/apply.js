@@ -154,7 +154,17 @@ export async function applyPayment(tenantId, tx) {
        returning id`,
       [tenantId, tx.provider, tx.ref, tx.amount, tx.phone, tx.name, tx.rawAccount, tx.payload ?? {}]
     );
-    if (!ins.rows[0]) return { duplicate: true };
+    if (!ins.rows[0]) {
+      // The same payment already arrived by another route (the paybill's own confirmation often beats the STK
+      // callback). A guest's page finds its voucher through the checkout id, so put it on the payment that is there.
+      if (tx.payload?.checkoutId) {
+        await c.query(
+          `update payments set payload = coalesce(payload, '{}'::jsonb) || $4::jsonb
+            where tenant_id=$1 and provider=$2 and provider_ref=$3 and not (coalesce(payload, '{}'::jsonb) ? 'checkoutId')`,
+          [tenantId, tx.provider, tx.ref, JSON.stringify({ checkoutId: tx.payload.checkoutId })]);
+      }
+      return { duplicate: true };
+    }
     const paymentId = ins.rows[0].id;
 
     let target = tx.target ?? (await match(c, tenantId, tx));
