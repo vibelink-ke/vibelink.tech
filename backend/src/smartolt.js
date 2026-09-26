@@ -559,8 +559,18 @@ export function getProvision(tenantId, id) {
 export async function provisionOnu(tenantId, f, ctx = {}) {
   const cfg = await loadConfig(tenantId);
   if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
-  const externalId = alnum(f.sn);
-  await authorizeOnu(tenantId, { ...f, onu_external_id: externalId });
+  // SmartOLT wants the ONU's external ID to be unique across everything it has ever held, so the serial alone is not
+  // enough (a removed ONU, or an earlier attempt, may already have used it): a short random tail is added, and a
+  // clash is retried once with a new one.
+  const newId = () => `${alnum(f.sn)}${Math.random().toString(36).replace(/[^a-z0-9]/g, '').slice(2, 8)}`;
+  let externalId = newId();
+  try {
+    await authorizeOnu(tenantId, { ...f, onu_external_id: externalId });
+  } catch (e) {
+    if (!/unique/i.test(e.message)) throw e;
+    externalId = newId();
+    await authorizeOnu(tenantId, { ...f, onu_external_id: externalId });
+  }
 
   const routing = String(f.onu_mode || 'Routing') !== 'Bridging';
   const post = (path, form) => () => call(cfg, 'POST', `/onu/${path}/${encodeURIComponent(externalId)}`, { form });
