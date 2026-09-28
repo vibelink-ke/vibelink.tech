@@ -740,6 +740,34 @@ export default function ClientDetail() {
                       />
                       <KV k="Expiry" v={line.expires_at ? new Date(line.expires_at).toLocaleString('en-KE') : '—'} />
                       <KV k="Router" v={lineRouter?.name ?? '—'} />
+                      {store.session?.perms?.['tr069.view'] && (
+                        <KV
+                          k="TR-069 serial"
+                          v={
+                            <span style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <span style={{ fontFamily: font.mono }}>{line.tr069_serial ?? 'not watched for'}</span>
+                              {store.session?.perms?.['clients.edit'] && (
+                                <span
+                                  onClick={async () => {
+                                    const v = window.prompt('Serial number to watch for (the device’s own label), or leave blank to stop watching:', line.tr069_serial ?? '');
+                                    if (v === null) return;
+                                    try {
+                                      await api.setTr069Serial(line.id, v.trim());
+                                      store.toast(v.trim() ? 'Saved — it will link once the device calls in' : 'Cleared');
+                                      await store.reload({ quiet: true });
+                                    } catch (e) {
+                                      store.toast(e.message);
+                                    }
+                                  }}
+                                  style={{ fontSize: 11.5, fontWeight: 600, color: color.green, cursor: 'pointer' }}
+                                >
+                                  Set
+                                </span>
+                              )}
+                            </span>
+                          }
+                        />
+                      )}
                       {connectionStatus(line) && (
                         <KV k="Connection" v={<span style={{ color: connectionStatus(line).dot }}>{connectionStatus(line).text}</span>} />
                       )}

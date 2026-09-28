@@ -49,6 +49,7 @@ const Hotspot = lazy(() => import('./screens/Hotspot'));
 const Fup = lazy(() => import('./screens/Fup'));
 const MapScreen = lazy(() => import('./screens/Map'));
 const SmartOlt = lazy(() => import('./screens/SmartOlt'));
+const Tr069 = lazy(() => import('./screens/Tr069'));
 const AuditLog = lazy(() => import('./screens/AuditLog'));
 const Issues = lazy(() => import('./screens/Issues'));
 const PlatformMonitor = lazy(() => import('./screens/PlatformMonitor'));
@@ -311,6 +312,7 @@ export default function App() {
             <Route path="/inventory" element={<Inventory />} />
             <Route path="/map" element={<MapScreen />} />
             <Route path="/smartolt" element={<SmartOlt />} />
+            <Route path="/tr069" element={<Tr069 />} />
             <Route path="/audit" element={<AuditLog />} />
             <Route path="/issues" element={<Issues />} />
             <Route path="/platform" element={<PlatformMonitor />} />

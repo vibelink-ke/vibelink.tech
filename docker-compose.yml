@@ -124,7 +124,37 @@ services:
       - ./infra/wireguard:/config
       - /lib/modules:/lib/modules:ro
 
+  # TR-069 (tr069.js): customer routers/ONUs call this directly to be configured. Behind the `tr069`
+  # profile — most local dev work never touches it, and it needs its own database.
+  mongo:
+    image: mongo:7
+    container_name: billing-mongo
+    profiles: ['tr069']
+    restart: unless-stopped
+    volumes:
+      - billing-mongodata:/data/db
+
+  genieacs:
+    image: drumsergio/genieacs:latest
+    container_name: billing-genieacs
+    profiles: ['tr069']
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      GENIEACS_MONGODB_CONNECTION_URL: mongodb://mongo/genieacs
+      GENIEACS_CWMP_INTERFACE: '0.0.0.0'
+      GENIEACS_NBI_INTERFACE: '0.0.0.0'
+      GENIEACS_FS_INTERFACE: '0.0.0.0'
+      GENIEACS_UI_INTERFACE: '0.0.0.0'
+    ports:
+      - '7547:7547'   # CWMP — devices call in here
+      - '3000:3000'   # GenieACS's own admin UI, for poking at a device directly while setting this up
+      # NBI (7557) and FS (7567) stay unpublished; the api container reaches them on the compose
+      # network as genieacs:7557 / genieacs:7567.
+
 volumes:
   billing-pgdata:
   ovpn-run:           # openvpn status file
   billing-ovpn-pki:   # generated on first run; keep it or every router must re-trust the CA
+  billing-mongodata:  # GenieACS's device database

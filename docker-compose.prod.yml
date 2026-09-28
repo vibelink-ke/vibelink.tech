@@ -102,6 +102,9 @@ services:
       # QUEUE_PROFILE_USERS=user1,user2 to try a few; QUEUE_PROFILES=all once it has been seen to work.
       QUEUE_PROFILES: ${QUEUE_PROFILES:-}
       QUEUE_PROFILE_USERS: ${QUEUE_PROFILE_USERS:-}
+      # TR-069 (tr069.js). The default already matches the `genieacs` service below — only worth
+      # setting if the ACS is somewhere else.
+      GENIEACS_NBI_URL: ${GENIEACS_NBI_URL:-http://genieacs:7557}
       # Optional: a satellite-map provider with sharper imagery than the free default.
       MAPBOX_TOKEN: ${MAPBOX_TOKEN:-}
       MAPTILER_KEY: ${MAPTILER_KEY:-}
@@ -311,10 +314,38 @@ services:
       - ./infra/wireguard:/config
       - /lib/modules:/lib/modules:ro
 
+  # TR-069 (tr069.js): customer routers/ONUs call this directly over the plain internet, the same way
+  # they would reach any ISP's ACS — not through the WireGuard/OpenVPN tunnel `net` owns, so this is a
+  # standalone service with its own published port, like `web` above.
+  mongo:
+    image: mongo:7
+    container_name: billing-mongo
+    restart: unless-stopped
+    volumes:
+      - billing-mongodata:/data/db
+
+  genieacs:
+    image: drumsergio/genieacs:latest
+    container_name: billing-genieacs
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      GENIEACS_MONGODB_CONNECTION_URL: mongodb://mongo/genieacs
+      GENIEACS_CWMP_INTERFACE: '0.0.0.0'
+      GENIEACS_NBI_INTERFACE: '0.0.0.0'
+      GENIEACS_FS_INTERFACE: '0.0.0.0'
+    ports:
+      - '7547:7547'   # CWMP — devices call in here. NBI (7557) and FS (7567) stay unpublished; the
+                       # api container reaches them on the compose network as genieacs:7557/7567.
+                       # No UI port here on purpose: GenieACS's own admin page has no auth of its
+                       # own worth trusting on the open internet.
+
 volumes:
   billing-pgdata:
   db-backups:         # nightly pg_dump files, see scripts/restore-backup.sh
   ovpn-run:           # openvpn status file, shared read-only with the API
   billing-ovpn-pki:   # the tunnel CA; losing it means re-onboarding every router
+  billing-mongodata:  # GenieACS's device database
   caddy-data:
   caddy-config:

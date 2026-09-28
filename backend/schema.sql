@@ -3083,3 +3083,33 @@ create table if not exists staff_backup_codes (
   used_at   timestamptz
 );
 create index if not exists staff_backup_codes_staff on staff_backup_codes (staff_id);
+
+-- TR-069 (tr069.js): devices that call our own ACS (GenieACS). One ACS serves every tenant on this box, so a
+-- device belongs to no tenant until matched by serial (see subscribers.tr069_serial and matchDevices()).
+create table if not exists tr069_devices (
+  id                uuid primary key default gen_random_uuid(),
+  genieacs_id       text not null unique,
+  tenant_id         uuid references tenants on delete cascade,
+  subscriber_id     uuid references subscribers on delete set null,
+  serial_number     text,
+  oui               text,
+  product_class     text,
+  manufacturer      text,
+  model_name        text,
+  software_version  text,
+  data_model        text,   -- 'tr098' | 'tr181', set once the device's own shape is known
+  ssid              text,
+  wan_ip            text,
+  connected_clients int,
+  last_inform       timestamptz,
+  provisioned_at    timestamptz,   -- set once autoProvisionNew has pushed this device's first WiFi/PPPoE
+  created_at        timestamptz not null default now(),
+  updated_at        timestamptz not null default now()
+);
+create index if not exists tr069_devices_tenant on tr069_devices (tenant_id);
+create index if not exists tr069_devices_subscriber on tr069_devices (subscriber_id);
+create index if not exists tr069_devices_serial on tr069_devices (serial_number);
+
+-- A customer's TR-069 device is matched to them by this, set by hand (or once seen, offered to confirm) —
+-- separate from onu_sn, which is a SmartOLT-authorised ONU's serial and not necessarily the same device.
+alter table subscribers add column if not exists tr069_serial text;

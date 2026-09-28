@@ -8142,6 +8142,84 @@ app.get('/api/smartolt/map', requirePermission('smartolt.view'), wrap(async (req
   res.json(rows);
 }));
 
+/**
+ * TR-069 (see tr069.js): customer routers/ONUs that call our own ACS directly, rather than through SmartOLT.
+ * Viewing needs tr069.view; changing anything on a device needs tr069.manage.
+ */
+const tr069 = () => import('./tr069.js');
+const tr069Fail = (res, e, code = 502) => res.status(code).json({ error: e.message });
+
+app.get('/api/tr069/devices', requirePermission('tr069.view'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { res.json(await m.tenantDevices(req.tenant.id)); } catch (e) { tr069Fail(res, e); }
+}));
+
+app.get('/api/tr069/unmatched', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { res.json(await m.unmatchedDevices()); } catch (e) { tr069Fail(res, e); }
+}));
+
+app.post('/api/tr069/match', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { res.json(await m.matchDevices(req.tenant.id)); } catch (e) { tr069Fail(res, e); }
+}));
+
+app.post('/api/tr069/devices/:id/link', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  const subscriberId = req.body?.subscriberId;
+  if (!subscriberId) return res.status(400).json({ error: 'Choose a client.' });
+  try { await m.linkDevice(req.tenant.id, req.params.id, subscriberId); res.json({ ok: true }); } catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/unmatched/:genieacsId/claim', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  const subscriberId = req.body?.subscriberId;
+  if (!subscriberId) return res.status(400).json({ error: 'Choose a client.' });
+  try { await m.claimUnmatched(req.tenant.id, req.params.genieacsId, subscriberId); res.json({ ok: true }); } catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/devices/:id/wifi', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  const { ssid, password, band5 } = req.body ?? {};
+  if (!String(ssid ?? '').trim() || String(password ?? '').length < 8) {
+    return res.status(400).json({ error: 'Give a WiFi name and a password of at least 8 characters.' });
+  }
+  try { await m.setWifi(req.tenant.id, req.params.id, { ssid: ssid.trim(), password, band5: !!band5 }); res.json({ ok: true }); }
+  catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/devices/:id/pppoe', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  const { username, password } = req.body ?? {};
+  if (!String(username ?? '').trim()) return res.status(400).json({ error: 'Give the PPPoE username.' });
+  try { await m.setPppoe(req.tenant.id, req.params.id, { username: username.trim(), password: password ?? '' }); res.json({ ok: true }); }
+  catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/devices/:id/reboot', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { await m.reboot(req.tenant.id, req.params.id); res.json({ ok: true }); } catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/devices/:id/factory-reset', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { await m.factoryReset(req.tenant.id, req.params.id); res.json({ ok: true }); } catch (e) { tr069Fail(res, e, 400); }
+}));
+
+app.post('/api/tr069/devices/:id/refresh', requirePermission('tr069.manage'), wrap(async (req, res) => {
+  const m = await tr069();
+  try { await m.refresh(req.tenant.id, req.params.id); res.json({ ok: true }); } catch (e) { tr069Fail(res, e, 400); }
+}));
+
+/** The serial a client's TR-069 device will match on, the next time the ACS's device list is synced. */
+app.put('/api/subscribers/:id/tr069-serial', requirePermission('clients.edit'), wrap(async (req, res) => {
+  const serial = String(req.body?.serial ?? '').trim() || null;
+  const { rowCount } = await pool.query(
+    'update subscribers set tr069_serial=$3 where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id, serial]);
+  if (!rowCount) return res.status(404).json({ error: 'No such client.' });
+  res.json({ ok: true, serial });
+}));
+
 app.get('/api/routers', async (req, res) => {
   const { rows } = await pool.query('select * from routers where tenant_id=$1 order by name', [req.tenant.id]);
   res.json(rows);
@@ -13358,6 +13436,7 @@ const AUTOMATION_JOBS = [
   { job: 'healRouters', name: 'Router self-healing', cron: '*/10 * * * *', detail: 'Re-pushes RADIUS and the hotspot profile to a router that has drifted or been reset' },
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
   { job: 'syncOnlineCustomers', name: 'Sync online customers', cron: '*/30 * * * * *', detail: 'Every 30 seconds, reads who each router says is connected and records it, so a customer who was already online is shown with the right address without having to disconnect and reconnect' },
+  { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },
   { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },
   { job: 'generateMonthlyCharges', name: 'Tenant monthly statements', cron: '0 1 * * *', detail: 'Once a month has ended, works out each tenant\'s charge — a percentage of hotspot revenue plus a rate per active PPPoE client — and tells the platform owner' },

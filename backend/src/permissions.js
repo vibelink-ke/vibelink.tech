@@ -53,6 +53,9 @@ export const DEFAULT_PERMISSIONS = {
   // SmartOLT: seeing the ONUs, and acting on them (reboot, enable/disable, authorise, connecting the account).
   'smartolt.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'smartolt.manage': { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  // TR-069: seeing customer devices (routers/ONUs on our own ACS), and acting on them (WiFi, PPPoE, reboot, reset, link).
+  'tr069.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
+  'tr069.manage': { owner: true, cashier: false, technician: true,  support: false, sales: false },
 
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -227,6 +230,8 @@ export const PERMISSION_META = [
   { key: 'network.edit', page: 'Map', action: 'Draw / edit the network (fibre and wireless)' },
   { key: 'smartolt.view', page: 'SmartOLT', action: 'View ONUs and their status' },
   { key: 'smartolt.manage', page: 'SmartOLT', action: 'Connect, reboot, enable/disable, link and authorise ONUs' },
+  { key: 'tr069.view', page: 'TR-069', action: 'View customer devices and their status' },
+  { key: 'tr069.manage', page: 'TR-069', action: 'Set WiFi/PPPoE, reboot, factory reset and link devices' },
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },

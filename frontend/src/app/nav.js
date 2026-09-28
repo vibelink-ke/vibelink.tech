@@ -12,6 +12,7 @@ export const NAV_SECTIONS = [
       { to: '/networks', label: 'Networks' },
       // Only for tenants who have connected SmartOLT — plus whoever may set it up.
       { to: '/smartolt', label: 'SmartOLT', perm: 'smartolt.view', feature: 'smartolt', setupPerm: 'smartolt.manage' },
+      { to: '/tr069', label: 'TR-069 devices', perm: 'tr069.view' },
       { to: '/tariffs', label: 'Internet tariffs' },
       { to: '/fair-use', label: 'Fair use policy', count: (s) => s.fupPolicies.length },
       { to: '/routers', label: 'Routers', count: (s) => s.routers.length },

@@ -73,6 +73,10 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every 30s, the routers' own lists of who is connected are written into the system, so nobody has to drop and redial to be seen.
   cron.schedule('*/30 * * * * *', safely('syncOnlineCustomers', syncOnlineCustomersJob));
+  // TR-069: pull the ACS's device list, link newly-seen devices to whichever subscriber's serial matches, and
+  // give a freshly-linked device its first WiFi/PPPoE. GenieACS is shared infra, so this reads its device list
+  // once and then does the per-tenant matching/provisioning — not once per tenant.
+  cron.schedule('*/2 * * * *', safely('syncTr069Devices', syncTr069DevicesJob));
   // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
   cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
@@ -1893,6 +1897,30 @@ async function syncOnlineCustomersJob() {
     }
   } finally {
     presencePassRunning = false;
+  }
+}
+
+let tr069PassRunning = false;
+async function syncTr069DevicesJob() {
+  if (tr069PassRunning) return;
+  tr069PassRunning = true;
+  try {
+    const m = await import('./tr069.js');
+    await m.syncDevices().catch((e) => console.warn('tr069 syncDevices:', e.message));
+    const { rows } = await pool.query(`select id from tenants where id in (${enabledTenants})`, ['syncTr069Devices']);
+    for (const t of rows) {
+      try {
+        const linked = await m.matchDevices(t.id);
+        const provisioned = await m.autoProvisionNew(t.id);
+        if (linked.linked || provisioned.provisioned) {
+          console.log(`tr069: tenant ${t.id} — ${linked.linked} linked, ${provisioned.provisioned} provisioned`);
+        }
+      } catch (e) {
+        console.warn('tr069 tenant pass:', t.id, '—', e.message);
+      }
+    }
+  } finally {
+    tr069PassRunning = false;
   }
 }
 
