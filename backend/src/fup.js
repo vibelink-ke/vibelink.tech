@@ -1,6 +1,5 @@
 import { pool, withTenant } from './db.js';
 import { applyFupThrottle, clearFupThrottle } from './radius.js';
-import { send } from './sms.js';
 
 /**
  * Fair-use enforcement.
@@ -103,18 +102,15 @@ export async function enforceForTenant(tenantId) {
             'update fup_state set throttled=true where subscriber_id=$1 and window_start=$2',
             [r.subscriber_id, r.window_start]);
           summary.throttled++;
-          await send(tenantId, r.phone, 'custom', {
-            body: `You have used your ${tidyGb(r.data_cap_gb)} GB fair-use allowance. Speeds are reduced to ${Math.round(r.throttle_down / 1000)} Mbps until the next period.`,
-          }).catch(() => {});
+          // No SMS for a fair-use throttle — the operator asked for this to stay silent. The
+          // throttle itself still applies; only the text message to the customer is skipped.
         }
       } else if (shouldWarn && !r.warned) {
         await pool.query(
           'update fup_state set warned=true where subscriber_id=$1 and window_start=$2',
           [r.subscriber_id, r.window_start]);
         summary.warned++;
-        await send(tenantId, r.phone, 'custom', {
-          body: `You have used ${Math.round(pct)}% of your ${tidyGb(r.data_cap_gb)} GB allowance. Speeds drop once it is finished.`,
-        }).catch(() => {});
+        // No SMS for a fair-use warning either — same as the throttle above.
       }
     }
   }
