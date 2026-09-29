@@ -9880,22 +9880,33 @@ app.post('/api/platform/org-balance/refresh', superAdminOnly, wrap(async (req, r
 
 app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(`
-    select pay.*,
-           -- Which bundle a hotspot sale actually paid for — a payment
-           -- carried only voucher_id, which named nothing a person could
-           -- read on this screen.
-           v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up,
-           -- Whose PPPoE account this actually applied to — a payment matched
-           -- by account number carried only subscriber_id, so confirming a
-           -- specific customer's payment landed meant a database query.
-           s.name as customer_name
-      from payments pay
-      left join vouchers v on v.id = pay.voucher_id
-      left join plans p on p.id = v.plan_id
-      left join subscribers s on s.id = pay.subscriber_id
-     where pay.tenant_id=$1
-     order by pay.received_at desc
-     limit 500`, [req.tenant.id]);
+    select * from (
+      select pay.*,
+             -- Which bundle a hotspot sale actually paid for — a payment
+             -- carried only voucher_id, which named nothing a person could
+             -- read on this screen.
+             v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up,
+             -- Whose PPPoE account this actually applied to — a payment matched
+             -- by account number carried only subscriber_id, so confirming a
+             -- specific customer's payment landed meant a database query.
+             s.name as customer_name,
+             -- The 500-row cap used to apply across every provider mixed together —
+             -- a tenant whose hotspot (KopoKopo) volume dwarfs their PPPoE paybill
+             -- (Daraja) volume had the cap fill up entirely with KopoKopo rows, so
+             -- filtering the screen to "M-Pesa Paybill" could show as few as a
+             -- handful of transactions even with thousands actually recorded: they
+             -- were real, just crowded out of the list before the filter ever ran.
+             -- Ranking within each provider instead means every channel keeps its
+             -- own 500 most recent, regardless of how busy any other channel is.
+             row_number() over (partition by pay.provider order by pay.received_at desc) as rn
+        from payments pay
+        left join vouchers v on v.id = pay.voucher_id
+        left join plans p on p.id = v.plan_id
+        left join subscribers s on s.id = pay.subscriber_id
+       where pay.tenant_id=$1
+    ) x
+    where rn <= 500
+    order by received_at desc`, [req.tenant.id]);
   res.json(rows);
 }));
 
