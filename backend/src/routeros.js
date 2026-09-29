@@ -2996,6 +2996,33 @@ export async function identify(conn) {
 }
 
 /**
+ * The full "what is this box" picture for the Routers screen's own System info
+ * view — identify() above only ever kept the three fields Configure itself
+ * needs (version, board, identity), not the live health an operator actually
+ * opens this for: is it overloaded, low on memory, or just freshly rebooted.
+ */
+export async function systemInfo(conn) {
+  const [res] = await conn.write('/system/resource/print', []);
+  const [ident] = await conn.write('/system/identity/print', []);
+  const toNum = (v) => (v == null ? null : Number(v));
+  return {
+    identity: ident?.name ?? null,
+    version: res?.version ?? null,
+    board: res?.['board-name'] ?? null,
+    architecture: res?.['architecture-name'] ?? null,
+    cpuLoadPct: toNum(res?.['cpu-load']),
+    freeMemoryBytes: toNum(res?.['free-memory']),
+    totalMemoryBytes: toNum(res?.['total-memory']),
+    freeHddBytes: toNum(res?.['free-hdd-space']),
+    totalHddBytes: toNum(res?.['total-hdd-space']),
+    // RouterOS's own duration format ("1w2d3h4m5s") — left as-is rather than parsed
+    // into seconds, since that's exactly how Winbox itself shows it and an operator
+    // comparing the two should see the same string.
+    uptime: res?.uptime ?? null,
+  };
+}
+
+/**
  * RouterOS returns each ping reply's round-trip time as a raw duration
  * string ("1ms200us", "500us", "2s100ms") — parseRouterOSDuration above only
  * handles second-granularity durations (hotspot/PPPoE session lengths), not

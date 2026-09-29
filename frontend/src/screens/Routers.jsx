@@ -675,6 +675,18 @@ export default function Routers() {
     }
   }
 
+  /** Same one-off-reading shape as Ping above, for CPU/memory/uptime/version straight off the router. */
+  const [sysInfo, setSysInfo] = useState(null);   // { router, result, error } while the modal is open
+  async function runSystemInfo(r) {
+    setSysInfo({ router: r, result: null, error: null });
+    try {
+      const result = await api.routerSystemInfo(r.id);
+      setSysInfo((p) => (p?.router?.id === r.id ? { ...p, result } : p));
+    } catch (e) {
+      setSysInfo((p) => (p?.router?.id === r.id ? { ...p, error: e.message } : p));
+    }
+  }
+
   /**
    * Lock a device (a TV, a printer — anything with no browser to log into a
    * hotspot page with) to a fixed IP by its MAC address. bindDeviceByMac/
@@ -1346,6 +1358,12 @@ Revoke anyway?`
                       Ping
                     </MenuItem>
                     <MenuItem
+                      onClick={() => { setMenuFor(null); runSystemInfo(r); }}
+                      title="CPU load, memory, uptime, RouterOS version and board — read live off the router"
+                    >
+                      System info
+                    </MenuItem>
+                    <MenuItem
                       onClick={() => { setMenuFor(null); openDevices(r); }}
                       title="Lock a device (a TV, anything without a browser) to a fixed IP by its MAC address"
                     >
@@ -1739,6 +1757,64 @@ Revoke anyway?`
                   </div>
                 </>
               )}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal
+        open={!!sysInfo}
+        title={`System info — ${sysInfo?.router?.name ?? ''}`}
+        onClose={() => setSysInfo(null)}
+        footer={
+          <>
+            <Button onClick={() => runSystemInfo(sysInfo.router)} disabled={!sysInfo?.result && !sysInfo?.error}>Refresh</Button>
+            <Button variant="primary" onClick={() => setSysInfo(null)}>Close</Button>
+          </>
+        }
+      >
+        {sysInfo?.error && (
+          <div style={{ fontSize: 13, color: color.rust, marginBottom: 10 }}>{sysInfo.error}</div>
+        )}
+        {!sysInfo?.result && !sysInfo?.error && (
+          <div style={{ fontSize: 13, color: color.muted }}>Connecting and reading…</div>
+        )}
+        {sysInfo?.result && (
+          <div style={{ display: 'grid', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <div>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>CPU LOAD</div>
+                <div style={{ fontSize: 22, fontWeight: 700, fontFamily: font.mono, color: Number(sysInfo.result.cpuLoadPct) >= 80 ? color.rust : color.ink }}>
+                  {sysInfo.result.cpuLoadPct == null ? '—' : `${sysInfo.result.cpuLoadPct}%`}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>UPTIME</div>
+                <div style={{ fontSize: 22, fontWeight: 700, fontFamily: font.mono }}>{sysInfo.result.uptime ?? '—'}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>MEMORY FREE</div>
+                <div style={{ fontSize: 15, fontFamily: font.mono }}>
+                  {sysInfo.result.freeMemoryBytes == null ? '—' : formatBytes(sysInfo.result.freeMemoryBytes)}
+                  {sysInfo.result.totalMemoryBytes != null && (
+                    <span style={{ color: color.muted }}> / {formatBytes(sysInfo.result.totalMemoryBytes)}</span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>STORAGE FREE</div>
+                <div style={{ fontSize: 15, fontFamily: font.mono }}>
+                  {sysInfo.result.freeHddBytes == null ? '—' : formatBytes(sysInfo.result.freeHddBytes)}
+                  {sysInfo.result.totalHddBytes != null && (
+                    <span style={{ color: color.muted }}> / {formatBytes(sysInfo.result.totalHddBytes)}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'grid', gap: 6, fontSize: 13 }}>
+              <div><span style={{ color: color.muted }}>Identity</span> — {sysInfo.result.identity ?? '—'}</div>
+              <div><span style={{ color: color.muted }}>RouterOS</span> — {sysInfo.result.version ?? '—'}</div>
+              <div><span style={{ color: color.muted }}>Board</span> — {sysInfo.result.board ?? '—'}{sysInfo.result.architecture ? ` (${sysInfo.result.architecture})` : ''}</div>
             </div>
           </div>
         )}

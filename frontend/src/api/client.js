@@ -406,6 +406,7 @@ export const api = {
   routerTunnels: () => get('/api/routers/tunnels'),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),
   routerPing: (id) => post(`/api/routers/${id}/ping`, {}),
+  routerSystemInfo: (id) => post(`/api/routers/${id}/system-info`, {}),
   routerDevices: (id) => get(`/api/routers/${id}/devices`),
   lockRouterDevice: (id, body) => post(`/api/routers/${id}/devices/lock`, body),
   unlockRouterDevice: (id, mac) => post(`/api/routers/${id}/devices/unlock`, { mac }),

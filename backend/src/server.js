@@ -6012,6 +6012,32 @@ app.post('/api/routers/:id/ping', requirePermission('routers.view'), wrap(async 
   }
 }));
 
+/** Live CPU/memory/uptime/version off the router itself — see routeros.js's systemInfo. */
+app.post('/api/routers/:id/system-info', requirePermission('routers.view'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+
+  const { rows: [r] } = await pool.query(
+    'select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+
+  let conn;
+  try {
+    conn = await step('connect', () =>
+      ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    const info = await step('read system info', () => ros.systemInfo(conn));
+    res.json(info);
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/api/routers/:id/traffic', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
