@@ -262,29 +262,21 @@ export default function Dashboard() {
   /**
    * Last month's Employee of the month, on the dashboard for everyone to see — not just on Team jobs, which most
    * roles never open. Shown for the first week of the new month only (the recognition is worth a moment, not a
-   * permanent fixture crowding out today's numbers), computed from the same resolved_at every job is already
-   * marked with, the moment it was actually finished (see Team jobs / PATCH /api/tickets/:id).
+   * permanent fixture crowding out today's numbers). Combines tickets resolved with sales revenue brought in,
+   * normalized so a salesperson can win this too — see /api/team/eotm (eotm.js).
    */
-  const lastMonthMvp = useMemo(() => {
-    const now = new Date();
-    if (now.getDate() > 7) return null;
-    const monthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const monthEnd = new Date(now.getFullYear(), now.getMonth(), 1);
-    const staffById = Object.fromEntries((store.staff ?? []).map((s) => [s.id, s.name]));
-    const counts = new Map();
-    for (const t of store.tickets ?? []) {
-      if (!t.assigned_to || !t.resolved_at) continue;
-      const at = new Date(t.resolved_at);
-      if (at < monthStart || at >= monthEnd) continue;
-      counts.set(t.assigned_to, (counts.get(t.assigned_to) ?? 0) + 1);
-    }
-    let top = null;
-    for (const [staffId, n] of counts) {
-      if (!top || n > top.jobs) top = { staffId, jobs: n };
-    }
-    if (!top) return null;
-    return { name: staffById[top.staffId] ?? 'A former staff member', jobs: top.jobs, month: monthStart.toLocaleDateString('en-KE', { month: 'long' }) };
-  }, [store.tickets, store.staff]);
+  const [lastMonthMvp, setLastMonthMvp] = useState(null);
+  useEffect(() => {
+    if (new Date().getDate() > 7) return;
+    const monthLabel = new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1)
+      .toLocaleDateString('en-KE', { month: 'long' });
+    api.eotm('last_month')
+      .then((d) => setLastMonthMvp(d.winner ? { ...d.winner, month: monthLabel } : null))
+      .catch(() => setLastMonthMvp(null));
+  }, []);
+  const mvpAchievement = lastMonthMvp && (lastMonthMvp.metric === 'sales'
+    ? `KES ${Math.round(lastMonthMvp.value).toLocaleString('en-KE')} brought in`
+    : `${lastMonthMvp.value} job${lastMonthMvp.value === 1 ? '' : 's'} finished`);
 
   const exportCsv = () => {
     const rows = [
@@ -363,7 +355,7 @@ export default function Dashboard() {
         >
           <span style={{ fontSize: 26, lineHeight: 1 }}>🏆</span>
           <span style={{ fontSize: 14, color: color.ink }}>
-            <b>Employee of the month</b> for {lastMonthMvp.month}: <b>{lastMonthMvp.name}</b> — {lastMonthMvp.jobs} job{lastMonthMvp.jobs === 1 ? '' : 's'} finished
+            <b>Employee of the month</b> for {lastMonthMvp.month}: <b>{lastMonthMvp.name}</b> — {mvpAchievement}
           </span>
           <Button
             onClick={async () => {
@@ -373,7 +365,7 @@ export default function Dashboard() {
                 title: `Employee of the Month — ${lastMonthMvp.month}`,
                 name: lastMonthMvp.name,
                 subtitle: 'In recognition of outstanding work',
-                detail: `${lastMonthMvp.jobs} job${lastMonthMvp.jobs === 1 ? '' : 's'} finished`,
+                detail: mvpAchievement,
               });
             }}
             style={{ marginLeft: 'auto' }}
@@ -595,8 +587,11 @@ export default function Dashboard() {
             }}
             onClick={() => navigate('/leads?tab=performance')}
           >
+            {/* Top commission earner, not the Employee of the Month banner above (which combines every role) —
+                a different, deliberately narrower question: who is earning the most from leads named as their
+                referral this month, commission only. See /api/leads/sales-performance's own comment. */}
             <span style={{ fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.green }}>
-              🏆 EMPLOYEE OF THE MONTH
+              💰 TOP COMMISSION EARNER
             </span>
             <span style={{ fontSize: 20, fontWeight: 700 }}>{topPerformer.name}</span>
             <span style={{ fontSize: 12.5, color: color.neutralInk }}>

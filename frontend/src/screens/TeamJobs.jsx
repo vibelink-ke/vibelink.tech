@@ -1,8 +1,17 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
+import { api } from '../api/client';
 import { Badge, Card, Screen, Select } from '../ui/primitives';
+
+/** "3 jobs finished" or "KES 40,000 brought in" — whichever lane a leaderboard entry won in. */
+function eotmAchievement(entry, span) {
+  if (!entry) return '';
+  return entry.metric === 'sales'
+    ? `KES ${Math.round(entry.value).toLocaleString('en-KE')} brought in ${span}`
+    : `${entry.value} job${entry.value === 1 ? '' : 's'} finished ${span}`;
+}
 
 const PRIORITY_COLOUR = { critical: color.rust, high: color.amberInk, medium: color.muted, low: color.muted };
 const STATUS_LABEL = { open: 'Open', in_progress: 'In progress', resolved: 'Resolved' };
@@ -50,16 +59,15 @@ export default function TeamJobs() {
     return [...groups.values()].sort((a, b) => (b.open + b.in_progress) - (a.open + a.in_progress));
   }, [tickets, staffById, monthStart, yearStart]);
 
-  const topOfMonth = useMemo(() => {
-    const eligible = byPerson.filter((p) => p.id !== '__unassigned');
-    const top = [...eligible].sort((a, b) => b.resolvedThisMonth - a.resolvedThisMonth)[0];
-    return top && top.resolvedThisMonth > 0 ? top : null;
-  }, [byPerson]);
-  const topOfYear = useMemo(() => {
-    const eligible = byPerson.filter((p) => p.id !== '__unassigned');
-    const top = [...eligible].sort((a, b) => b.resolvedThisYear - a.resolvedThisYear)[0];
-    return top && top.resolvedThisYear > 0 ? top : null;
-  }, [byPerson]);
+  // Combines tickets resolved with sales revenue brought in, normalized so a
+  // salesperson can win this too, not just whoever closes the most tickets —
+  // see /api/team/eotm (eotm.js) for how the two are made comparable.
+  const [topOfMonth, setTopOfMonth] = useState(null);
+  const [topOfYear, setTopOfYear] = useState(null);
+  useEffect(() => {
+    api.eotm('month').then((d) => setTopOfMonth(d.winner)).catch(() => setTopOfMonth(null));
+    api.eotm('year').then((d) => setTopOfYear(d.winner)).catch(() => setTopOfYear(null));
+  }, []);
 
   const visible = useMemo(() => tickets
     .filter((t) => staffFilter === 'all' || (staffFilter === '__unassigned' ? !t.assigned_to : t.assigned_to === staffFilter))
@@ -79,7 +87,7 @@ export default function TeamJobs() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{topOfMonth.name}</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
-                  {topOfMonth.resolvedThisMonth} job{topOfMonth.resolvedThisMonth === 1 ? '' : 's'} finished this month
+                  {eotmAchievement(topOfMonth, 'this month')}
                 </span>
               </div>
             </Card>
@@ -89,7 +97,7 @@ export default function TeamJobs() {
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 20, fontWeight: 700 }}>{topOfYear.name}</span>
                 <span style={{ fontSize: 15, fontWeight: 700, color: color.green, marginLeft: 'auto' }}>
-                  {topOfYear.resolvedThisYear} job{topOfYear.resolvedThisYear === 1 ? '' : 's'} finished this year
+                  {eotmAchievement(topOfYear, 'this year')}
                 </span>
               </div>
             </Card>

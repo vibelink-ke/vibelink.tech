@@ -91,6 +91,7 @@ export const api = {
   subscriberQueue: (id) => get(`/api/subscribers/${id}/queue`),
   subscriberLiveTraffic: (id) => get(`/api/subscribers/${id}/live-traffic`),
   subscriberActivity: (id) => get(`/api/subscribers/${id}/activity`),
+  eotm: (period) => get(`/api/team/eotm?period=${period}`),
   smsPlaceholders: () => get('/api/sms/placeholders'),
   smsTemplates: () => get('/api/sms/templates'),
   saveSmsTemplates: (templates) => put('/api/sms/templates', { templates }),

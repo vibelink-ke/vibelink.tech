@@ -23,6 +23,7 @@ import { router as manual } from './payments/manual.js';
 import * as kk from './payments/kopokopo.js';
 import * as mpesa from './payments/daraja.js';
 import { startJobs, payoutTenantNow } from './jobs.js';
+import * as eotm from './eotm.js';
 import { settleStaffCommissionsForPayout } from './payments/apply.js';
 import { providerNames } from './sms.js';
 import * as auth from './auth.js';
@@ -3850,6 +3851,29 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
       order by brought_this_month desc, won_this_month desc`,
     [req.tenant.id]);
   res.json(rows);
+}));
+
+/**
+ * Live "Employee of the month"/"of the year" — Team jobs' trophy cards and the Dashboard banner both used to
+ * compute this purely from tickets already sitting in the browser store, which meant a salesperson could never
+ * win no matter how much revenue they brought in. Both now read this instead — see eotm.js for how a ticket
+ * count and revenue brought in are made comparable.
+ */
+app.get('/api/team/eotm', requirePermission('tickets.view'), wrap(async (req, res) => {
+  const now = new Date();
+  let start, end;
+  if (req.query.period === 'year') {
+    start = new Date(now.getFullYear(), 0, 1);
+    end = new Date(now.getFullYear() + 1, 0, 1);
+  } else if (req.query.period === 'last_month') {
+    start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    end = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else {
+    start = new Date(now.getFullYear(), now.getMonth(), 1);
+    end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  }
+  const board = await eotm.leaderboard(req.tenant.id, start, end);
+  res.json({ leaderboard: board, winner: board[0] ?? null });
 }));
 
 app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
