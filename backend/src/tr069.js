@@ -57,12 +57,23 @@ function readDevice(d) {
   const connected = dataModel === 'tr181'
     ? Number(first(d, 'Device.Hosts.HostNumberOfEntries')) || null
     : Number(first(d, 'InternetGatewayDevice.LANDevice.1.Hosts.HostNumberOfEntries')) || null;
+  /**
+   * GenieACS's own _deviceId struct — populated from every single Inform's DeviceId (Manufacturer, OUI,
+   * ProductClass, SerialNumber), so it is there from the device's very first contact, before anything has
+   * asked it for its DeviceInfo.* parameter tree. Its own leaf keys are underscore-prefixed
+   * (_Manufacturer/_OUI/_ProductClass/_SerialNumber) — not the same shape as a TR-069 parameter object
+   * (which is why `first()`, built for {_value: ...} leaves, cannot read it) and there is no
+   * "DeviceID.SerialNumber" parameter in either data model to fall back through; that used to be tried
+   * first and could never match anything. Confirmed live: every device this ACS had actually heard from
+   * showed a blank Device/Serial in "Waiting to be linked" until this read the right keys — last_inform
+   * (a different, correctly-named top-level field) was the only thing that was ever populating.
+   */
   return {
     genieacsId: idOf(d),
-    serial: first(d, 'DeviceID.SerialNumber', 'Device.DeviceInfo.SerialNumber', 'InternetGatewayDevice.DeviceInfo.SerialNumber') ?? d._deviceId?.SerialNumber ?? null,
-    oui: d._deviceId?.OUI ?? first(d, 'DeviceID.OUI') ?? null,
-    manufacturer: d._deviceId?.Manufacturer ?? first(d, 'DeviceID.Manufacturer', 'Device.DeviceInfo.Manufacturer', 'InternetGatewayDevice.DeviceInfo.Manufacturer'),
-    productClass: d._deviceId?.ProductClass ?? first(d, 'DeviceID.ProductClass') ?? null,
+    serial: d._deviceId?._SerialNumber ?? first(d, 'Device.DeviceInfo.SerialNumber', 'InternetGatewayDevice.DeviceInfo.SerialNumber') ?? null,
+    oui: d._deviceId?._OUI ?? null,
+    manufacturer: d._deviceId?._Manufacturer ?? first(d, 'Device.DeviceInfo.Manufacturer', 'InternetGatewayDevice.DeviceInfo.Manufacturer'),
+    productClass: d._deviceId?._ProductClass ?? null,
     modelName: first(d, 'Device.DeviceInfo.ModelName', 'InternetGatewayDevice.DeviceInfo.ModelName'),
     softwareVersion: first(d, 'Device.DeviceInfo.SoftwareVersion', 'InternetGatewayDevice.DeviceInfo.SoftwareVersion'),
     lastInform: d._lastInform ?? null,
