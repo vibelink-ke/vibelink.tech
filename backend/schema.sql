@@ -3118,3 +3118,10 @@ alter table subscribers add column if not exists tr069_serial text;
 -- rows have no real history to backfill, so they land on the day this migration runs rather than a
 -- fabricated earlier date; only routers added from here on carry a true install date.
 alter table routers add column if not exists created_at timestamptz not null default now();
+
+-- Message wording (Settings → Templates) has to be settable for a tenant with no SMS/email gateway of
+-- their own at all — a platform-collect tenant sending entirely through the platform's own gateway or
+-- relay, say — which storing templates on the gateway/SMTP config row itself could never support: there
+-- was nowhere to save them until a gateway existed to attach them to.
+alter table tenants add column if not exists sms_templates jsonb not null default '{}'::jsonb;
+alter table tenants add column if not exists email_templates jsonb not null default '{}'::jsonb;

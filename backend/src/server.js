@@ -11947,12 +11947,10 @@ app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (
  */
 app.get('/api/sms/templates', wrap(async (req, res) => {
   const { DEFAULTS, PLACEHOLDERS } = await import('./sms.js');
-  const { rows } = await pool.query(
-    'select templates from tenant_sms_config where tenant_id=$1 order by priority limit 1',
-    [req.tenant.id]);
+  const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [req.tenant.id]);
   res.json({
     defaults: DEFAULTS,
-    templates: rows[0]?.templates ?? {},
+    templates: t?.sms_templates ?? {},
     placeholders: PLACEHOLDERS,
   });
 }));
@@ -11962,13 +11960,11 @@ app.put('/api/sms/templates', requirePermission('settings.edit'), wrap(async (re
   if (!templates || typeof templates !== 'object') {
     return res.status(400).json({ error: 'Nothing to save' });
   }
-  // Written to every gateway this tenant has: the wording is theirs, not the
-  // provider's, and a message should not change because a gateway failed over.
-  const { rowCount } = await pool.query(
-    'update tenant_sms_config set templates=$2 where tenant_id=$1', [req.tenant.id, templates]);
-  if (!rowCount) {
-    return res.status(400).json({ error: 'Add an SMS gateway first — templates are stored against it.' });
-  }
+  // On the tenant itself, not any one gateway: the wording is theirs, and has to be settable whether or
+  // not they have a gateway of their own at all — a platform-collect tenant sending entirely through the
+  // platform's own gateway previously had nowhere to save this, since there was no gateway row to attach
+  // it to.
+  await pool.query('update tenants set sms_templates=$2 where id=$1', [req.tenant.id, templates]);
   res.json({ ok: true, templates });
 }));
 
@@ -11980,11 +11976,10 @@ app.get('/api/sms/placeholders', wrap(async (_req, res) => {
 /** Same idea as /api/sms/templates above, for the system emails email.js sends. */
 app.get('/api/email/templates', wrap(async (req, res) => {
   const { DEFAULTS, PLACEHOLDERS } = await import('./email.js');
-  const { rows } = await pool.query(
-    'select templates from tenant_email_config where tenant_id=$1', [req.tenant.id]);
+  const { rows: [t] } = await pool.query('select email_templates from tenants where id=$1', [req.tenant.id]);
   res.json({
     defaults: DEFAULTS,
-    templates: rows[0]?.templates ?? {},
+    templates: t?.email_templates ?? {},
     placeholders: PLACEHOLDERS,
   });
 }));
@@ -11994,11 +11989,9 @@ app.put('/api/email/templates', requirePermission('settings.edit'), wrap(async (
   if (!templates || typeof templates !== 'object') {
     return res.status(400).json({ error: 'Nothing to save' });
   }
-  const { rowCount } = await pool.query(
-    'update tenant_email_config set templates=$2 where tenant_id=$1', [req.tenant.id, templates]);
-  if (!rowCount) {
-    return res.status(400).json({ error: 'Add an email gateway first — templates are stored against it.' });
-  }
+  // Same reasoning as /api/sms/templates just above: on the tenant itself, settable with no SMTP
+  // config of their own required at all.
+  await pool.query('update tenants set email_templates=$2 where id=$1', [req.tenant.id, templates]);
   res.json({ ok: true, templates });
 }));
 

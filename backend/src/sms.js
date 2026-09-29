@@ -359,9 +359,13 @@ export async function send(tenantId, phone, template, vars = {}) {
 
 async function sendSms(tenantId, to, template, vars) {
   const { rows: gateways } = await pool.query(
-    "select provider, credentials, templates from tenant_sms_config where tenant_id=$1 and enabled and provider <> 'twilio_whatsapp' order by priority",
+    "select provider, credentials from tenant_sms_config where tenant_id=$1 and enabled and provider <> 'twilio_whatsapp' order by priority",
     [tenantId]);
-  const body = render(gateways[0]?.templates?.[template] ?? DEFAULTS[template], vars);
+  // Wording lives on the tenant itself, not on any one gateway (see /api/sms/templates in server.js) —
+  // a tenant with no gateway of their own, sending entirely through the platform's, still has to be able
+  // to set and actually get their own wording, not just the built-in default.
+  const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [tenantId]).catch(() => ({ rows: [] }));
+  const body = render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars);
 
   if (!gateways.length) {
     console.warn('no sms gateway for tenant', tenantId);
@@ -517,11 +521,14 @@ export async function sendViaPlatformGateway(to, body, source = 'local') {
 /** Its own row (provider='twilio_whatsapp'), read directly rather than through the failover list above. */
 async function sendWhatsApp(tenantId, to, template, vars) {
   const { rows: [g] } = await pool.query(
-    "select credentials, templates from tenant_sms_config where tenant_id=$1 and provider='twilio_whatsapp' and enabled",
+    "select credentials from tenant_sms_config where tenant_id=$1 and provider='twilio_whatsapp' and enabled",
     [tenantId]);
   if (!g || !credentialsComplete('twilio_whatsapp', g.credentials)) return;
 
-  const body = render(g.templates?.[template] ?? DEFAULTS[template], vars);
+  // Same wording as the SMS side of the same send() call (tenants.sms_templates) — a tenant editing
+  // Settings → Templates expects it to change both, not just whichever one happens to go out on SMS.
+  const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [tenantId]).catch(() => ({ rows: [] }));
+  const body = render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars);
   try {
     const res = await PROVIDERS.twilio_whatsapp(g.credentials, to, body);
     if (!accepted('twilio_whatsapp', res)) {

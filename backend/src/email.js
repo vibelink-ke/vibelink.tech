@@ -191,9 +191,13 @@ export const PLACEHOLDERS = [
 const render = (tpl, vars) => String(tpl ?? '').replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 export const fill = (tpl, vars) => render(tpl, vars);
 
-/** A template merged over its default — an override may set just the subject or just the body. */
+/**
+ * A template merged over its default — an override may set just the subject or just the body.
+ * On the tenant itself (tenants.email_templates), not the SMTP config row — a tenant with no SMTP
+ * setup of their own still needs their wording read back correctly, not silently ignored.
+ */
 export async function template(tenantId, key) {
   const { rows: [row] } = await pool.query(
-    'select templates from tenant_email_config where tenant_id=$1', [tenantId]);
-  return { ...DEFAULTS[key], ...(row?.templates?.[key] ?? {}) };
+    'select email_templates from tenants where id=$1', [tenantId]);
+  return { ...DEFAULTS[key], ...(row?.email_templates?.[key] ?? {}) };
 }
