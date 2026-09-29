@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import fs from 'node:fs/promises';
 import { pool, enabledTenants } from './db.js';
-import { send, sendViaPlatformGateway } from './sms.js';
+import { send, sendViaPlatformGateway, orgVars } from './sms.js';
 import * as email from './email.js';
 import { fmtNairobi, fmtNairobiDate } from './nairobi-time.js';
 import { generateDueBills } from './bills.js';
@@ -755,13 +755,20 @@ async function autoCharge() {
 
 async function remind() {
   const { rows } = await pool.query(`
-    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at
+    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service
     from subscribers s
     where s.status='active' and s.expires_at between now() and now() + interval '3 days'
       and s.tenant_id in (${enabledTenants})`, ['remind']);
+  // orgVars is a tenant-wide lookup (paybill numbers, company name) — cached per
+  // run so a tenant with hundreds of subscribers due this batch doesn't re-query
+  // its gateways once per subscriber.
+  const orgCache = new Map();
   for (const s of rows) {
+    if (!orgCache.has(s.tenant_id)) orgCache.set(s.tenant_id, await orgVars(s.tenant_id));
+    const org = orgCache.get(s.tenant_id);
+    const paybill = s.service === 'hotspot' ? org.paybillHotspot : org.paybillPppoe;
     await send(s.tenant_id, s.phone, 'reminder',
-      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code });
+      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code, paybill: paybill ?? '' });
   }
 }
 
