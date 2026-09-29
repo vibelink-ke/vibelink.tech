@@ -3125,3 +3125,8 @@ alter table routers add column if not exists created_at timestamptz not null def
 -- was nowhere to save them until a gateway existed to attach them to.
 alter table tenants add column if not exists sms_templates jsonb not null default '{}'::jsonb;
 alter table tenants add column if not exists email_templates jsonb not null default '{}'::jsonb;
+
+-- Where a walk-up prospect actually was, for the field sales app's "New prospect" quick-add — a lead logged on
+-- the spot rarely has a real address yet, only wherever the rep happened to be standing (see /work/my-leads).
+alter table leads add column if not exists lat numeric(9,6);
+alter table leads add column if not exists lng numeric(9,6);

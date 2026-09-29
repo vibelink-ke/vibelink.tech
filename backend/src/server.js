@@ -3892,7 +3892,7 @@ app.get('/api/team/eotm', requirePermission('tickets.view'), wrap(async (req, re
 }));
 
 app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
-  const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp } = req.body;
+  const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp, lat, lng } = req.body;
 
   let referrer = null;
   if (referrerId) {
@@ -3914,10 +3914,10 @@ app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
   }
 
   const { rows: [l] } = await pool.query(
-    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up, created_by)
-     values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
+    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up, created_by, lat, lng)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
     [req.tenant.id, name, phone, source ?? 'manual', referrer, assignedTo || null, nextFollowUp || null,
-     req.session?.staff_id ?? null]);
+     req.session?.staff_id ?? null, lat ?? null, lng ?? null]);
   res.json(l);
 });
 
