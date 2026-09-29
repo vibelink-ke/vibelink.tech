@@ -265,6 +265,18 @@ export default function Payments() {
     return channelFilter === 'all' ? byChart : byChart.filter((p) => p.provider === channelFilter);
   }, [all, chartFilter, channelFilter]);
 
+  // The M-Pesa Paybill table's own ID column, chronological from that channel's first-ever transaction —
+  // fixed per payment, not a position in whatever's currently on screen. Built off `all` (every Daraja
+  // payment loaded), not `filteredAll`, so narrowing the view with a chart click or a search never
+  // renumbers a transaction that already has an ID.
+  const darajaRank = useMemo(() => {
+    const ordered = all
+      .filter((p) => p.provider === 'daraja')
+      .slice()
+      .sort((a, b) => new Date(a.received_at ?? 0) - new Date(b.received_at ?? 0));
+    return new Map(ordered.map((p, i) => [p.id, i + 1]));
+  }, [all]);
+
   const [stkForm, setStkForm] = useState(null);
   const [stkResult, setStkResult] = useState(null);
   const stkPoll = useRef(null);
@@ -676,7 +688,7 @@ export default function Payments() {
                 // Transaction ID, Transaction time, Reference) — what an operator reconciling
                 // against that portal actually expects to see, rather than columns (Customer,
                 // Bundle) that only make sense for hotspot sales.
-                { key: 'id', label: 'ID', render: (_r, i) => i + 1 },
+                { key: 'id', label: 'ID', render: (r) => darajaRank.get(r.id) ?? '—' },
                 { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
                 { key: 'provider_ref', label: 'Transaction ID', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
