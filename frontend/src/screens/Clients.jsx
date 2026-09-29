@@ -308,8 +308,10 @@ export default function Clients() {
     const results = await Promise.allSettled(
       unique.map((c) => api.sendMessage({ subscriberId: c.id, body, channel: 'sms' }))
     );
-    const sent = results.filter((r) => r.status === 'fulfilled').length;
-    store.toast(sent === unique.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${unique.length}`);
+    // "The request went through" and "the gateway actually delivered it" are different things — a
+    // fulfilled promise with delivered:false is a customer who got nothing, not a success.
+    const sent = results.filter((r) => r.status === 'fulfilled' && r.value?.delivered !== false).length;
+    store.toast(sent === unique.length ? `Sent to ${sent} client(s)` : `Sent ${sent} of ${unique.length} — the rest failed`);
   };
 
   const bulkCompensate = async () => {

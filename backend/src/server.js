@@ -4852,11 +4852,17 @@ app.post('/api/messages', requirePermission('messaging.send'), async (req, res) 
     "insert into messages (tenant_id, subscriber_id, direction, channel, body) values ($1,$2,'out',$3,$4) returning *",
     [req.tenant.id, subscriberId, channel, filled]);
 
+  // send() already works out whether it actually went out (tries every configured gateway, then the
+  // platform one, logging each attempt) — this route just never told the caller, so the button always
+  // said "Message sent" whether or not anything left the building. null for live_chat: no gateway is
+  // involved, so there is nothing to have failed.
+  let delivered = null;
   if (channel !== 'live_chat') {
     const { send } = await import('./sms.js');
-    await send(req.tenant.id, phone, 'custom', { body: filled });
+    const result = await send(req.tenant.id, phone, 'custom', { body: filled });
+    delivered = !phone ? null : !!result?.ok;
   }
-  res.json(m);
+  res.json({ ...m, delivered });
 });
 
 app.get('/api/live-chats', async (req, res) => {

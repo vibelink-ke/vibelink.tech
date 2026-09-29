@@ -169,8 +169,12 @@ export default function Messaging() {
     setBusy(true);
     try {
       if (tab === 'single') {
-        await api.sendMessage({ subscriberId: sms.singleClient, body: sms.body, channel: 'sms' });
-        store.toast('Message sent');
+        const r = await api.sendMessage({ subscriberId: sms.singleClient, body: sms.body, channel: 'sms' });
+        store.toast(
+          r.delivered === false ? "Could not send — no gateway accepted it. Check Settings → Payment gateways → SMS."
+          : r.delivered === null ? 'Message sent'
+          : 'Message sent and delivered to the gateway'
+        );
       } else {
         const audience = {
           'All clients': 'all',
