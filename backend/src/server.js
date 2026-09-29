@@ -1491,6 +1491,23 @@ async function voucherAndRouter(tenantId, code, pageRouterId) {
 }
 
 /**
+ * How many devices this specific voucher's own plan is actually sold for —
+ * the same rule radius.js's ensureHotspotProfiles now uses for the router's
+ * own shared-users limit (see its comment): a plan explicitly priced for 2+
+ * devices gets exactly that many regardless of the anti-sharing toggle,
+ * which exists to stop an ORDINARY single-device code being shared, not to
+ * shrink a multi-device bundle someone was actually sold. Kept in sync with
+ * that function so the "add a device" picker here never offers more slots
+ * than the router will actually let authenticate at once, or fewer than a
+ * multi-device buyer paid for.
+ */
+async function deviceLimitFor(tenantId, voucher, hs) {
+  const { rows: [p] } = await pool.query('select devices from plans where id=$1 and tenant_id=$2', [voucher.plan_id, tenantId]);
+  const devices = Math.max(1, Math.round(Number(p?.devices) || 1));
+  return devices > 1 ? devices : ((hs?.multi_device ?? true) ? 3 : 1);
+}
+
+/**
  * Everything the "Adding a TV or console?" page needs to sell a bundle
  * straight to a device that was never going to type a code in — every
  * device seen at the guest's own site, and every bundle on sale there, in
@@ -1804,7 +1821,7 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
    * offer more devices than the router will actually let authenticate at
    * once, in either case.
    */
-  const limit = (hs?.multi_device ?? true) ? 3 : 1;
+  const limit = await deviceLimitFor(tenant.id, found.voucher, hs);
   // taken already counts voucher.mac when the device-picker flow set one;
   // a typed-code voucher never does, so a live session with no mac means an
   // ordinary phone is already using this code's one slot uncounted above.
@@ -1845,10 +1862,8 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   const found = await voucherAndRouter(tenant.id, code, pageRouterId);
   if (found.error) return res.status(404).json({ error: found.error });
 
-  // Same limit as the list above: 3 slots when sharing is on, 1 when it's
-  // not — a single-device code registering its one device through the MAC
-  // picker instead of typing it in, not an extra device beyond what was paid for.
-  const limit = (hs?.multi_device ?? true) ? 3 : 1;
+  // Same limit as the list above — see deviceLimitFor.
+  const limit = await deviceLimitFor(tenant.id, found.voucher, hs);
   const { rows: [{ count }] } = await pool.query(
     'select count(*)::int from voucher_devices where voucher_id=$1', [found.voucher.id]);
   // Reserves a slot for the voucher's own original device — but only when

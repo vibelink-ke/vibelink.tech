@@ -64,10 +64,22 @@ function radiusDate(date) {
  * healRouters/autoProvisionNewRouters) — naming a profile the router does
  * not have is what disconnects a session immediately after it
  * authenticates, so this always has to match what those actually create.
+ *
+ * Suffixed with the plan's own device count when it sells more than one —
+ * a plan explicitly priced and sold for, say, 2 devices is a different
+ * product from an ordinary single-device bundle, not the anti-sharing
+ * toggle's business: ensureHotspotProfiles used to size shared-users purely
+ * from that tenant-wide toggle (3 when on, 1 when off), which silently
+ * capped every 2+ device plan down to 1 device the moment an operator
+ * turned the toggle off to stop *ordinary* codes being shared — the
+ * multi-device plan they were still selling on purpose broke along with it.
+ * Kept unsuffixed for the ordinary devices<=1 case so an existing profile
+ * (and every voucher already pointed at it) needs no migration.
  */
-function hotspotCookieProfile(durationMin) {
+function hotspotCookieProfile(durationMin, devices = 1) {
   const minutes = Math.min(Math.max(Math.round(Number(durationMin) || 1440), 1), 1440);
-  return `hs-cookie-${minutes}`;
+  const d = Math.max(1, Math.round(Number(devices) || 1));
+  return d > 1 ? `hs-cookie-${minutes}-d${d}` : `hs-cookie-${minutes}`;
 }
 
 /**
@@ -86,16 +98,18 @@ function hotspotCookieProfile(durationMin) {
 export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
   const ros = await import('./routeros.js');
   const { rows } = await dbClient.query(
-    `select distinct duration_min from plans where tenant_id=$1 and service='hotspot'`, [tenantId]);
-  const durations = rows.length ? rows.map((r) => r.duration_min) : [1440];
+    `select distinct duration_min, greatest(devices, 1) as devices from plans where tenant_id=$1 and service='hotspot'`, [tenantId]);
+  const combos = rows.length ? rows.map((r) => ({ durationMin: r.duration_min, devices: r.devices })) : [{ durationMin: 1440, devices: 1 }];
   const seen = new Set();
-  for (const durationMin of durations) {
-    const name = hotspotCookieProfile(durationMin);
+  for (const { durationMin, devices } of combos) {
+    const name = hotspotCookieProfile(durationMin, devices);
     if (seen.has(name)) continue;
     seen.add(name);
     await ros.ensureHotspotUserProfile(conn, {
       name,
-      sharedUsers: (hs?.multi_device ?? true) ? 3 : 1,
+      // A plan explicitly sold for more than one device gets exactly that many, regardless of
+      // the anti-sharing toggle below — see hotspotCookieProfile's own comment for why.
+      sharedUsers: devices > 1 ? devices : ((hs?.multi_device ?? true) ? 3 : 1),
       idleSeconds: hs?.idle_timeout_sec ?? 1200,
       bindMac: hs?.bind_mac ?? true,
       cookieMinutes: durationMin,
@@ -889,7 +903,7 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { star
        ($4,$1,'Mikrotik-Group',':=',$5)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
     [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId,
-     hotspotCookieProfile(plan.duration_min)]);
+     hotspotCookieProfile(plan.duration_min, plan.devices)]);
   return v;
 }
 
@@ -1029,7 +1043,7 @@ export async function startVoucherClock(c, tenantId, code, mac) {
  */
 export async function ensureMacRadiusLogin(c, tenantId, code) {
   const { rows: [v] } = await c.query(
-    `select v.mac, v.expires_at, p.rate_up, p.rate_down, p.duration_min
+    `select v.mac, v.expires_at, p.rate_up, p.rate_down, p.duration_min, p.devices
        from vouchers v join plans p on p.id = v.plan_id
       where v.tenant_id=$1 and v.code=$2 and v.mac is not null and v.expires_at is not null`,
     [tenantId, code]);
@@ -1047,7 +1061,7 @@ export async function ensureMacRadiusLogin(c, tenantId, code) {
        ($1,$2,'Session-Timeout',':=',$4),
        ($1,$2,'Mikrotik-Group',':=',$5)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [tenantId, macUser, `${v.rate_up}k/${v.rate_down}k`, v.duration_min * 60, hotspotCookieProfile(v.duration_min)]);
+    [tenantId, macUser, `${v.rate_up}k/${v.rate_down}k`, v.duration_min * 60, hotspotCookieProfile(v.duration_min, v.devices)]);
 }
 
 /**
