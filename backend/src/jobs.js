@@ -1804,7 +1804,7 @@ async function ownerBrief() {
     where t.id in (${enabledTenants})`, ['ownerBrief']);
   for (const t of rows) {
     await send(t.id, t.owner_phone, 'brief',
-      { collected: t.collected, subs: t.new_subs, down: t.down });
+      { collected: Number(t.collected).toLocaleString('en-KE'), subs: t.new_subs, down: t.down });
   }
 }
 

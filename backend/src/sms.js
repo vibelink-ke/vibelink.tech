@@ -246,12 +246,15 @@ export function subscriberVars(s, org = {}) {
     account: s.account_code ?? '',
     phone: s.phone ?? '',
     plan: s.plan_title ?? '',
-    price: s.plan_price == null ? '' : String(Number(s.plan_price)),
+    // Comma-separated, same as every other money figure in a template — plain String(Number(...))
+    // left a real Kenyan-market amount ("KES 2000") reading like a typo for "20.00" or a phone
+    // number, rather than the two thousand shillings it actually is.
+    price: s.plan_price == null ? '' : Number(s.plan_price).toLocaleString('en-KE'),
     speed: s.rate_down ? `${mbps(s.rate_down)}/${mbps(s.rate_up)} Mbps` : '',
     expires: s.expires_at ? fmtNairobiDate(s.expires_at) : '',
     days_left: days == null ? '' : String(Math.max(0, days)),
     status: s.status ?? '',
-    balance: s.credit == null ? '' : String(Number(s.credit)),
+    balance: s.credit == null ? '' : Number(s.credit).toLocaleString('en-KE'),
     router: s.router_name ?? '',
     company: org.company ?? '',
     support_phone: org.supportPhone ?? '',
