@@ -463,7 +463,6 @@ export const api = {
   createTenant: (t) => post('/api/tenants', t),
   updateTenant: (id, patchBody) => patch(`/api/tenants/${id}`, patchBody),
   tenantDeleteCheck: (id) => get(`/api/tenants/${id}/delete-check`),
-  setAllRates: (body) => post('/api/tenants/bulk-rate', body),
   removeTenant: (id) => post(`/api/tenants/${id}/remove`, {}),
   restoreTenant: (id) => post(`/api/tenants/${id}/restore`, {}),
   purgeTenant: (id, body) => post(`/api/tenants/${id}/purge`, body),

@@ -31,12 +31,11 @@ const monthLabel = (key) =>
 const money = { fontFamily: font.mono, fontSize: 13 };
 
 function downloadCsv(month, rows) {
-  const head = ['Tenant', 'Reference', 'Month', 'Hotspot revenue', 'Hotspot %', 'Hotspot fee',
-    'Active PPPoE clients', 'Rate per client', 'PPPoE fee', 'Flat fee', 'Total', 'Status'];
+  const head = ['Tenant', 'Reference', 'Month', 'Revenue', 'Active PPPoE clients', 'Total', 'Status'];
   const cell = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
   const lines = rows.map((r) => [
-    r.name, r.billing_ref, month, r.hotspot_revenue, r.hotspot_pct, r.hotspot_fee,
-    r.pppoe_active, r.pppoe_rate, r.pppoe_fee, r.flat_fee ?? 0, r.total, r.live ? 'estimate' : r.status,
+    r.name, r.billing_ref, month, r.hotspot_revenue,
+    r.pppoe_active, r.total, r.live ? 'estimate' : r.status,
   ].map(cell).join(','));
   const blob = new Blob([[head.map(cell).join(','), ...lines].join('\n')], { type: 'text/csv' });
   const a = document.createElement('a');
@@ -119,25 +118,17 @@ export default function SaasRevenue() {
     const t = tenants.find((x) => x.id === r.tenant_id) ?? {};
     setEditing({
       id: r.tenant_id, name: r.name,
-      charge_mode: t.flat_monthly_fee != null ? 'flat' : 'usage',
       flat_monthly_fee: t.flat_monthly_fee ?? '',
-      hotspot_commission_pct: t.hotspot_commission_pct ?? r.hotspot_pct ?? 3,
-      pppoe_client_rate: t.pppoe_client_rate ?? r.pppoe_rate ?? 16,
       settlement_frequency: t.settlement_frequency ?? 'daily',
     });
   };
 
   const saveRates = async () => {
-    const pct = Number(editing.hotspot_commission_pct);
-    const rate = Number(editing.pppoe_client_rate);
-    const flat = editing.charge_mode === 'flat' ? Number(editing.flat_monthly_fee) : null;
-    if (flat === null && !(pct >= 0 && pct <= 100)) return store.toast('The hotspot percentage must be between 0 and 100');
-    if (flat === null && !(rate >= 0)) return store.toast('The per-client rate must be zero or more');
-    if (flat !== null && !(flat >= 0)) return store.toast('Enter the flat monthly fee');
+    const flat = editing.flat_monthly_fee === '' ? null : Number(editing.flat_monthly_fee);
+    if (flat !== null && !(flat >= 0)) return store.toast('The fixed fee must be zero or more');
     setBusy(true);
     try {
       const updated = await api.updateTenant(editing.id, {
-        ...(flat === null ? { hotspot_commission_pct: pct, pppoe_client_rate: rate } : {}),
         flat_monthly_fee: flat,
         settlement_frequency: editing.settlement_frequency,
       });
@@ -157,7 +148,7 @@ export default function SaasRevenue() {
   return (
     <Screen
       title="SaaS revenue"
-      subtitle="What tenants owe the platform each month — a percentage of hotspot revenue plus a rate per active PPPoE client, at each tenant's own rate. Payouts to tenants are never reduced by this."
+      subtitle="What tenants owe the platform each month — a flat fee tiered on their own total revenue (hotspot + PPPoE combined), unless overridden per tenant. Payouts to tenants are never reduced by this."
       actions={
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <Select
@@ -176,8 +167,8 @@ export default function SaasRevenue() {
         <>
           <Grid min={200} gap={14}>
             <Stat label={data.current ? 'Due so far' : 'Total due'} value={`KES ${kes(totals.total)}`} tone={totals.total ? color.green : undefined} />
-            <Stat label="Hotspot commission" value={`KES ${kes(totals.hotspotFee)}`} hint={`on KES ${kes(totals.hotspotRevenue)} of hotspot sales`} />
-            <Stat label="PPPoE fees" value={`KES ${kes(totals.pppoeFee)}`} hint={`${totals.pppoeActive} active clients`} />
+            <Stat label="Tenant revenue" value={`KES ${kes(totals.hotspotRevenue)}`} hint="hotspot + PPPoE combined, what the tier is based on" />
+            <Stat label="Active PPPoE" value={String(totals.pppoeActive)} hint="across every billable tenant" />
             <Stat label="Tenants charged" value={String(rows.length)} />
           </Grid>
 
@@ -208,15 +199,14 @@ export default function SaasRevenue() {
                     </div>
                   ),
                 },
-                { key: 'rev', label: 'Hotspot sales', align: 'right', render: (r) => <span style={money}>KES {kes(r.hotspot_revenue)}</span> },
-                { key: 'pct', label: 'Rate', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>{Number(r.hotspot_pct)}%</span> },
-                { key: 'hf', label: 'Hotspot fee', align: 'right', render: (r) => <span style={money}>KES {kes(r.hotspot_fee)}</span> },
-                { key: 'act', label: 'Active PPPoE', align: 'right', render: (r) => <span style={money}>{r.pppoe_active}</span> },
-                { key: 'rate', label: 'Rate', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>KES {Number(r.pppoe_rate)}</span> },
-                { key: 'pf', label: 'PPPoE fee', align: 'right', render: (r) => <span style={money}>KES {kes(r.pppoe_fee)}</span> },
-                ...(rows.some((r) => Number(r.flat_fee) > 0)
-                  ? [{ key: 'flat', label: 'Flat fee', align: 'right', render: (r) => <span style={money}>{Number(r.flat_fee) > 0 ? `KES ${kes(r.flat_fee)}` : '—'}</span> }]
-                  : []),
+                { key: 'rev', label: 'Revenue', align: 'right', render: (r) => <span style={money}>KES {kes(r.hotspot_revenue)}</span> },
+                { key: 'act', label: 'Active PPPoE', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>{r.pppoe_active}</span> },
+                {
+                  key: 'basis', label: 'Charged by', align: 'right',
+                  render: (r) => (tenants.find((t) => t.id === r.tenant_id)?.flat_monthly_fee != null
+                    ? <Badge tone="default">fixed override</Badge>
+                    : <span style={{ fontSize: 11.5, color: color.muted }}>revenue tier</span>),
+                },
                 { key: 'total', label: 'Total', align: 'right', render: (r) => <span style={{ ...money, fontWeight: 700 }}>KES {kes(r.total)}</span> },
                 {
                   key: 'status', label: 'Status',
@@ -241,9 +231,11 @@ export default function SaasRevenue() {
               ]}
             />
             <p style={{ margin: '12px 0 0', fontSize: 12.5, color: color.muted }}>
-              Hotspot sales are voucher payments received in the month. An active PPPoE client is a PPPoE line with
-              status active when the statement is drawn. Trials are never charged, and a tenant's first statement is the first
-              full month after you activate them. The demo tenant and your own tenant are not charged.
+              Revenue is every payment applied in the month, hotspot and PPPoE combined — under KES 10,000 pays KES 1,000,
+              KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000, unless a tenant has a fixed override set.
+              An active PPPoE client is shown for context and no longer affects the fee. Trials are never charged, and a
+              tenant's first statement is the first full month after you activate them. The demo tenant and your own
+              tenant are not charged.
             </p>
           </Card>
         </>
@@ -262,35 +254,18 @@ export default function SaasRevenue() {
       >
         {editing && (
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Field label="How are they charged?" span={2}>
-              <Select
-                value={editing.charge_mode}
-                onChange={set('charge_mode')}
-                options={[
-                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
-                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
-                ]}
-              />
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+              By default, charged a flat fee tiered on their own total monthly revenue: under KES 10,000 pays KES 1,000,
+              KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000. Set a fee below to override that for this tenant.
+            </p>
+            <Field label="Fixed monthly fee override (KES)" span={2} hint="Leave blank to use the revenue tier above.">
+              <Input type="number" step="1" min="0" placeholder="Auto by revenue tier" value={editing.flat_monthly_fee} onChange={set('flat_monthly_fee')} />
             </Field>
-            {editing.charge_mode === 'flat' ? (
-              <Field label="Flat monthly fee (KES)" span={2} hint="The same every month, whatever their usage.">
-                <Input type="number" step="1" min="0" value={editing.flat_monthly_fee} onChange={set('flat_monthly_fee')} />
-              </Field>
-            ) : (
-              <>
-                <Field label="Hotspot commission (%)" hint="Of their hotspot sales each month. Standard is 3.">
-                  <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={set('hotspot_commission_pct')} />
-                </Field>
-                <Field label="Per active PPPoE client (KES)" hint="Each month. Standard is 16.">
-                  <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={set('pppoe_client_rate')} />
-                </Field>
-              </>
-            )}
             <Field label="Payout schedule" span={2} hint="How often what we collect for them is paid out — always in full.">
               <Select value={editing.settlement_frequency} onChange={set('settlement_frequency')} options={FREQUENCIES} />
             </Field>
             <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
-              New rates apply to this month and after. A statement already drawn for an earlier month keeps the rates it was drawn at.
+              Changes apply to this month and after. A statement already drawn for an earlier month keeps the amount it was drawn at.
             </p>
           </div>
         )}

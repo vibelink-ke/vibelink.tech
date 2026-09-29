@@ -12317,28 +12317,25 @@ app.post('/api/platform/restart', superAdminOnly, wrap(async (_req, res) => {
 }));
 
 app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
-  const { name, subdomain, hotspotCommissionPct = 3, pppoeClientRate = 16, flatMonthlyFee = null, supportPhone, hosting = 'platform' } = req.body;
+  const { name, subdomain, flatMonthlyFee = null, supportPhone, hosting = 'platform' } = req.body;
   if (!['platform', 'self'].includes(hosting)) return res.status(400).json({ error: 'hosting must be platform or self' });
   if (!name || !subdomain) return res.status(400).json({ error: 'name and subdomain are required' });
-  const pct = Number(hotspotCommissionPct);
-  const rate = Number(pppoeClientRate);
-  if (!(pct >= 0 && pct <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
-  if (!(rate >= 0)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
   const flat = flatMonthlyFee === null || flatMonthlyFee === '' ? null : Number(flatMonthlyFee);
   if (flat !== null && !(flat >= 0)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });
-  // A self-hosted tenant is billed a flat fee: there is no usage here to measure.
+  // A self-hosted tenant is billed a flat fee: there is no revenue on this platform to tier on.
+  // A platform-hosted tenant left blank is auto-charged by their own revenue tier (see charges.js).
   if (hosting === 'self' && flat === null) return res.status(400).json({ error: 'A self-hosted tenant needs a flat monthly fee.' });
   // Self-hosted tenants are agreed customers, not trials: active now, licensed for the
   // first month, with billing starting the first full month after.
   const { rows: [t] } = await pool.query(
-    `insert into tenants (name, subdomain, hotspot_commission_pct, pppoe_client_rate, flat_monthly_fee, support_phone, hosting,
+    `insert into tenants (name, subdomain, flat_monthly_fee, support_phone, hosting,
                           status, converted_at, licence_ends)
-     values ($1,$2,$3,$4,$5,$6,$7,
-             case when $7 = 'self' then 'active' else 'trial' end,
-             case when $7 = 'self' then now() end,
-             case when $7 = 'self' then (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date end)
+     values ($1,$2,$3,$4,$5,
+             case when $5 = 'self' then 'active' else 'trial' end,
+             case when $5 = 'self' then now() end,
+             case when $5 = 'self' then (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date end)
      returning *`,
-    [name, subdomain, pct, rate, flat, supportPhone ?? null, hosting]);
+    [name, subdomain, flat, supportPhone ?? null, hosting]);
 
   // Nothing is set up on the platform for a self-hosted tenant: no help articles,
   // no support login. Their software runs on their own server.
@@ -12490,38 +12487,10 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
   res.json(c);
 }));
 
-/**
- * The rates every tenant is charged, set for all of them at once: the PPPoE rate (KES per active client per
- * month) and/or the hotspot commission (% of hotspot sales). Either may be left out. Statements already drawn
- * for closed months keep the rate they were drawn with; this changes what is charged from now on. Tenants on a
- * flat monthly fee pay the same (their statement ignores both) but their stored rates are updated too.
- * "alsoNew" makes them the starting rates for tenants created later. Removed tenants are left alone.
- */
-app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
-  const has = (k) => req.body?.[k] !== undefined && req.body?.[k] !== null && req.body?.[k] !== '';
-  const pppoe = has('pppoeClientRate') ? Number(req.body.pppoeClientRate) : null;
-  const hotspot = has('hotspotCommissionPct') ? Number(req.body.hotspotCommissionPct) : null;
-  if (pppoe === null && hotspot === null) return res.status(400).json({ error: 'Enter a PPPoE rate, a hotspot percentage, or both.' });
-  if (pppoe !== null && !(pppoe >= 0 && pppoe <= 100000)) return res.status(400).json({ error: 'The PPPoE rate must be zero or more.' });
-  if (hotspot !== null && !(hotspot >= 0 && hotspot <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
-
-  const sets = [];
-  const vals = [];
-  if (pppoe !== null) { vals.push(pppoe); sets.push(`pppoe_client_rate=$${vals.length}`); }
-  if (hotspot !== null) { vals.push(hotspot); sets.push(`hotspot_commission_pct=$${vals.length}`); }
-  const { rowCount } = await pool.query(`update tenants set ${sets.join(', ')} where deleted_at is null`, vals);
-  if (req.body?.alsoNew) {
-    // validated numbers, formatted here — DDL cannot take a parameter
-    if (pppoe !== null) await pool.query(`alter table tenants alter column pppoe_client_rate set default ${pppoe.toFixed(2)}`);
-    if (hotspot !== null) await pool.query(`alter table tenants alter column hotspot_commission_pct set default ${hotspot.toFixed(2)}`);
-  }
-  res.json({ ok: true, updated: rowCount, pppoeClientRate: pppoe, hotspotCommissionPct: hotspot, alsoNew: !!req.body?.alsoNew });
-}));
-
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
-                   'hotspot_commission_pct', 'pppoe_client_rate', 'settlement_frequency', 'settlement_time', 'flat_monthly_fee',
+                   'settlement_frequency', 'settlement_time', 'flat_monthly_fee',
                    'max_concurrent_clients'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
@@ -12532,15 +12501,8 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
     if (!Number.isInteger(v) || v < 0) return res.status(400).json({ error: 'The concurrent client cap must be zero or more, or left blank for unlimited.' });
   }
   // What the platform charges this tenant, and how often it pays them out.
-  if ('hotspot_commission_pct' in req.body) {
-    const v = Number(req.body.hotspot_commission_pct);
-    if (!(v >= 0 && v <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
-  }
-  if ('pppoe_client_rate' in req.body) {
-    const v = Number(req.body.pppoe_client_rate);
-    if (!(v >= 0 && v <= 100000)) return res.status(400).json({ error: 'The per-client rate must be zero or more.' });
-  }
-  // null puts a tenant back on usage-based charging; a number is a flat monthly fee.
+  // null leaves them auto-charged by their own monthly revenue tier (see charges.js); a number
+  // overrides that with a fixed amount, the same escape hatch usage-based charging used to be.
   if ('flat_monthly_fee' in req.body && req.body.flat_monthly_fee !== null) {
     const v = Number(req.body.flat_monthly_fee);
     if (!(v >= 0 && v <= 10000000)) return res.status(400).json({ error: 'The flat monthly fee must be zero or more.' });

@@ -614,7 +614,7 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
               </div>
 
               <Check on={f.terms} onClick={toggle('terms')} style={{ fontSize: 12, lineHeight: 1.4, flex: '0 0 auto' }}>
-                I accept the terms — free for 14 days, then KES 500 to activate. After that, KES 16 per active PPPoE client plus 3% of hotspot revenue, billed monthly.
+                I accept the terms — free for 14 days, then KES 500 to activate. After that, billed monthly based on revenue: under KES 10,000 pays KES 1,000, KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000.
               </Check>
 
               {error && (

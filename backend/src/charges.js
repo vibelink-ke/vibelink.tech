@@ -1,19 +1,26 @@
 import { pool, config, platformCollectConfig } from './db.js';
 
 /**
- * What tenants are charged each month for using the platform:
- *   - a percentage of the tenant's HOTSPOT revenue (payments applied to a
- *     voucher sale), and
- *   - a fixed amount for each ACTIVE PPPoE client — a line whose status is
- *     'active' when the statement is drawn.
+ * What tenants are charged each month for using the platform: a flat fee
+ * tiered on their own total revenue that month (hotspot + PPPoE payments
+ * combined) — under KES 10,000 pays 1,000, 10,001–20,000 pays 2,000, over
+ * 20,000 pays 3,000. Replaces the old per-active-PPPoE-client-plus-hotspot-%
+ * model, which needed a rate set correctly per tenant and still didn't scale
+ * with what a small tenant could actually afford.
  *
- * Both rates live on the tenant (hotspot_commission_pct, pppoe_client_rate) so
- * the platform owner can charge a particular tenant their own rate. Nothing is
- * ever taken out of a tenant's payouts: these are billed separately.
+ * A tenant's own flat_monthly_fee, when the platform owner has set one,
+ * overrides the tier entirely — the same "editable per tenant" escape hatch
+ * the old model had, just simpler: there is no separate "usage" mode to
+ * switch into any more, only whether an override is set or left blank.
+ *
+ * A self-hosted tenant's revenue never reaches this platform's `payments`
+ * table at all (it happens on their own server), so they cannot be tiered —
+ * the signup route already requires a flat fee for them for that reason.
  *
  * A closed month is written once to tenant_charges and never rewritten, so a
- * later rate change cannot alter a statement already sent. The current month,
- * and any month without a stored statement, is worked out live.
+ * later tier or rate change cannot alter a statement already sent. The
+ * current month, and any month without a stored statement, is worked out
+ * live.
  */
 
 /** 'YYYY-MM' -> { month: 'YYYY-MM-01', start, end } with Nairobi (+03:00) boundaries. */
@@ -77,22 +84,25 @@ const BILLABLE = `
 
 const FIGURES = `
   select t.id as tenant_id, t.name, t.subdomain, t.billing_ref,
-         h.revenue as hotspot_revenue, t.hotspot_commission_pct as hotspot_pct,
-         -- A flat-rate tenant is charged the flat amount only; the usage is still
-         -- recorded (revenue, active clients) so the statement shows what it covered.
-         case when t.flat_monthly_fee is null then round(h.revenue * t.hotspot_commission_pct / 100, 2) else 0 end as hotspot_fee,
-         p.active as pppoe_active, t.pppoe_client_rate as pppoe_rate,
-         case when t.flat_monthly_fee is null then p.active * t.pppoe_client_rate else 0 end as pppoe_fee,
-         coalesce(t.flat_monthly_fee, 0) as flat_fee,
-         coalesce(t.flat_monthly_fee, round(h.revenue * t.hotspot_commission_pct / 100, 2) + p.active * t.pppoe_client_rate) as total
+         -- hotspot_revenue now carries TOTAL revenue (hotspot + PPPoE combined) — what the
+         -- tier below is based on, not hotspot sales alone. hotspot_pct/hotspot_fee/pppoe_rate/
+         -- pppoe_fee are kept at 0 rather than dropped from the row: a statement already drawn
+         -- under the old per-PPPoE-client + hotspot % model still carries its real historic
+         -- values in these same columns, and this keeps every past and future row the same shape.
+         rev.total as hotspot_revenue, 0::numeric as hotspot_pct, 0::numeric as hotspot_fee,
+         p.active as pppoe_active, 0::numeric as pppoe_rate, 0::numeric as pppoe_fee,
+         coalesce(t.flat_monthly_fee, tier.fee) as flat_fee,
+         coalesce(t.flat_monthly_fee, tier.fee) as total
     from tenants t
    cross join lateral (
-     select coalesce(sum(pay.amount), 0) as revenue from payments pay
-      where pay.tenant_id = t.id and pay.status = 'applied' and pay.voucher_id is not null
-        and pay.received_at >= $1 and pay.received_at < $2) h
+     select coalesce(sum(pay.amount), 0) as total from payments pay
+      where pay.tenant_id = t.id and pay.status = 'applied'
+        and pay.received_at >= $1 and pay.received_at < $2) rev
    cross join lateral (
      select count(*)::int as active from subscribers s
       where s.tenant_id = t.id and s.service = 'pppoe' and s.status = 'active') p
+   cross join lateral (
+     select case when rev.total < 10000 then 1000 when rev.total <= 20000 then 2000 else 3000 end as fee) tier
    where ${BILLABLE}`;
 
 /** Every billable tenant's figures for a month, worked out now. */

@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { name: '', subdomain: '', hosting: 'platform', chargeMode: 'usage', hotspotCommissionPct: '3', pppoeClientRate: '16', flatMonthlyFee: '', supportPhone: '' };
+const BLANK = { name: '', subdomain: '', hosting: 'platform', flatMonthlyFee: '', supportPhone: '' };
 
 export default function Tenants() {
   const store = useStore();
@@ -32,10 +32,6 @@ export default function Tenants() {
   // Remove (hide + suspend, keeps everything) and, from the Removed list, Delete permanently.
   // { ...tenant, mode: 'remove' | 'purge', confirmText, force, check }
   // The PPPoE rate and the hotspot percentage, for every tenant at once.
-  const [bulkRate, setBulkRate] = useState('');
-  const [bulkPct, setBulkPct] = useState('');
-  const [bulkNew, setBulkNew] = useState(true);
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const openRemoval = (t, mode) => {
     setDeleting({ ...t, mode, confirmText: '', force: false, check: null });
@@ -264,56 +260,20 @@ export default function Tenants() {
   const tenants = allTenants.filter((t) => !t.deleted_at);
   const removedTenants = allTenants.filter((t) => t.deleted_at);
 
-  // What tenants are charged today, so the effect of a change is plain.
-  const groupsOf = (get, dflt) => Object.entries(tenants.reduce((m, t) => {
-    const r = Number(get(t) ?? dflt);
-    m[r] = (m[r] ?? 0) + 1;
-    return m;
-  }, {})).sort((a, b) => b[1] - a[1]);
-  const rateGroups = groupsOf((t) => t.pppoe_client_rate, 16);
-  const pctGroups = groupsOf((t) => t.hotspot_commission_pct, 3);
-  const applyBulkRate = async () => {
-    const rate = bulkRate === '' ? null : Number(bulkRate);
-    const pct = bulkPct === '' ? null : Number(bulkPct);
-    if (rate === null && pct === null) return store.toast('Enter a PPPoE rate, a hotspot percentage, or both');
-    if (rate !== null && !(Number.isFinite(rate) && rate >= 0)) return store.toast('The PPPoE rate must be zero or more');
-    if (pct !== null && !(Number.isFinite(pct) && pct >= 0 && pct <= 100)) return store.toast('The hotspot percentage must be between 0 and 100');
-    const lines = [];
-    if (rate !== null) lines.push(`PPPoE: KES ${rate} per active client (${tenants.filter((t) => Number(t.pppoe_client_rate ?? 16) !== rate).length} tenants change)`);
-    if (pct !== null) lines.push(`Hotspot: ${pct}% of sales (${tenants.filter((t) => Number(t.hotspot_commission_pct ?? 3) !== pct).length} tenants change)`);
-    if (!window.confirm(
-      `Apply to all ${tenants.length} tenants?\n\n${lines.join('\n')}\n\nStatements already drawn keep their old rates.`
-      + (bulkNew ? '\nNew tenants will start on these too.' : ''))) return;
-    setBulkBusy(true);
-    try {
-      await api.setAllRates({ pppoeClientRate: rate, hotspotCommissionPct: pct, alsoNew: bulkNew });
-      store.setCollection('tenants', (ts) => ts.map((t) => (t.deleted_at ? t : {
-        ...t,
-        ...(rate !== null ? { pppoe_client_rate: rate } : {}),
-        ...(pct !== null ? { hotspot_commission_pct: pct } : {}),
-      })));
-      store.toast('Rates updated for every tenant');
-      setBulkRate('');
-      setBulkPct('');
-    } catch (e) {
-      store.toast(e.message);
-    } finally {
-      setBulkBusy(false);
-    }
-  };
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   const onboard = async () => {
     if (!f.name.trim() || !f.subdomain.trim()) return store.toast('Name and subdomain are required');
+    if (f.hosting === 'self' && f.flatMonthlyFee === '') return store.toast('A self-hosted tenant needs a flat monthly fee — their revenue never reaches this platform to tier on.');
     setBusy(true);
     try {
       const created = await api.createTenant({
         name: f.name,
         subdomain: f.subdomain,
-        hotspotCommissionPct: Number(f.hotspotCommissionPct),
-        pppoeClientRate: Number(f.pppoeClientRate),
         hosting: f.hosting,
-        flatMonthlyFee: f.chargeMode === 'flat' || f.hosting === 'self' ? Number(f.flatMonthlyFee) : null,
+        // Left blank (platform-hosted only): auto-charged by their own revenue tier from the
+        // first statement on — see charges.js. Self-hosted always needs an explicit amount.
+        flatMonthlyFee: f.flatMonthlyFee === '' ? null : Number(f.flatMonthlyFee),
         supportPhone: f.supportPhone || null,
       });
       store.setCollection('tenants', (ts) => [created, ...ts]);
@@ -351,9 +311,9 @@ export default function Tenants() {
         support_phone: editing.support_phone || null,
         platform_collect_enabled: !!editing.platform_collect_enabled,
         settlement_phone: editing.settlement_phone || null,
-        hotspot_commission_pct: Number(editing.hotspot_commission_pct),
-        pppoe_client_rate: Number(editing.pppoe_client_rate),
-        flat_monthly_fee: editing.charge_mode === 'flat' ? Number(editing.flat_monthly_fee) : null,
+        // Left blank: auto-charged by their own monthly revenue tier (see charges.js) rather
+        // than a fixed amount. A number here overrides that tier for this tenant specifically.
+        flat_monthly_fee: editing.flat_monthly_fee === '' ? null : Number(editing.flat_monthly_fee),
         settlement_frequency: editing.settlement_frequency,
         settlement_time: editing.settlement_time || '00:00',
         settlement_fee_mode: editing.settlement_fee_mode,
@@ -697,29 +657,6 @@ export default function Tenants() {
         </Card>
       )}
 
-      <Card
-        title="Rates for all tenants"
-        subtitle="What every tenant is charged each month: a rate per active PPPoE client and a percentage of hotspot sales. Fill in either or both and apply to everyone at once; a single tenant can still be changed under Edit."
-      >
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <Field label="PPPoE rate (KES per active client)" hint={rateGroups.length ? `Now: ${rateGroups.map(([r, n]) => `KES ${r} (${n})`).join(', ')}` : undefined}>
-            <Input type="number" min="0" value={bulkRate} onChange={(e) => setBulkRate(e.target.value)} placeholder="e.g. 16" style={{ width: 190 }} />
-          </Field>
-          <Field label="Hotspot commission (% of sales)" hint={pctGroups.length ? `Now: ${pctGroups.map(([r, n]) => `${r}% (${n})`).join(', ')}` : undefined}>
-            <Input type="number" min="0" max="100" step="0.1" value={bulkPct} onChange={(e) => setBulkPct(e.target.value)} placeholder="e.g. 3" style={{ width: 190 }} />
-          </Field>
-          <label style={{ display: 'inline-flex', gap: 8, alignItems: 'center', fontSize: 13, paddingBottom: 10, cursor: 'pointer' }}>
-            <input type="checkbox" checked={bulkNew} onChange={(e) => setBulkNew(e.target.checked)} />
-            Also use for tenants created from now on
-          </label>
-          <div style={{ paddingBottom: 6 }}>
-            <Button variant="primary" onClick={applyBulkRate} disabled={bulkBusy || (bulkRate === '' && bulkPct === '')}>
-              {bulkBusy ? 'Applying…' : `Apply to all ${tenants.length} tenants`}
-            </Button>
-          </div>
-        </div>
-      </Card>
-
       {removedTenants.length > 0 && (
         <Card
           title="Removed tenants"
@@ -768,7 +705,7 @@ export default function Tenants() {
           </Field>
           <Field label="Charged">
             <Select value={tf.charge} onChange={(e) => setTf((x) => ({ ...x, charge: e.target.value }))} options={[
-              { value: 'all', label: 'Any way' }, { value: 'usage', label: 'By usage' }, { value: 'flat', label: 'Flat monthly fee' },
+              { value: 'all', label: 'Any way' }, { value: 'usage', label: 'Auto by revenue tier' }, { value: 'flat', label: 'Fixed override' },
             ]} />
           </Field>
           {filtering && (
@@ -799,16 +736,10 @@ export default function Tenants() {
               render: (t) => (t.hosting === 'self' ? <Badge tone="default">self-hosted</Badge> : <span style={{ color: color.muted }}>platform</span>),
             },
             {
-              key: 'hotspot_pct', label: 'Hotspot %', align: 'right',
-              render: (t) => (t.flat_monthly_fee != null
-                ? <span style={{ fontFamily: font.mono }}>Flat</span>
-                : <span style={{ fontFamily: font.mono }}>{Number(t.hotspot_commission_pct ?? 3)}%</span>),
-            },
-            {
-              key: 'pppoe_rate', label: 'Per PPPoE client', align: 'right',
+              key: 'charged', label: 'Charged', align: 'right',
               render: (t) => (t.flat_monthly_fee != null
                 ? <span style={{ fontFamily: font.mono }}>KES {kes(t.flat_monthly_fee)} / month</span>
-                : <span style={{ fontFamily: font.mono }}>KES {Number(t.pppoe_client_rate ?? 16)}</span>),
+                : <span style={{ fontFamily: font.mono, color: color.muted }}>Auto by revenue</span>),
             },
             { key: 'devices', label: 'Active', align: 'right', render: (t) => <span style={{ fontFamily: font.mono }}>{t.devices ?? 0}</span> },
             {
@@ -849,10 +780,7 @@ export default function Tenants() {
                         support_phone: t.support_phone ?? '',
                         platform_collect_enabled: t.platform_collect_enabled ?? false,
                         settlement_phone: t.settlement_phone ?? '',
-                        charge_mode: t.flat_monthly_fee != null ? 'flat' : 'usage',
                         flat_monthly_fee: t.flat_monthly_fee ?? '',
-                        hotspot_commission_pct: t.hotspot_commission_pct ?? 3,
-                        pppoe_client_rate: t.pppoe_client_rate ?? 16,
                         settlement_frequency: t.settlement_frequency ?? 'daily',
                         settlement_time: String(t.settlement_time ?? '00:00').slice(0, 5),
                         settlement_fee_mode: t.settlement_fee_mode ?? 'tiered',
@@ -914,7 +842,7 @@ export default function Tenants() {
           <Field label="Where does it run?" span={2}>
             <Select
               value={f.hosting}
-              onChange={(e) => setF((s) => ({ ...s, hosting: e.target.value, chargeMode: e.target.value === 'self' ? 'flat' : s.chargeMode }))}
+              onChange={(e) => setF((s) => ({ ...s, hosting: e.target.value }))}
               options={[
                 { value: 'platform', label: 'On our platform — they use it at their own address here' },
                 { value: 'self', label: 'Self-hosted — they run their own copy on their own server' },
@@ -928,31 +856,15 @@ export default function Tenants() {
               key from the tenant's Edit screen and give it to whoever runs their server.
             </p>
           ) : (
-            <Field label="How are they charged?" span={2}>
-              <Select
-                value={f.chargeMode}
-                onChange={set('chargeMode')}
-                options={[
-                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
-                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
-                ]}
-              />
-            </Field>
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+              By default, charged a flat fee tiered on their own total monthly revenue (hotspot + PPPoE combined): under KES 10,000 pays
+              KES 1,000, KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000. Set a fee below to override that for this tenant.
+            </p>
           )}
-          {f.chargeMode === 'flat' ? (
-            <Field label="Flat monthly fee (KES)" span={2} hint="The same every month, whatever their usage">
-              <Input value={f.flatMonthlyFee} onChange={set('flatMonthlyFee')} type="number" min="0" />
-            </Field>
-          ) : (
-            <>
-              <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly. Standard is 3.">
-                <Input value={f.hotspotCommissionPct} onChange={set('hotspotCommissionPct')} type="number" step="0.1" min="0" max="100" />
-              </Field>
-              <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active client. Standard is 16.">
-                <Input value={f.pppoeClientRate} onChange={set('pppoeClientRate')} type="number" min="0" />
-              </Field>
-            </>
-          )}
+          <Field label={f.hosting === 'self' ? 'Flat monthly fee (KES)' : 'Fixed monthly fee override (KES)'} span={2}
+            hint={f.hosting === 'self' ? 'The same every month, whatever their usage' : 'Leave blank to use the revenue tier above'}>
+            <Input value={f.flatMonthlyFee} onChange={set('flatMonthlyFee')} type="number" min="0" placeholder={f.hosting === 'self' ? undefined : 'Auto by revenue tier'} />
+          </Field>
         </div>
       </Modal>
 
@@ -968,14 +880,7 @@ export default function Tenants() {
             )}
             <KV k="Status" v={viewing.status} />
             <KV k="Concurrent client cap" v={viewing.max_concurrent_clients != null ? `${viewing.max_concurrent_clients} at once (PPPoE + hotspot)` : 'Unlimited'} />
-            {viewing.flat_monthly_fee != null ? (
-              <KV k="Charged" v={`Flat KES ${kes(viewing.flat_monthly_fee)} per month`} />
-            ) : (
-              <>
-                <KV k="Hotspot commission" v={`${Number(viewing.hotspot_commission_pct ?? 3)}% of hotspot sales`} />
-                <KV k="PPPoE" v={`KES ${Number(viewing.pppoe_client_rate ?? 16)} per active client`} />
-              </>
-            )}
+            <KV k="Charged" v={viewing.flat_monthly_fee != null ? `Fixed KES ${kes(viewing.flat_monthly_fee)} per month` : 'Auto — tiered on their monthly revenue'} />
             <KV k="Active devices" v={viewing.devices ?? 0} />
             <KV k="Collected this month" v={`KES ${kes(viewing.collected)}`} />
             <KV k="Currency" v={viewing.currency ?? 'KES'} />
@@ -1073,35 +978,13 @@ export default function Tenants() {
                 )}
               </div>
             )}
-            <Field label="How is this tenant charged?" span={2} hint="Choose one. Either way, payouts to them are never reduced.">
-              <Select
-                value={editing.charge_mode}
-                onChange={(e) => setEditing((s) => ({ ...s, charge_mode: e.target.value }))}
-                options={[
-                  { value: 'usage', label: 'By usage — hotspot % plus a rate per active PPPoE client' },
-                  { value: 'flat', label: 'Flat monthly fee — the same amount every month' },
-                ]}
-              />
+            <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
+              By default, a tenant is charged a flat fee tiered on their own total monthly revenue (hotspot + PPPoE combined): under KES 10,000
+              pays KES 1,000, KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000. Payouts to them are never reduced either way.
+            </p>
+            <Field label="Fixed monthly fee override (KES)" span={2} hint="Leave blank to use the revenue tier above. Set a number to charge this tenant that fixed amount every month instead, regardless of their revenue.">
+              <Input type="number" step="1" min="0" placeholder="Auto by revenue tier" value={editing.flat_monthly_fee} onChange={(e) => setEditing((s) => ({ ...s, flat_monthly_fee: e.target.value }))} />
             </Field>
-            {editing.charge_mode === 'flat' ? (
-              <Field label="Flat monthly fee (KES)" span={2} hint="The same amount every month, whatever their usage. The hotspot % and per-client rate do not apply.">
-                <Input type="number" step="1" min="0" value={editing.flat_monthly_fee} onChange={(e) => setEditing((s) => ({ ...s, flat_monthly_fee: e.target.value }))} />
-              </Field>
-            ) : (
-              <>
-                <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
-                  By usage, a tenant pays <b>both</b> charges added together: a percentage of their hotspot sales, plus a fixed amount for each active
-                  PPPoE client. Set one to 0 if it should not apply. For example, KES 100,000 of hotspot sales at 3% and 300 active clients at KES 16
-                  is KES 3,000 + KES 4,800 = KES 7,800.
-                </p>
-                <Field label="Hotspot commission (%)" hint="Of their hotspot sales, billed monthly. Standard is 3.">
-                  <Input type="number" step="0.1" min="0" max="100" value={editing.hotspot_commission_pct} onChange={(e) => setEditing((s) => ({ ...s, hotspot_commission_pct: e.target.value }))} />
-                </Field>
-                <Field label="Per active PPPoE client (KES)" hint="Billed monthly for each active line. Standard is 16.">
-                  <Input type="number" step="1" min="0" value={editing.pppoe_client_rate} onChange={(e) => setEditing((s) => ({ ...s, pppoe_client_rate: e.target.value }))} />
-                </Field>
-              </>
-            )}
             <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
               Changes apply to this month and after; statements already drawn keep the amounts they were drawn at.
             </p>
