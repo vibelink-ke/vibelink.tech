@@ -87,6 +87,28 @@ export default function Tenants() {
   const [balancePaidTo, setBalancePaidTo] = useState('');
   const [balanceBusy, setBalanceBusy] = useState(false);
 
+  // Just the price, not the whole gateway — the full form below also shows the (blank, by design)
+  // credential fields, which is the wrong door to open for a routine price change: the backend already
+  // merges a partial save correctly (see PUT /api/platform/sms-gateways/:id), so sending pricePerCredit
+  // alone touches nothing else on the row.
+  const [priceFor, setPriceFor] = useState(null);   // gateway row
+  const [priceInput, setPriceInput] = useState('');
+  const [priceBusy, setPriceBusy] = useState(false);
+  const savePrice = async () => {
+    if (!priceFor) return;
+    setPriceBusy(true);
+    try {
+      await api.savePlatformSmsGateway(priceFor.id, { pricePerCredit: Number(priceInput) || 0 });
+      setGateways((gs) => gs.map((g) => (g.id === priceFor.id ? { ...g, pricePerCredit: Number(priceInput) || 0 } : g)));
+      store.toast(`${priceFor.name}: KES ${Number(priceInput) || 0}/credit`);
+      setPriceFor(null);
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setPriceBusy(false);
+    }
+  };
+
   const [gateways, setGateways] = useState([]);      // every platform-owned gateway (sender)
   const [gwFields, setGwFields] = useState({});
   const [gwForm, setGwForm] = useState(null);         // null=closed, {} for new, {...gw} to edit
@@ -507,7 +529,8 @@ export default function Tenants() {
                       : bal?.value && !bal.value.configured ? 'unavailable' : ''}
                   </span>
                   <Button onClick={() => checkGatewayBalance(g.id, true)} disabled={bal?.loading}>Check balance</Button>
-                  <span onClick={() => openGwForm(g)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Edit</span>
+                  <span onClick={() => { setPriceFor(g); setPriceInput(String(g.pricePerCredit ?? 0)); }} title="Just the price — credentials untouched" style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Edit price</span>
+                  <span onClick={() => openGwForm(g)} style={{ color: color.ink, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }} title="Name, provider, credentials, default">Edit gateway</span>
                   <span onClick={() => deleteGateway(g)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Remove</span>
                 </span>
               </div>
@@ -1320,6 +1343,24 @@ export default function Tenants() {
             </Field>
           )}
         </div>
+      </Modal>
+
+      <Modal
+        open={!!priceFor}
+        title={`Price per credit — ${priceFor?.name ?? ''}`}
+        onClose={() => setPriceFor(null)}
+        footer={
+          <>
+            <Button onClick={() => setPriceFor(null)}>Cancel</Button>
+            <Button variant="primary" onClick={savePrice} disabled={priceBusy}>
+              {priceBusy ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }
+      >
+        <Field label="KES per credit" hint="What a tenant assigned to this sender pays when they buy more via M-Pesa — nothing else on the gateway is touched">
+          <Input type="number" min="0" step="0.5" value={priceInput} onChange={(e) => setPriceInput(e.target.value)} />
+        </Field>
       </Modal>
     </Screen>
   );
