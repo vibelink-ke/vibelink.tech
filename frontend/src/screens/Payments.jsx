@@ -46,6 +46,11 @@ const Tile = ({ label, value, hint, dim, onClick }) => (
 
 const money = (n) => `KES ${kes(n)}`;
 const when = (d) => (d ? new Date(d).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+// Daraja can report a hashed/tokenized value in place of the real MSISDN on a C2B
+// confirmation (see payments/apply.js) — a real Kenyan number is at most 12 digits
+// once normalised (254 + 9), so anything longer is that token, not a phone number
+// worth showing (or dialling, or copying) on this screen.
+const phone = (p) => (p && String(p).length <= 12 ? p : '—');
 
 export default function Payments() {
   const store = useStore();
@@ -590,7 +595,7 @@ export default function Payments() {
                 { key: 'payer', label: 'From', render: (r) => (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <span>{r.payer_name ?? '—'}</span>
-                    <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>{r.payer_phone}</span>
+                    <span style={{ fontFamily: font.mono, fontSize: 11.5, color: color.muted }}>{phone(r.payer_phone)}</span>
                   </div>
                 ) },
                 { key: 'raw_account', label: 'Typed account', render: (r) => <span style={{ fontFamily: font.mono }}>{r.raw_account ?? '—'}</span> },
@@ -618,7 +623,7 @@ export default function Payments() {
               columns={[
                 { key: 'provider_ref', label: 'Ref' },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
-                { key: 'payer_phone', label: 'Phone' },
+                { key: 'payer_phone', label: 'Phone', render: (r) => phone(r.payer_phone) },
                 { key: 'received_at', label: 'When', render: (r) => when(r.received_at) },
               ]}
             />
@@ -667,7 +672,7 @@ export default function Payments() {
                   // paid — a shared or family phone means those can differ.
                   render: (r) => r.customer_name ? r.customer_name.trim().split(/\s+/)[0] : '—',
                 },
-                { key: 'payer_phone', label: 'Phone' },
+                { key: 'payer_phone', label: 'Phone', render: (r) => phone(r.payer_phone) },
                 {
                   key: 'plan',
                   label: 'Bundle',
@@ -849,7 +854,7 @@ export default function Payments() {
             <div style={{ background: color.tileBg, borderRadius: radius.md, padding: 12, fontSize: 13, display: 'flex', flexDirection: 'column', gap: 6 }}>
               <span><strong>{money(resolving.amount)}</strong> from {resolving.payer_name ?? 'unknown'}</span>
               <span style={{ fontFamily: font.mono, fontSize: 12, color: color.muted }}>
-                {resolving.payer_phone} · typed "{resolving.raw_account ?? ''}"
+                {phone(resolving.payer_phone)} · typed "{resolving.raw_account ?? ''}"
               </span>
             </div>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>

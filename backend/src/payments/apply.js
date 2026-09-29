@@ -184,7 +184,16 @@ export async function applyPayment(tenantId, tx) {
       // would have shown, just spelled out as "how long you actually have"
       // rather than a date that looks unchanged from before they paid.
       const days = Math.max(0, Math.ceil((new Date(r.expires).getTime() - Date.now()) / 86400000));
-      await send(tenantId, tx.phone, r.partial ? 'partial' : 'receipt',
+      // The subscriber is already known here (matched by account number, not
+      // by tx.phone) — their own registered number, not Safaricom's MSISDN on
+      // this transaction, is who the receipt is actually for. Confirmed live:
+      // Daraja can report a hashed/tokenized value in place of the real MSISDN
+      // (the same thing applyMatched below already guards against), which sent
+      // this to an unreachable "number" for every ordinary Paybill payment and
+      // the receipt silently never arrived — nothing here ever surfaced that,
+      // since send() swallows a bad destination as an ordinary delivery failure.
+      const { rows: [s] } = await c.query('select phone from subscribers where id=$1', [target.id]);
+      await send(tenantId, s?.phone ?? tx.phone, r.partial ? 'partial' : 'receipt',
         { amount: tx.amount, code: tx.ref, days, ...r });
       return { paymentId, applied: true, ...r };
     }
