@@ -345,15 +345,33 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   // invoice still honours that invoice's own stated amount — a one-off staff-set figure must not be
   // silently overridden here.
   const price = preferCurrentPrice ? Number(sub.price) : Number(inv?.amount ?? sub.price);
-  const periods = Math.floor(available / price);
-  const full = periods >= 1;
+
+  /**
+   * "Billing type" (Client → Edit info) turns a whole-period plan into one billed by the day or the
+   * week instead: a KES 2000/month plan billed daily is really KES 2000/30 = 66.67 a day, and a
+   * customer who has only ever paid KES 500 gets 7 days of service (500/66.67), not zero because
+   * they are short of the full month — which is what plain floor(available/price) would otherwise
+   * give them regardless of this setting. Blank, "Monthly (prepaid)" and "Monthly (postpaid)" all
+   * mean the ordinary whole-period behaviour below; only Daily/Weekly change anything, and only when
+   * that unit is actually shorter than the plan's own period (a plan that IS already daily/weekly
+   * gets no help from this — it is already billed in that unit).
+   */
+  const DAY_MIN = 1440;
+  const WEEK_MIN = 10080;
+  const billingType = String(sub.billing_type ?? '').toLowerCase();
+  const unitMinutes = billingType.includes('daily') ? DAY_MIN : billingType.includes('weekly') ? WEEK_MIN : null;
+  const proRated = unitMinutes && unitMinutes < sub.duration_min;
+
+  const unitPrice = proRated ? price * (unitMinutes / sub.duration_min) : price;
+  const units = Math.floor(available / unitPrice);
+  const full = units >= 1;
+  const minutesBought = units * (proRated ? unitMinutes : sub.duration_min);
 
   let expires = sub.expires_at;
-  const credit = full ? available - periods * price : available;
+  const credit = full ? available - units * unitPrice : available;
   if (full) {
-    const minutes = periods * sub.duration_min;
     const base = new Date(Math.max(Date.now(), new Date(sub.expires_at ?? Date.now()).getTime()));
-    expires = new Date(base.getTime() + minutes * 60000);
+    expires = new Date(base.getTime() + minutesBought * 60000);
     // Hotspot vouchers are short (minutes/hours) and are meant to expire at
     // the literal moment paid for — only PPPoE's day-scale plans get pushed
     // onto the shared midnight boundary.
