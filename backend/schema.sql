@@ -3113,3 +3113,8 @@ create index if not exists tr069_devices_serial on tr069_devices (serial_number)
 -- A customer's TR-069 device is matched to them by this, set by hand (or once seen, offered to confirm) —
 -- separate from onu_sn, which is a SmartOLT-authorised ONU's serial and not necessarily the same device.
 alter table subscribers add column if not exists tr069_serial text;
+
+-- When a router was added — for the Installations screen (newly-installed routers/clients). Existing
+-- rows have no real history to backfill, so they land on the day this migration runs rather than a
+-- fabricated earlier date; only routers added from here on carry a true install date.
+alter table routers add column if not exists created_at timestamptz not null default now();

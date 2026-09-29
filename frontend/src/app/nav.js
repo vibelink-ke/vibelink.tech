@@ -18,6 +18,7 @@ export const NAV_SECTIONS = [
       { to: '/routers', label: 'Routers', count: (s) => s.routers.length },
       { to: '/inventory', label: 'Inventory', count: (s) => s.inventory.length },
       { to: '/map', label: 'Map' },
+      { to: '/installations', label: 'Installations' },
       { to: '/analytics', label: 'Analytics', perm: 'analytics.view' },
     ],
   },
