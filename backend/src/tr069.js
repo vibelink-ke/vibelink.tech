@@ -87,11 +87,22 @@ function readDevice(d) {
 /** Every device GenieACS currently knows about. */
 async function listDevices() {
   const rows = await nbi('GET', '/devices');
-  return (rows ?? []).map(readDevice);
+  return (rows ?? [])
+    // GenieACS's own internal STUN/connection-request discovery helper shows up in /devices
+    // alongside real CPEs, with an id like "DISCOVERYSERVICE-DISCOVERYSERVICE-<random>" — it is not
+    // a router anyone owns and will never have a manufacturer, model or serial, so keeping it meant
+    // it sat in "Waiting to be linked" forever, permanently unmatchable, cluttering a list meant for
+    // actual customer devices.
+    .filter((d) => !String(d._id ?? '').startsWith('DISCOVERYSERVICE-'))
+    .map(readDevice);
 }
 
 /** Pull GenieACS's device list into our own table, tenant-unaware (see matchDevices for that half). */
 export async function syncDevices() {
+  // Rows written before listDevices() started filtering the discovery-service placeholder out — a plain
+  // sync (insert/update only) never removes anything, so these would otherwise sit in "Waiting to be
+  // linked" forever. Harmless to run every pass: there is nothing to delete once the first one has.
+  await pool.query("delete from tr069_devices where genieacs_id like 'DISCOVERYSERVICE-%'");
   const devices = await listDevices();
   for (const d of devices) {
     if (!d.genieacsId) continue;
