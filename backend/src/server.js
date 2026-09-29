@@ -366,8 +366,10 @@ app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
   if (!owner) return res.status(503).json({ error: 'Platform billing is not set up yet on this platform.' });
 
   try {
+    // Same reasoning as /api/sms/buy-credits above: the platform's own paybill, since this is a
+    // sibling deployment's tenant paying the platform, not the owner's own ISP collecting anything.
     const r = await mpesa.stkPush(owner.tenant_id, {
-      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits (${req.body?.source ?? 'relay'})`,
+      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits (${req.body?.source ?? 'relay'})`, platformCollect: true,
     });
     const checkoutId = r.CheckoutRequestID;
     if (!checkoutId) {
@@ -3566,8 +3568,11 @@ app.post('/api/sms/buy-credits', wrap(async (req, res) => {
   }
 
   try {
+    // The platform's own paybill, not whatever (if anything) the owner's ISP portal collects on for
+    // itself — this is a tenant paying the platform, the same money as a platform-collected customer's,
+    // just for credits instead of internet.
     const r = await mpesa.stkPush(owner.tenant_id, {
-      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits`,
+      phone, amount, accountRef: 'SMSCREDIT', description: `${quantity} SMS credits`, platformCollect: true,
     });
     const checkoutId = r.CheckoutRequestID;
     if (!checkoutId) {
