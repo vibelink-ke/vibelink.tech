@@ -51,6 +51,15 @@ const when = (d) => (d ? new Date(d).toLocaleString('en-KE', { day: '2-digit', m
 // once normalised (254 + 9), so anything longer is that token, not a phone number
 // worth showing (or dialling, or copying) on this screen.
 const phone = (p) => (p && String(p).length <= 12 ? p : '—');
+// Full local timestamp, seconds included — matches the paybill provider's own portal
+// (which is what an operator reconciles against), unlike the day/hour/minute `when()`
+// used elsewhere on this screen for a quick glance.
+const whenFull = (d) => {
+  if (!d) return '—';
+  const t = new Date(d);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
+};
 
 export default function Payments() {
   const store = useStore();
@@ -662,7 +671,18 @@ export default function Payments() {
               rowKey={(r) => r.id}
               empty="No transactions recorded yet"
               rows={filteredAll}
-              columns={[
+              columns={channelFilter === 'daraja' ? [
+                // Mirrors the M-Pesa Paybill portal's own transaction list (ID, Status, Amount,
+                // Transaction ID, Transaction time, Reference) — what an operator reconciling
+                // against that portal actually expects to see, rather than columns (Customer,
+                // Bundle) that only make sense for hotspot sales.
+                { key: 'id', label: 'ID', render: (_r, i) => i + 1 },
+                { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status}>{r.status}</Badge> },
+                { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
+                { key: 'provider_ref', label: 'Transaction ID', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
+                { key: 'received_at', label: 'Transaction time', render: (r) => whenFull(r.received_at) },
+                { key: 'raw_account', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.raw_account ?? '—'}</span> },
+              ] : [
                 { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
                 {
