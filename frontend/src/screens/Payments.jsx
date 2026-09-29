@@ -225,18 +225,31 @@ export default function Payments() {
     return out.map((m) => ({ ...m, pct: (m.total / peak) * 100 }));
   }, [collections]);
 
+  // The channels actually present, so the filter only ever offers real choices — a tenant with no
+  // KopoKopo activity never sees a KopoKopo button that would just show an empty table.
+  const CHANNEL_LABELS = {
+    daraja: 'M-Pesa Paybill', kopokopo: 'KopoKopo', bankstk: 'Bank STK', manual_till: 'Till (manual)',
+    piggyback_till: 'Buy Goods (via platform)',
+  };
+  const channelsPresent = useMemo(
+    () => [...new Set(all.map((p) => p.provider).filter(Boolean))].sort(),
+    [all]);
+  const [channelFilter, setChannelFilter] = useState('all');
+
   // What the All-transactions table actually shows: everything, unless a chart click narrowed it to one day,
-  // channel or month (chartFilter, set above from the query string a chart click navigated here with).
+  // channel or month (chartFilter, set above from the query string a chart click navigated here with), and/or
+  // the channel buttons above the table narrowed it to one gateway (KopoKopo vs Paybill vs any other).
   const filteredAll = useMemo(() => {
-    if (!chartFilter) return all;
-    if (chartFilter.day) return all.filter((p) => (p.received_at ?? '').slice(0, 10) === chartFilter.day);
-    if (chartFilter.channel) return all.filter((p) => chartFilter.channel.includes(p.provider));
-    if (chartFilter.month != null) return all.filter((p) => {
-      const t = new Date(p.received_at ?? 0);
-      return t.getMonth() === chartFilter.month && t.getFullYear() === chartFilter.year;
-    });
-    return all;
-  }, [all, chartFilter]);
+    const byChart = !chartFilter ? all
+      : chartFilter.day ? all.filter((p) => (p.received_at ?? '').slice(0, 10) === chartFilter.day)
+      : chartFilter.channel ? all.filter((p) => chartFilter.channel.includes(p.provider))
+      : chartFilter.month != null ? all.filter((p) => {
+          const t = new Date(p.received_at ?? 0);
+          return t.getMonth() === chartFilter.month && t.getFullYear() === chartFilter.year;
+        })
+      : all;
+    return channelFilter === 'all' ? byChart : byChart.filter((p) => p.provider === channelFilter);
+  }, [all, chartFilter, channelFilter]);
 
   const [stkForm, setStkForm] = useState(null);
   const [stkResult, setStkResult] = useState(null);
@@ -613,6 +626,24 @@ export default function Payments() {
 
           {tab === 'all' && (
             <>
+              {channelsPresent.length > 1 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {['all', ...channelsPresent].map((ch) => (
+                    <span
+                      key={ch}
+                      onClick={() => setChannelFilter(ch)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${channelFilter === ch ? color.green : color.line}`,
+                        background: channelFilter === ch ? color.green : '#fff',
+                        color: channelFilter === ch ? '#fff' : color.ink,
+                      }}
+                    >
+                      {ch === 'all' ? 'All channels' : CHANNEL_LABELS[ch] ?? ch}
+                    </span>
+                  ))}
+                </div>
+              )}
               {chartFilter && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '9px 13px', marginBottom: 10, background: color.subtleBg, border: `1px solid ${color.line}`, borderRadius: radius.md, fontSize: 12.5 }}>
                   <span>
