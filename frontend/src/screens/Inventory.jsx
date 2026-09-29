@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { color, font } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -42,13 +42,38 @@ function locationText(i) {
  * (condition/lifecycle), matching how Splynx, Sonar and ISPBox all model
  * this — "in stock" alone never answers "which shelf, or whose van".
  */
+const INSTALLED_RANGES = [
+  { value: 7, label: 'Last 7 days' },
+  { value: 30, label: 'Last 30 days' },
+  { value: 90, label: 'Last 90 days' },
+  { value: 0, label: 'All time' },
+];
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—');
+
 export default function Inventory() {
   const store = useStore();
+  const navigate = useNavigate();
   const items = store.inventory ?? [];
   const [form, setForm] = useState(null);   // null = closed, object = open (new or editing)
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [installedRange, setInstalledRange] = useState(30);
+
+  /**
+   * One row per gadget, not grouped like the table below — "recently installed" is exactly the
+   * question "which specific unit, at whose premises, and when", which grouping by name/category
+   * hides. updated_at is the best signal for "when" this system has: it changes whenever an item's
+   * status/location is edited, which for an installed item is normally the moment Issue set it so —
+   * not perfect (a later unrelated edit would also bump it), but there is no dedicated install-date
+   * column and this is the closest honest proxy without one.
+   */
+  const recentlyInstalled = useMemo(() => {
+    const cutoff = installedRange ? Date.now() - installedRange * 86400000 : null;
+    return items
+      .filter((i) => i.status === 'installed' && (!cutoff || new Date(i.updated_at ?? 0).getTime() >= cutoff))
+      .sort((a, b) => new Date(b.updated_at ?? 0) - new Date(a.updated_at ?? 0));
+  }, [items, installedRange]);
   const [adjusting, setAdjusting] = useState(null);   // { item, delta }
   const [adjustBusy, setAdjustBusy] = useState(false);
   const [issuing, setIssuing] = useState(null);   // { item, staffId, quantity, macAddress, serialNumber, subscriberId, routerId, ownedByTenant, note }
@@ -292,6 +317,42 @@ export default function Inventory() {
         <Stat label="With technicians" value={vanCount} hint="issued, not yet installed or returned" />
         <Stat label="Bulk stock lines" value={bulkCount} hint="cable, connectors, spares" />
       </Grid>
+
+      <Card
+        title="Recently installed"
+        subtitle="Individual gadgets marked Installed, newest first — who has it and where."
+        actions={
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {INSTALLED_RANGES.map((r) => (
+              <span
+                key={r.value}
+                onClick={() => setInstalledRange(r.value)}
+                style={{
+                  padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                  border: `1px solid ${installedRange === r.value ? color.green : color.line}`,
+                  background: installedRange === r.value ? color.green : '#fff',
+                  color: installedRange === r.value ? '#fff' : color.ink,
+                }}
+              >
+                {r.label}
+              </span>
+            ))}
+          </div>
+        }
+      >
+        <Table
+          rowKey={(i) => i.id}
+          empty="Nothing installed in this window"
+          rows={recentlyInstalled}
+          onRowClick={(i) => { if (i.subscriber_id) navigate(`/clients/${i.subscriber_id}`); }}
+          columns={[
+            { key: 'name', label: 'Gadget', render: (i) => <div style={{ display: 'flex', flexDirection: 'column' }}><span style={{ fontWeight: 600 }}>{i.name}</span><span style={{ fontSize: 11.5, color: color.muted }}>{i.category}</span></div> },
+            { key: 'id_no', label: 'Serial / MAC', render: (i) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{i.serial_number || i.mac_address || '—'}</span> },
+            { key: 'where', label: 'Where', render: (i) => locationText(i) },
+            { key: 'when', label: 'Installed', render: (i) => fmtDate(i.updated_at) },
+          ]}
+        />
+      </Card>
 
       <Card
         title="Gadgets & stock"
