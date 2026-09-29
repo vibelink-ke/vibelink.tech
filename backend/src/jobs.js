@@ -769,7 +769,8 @@ async function remind() {
     const org = orgCache.get(s.tenant_id);
     const paybill = s.service === 'hotspot' ? org.paybillHotspot : org.paybillPppoe;
     await send(s.tenant_id, s.phone, 'reminder',
-      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code, paybill: paybill ?? '' });
+      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code,
+        paybill: paybill ?? '', company: org.company ?? '' });
   }
 }
 

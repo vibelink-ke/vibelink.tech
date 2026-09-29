@@ -149,12 +149,23 @@ const accepted = (provider, res) => {
   return check ? check(res?.data) : true;
 };
 
+/**
+ * {company} leads every money-related and paybill-instruction template below (receipt, partial,
+ * reminder, outage) — added deliberately, not cosmetic. These are exactly the shape of message
+ * Kenyan SMS fraud impersonates ("KES X received", "pay paybill Y") — a text with no identifiable
+ * sender beyond a shortcode the recipient may not recognise reads exactly like one of those, and a
+ * real customer has no way to tell the two apart except by trusting a number. Naming the company in
+ * the body itself is the one thing that works regardless of which gateway or sender ID actually
+ * carries it. welcome and chat_offline already led with {company}; voucher does not, on purpose —
+ * that one fires seconds after a purchase the guest just made on this tenant's own branded portal,
+ * so there is no such ambiguity to resolve.
+ */
 export const DEFAULTS = {
-  receipt:  'Thank you. KES {amount} received, ref {code}. Active until {expires}.',
+  receipt:  '{company}: KES {amount} received, ref {code}. Active until {expires}. Thank you!',
   voucher:  'Your code is {code}. Valid until {expires}. Tap {link} to connect.{points_line}',
-  reminder: 'Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account}.',
-  partial:  'Received KES {amount}. Balance KES {balance}. You have {days} day(s) of service.',
-  outage:   'Outage at {site}. Engineers are on it, ETA {eta}. Sorry for the trouble.',
+  reminder: '{company}: Hi {name}, your internet expires {expires}. Pay Paybill {paybill} acc {account} to stay connected.',
+  partial:  '{company}: KES {amount} received. Balance KES {balance}. {days} day(s) of service remaining.',
+  outage:   '{company}: Outage at {site}. Our engineers are on it — ETA {eta}. Sorry for the disruption.',
   brief:    'Today: KES {collected} collected, {subs} new clients, {down} router(s) down.',
   // Free-text sends (POST /api/messages, POST /api/sms/bulk) pass the body through
   // the same renderer, so {name}/{account}/{expires} still interpolate per recipient.

@@ -193,6 +193,7 @@ export async function applyPayment(tenantId, tx) {
       // the receipt silently never arrived — nothing here ever surfaced that,
       // since send() swallows a bad destination as an ordinary delivery failure.
       const { rows: [s] } = await c.query('select phone from subscribers where id=$1', [target.id]);
+      const { rows: [own] } = await c.query('select name from tenants where id=$1', [tenantId]);
       // r.expires arrives as a real JS Date — the same bug the voucher SMS below already had fixed
       // (see its own comment): spread raw into the template's vars, {expires} printed the Date's
       // full toString(), timezone offset and all ("Fri Oct 30 2026 21:00:00 GMT+0000 (Coordinated
@@ -201,6 +202,7 @@ export async function applyPayment(tenantId, tx) {
         amount: Number(tx.amount).toLocaleString('en-KE'), code: tx.ref, days,
         balance: Number(r.balance).toLocaleString('en-KE'),
         expires: fmtNairobi(r.expires, { dateStyle: 'medium', timeStyle: 'short' }),
+        company: own?.name ?? '',
       });
       return { paymentId, applied: true, ...r };
     }
@@ -447,12 +449,14 @@ export async function applyMatched(tenantId, paymentId, subscriberId) {
     await activateSubscriber(c, tenantId, subscriberId);
 
     const days = Math.max(0, Math.ceil((new Date(r.expires).getTime() - Date.now()) / 86400000));
+    const { rows: [own] } = await c.query('select name from tenants where id=$1', [tenantId]);
     // Same fix as applyPayment's own receipt send above — r.expires is a raw Date, and {expires}
     // must never interpolate one directly (see that comment for what it prints when it does).
     await send(tenantId, pay.payer_phone, r.partial ? 'partial' : 'receipt', {
       amount: Number(pay.amount).toLocaleString('en-KE'), code: pay.provider_ref, days,
       balance: Number(r.balance).toLocaleString('en-KE'),
       expires: fmtNairobi(r.expires, { dateStyle: 'medium', timeStyle: 'short' }),
+      company: own?.name ?? '',
     }).catch(() => {
         // payer_phone on a manually-matched payment is often the number M-Pesa
         // reported for the transaction, not necessarily one that can receive

@@ -11672,7 +11672,7 @@ app.post('/api/outages', wrap(async (req, res) => {
       "select distinct phone from subscribers where tenant_id=$1 and router_id=$2 and status in ('active','grace') and phone is not null",
       [req.tenant.id, routerId]);
     for (const s of affected) {
-      await send(req.tenant.id, s.phone, 'outage', { site, eta: eta ?? 'shortly' }).catch(() => {});
+      await send(req.tenant.id, s.phone, 'outage', { site, eta: eta ?? 'shortly', company: req.tenant.name ?? '' }).catch(() => {});
     }
   }
 }));

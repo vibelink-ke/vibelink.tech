@@ -170,9 +170,13 @@ export const DEFAULTS = {
     subject: 'Your {company} sign-in link',
     body: 'Sign in: {link}\n\nThis link expires in 15 minutes and works once. If you did not request this, ignore it.',
   },
+  // The only one of the four with no {company} anywhere — the other three at least name it in the
+  // subject. Bare credentials with no context read like they could have come from anyone; naming who
+  // set them up, and why, matters here the same way it does for the money-related SMS templates
+  // (sms.js's own DEFAULTS comment).
   customer_credentials: {
-    subject: 'Your account login details',
-    body: 'Account number: {account}\nPassword: {password}',
+    subject: 'Your {company} account login details',
+    body: 'Your {company} customer portal login has been set.\n\nAccount number: {account}\nPassword: {password}',
   },
   staff_invite: {
     subject: "You've been invited to {company}",
