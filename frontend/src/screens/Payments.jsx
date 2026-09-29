@@ -304,6 +304,7 @@ export default function Payments() {
 
   const [invoiceForm, setInvoiceForm] = useState(null);
   const [invoiceView, setInvoiceView] = useState(null);
+  const [selectedInvoices, setSelectedInvoices] = useState(() => new Set());
   const [recordForm, setRecordForm] = useState(null);
   const [reconcileText, setReconcileText] = useState(null);
 
@@ -348,6 +349,23 @@ export default function Payments() {
     } catch (e) {
       store.toast(`Could not delete: ${e.message}`);
     }
+  };
+
+  // One invoice at a time, same as a single delete — an invoice with a payment on it refuses on
+  // its own, so a batch that happens to include one just reports that one as a failure rather than
+  // silently skipping it.
+  const bulkDeleteInvoices = async () => {
+    const ids = [...selectedInvoices];
+    if (!ids.length) return;
+    if (!window.confirm(`Delete ${ids.length} invoice${ids.length > 1 ? 's' : ''}? This cannot be undone. One with a payment applied to it will be skipped.`)) return;
+    const results = await Promise.allSettled(ids.map((id) => api.deleteInvoice(id)));
+    const gone = new Set(ids.filter((_, i) => results[i].status === 'fulfilled'));
+    store.setCollection('invoices', (xs) => xs.filter((x) => !gone.has(x.id)));
+    setSelectedInvoices(new Set());
+    const failed = ids.length - gone.size;
+    store.toast(failed
+      ? `Deleted ${gone.size}, ${failed} skipped (has a payment applied — void it instead)`
+      : `Deleted ${gone.size} invoice${gone.size > 1 ? 's' : ''}`);
   };
 
   const recordPayment = async () => {
@@ -635,10 +653,25 @@ export default function Payments() {
           )}
 
           {tab === 'invoices' && (
+            <>
+              {selectedInvoices.size > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontSize: 13, color: '#4a524c' }}>{selectedInvoices.size} selected</span>
+                  <Button size="sm" onClick={() => setSelectedInvoices(new Set())}>Clear</Button>
+                  <Button
+                    size="sm"
+                    style={{ background: color.rust, borderColor: color.rust, color: '#fff', fontWeight: 600 }}
+                    onClick={bulkDeleteInvoices}
+                  >
+                    Delete selected
+                  </Button>
+                </div>
+              )}
             <Table
               rowKey={(r) => r.id}
               empty="No invoices raised yet — they generate automatically 3 days before expiry"
               rows={invoices}
+              select={{ id: (r) => r.id, selected: selectedInvoices, setSelected: setSelectedInvoices }}
               columns={[
                 { key: 'number', label: 'Invoice', render: (r) => <span style={{ fontFamily: font.mono }}>{r.number}</span> },
                 { key: 'reason', label: 'Reason', render: (r) => r.reason || '—' },
@@ -666,6 +699,7 @@ export default function Payments() {
                 },
               ]}
             />
+            </>
           )}
 
           {tab === 'reports' && (
