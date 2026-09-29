@@ -26,7 +26,9 @@ const blank = () => ({
 
 function locationText(i) {
   if (i.location === 'van') return `Van — ${i.assigned_staff_name ?? 'unassigned'}`;
-  if (i.location === 'premises') return i.subscriber_name ? `Premises — ${i.subscriber_name}` : 'Premises';
+  // A router with no client on it is company-owned gear installed as site/hotspot equipment, not a
+  // customer's own premises — told apart here so it doesn't read as "installed for a client" it isn't.
+  if (i.location === 'premises') return i.subscriber_name ? `Premises — ${i.subscriber_name}` : (i.router_name ? `Hotspot site — ${i.router_name}` : 'Premises');
   if (i.location === 'repair_bench') return 'Repair bench';
   return i.router_name ? `Warehouse (${i.router_name})` : 'Warehouse';
 }
@@ -231,13 +233,22 @@ export default function Inventory() {
     (viewing?.units ?? items.filter((x) => x.name === faulty.name && x.category === faulty.category))
       .filter((x) => x.id !== faulty.id && x.location === 'warehouse' && x.status !== 'faulty');
 
-  const openReplace = (i) => setReplacing({ faulty: i, replacementId: '', note: '' });
+  const openReplace = (i) => setReplacing({
+    faulty: i, replacementId: '', note: '',
+    oldMacAddress: i.mac_address || '', oldSerialNumber: i.serial_number || '',
+  });
 
   const submitReplace = async () => {
     if (!replacing.replacementId) return store.toast('Pick a replacement unit');
+    if (!replacing.oldMacAddress.trim() && !replacing.oldSerialNumber.trim()) {
+      return store.toast('Record the MAC address or serial number of the unit being taken out');
+    }
     setReplaceBusy(true);
     try {
-      await api.replaceInventoryItem(replacing.faulty.id, { replacementId: replacing.replacementId, note: replacing.note || undefined });
+      await api.replaceInventoryItem(replacing.faulty.id, {
+        replacementId: replacing.replacementId, note: replacing.note || undefined,
+        oldMacAddress: replacing.oldMacAddress || undefined, oldSerialNumber: replacing.oldSerialNumber || undefined,
+      });
       const fresh = await api.inventory();
       store.setCollection('inventory', fresh);
       setViewing((v) => (v ? { ...v, units: fresh.filter((x) => x.name === v.name && x.category === v.category) } : v));
@@ -558,7 +569,7 @@ export default function Inventory() {
                 MAC {issuing.item.mac_address || '—'} · Serial {issuing.item.serial_number || '—'}
               </div>
             )}
-            <Field label="Client installed at" hint="Optional — leave unassigned if it's just going into the tech's van for now">
+            <Field label="Client installed at" hint="Leave unassigned only if it's just going into the tech's van for now — an install needs either a client here or a router/site below">
               <Select
                 value={issuing.subscriberId}
                 onChange={(e) => setIssuing((s) => ({ ...s, subscriberId: e.target.value }))}
@@ -577,7 +588,7 @@ export default function Inventory() {
                 />
               </Field>
             )}
-            <Field label="Site" hint="Optional — for gear tied to a site rather than one client">
+            <Field label="Router / site" hint={issuing.subscriberId ? 'Optional — which router this client is on, if relevant' : "Pick this instead of a client for the company's own gear — a hotspot bridge, site equipment"}>
               <Select
                 value={issuing.routerId}
                 onChange={(e) => setIssuing((s) => ({ ...s, routerId: e.target.value }))}
@@ -644,6 +655,15 @@ export default function Inventory() {
                     ...candidates.map((c) => ({ value: c.id, label: `${c.mac_address || c.serial_number || c.id}` })),
                   ]}
                 />
+              </Field>
+              <div style={{ fontSize: 12, color: color.muted }}>
+                Confirm the unit coming out — at least one of these is required, so what got taken away stays on record.
+              </div>
+              <Field label="Old unit's MAC address">
+                <Input value={replacing.oldMacAddress} onChange={(e) => setReplacing((s) => ({ ...s, oldMacAddress: e.target.value }))} style={{ fontFamily: font.mono }} />
+              </Field>
+              <Field label="Old unit's serial number">
+                <Input value={replacing.oldSerialNumber} onChange={(e) => setReplacing((s) => ({ ...s, oldSerialNumber: e.target.value }))} />
               </Field>
               <Field label="Note" hint="Optional">
                 <Textarea rows={2} value={replacing.note} onChange={(e) => setReplacing((s) => ({ ...s, note: e.target.value }))} />

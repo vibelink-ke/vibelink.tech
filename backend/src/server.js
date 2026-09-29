@@ -7113,6 +7113,15 @@ app.put('/api/inventory/:id', requirePermission('inventory.edit'), wrap(async (r
     ? 'premises'
     : (newSubscriberId !== (before.subscriber_id ?? null) ? 'warehouse' : before.location);
 
+  // "Installed" without anyone or anywhere named on the record is exactly the hole this closes: status
+  // and location used to be entirely separate, so this form could mark something Installed with nothing
+  // to say who has it. Either a client (a normal install) or a router (equipment that's the company's
+  // own — a bridge for the hotspot at a site, not any one customer's) satisfies it. Issue (below) is the
+  // normal way in and does this check too, but a straight edit must not be a back door around it.
+  if ((status || before.status) === 'installed' && !newSubscriberId && !newRouterId) {
+    return res.status(400).json({ error: 'Select the client this is installed for, or the router/site it belongs to, before marking it Installed.' });
+  }
+
   try {
     const { rows: [item] } = await pool.query(
       `update inventory_items set
@@ -7212,7 +7221,10 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
       'select 1 from routers where id=$1 and tenant_id=$2', [routerId, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such router' });
   }
-  const destination = subscriberId ? 'premises' : 'van';
+  // "premises" here means "actually deployed," not literally a customer's address — a router picked with
+  // no client is company-owned equipment going in as a hotspot bridge or similar site gear, and is just
+  // as much an install as one handed to a specific client. Neither picked leaves it with the technician.
+  const destination = (subscriberId || routerId) ? 'premises' : 'van';
 
   const { rows: [item] } = await pool.query(
     'select * from inventory_items where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
@@ -7244,10 +7256,11 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
         const { rows: [child] } = await pool.query(
           `insert into inventory_items (tenant_id, name, category, mac_address, serial_number,
              owned_by_tenant, status, tracking, quantity, location, assigned_staff_id, subscriber_id, router_id)
-           values ($1,$2,$3,$4,$5,$6,'in_stock','serialized',1,$7,$8,$9,$10) returning id`,
+           values ($1,$2,$3,$4,$5,$6,$11,'serialized',1,$7,$8,$9,$10) returning id`,
           [req.tenant.id, item.name, item.category, macAddress?.trim().toUpperCase() || null,
            serialNumber?.trim() || null, destination === 'premises' ? !clientOwns : item.owned_by_tenant,
-           destination, staffId, subscriberId || null, routerId || null]);
+           destination, staffId, subscriberId || null, routerId || null,
+           destination === 'premises' ? 'installed' : 'in_stock']);
         createdId = child.id;
         await logInventoryMovement(req.tenant.id, child.id, 'created', { toLocation: destination, staffId, subscriberId: subscriberId || null, note: `Issued from "${item.name}" stock` });
       } catch (e) {
@@ -7271,7 +7284,9 @@ app.post('/api/inventory/:id/issue', requirePermission('inventory.edit'), wrap(a
 
   await pool.query(
     `update inventory_items set location=$2, assigned_staff_id=$3, subscriber_id=$4, router_id=coalesce($5, router_id),
-       owned_by_tenant = case when $2='premises' then $6 else owned_by_tenant end, updated_at=now() where id=$1`,
+       owned_by_tenant = case when $2='premises' then $6 else owned_by_tenant end,
+       status = case when $2='premises' then 'installed' else status end,
+       updated_at=now() where id=$1`,
     [item.id, destination, staffId, subscriberId || null, routerId || null, !clientOwns]);
   await logInventoryMovement(req.tenant.id, item.id, destination === 'premises' ? 'installed' : 'issued', {
     fromLocation: item.location, toLocation: destination, staffId, subscriberId: subscriberId || null, note,
@@ -7302,7 +7317,7 @@ app.post('/api/inventory/:id/return', requirePermission('inventory.edit'), wrap(
  * link this keeps in the movement history of both.
  */
 app.post('/api/inventory/:id/replace', requirePermission('inventory.edit'), wrap(async (req, res) => {
-  const { replacementId, note } = req.body;
+  const { replacementId, note, oldMacAddress, oldSerialNumber } = req.body;
   if (!replacementId) return res.status(400).json({ error: 'Pick a replacement unit' });
 
   const { rows: [faulty] } = await pool.query(
@@ -7311,6 +7326,15 @@ app.post('/api/inventory/:id/replace', requirePermission('inventory.edit'), wrap
   if (faulty.status !== 'faulty') return res.status(400).json({ error: 'Only a gadget marked faulty can be replaced this way.' });
   if (!['premises', 'van'].includes(faulty.location)) {
     return res.status(400).json({ error: "This gadget isn't currently deployed anywhere — use Issue instead of Replace." });
+  }
+  // The faulty unit being taken out has to be traceable, the same rule Issue already holds a fresh unit
+  // to — a record with nowhere and no name behind it is how "we swapped something" turns into nobody
+  // being able to say which physical box came back. Whatever it already has on file is enough; anything
+  // typed here fills in what was missing.
+  const newOldMac = oldMacAddress?.trim().toUpperCase() || faulty.mac_address || null;
+  const newOldSerial = oldSerialNumber?.trim() || faulty.serial_number || null;
+  if (!newOldMac && !newOldSerial) {
+    return res.status(400).json({ error: 'Record the MAC address or serial number of the unit being taken out before replacing it.' });
   }
 
   const { rows: [replacement] } = await pool.query(
@@ -7325,11 +7349,13 @@ app.post('/api/inventory/:id/replace', requirePermission('inventory.edit'), wrap
     await c.query('begin');
     await c.query(
       `update inventory_items set location=$2, subscriber_id=$3, router_id=$4, assigned_staff_id=$5,
-         owned_by_tenant=$6, status='in_stock', updated_at=now() where id=$1`,
-      [replacement.id, faulty.location, faulty.subscriber_id, faulty.router_id, faulty.assigned_staff_id, faulty.owned_by_tenant]);
+         owned_by_tenant=$6, status=$7, updated_at=now() where id=$1`,
+      [replacement.id, faulty.location, faulty.subscriber_id, faulty.router_id, faulty.assigned_staff_id, faulty.owned_by_tenant,
+       faulty.location === 'premises' ? 'installed' : 'in_stock']);
     await c.query(
-      `update inventory_items set location='repair_bench', subscriber_id=null, router_id=null, assigned_staff_id=null, updated_at=now() where id=$1`,
-      [faulty.id]);
+      `update inventory_items set location='repair_bench', subscriber_id=null, router_id=null, assigned_staff_id=null,
+         mac_address=$2, serial_number=$3, updated_at=now() where id=$1`,
+      [faulty.id, newOldMac, newOldSerial]);
     await c.query('commit');
   } catch (e) {
     await c.query('rollback');
@@ -7341,7 +7367,7 @@ app.post('/api/inventory/:id/replace', requirePermission('inventory.edit'), wrap
   const swapNote = note?.trim() || null;
   await logInventoryMovement(req.tenant.id, replacement.id, 'replaced', {
     fromLocation: 'warehouse', toLocation: faulty.location, subscriberId: faulty.subscriber_id, staffId: faulty.assigned_staff_id,
-    note: swapNote || `Replacing faulty ${faulty.name} (${faulty.mac_address || faulty.serial_number || faulty.id})`,
+    note: swapNote || `Replacing faulty ${faulty.name} (${newOldMac || newOldSerial})`,
   });
   await logInventoryMovement(req.tenant.id, faulty.id, 'replaced', {
     fromLocation: faulty.location, toLocation: 'repair_bench',
