@@ -336,7 +336,7 @@ async function renewFromWallet() {
              order by s.expires_at asc limit 1`,
           [tenant_id, account_code]);
         if (!due) break;
-        const r = await settleSubscriber(c, tenant_id, due.id, 0, null, null);
+        const r = await settleSubscriber(c, tenant_id, due.id, 0, null, null, { preferCurrentPrice: true });
         if (r.partial) break;
         await activateSubscriber(c, tenant_id, due.id);
         await c.query(

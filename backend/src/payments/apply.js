@@ -292,7 +292,7 @@ export async function applyPayment(tenantId, tx) {
  * payment regardless of size: a partial payment does not yet entitle
  * anyone to service, only to a bigger balance.
  */
-export async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId = null) {
+export async function settleSubscriber(c, tenantId, subId, amount, paymentId, invoiceId = null, { preferCurrentPrice = false } = {}) {
   /**
    * `for update` on the subscriber row — without it, two payments landing
    * close together (a portal STK and an operator keying in the same
@@ -337,7 +337,14 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
     [tenantId, sub.account_code]);
 
   const available = Number(amount) + Number(wallet.balance);
-  const price = Number(inv?.amount ?? sub.price);
+  // Auto-renewing from an existing balance (no fresh payment, no invoice being paid down — see
+  // jobs.js's renewFromWallet) has to buy service at whatever the customer's price is RIGHT NOW.
+  // A stale open invoice from before their custom price was set or changed would otherwise decide
+  // it, and a customer with exactly enough for their real price never renews because the wallet is
+  // checked against a number that no longer applies to them. A real payment against a specific
+  // invoice still honours that invoice's own stated amount — a one-off staff-set figure must not be
+  // silently overridden here.
+  const price = preferCurrentPrice ? Number(sub.price) : Number(inv?.amount ?? sub.price);
   const periods = Math.floor(available / price);
   const full = periods >= 1;
 
