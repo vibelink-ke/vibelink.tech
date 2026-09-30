@@ -8,6 +8,7 @@ import ErrorBoundary from '../ui/boundary';
 const Tenants = lazy(() => import('./Tenants'));
 const PlatformMonitor = lazy(() => import('./PlatformMonitor'));
 const SaasRevenue = lazy(() => import('./SaasRevenue'));
+const PlatformHistory = lazy(() => import('./PlatformHistory'));
 const Gateways = lazy(() => import('./settings/Gateways'));
 
 /**
@@ -23,6 +24,7 @@ const TABS = [
   { to: '/admin', label: 'ISP tenants', view: Tenants },
   { to: '/admin/monitor', label: 'Platform monitor', view: PlatformMonitor },
   { to: '/admin/revenue', label: 'SaaS revenue', view: SaasRevenue },
+  { to: '/admin/history', label: 'Payout & pay-in history', view: PlatformHistory },
   { to: '/admin/gateways', label: 'Payment gateways', view: Gateways, props: { platform: true },
     note: 'The platform\'s own paybill: it takes the fees ISPs pay the platform and the payments of ISPs who collect through it. It is kept here and appears in no ISP\'s own settings.' },
 ];

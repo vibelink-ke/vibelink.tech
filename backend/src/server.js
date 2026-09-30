@@ -10569,6 +10569,42 @@ app.get('/api/platform/settlements/in-flight', superAdminOnly, wrap(async (_req,
   res.json(rows);
 }));
 
+/**
+ * Every completed (or failed) payout to a tenant — the historical counterpart to /in-flight above,
+ * which only ever shows what's still stuck. What the platform has actually paid OUT, tenant by
+ * tenant: money collected on their behalf (platform_collect_enabled) and settled to their own bank
+ * or till.
+ */
+app.get('/api/platform/payouts', superAdminOnly, wrap(async (req, res) => {
+  const tenantId = req.query.tenantId ? String(req.query.tenantId) : null;
+  const { rows } = await pool.query(
+    `select s.id, s.tenant_id, t.name as tenant, s.amount, s.fee, s.method, s.status, s.reference, s.note,
+            coalesce(s.settled_at, s.created_at) as at
+       from settlements s join tenants t on t.id = s.tenant_id
+      where s.status in ('paid','failed') and ($1::uuid is null or s.tenant_id=$1)
+      order by at desc
+      limit 500`,
+    [tenantId]);
+  res.json(rows);
+}));
+
+/**
+ * Every payment a tenant has made TO the platform — the other direction from payouts above: their
+ * own licence/statement fees, settled through applyTenantPayment (charges.js). What actually pays
+ * down a tenant_charges statement, not what the statement itself says is owed.
+ */
+app.get('/api/platform/pay-ins', superAdminOnly, wrap(async (req, res) => {
+  const tenantId = req.query.tenantId ? String(req.query.tenantId) : null;
+  const { rows } = await pool.query(
+    `select p.id, p.tenant_id, t.name as tenant, p.amount, p.method, p.reference, p.phone, p.created_at as at
+       from tenant_payments p join tenants t on t.id = p.tenant_id
+      where $1::uuid is null or p.tenant_id=$1
+      order by p.created_at desc
+      limit 500`,
+    [tenantId]);
+  res.json(rows);
+}));
+
 app.post('/api/platform/settlements/:id/cancel', superAdminOnly, wrap(async (req, res) => {
   const { cancelPayout } = await import('./jobs.js');
   try {
