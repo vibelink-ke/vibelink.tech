@@ -11036,18 +11036,18 @@ app.post('/api/vouchers/send-sms', requirePermission('hotspot.vouchers'), wrap(a
   const sms = await import('./sms.js');
   const org = await sms.orgVars(req.tenant.id);
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
-  const link = req.tenant.subdomain ? `https://${req.tenant.subdomain}.${root}/hotspot/login.html?code=` : null;
+  const loginLink = req.tenant.subdomain ? `https://${req.tenant.subdomain}.${root}/hotspot/login.html` : null;
   const company = org.company || req.tenant.name || 'WiFi';
 
   const messages = [];
   if (rows.length === 1) {
     const [v] = rows;
-    messages.push(`${company} WiFi: your code is ${v.code}${v.plan ? ` (${v.plan})` : ''}.${link ? ` Tap to connect: ${link}${v.code}` : ' Type it on the login page to connect.'}`);
+    messages.push(`${company} WiFi: your code is ${v.code}${v.plan ? ` (${v.plan})` : ''}.${loginLink ? ` Tap to connect: ${loginLink}?code=${v.code}` : ' Type it on the login page to connect.'}`);
   } else {
     const plans = [...new Set(rows.map((r) => r.plan).filter(Boolean))];
     for (let i = 0; i < rows.length; i += 4) {
       const chunk = rows.slice(i, i + 4).map((r) => r.code).join(', ');
-      messages.push(`${company} WiFi codes${plans.length === 1 ? ` (${plans[0]})` : ''}: ${chunk}. Type one on the login page to connect.`);
+      messages.push(`${company} WiFi codes${plans.length === 1 ? ` (${plans[0]})` : ''}: ${chunk}.${loginLink ? ` Type one here to connect: ${loginLink}` : ' Type one on the login page to connect.'}`);
     }
   }
 
