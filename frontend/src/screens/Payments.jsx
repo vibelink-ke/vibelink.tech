@@ -4,7 +4,7 @@ import { color, font, radius, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
-import { exportTable } from '../lib/export';
+import { exportTable, downloadInvoice } from '../lib/export';
 import ExportMenu from '../ui/ExportMenu';
 import { Badge, Button, Empty, Field, Input, Modal, Screen, Select, Table, Textarea } from '../ui/primitives';
 
@@ -1065,21 +1065,80 @@ export default function Payments() {
 
       <Modal
         open={!!invoiceView}
-        title={invoiceView?.number ?? 'Invoice'}
+        title="Invoice"
         onClose={() => setInvoiceView(null)}
-        footer={<Button onClick={() => setInvoiceView(null)}>Close</Button>}
+        footer={
+          invoiceView && (
+            <>
+              <Button
+                onClick={() => {
+                  const link = `${window.location.origin}/invoice/${invoiceView.id}`;
+                  navigator.clipboard?.writeText(link).catch(() => {});
+                  store.toast('Invoice link copied');
+                }}
+              >
+                Copy link
+              </Button>
+              <Button
+                onClick={() => {
+                  const client = store.clients.find((c) => c.id === invoiceView.subscriber_id);
+                  const plan = (store.plans ?? []).find((p) => p.id === (invoiceView.plan_id ?? client?.plan_id));
+                  downloadInvoice(`Invoice ${invoiceView.number}.pdf`, {
+                    company: store.session?.company, number: invoiceView.number,
+                    subscriberName: client?.name, accountCode: client?.account_code,
+                    planTitle: invoiceView.reason || plan?.title, amount: invoiceView.amount, paid: invoiceView.paid,
+                    dueDate: invoiceView.due_date ? new Date(invoiceView.due_date).toLocaleDateString('en-KE') : '—',
+                    status: invoiceView.status, link: `${window.location.origin}/invoice/${invoiceView.id}`,
+                  });
+                }}
+              >
+                Download PDF
+              </Button>
+              <Button variant="primary" onClick={() => setInvoiceView(null)}>Close</Button>
+            </>
+          )
+        }
       >
-        {invoiceView && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <Row k="Reason" v={invoiceView.reason || '—'} />
-            <Row k="Amount" v={money(invoiceView.amount)} />
-            <Row k="Paid so far" v={money(invoiceView.paid)} />
-            <Row k="Outstanding" v={money(Number(invoiceView.amount) - Number(invoiceView.paid))} />
-            <Row k="Due" v={invoiceView.due_date ? new Date(invoiceView.due_date).toLocaleDateString('en-KE') : '—'} />
-            <Row k="Status" v={<Badge tone={invoiceView.status}>{invoiceView.status}</Badge>} />
-            <Row k="Raised" v={invoiceView.created_at ? new Date(invoiceView.created_at).toLocaleString('en-KE') : '—'} />
-          </div>
-        )}
+        {invoiceView && (() => {
+          const client = store.clients.find((c) => c.id === invoiceView.subscriber_id);
+          const plan = (store.plans ?? []).find((p) => p.id === (invoiceView.plan_id ?? client?.plan_id));
+          const outstanding = Number(invoiceView.amount) - Number(invoiceView.paid);
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, border: `1px solid ${color.line}`, borderRadius: radius.lg, overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '16px 18px', background: color.cardBg }}>
+                <div>
+                  <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', color: color.muted, textTransform: 'uppercase' }}>
+                    {store.session?.company}
+                  </span>
+                  <div style={{ fontSize: 18, fontWeight: 700, marginTop: 2 }}>{invoiceView.number}</div>
+                </div>
+                <Badge tone={invoiceView.status}>{invoiceView.status}</Badge>
+              </div>
+
+              <div style={{ padding: '14px 18px', borderTop: `1px solid ${color.line}`, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '.06em', color: color.muted, textTransform: 'uppercase' }}>Billed to</span>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>{client?.name || 'Walk-in / no account'}</span>
+                {client?.account_code && <span style={{ fontSize: 12.5, color: color.muted }}>Account {client.account_code}</span>}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 18px', background: color.cardBg, borderTop: `1px solid ${color.line}`, fontSize: 11.5, fontWeight: 700, color: color.muted, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                <span>Description</span>
+                <span>Amount</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 18px', borderTop: `1px solid ${color.line}`, fontSize: 13.5 }}>
+                <span>{invoiceView.reason || plan?.title || 'Service'}</span>
+                <span style={{ fontFamily: font.mono }}>{money(invoiceView.amount)}</span>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, padding: '14px 18px', borderTop: `1px solid ${color.line}` }}>
+                <Row k="Paid so far" v={money(invoiceView.paid)} />
+                <Row k="Balance due" v={<span style={{ color: outstanding > 0 ? color.rust : color.green }}>{money(outstanding)}</span>} />
+                <Row k="Due date" v={invoiceView.due_date ? new Date(invoiceView.due_date).toLocaleDateString('en-KE') : '—'} />
+                <Row k="Raised" v={invoiceView.created_at ? new Date(invoiceView.created_at).toLocaleString('en-KE') : '—'} />
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       <Modal
