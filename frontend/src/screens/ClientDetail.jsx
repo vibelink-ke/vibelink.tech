@@ -7,6 +7,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
 import ClientOnu from './clients/ClientOnu';
+import { Signal, StatusBadge } from './SmartOlt';
 import { downloadInvoice } from '../lib/export';
 import { useInvoicePay } from '../ui/invoicePay';
 
@@ -165,6 +166,22 @@ export default function ClientDetail() {
   const isEmptyLine = (l) => !l.plan_id && !l.router_id && !l.pppoe_user && !l.pppoe_pass && !l.static_ip;
   const emptyLine = siblings.find(isEmptyLine);
   const visibleSiblings = siblings.filter((l) => !isEmptyLine(l));
+
+  // Each line is its own ONU in SmartOLT (client_id there is a line id, not an
+  // account), so a two-service account can have a fibre signal on one line and
+  // not the other — fetched once per account and looked up per line below,
+  // same source Clients.jsx's list SIGNAL column and the Fibre tab both use.
+  const soOn = !!store.session?.features?.smartolt && !!store.session?.perms?.['smartolt.view'];
+  const [onuByLine, setOnuByLine] = useState(() => new Map());
+  useEffect(() => {
+    if (!soOn) return undefined;
+    const load = () => api.smartoltOnus()
+      .then((rows) => setOnuByLine(new Map(rows.filter((r) => r.client_id).map((r) => [r.client_id, r]))))
+      .catch(() => {});
+    load();
+    const t = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(t);
+  }, [soOn]);
 
   const [editing, setEditing] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set(client ? [client.id] : []));
@@ -743,6 +760,15 @@ export default function ClientDetail() {
                       />
                       <KV k="Expiry" v={line.expires_at ? new Date(line.expires_at).toLocaleString('en-KE') : '—'} />
                       <KV k="Router" v={lineRouter?.name ?? '—'} />
+                      {soOn && onuByLine.get(line.id) && (
+                        <KV
+                          k="Signal"
+                          v={(() => {
+                            const onu = onuByLine.get(line.id);
+                            return onu.status !== 'online' ? <StatusBadge status={onu.status} /> : <Signal dbm={onu.signal_dbm} cls={onu.signal_class} />;
+                          })()}
+                        />
+                      )}
                       {store.session?.perms?.['tr069.view'] && (
                         <KV
                           k="TR-069 serial"
