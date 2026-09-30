@@ -5,6 +5,7 @@ import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { exportTable, downloadInvoice } from '../lib/export';
+import { useInvoicePay } from '../ui/invoicePay';
 import ExportMenu from '../ui/ExportMenu';
 import { Badge, Button, Empty, Field, Input, Modal, Screen, Select, Table, Textarea } from '../ui/primitives';
 
@@ -63,6 +64,7 @@ const whenFull = (d) => {
 
 export default function Payments() {
   const store = useStore();
+  const pay = useInvoicePay(store);
   const [tab, setTab] = useState('unmatched');
   const [resolving, setResolving] = useState(null);
   const [assignTo, setAssignTo] = useState('');
@@ -1070,15 +1072,11 @@ export default function Payments() {
         footer={
           invoiceView && (
             <>
-              <Button
-                onClick={() => {
-                  const link = `${window.location.origin}/invoice/${invoiceView.id}`;
-                  navigator.clipboard?.writeText(link).catch(() => {});
-                  store.toast('Invoice link copied');
-                }}
-              >
-                Copy link
-              </Button>
+              {['open', 'partial'].includes(invoiceView.status) && Number(invoiceView.amount) - Number(invoiceView.paid) > 0 && (
+                <Button variant="primary" onClick={() => { setInvoiceView(null); pay.open(invoiceView); }}>
+                  Click to pay
+                </Button>
+              )}
               <Button
                 onClick={() => {
                   const client = store.clients.find((c) => c.id === invoiceView.subscriber_id);
@@ -1094,7 +1092,7 @@ export default function Payments() {
               >
                 Download PDF
               </Button>
-              <Button variant="primary" onClick={() => setInvoiceView(null)}>Close</Button>
+              <Button onClick={() => setInvoiceView(null)}>Close</Button>
             </>
           )
         }
@@ -1210,6 +1208,7 @@ export default function Payments() {
       </Modal>
 
       <ActionResult state={action.state} onClose={action.dismiss} />
+      {pay.modal}
     </Screen>
   );
 }

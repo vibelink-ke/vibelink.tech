@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
 import ClientOnu from './clients/ClientOnu';
 import { downloadInvoice } from '../lib/export';
+import { useInvoicePay } from '../ui/invoicePay';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -126,6 +127,7 @@ const areaPath = (values, w, h, max) => {
 
 export default function ClientDetail() {
   const store = useStore();
+  const pay = useInvoicePay(store);
   const navigate = useNavigate();
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
@@ -1103,12 +1105,14 @@ export default function ClientDetail() {
                         >
                           PDF
                         </span>
-                        <span
-                          style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
-                          onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); store.toast('Invoice link copied'); }}
-                        >
-                          Copy link
-                        </span>
+                        {['open', 'partial'].includes(inv.status) && Number(inv.amount) - Number(inv.paid) > 0 && (
+                          <span
+                            style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                            onClick={() => pay.open(inv)}
+                          >
+                            Click to pay
+                          </span>
+                        )}
                       </span>
                     </div>
                   );
@@ -1545,6 +1549,7 @@ export default function ClientDetail() {
           </div>
         )}
       </Modal>
+      {pay.modal}
     </Screen>
   );
 }

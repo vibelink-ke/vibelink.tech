@@ -16,8 +16,10 @@ const kes = (n) => Number(n ?? 0).toLocaleString('en-KE');
 export default function InvoiceView() {
   const [state, setState] = useState({ loading: true, data: null, error: null });
   const [phone, setPhone] = useState('');
-  const [amount, setAmount] = useState('');
-  const [pay, setPay] = useState({ kind: 'idle' });   // idle | sending | waiting | done | failed
+  // idle -> phone (asking) -> sending -> waiting -> done | failed. "phone" is its
+  // own step rather than an always-visible field: the whole point of "click to
+  // pay" is one big button first, not a form to fill in before you've decided to pay.
+  const [pay, setPay] = useState({ kind: 'idle' });
 
   useEffect(() => {
     let live = true;
@@ -28,11 +30,7 @@ export default function InvoiceView() {
         if (!r.ok) throw new Error(data?.error ?? 'Could not load this invoice.');
         return data;
       })
-      .then((data) => {
-        if (!live) return;
-        setState({ loading: false, data, error: null });
-        setAmount(String(Math.max(0, Number(data.amount) - Number(data.paid))));
-      })
+      .then((data) => { if (live) setState({ loading: false, data, error: null }); })
       .catch((e) => { if (live) setState({ loading: false, data: null, error: e.message }); });
     return () => { live = false; };
   }, []);
@@ -42,7 +40,7 @@ export default function InvoiceView() {
     try {
       const r = await fetch(`/api/public/invoices/${encodeURIComponent(id)}/pay`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone, amount: amount === '' ? undefined : Number(amount) }),
+        body: JSON.stringify({ phone }),
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) throw new Error(body?.error ?? 'Could not send the prompt.');
@@ -71,6 +69,7 @@ export default function InvoiceView() {
   const wrap = { minHeight: '100vh', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', background: '#f4f6f4', padding: '40px 16px', fontFamily: font.body ?? 'system-ui, sans-serif' };
   const input = { width: '100%', height: 42, borderRadius: 8, border: '1px solid #d8ddd7', padding: '0 12px', fontSize: 14, boxSizing: 'border-box' };
   const busy = pay.kind === 'sending' || pay.kind === 'waiting';
+  const asking = pay.kind === 'phone' || busy;
   const owed = data ? Number(data.amount) - Number(data.paid) : 0;
   const payable = data && ['open', 'partial'].includes(data.status) && owed > 0;
 
@@ -136,17 +135,32 @@ export default function InvoiceView() {
 
             {payable && (
               <div style={{ borderTop: '1px solid #eef1ee', paddingTop: 18, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>Pay with M-Pesa</p>
-                <input style={input} placeholder="07xx xxx xxx" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={busy} />
-                <input style={input} type="number" min="10" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
-                <button
-                  type="button" onClick={send} disabled={busy || !phone}
-                  style={{ height: 42, borderRadius: 8, border: 0, background: '#1c7a4d', color: '#fff', fontSize: 14, fontWeight: 700, cursor: busy || !phone ? 'default' : 'pointer', opacity: busy || !phone ? 0.6 : 1 }}
-                >
-                  {pay.kind === 'sending' ? 'Sending…' : pay.kind === 'waiting' ? 'Check your phone…' : 'Send M-Pesa prompt'}
-                </button>
+                {!asking && pay.kind !== 'done' ? (
+                  <button
+                    type="button"
+                    onClick={() => setPay({ kind: 'phone' })}
+                    style={{ height: 46, borderRadius: 8, border: 0, background: '#1c7a4d', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
+                  >
+                    Click to pay KES {kes(owed)}
+                  </button>
+                ) : pay.kind !== 'done' && (
+                  <>
+                    <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>Which number should we prompt?</p>
+                    <input
+                      style={input} placeholder="07xx xxx xxx" value={phone} autoFocus
+                      onChange={(e) => setPhone(e.target.value)} disabled={busy}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && phone && !busy) send(); }}
+                    />
+                    <button
+                      type="button" onClick={send} disabled={busy || !phone}
+                      style={{ height: 42, borderRadius: 8, border: 0, background: '#1c7a4d', color: '#fff', fontSize: 14, fontWeight: 700, cursor: busy || !phone ? 'default' : 'pointer', opacity: busy || !phone ? 0.6 : 1 }}
+                    >
+                      {pay.kind === 'sending' ? 'Sending…' : pay.kind === 'waiting' ? 'Check your phone…' : `Send prompt for KES ${kes(owed)}`}
+                    </button>
+                  </>
+                )}
                 {pay.kind === 'waiting' && <span style={{ fontSize: 12.5, color: '#6b756a' }}>Waiting for you to approve it on your phone…</span>}
-                {pay.kind === 'done' && <span style={{ fontSize: 12.5, color: '#1c7a4d', fontWeight: 600 }}>Payment received — thank you. Refresh this page to see it applied.</span>}
+                {pay.kind === 'done' && <span style={{ fontSize: 13, color: '#1c7a4d', fontWeight: 600 }}>Payment received — thank you. Refresh this page to see it applied.</span>}
                 {pay.kind === 'failed' && <span style={{ fontSize: 12.5, color: '#a13d1f' }}>{pay.message}</span>}
               </div>
             )}

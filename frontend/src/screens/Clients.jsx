@@ -6,6 +6,7 @@ import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
 import { exportTable, downloadInvoice } from '../lib/export';
+import { useInvoicePay } from '../ui/invoicePay';
 import ExportMenu from '../ui/ExportMenu';
 import { Signal, StatusBadge } from './SmartOlt';
 import ExpiryCalendar from './clients/ExpiryCalendar';
@@ -179,6 +180,7 @@ const action = { fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight
 
 export default function Clients() {
   const store = useStore();
+  const pay = useInvoicePay(store);
   const navigate = useNavigate();
   const [filter, setFilter] = useState('all');
   const [checking, setChecking] = useState(false);
@@ -952,12 +954,14 @@ export default function Clients() {
                               >
                                 PDF
                               </span>
-                              <span
-                                style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
-                                onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); store.toast?.('Invoice link copied'); }}
-                              >
-                                Copy link
-                              </span>
+                              {['open', 'partial'].includes(inv.status) && Number(inv.amount) - Number(inv.paid) > 0 && (
+                                <span
+                                  style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                                  onClick={() => pay.open(inv)}
+                                >
+                                  Click to pay
+                                </span>
+                              )}
                             </span>
                           </div>
                           {inv.reason && <span style={{ color: color.muted, fontSize: 11.5 }}>{inv.reason}</span>}
@@ -972,6 +976,7 @@ export default function Clients() {
         )}
       </Modal>
       <ActionResult state={action.state} onClose={action.dismiss} />
+      {pay.modal}
     </Screen>
   );
 }
