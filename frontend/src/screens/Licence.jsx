@@ -3,6 +3,7 @@ import { color, font, kes } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Empty, Field, Grid, Input, Screen, Stat, Table } from '../ui/primitives';
+import { downloadStatement } from '../lib/export';
 
 const SALES_EMAIL = 'sales@vibelink.co.ke';
 const STATUS_TONE = { open: 'pending', invoiced: 'default', paid: 'active', waived: 'default' };
@@ -243,6 +244,21 @@ export default function Licence() {
                   <Badge tone={STATUS_TONE[s.status]}>{s.status}</Badge>
                   {s.paid_at && <span style={{ fontSize: 11, color: color.muted }}>{dateLabel(s.paid_at)}</span>}
                 </div>
+              ),
+            },
+            {
+              key: 'pdf', label: '',
+              render: (s) => (
+                <span
+                  style={{ color: color.green, fontWeight: 600, fontSize: 12.5, cursor: 'pointer' }}
+                  onClick={() => downloadStatement(`Statement ${s.month}.pdf`, {
+                    tenant: data.tenant, month: monthLabel(s.month),
+                    hotspotFee: s.hotspot_fee, pppoeFee: s.pppoe_fee, flatFee: s.flat_fee, total: s.total,
+                    status: s.status, paidAt: s.paid_at ? dateLabel(s.paid_at) : null,
+                  })}
+                >
+                  PDF
+                </span>
               ),
             },
           ]}

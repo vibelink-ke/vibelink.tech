@@ -7,6 +7,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
 import ClientOnu from './clients/ClientOnu';
+import { downloadInvoice } from '../lib/export';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -1076,8 +1077,10 @@ export default function ClientDetail() {
               <div style={{ display: 'grid', gap: 8 }}>
                 {invoices.map((inv) => {
                   const tax = taxOf(Number(inv.amount));
+                  const owner = siblings.find((s) => s.id === inv.subscriber_id) ?? client;
+                  const link = `${window.location.origin}/invoice/${inv.id}`;
                   return (
-                    <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
+                    <div key={inv.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
                       <span style={{ fontFamily: font.mono }}>{inv.number}</span>
                       <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
                       <span>
@@ -1087,6 +1090,26 @@ export default function ClientDetail() {
                         )}
                       </span>
                       <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
+                      <span style={{ display: 'flex', gap: 8 }}>
+                        <span
+                          style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                          onClick={() => downloadInvoice(`Invoice ${inv.number}.pdf`, {
+                            company: store.session?.company, number: inv.number, subscriberName: owner?.name,
+                            accountCode: owner?.account_code, planTitle: planById[owner?.plan_id]?.title,
+                            amount: inv.amount, paid: inv.paid,
+                            dueDate: inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—',
+                            status: inv.status, link,
+                          })}
+                        >
+                          PDF
+                        </span>
+                        <span
+                          style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                          onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); store.toast('Invoice link copied'); }}
+                        >
+                          Copy link
+                        </span>
+                      </span>
                     </div>
                   );
                 })}

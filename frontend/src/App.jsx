@@ -13,6 +13,7 @@ import LicenceBanner from './app/LicenceBanner';
 import LicenceLocked from './screens/LicenceLocked';
 import CustomerPortal from './screens/CustomerPortal';
 import VerifyStaff from './screens/VerifyStaff';
+import InvoiceView from './screens/InvoiceView';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
 import { api } from './api/client';
@@ -189,6 +190,10 @@ export default function App() {
   // session and never will, so this has to be reachable the same way the
   // customer portal above is.
   if (pathname.startsWith('/verify-staff/')) return <VerifyStaff />;
+
+  // A shared invoice link (SMS/WhatsApp/email) — same reasoning: reachable by
+  // whoever holds the link, with no portal session at all.
+  if (pathname.startsWith('/invoice/')) return <InvoiceView />;
 
   // Reachable with no session at all — that is the point of a password
   // reset — so this has to come before the session gate below, not after it.

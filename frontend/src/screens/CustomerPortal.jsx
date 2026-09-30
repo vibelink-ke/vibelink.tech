@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Footer from '../app/Footer';
 import { font } from '../theme/tokens';
+import { downloadInvoice } from '../lib/export';
 
 /**
  * The customer's own page, at /customer.
@@ -800,22 +801,41 @@ export default function CustomerPortal() {
                       {Number(inv.paid) > 0 ? ` (KES ${inv.paid} paid)` : ''}
                     </span>
                   </div>
-                  {payable ? (
-                    <button
-                      style={{ ...button(true), padding: '6px 12px', fontSize: 13 }}
-                      onClick={() => {
-                        setPayTarget({ number: inv.number, owed });
-                        setPayAmount('');
-                        setPayPhone(payPhone || String(me.phone ?? ''));
-                        setPayOpen(true);
-                        setPayMsg('');
-                      }}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span
+                      style={{ fontSize: 12, color: pc.teal, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => downloadInvoice(`Invoice ${inv.number}.pdf`, {
+                        company: me.company, number: inv.number, subscriberName: me.name, accountCode: me.account,
+                        planTitle: me.plan?.title, amount: inv.amount, paid: inv.paid,
+                        dueDate: new Date(inv.due_date).toLocaleDateString('en-KE'), status: inv.status,
+                        link: `${window.location.origin}/invoice/${inv.id}`,
+                      })}
                     >
-                      Pay
-                    </button>
-                  ) : (
-                    <Badge text={inv.status} tone={INVOICE_TONE[inv.status]} />
-                  )}
+                      PDF
+                    </span>
+                    <span
+                      style={{ fontSize: 12, color: pc.teal, fontWeight: 600, cursor: 'pointer' }}
+                      onClick={() => navigator.clipboard?.writeText(`${window.location.origin}/invoice/${inv.id}`).catch(() => {})}
+                    >
+                      Copy link
+                    </span>
+                    {payable ? (
+                      <button
+                        style={{ ...button(true), padding: '6px 12px', fontSize: 13 }}
+                        onClick={() => {
+                          setPayTarget({ number: inv.number, owed });
+                          setPayAmount('');
+                          setPayPhone(payPhone || String(me.phone ?? ''));
+                          setPayOpen(true);
+                          setPayMsg('');
+                        }}
+                      >
+                        Pay
+                      </button>
+                    ) : (
+                      <Badge text={inv.status} tone={INVOICE_TONE[inv.status]} />
+                    )}
+                  </div>
                 </div>
               );
             })}

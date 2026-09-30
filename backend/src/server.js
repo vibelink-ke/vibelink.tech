@@ -1027,6 +1027,84 @@ app.get('/api/public/staff-verify/:token', wrap(async (req, res) => {
   });
 }));
 
+/**
+ * A public, unguessable link to one specific invoice — the invoice's own id (a random UUID) is the
+ * token, same convention as /api/public/staff-verify's verification_token just above. Reachable from
+ * any hostname, not gated by tenant subdomain or portal login, so it can be shared by SMS/WhatsApp/
+ * email to a customer who has never signed into the portal at all — see frontend's /invoice/:id.
+ *
+ * What's returned is deliberately thin: first name only (not the full name or phone) and the account
+ * code they would already type on a receipt anyway — nothing here is more exposed than what's already
+ * printed on the paybill instructions themselves, since this link can end up screenshotted or
+ * forwarded well beyond the one customer it was made for.
+ */
+app.get('/api/public/invoices/:id', wrap(async (req, res) => {
+  const { rows: [inv] } = await pool.query(
+    `select i.number, i.amount, i.paid, i.due_date, i.status,
+            s.name as subscriber_name, s.account_code,
+            p.title as plan_title,
+            t.name as company, t.support_phone
+       from invoices i
+       join subscribers s on s.id = i.subscriber_id
+       join tenants t on t.id = i.tenant_id
+       left join plans p on p.id = s.plan_id
+      where i.id = $1`,
+    [req.params.id]);
+  if (!inv) return res.status(404).json({ error: 'No such invoice' });
+  res.json({
+    number: inv.number, amount: inv.amount, paid: inv.paid, dueDate: inv.due_date, status: inv.status,
+    planTitle: inv.plan_title, company: inv.company, supportPhone: inv.support_phone,
+    subscriberName: (inv.subscriber_name ?? '').trim().split(/\s+/)[0] ?? '',
+    accountCode: inv.account_code,
+  });
+}));
+
+/**
+ * Pay that same invoice from the public link — no session, no portal login, rate-limited the same
+ * way every other STK trigger in this file is (stkLimiter). Reuses stkPushForSubscriber exactly as
+ * the authenticated /portal/pay-invoice does; the only difference is being told which invoice by its
+ * id in the URL instead of by a portal session's own subscriber_id.
+ */
+app.post('/api/public/invoices/:id/pay', stkLimiter, wrap(async (req, res) => {
+  const { rows: [inv] } = await pool.query(
+    `select i.id, i.tenant_id, i.number, i.amount, i.paid, i.subscriber_id, s.router_id, s.account_code
+       from invoices i join subscribers s on s.id = i.subscriber_id
+      where i.id=$1 and i.status in ('open','partial')`,
+    [req.params.id]);
+  if (!inv) return res.status(404).json({ error: 'That invoice was not found, or is already settled.' });
+
+  const owed = Number(inv.amount) - Number(inv.paid);
+  const amount = req.body?.amount != null ? Number(req.body.amount) : owed;
+  if (!(amount > 0) || amount > 1_000_000) {
+    return res.status(400).json({ error: 'Enter a valid amount to pay.' });
+  }
+
+  let phone = String(req.body?.phone ?? '').trim();
+  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) {
+    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  }
+
+  try {
+    const { checkoutId } = await stkPushForSubscriber(inv.tenant_id, {
+      phone, amount, accountCode: inv.account_code, description: `Invoice ${inv.number}`,
+      purpose: { subscriber_id: inv.subscriber_id, invoice_id: inv.id }, routerId: inv.router_id,
+    });
+    res.json({ phone, amount, checkoutId });
+  } catch (e) {
+    res.status(e.status ?? 502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
+/** What the public invoice page polls while an STK prompt is out — scoped to invoice-pay requests only. */
+app.get('/api/public/invoices/pay-status/:checkoutId', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    `select status, result_desc from stk_requests
+      where checkout_id=$1 and purpose ? 'invoice_id'`,
+    [req.params.checkoutId]);
+  res.json(r ?? { status: 'unknown' });
+}));
+
 /** "Adding a TV or console?" — see devicesPage() for what this actually does. */
 app.get('/hotspot/devices', wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
@@ -2569,7 +2647,7 @@ app.get('/portal/me', wrap(async (req, res) => {
    * validates against an outage's own free-text site name.
    */
   const { rows: invoices } = await pool.query(
-    `select number, amount, paid, due_date, status from invoices
+    `select id, number, amount, paid, due_date, status from invoices
       where tenant_id=$1 and subscriber_id=$2
       order by due_date desc limit 10`, [s.tenant_id, s.subscriber_id]);
   const { rows: tickets } = await pool.query(

@@ -5,7 +5,7 @@ import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
 import { parseCsv } from '../lib/csv';
-import { exportTable } from '../lib/export';
+import { exportTable, downloadInvoice } from '../lib/export';
 import ExportMenu from '../ui/ExportMenu';
 import { Signal, StatusBadge } from './SmartOlt';
 import ExpiryCalendar from './clients/ExpiryCalendar';
@@ -930,17 +930,40 @@ export default function Clients() {
                 }
                 return (
                   <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
-                    {invoices.slice(0, 6).map((inv) => (
-                      <div key={inv.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span style={{ fontFamily: font.mono }}>{inv.number}</span>
-                          <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
-                          <span>KES {kes(inv.paid)} / {kes(inv.amount)}</span>
-                          <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
+                    {invoices.slice(0, 6).map((inv) => {
+                      const link = `${window.location.origin}/invoice/${inv.id}`;
+                      return (
+                        <div key={inv.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5 }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontFamily: font.mono }}>{inv.number}</span>
+                            <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
+                            <span>KES {kes(inv.paid)} / {kes(inv.amount)}</span>
+                            <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
+                            <span style={{ display: 'flex', gap: 8 }}>
+                              <span
+                                style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                                onClick={() => downloadInvoice(`Invoice ${inv.number}.pdf`, {
+                                  company: store.session?.company, number: inv.number, subscriberName: editing.name,
+                                  accountCode: editing.account_code, planTitle: planTitleById.get(editing.plan_id),
+                                  amount: inv.amount, paid: inv.paid,
+                                  dueDate: inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—',
+                                  status: inv.status, link,
+                                })}
+                              >
+                                PDF
+                              </span>
+                              <span
+                                style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}
+                                onClick={() => { navigator.clipboard?.writeText(link).catch(() => {}); store.toast?.('Invoice link copied'); }}
+                              >
+                                Copy link
+                              </span>
+                            </span>
+                          </div>
+                          {inv.reason && <span style={{ color: color.muted, fontSize: 11.5 }}>{inv.reason}</span>}
                         </div>
-                        {inv.reason && <span style={{ color: color.muted, fontSize: 11.5 }}>{inv.reason}</span>}
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 );
               })()}

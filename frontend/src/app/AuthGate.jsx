@@ -18,7 +18,7 @@ import { passwordProblem } from '../lib/password';
 
 const BLANK = {
   identifier: '', email: '', username: '', password: '', password2: '',
-  company: '', subdomain: '', name: '', phone: '', remember: true, terms: false,
+  company: '', subdomain: '', name: '', phone: '', remember: true,
 };
 
 const label = { fontSize: 12.5, fontWeight: 600, color: '#4a524c' };
@@ -251,7 +251,6 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
     const pwProblem = passwordProblem(f.password);
     if (pwProblem) return setError(pwProblem);
     if (f.password !== f.password2) return setError('The two passwords do not match.');
-    if (!f.terms) return setError('Accept the terms to continue.');
     setBusy(true);
     setError('');
     try {
@@ -612,10 +611,6 @@ export default function AuthGate({ onSignedIn, brandName = 'Vibelink', only = nu
                   />
                 </Field>
               </div>
-
-              <Check on={f.terms} onClick={toggle('terms')} style={{ fontSize: 12, lineHeight: 1.4, flex: '0 0 auto' }}>
-                I accept the terms — free for 14 days, then KES 500 to activate. After that, billed monthly based on revenue: under KES 10,000 pays KES 1,000, KES 10,001–20,000 pays KES 2,000, over KES 20,000 pays KES 3,000.
-              </Check>
 
               {error && (
                 <div
