@@ -381,7 +381,13 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   const proRated = unitMinutes && unitMinutes < sub.duration_min;
 
   const unitPrice = proRated ? price * (unitMinutes / sub.duration_min) : price;
-  const units = Math.floor(available / unitPrice);
+  // A custom_price of exactly 0 (not null) divides available/unitPrice into Infinity, which every
+  // downstream date computation then chokes on: new Date(Infinity) is an Invalid Date, and
+  // ceilToMidnight's Intl.DateTimeFormat call throws "Invalid time value" on one — confirmed live,
+  // a real payment applied and was charged, then crashed before service was ever extended. A
+  // non-positive unit price has no meaningful "how many periods did this buy" answer, so the
+  // payment lands as wallet credit instead, same as an underpayment already does.
+  const units = unitPrice > 0 ? Math.floor(available / unitPrice) : 0;
   const full = units >= 1;
   const minutesBought = units * (proRated ? unitMinutes : sub.duration_min);
 
