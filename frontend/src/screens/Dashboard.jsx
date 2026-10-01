@@ -368,7 +368,11 @@ export default function Dashboard() {
                 subtitle: 'In recognition of outstanding work',
                 detail: mvpAchievement,
                 signerName: store.session?.name,
-                signerTitle: store.session?.role ? store.session.role[0].toUpperCase() + store.session.role.slice(1) : undefined,
+                // "Director" reads better on a signed certificate than the internal role
+                // name "owner" — every other role is shown as-is, just capitalized.
+                signerTitle: store.session?.role
+                  ? (store.session.role === 'owner' ? 'Director' : store.session.role[0].toUpperCase() + store.session.role.slice(1))
+                  : undefined,
                 logoUrl: '/api/public/favicon',
               });
             }}
