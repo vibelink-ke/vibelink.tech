@@ -366,7 +366,6 @@ export default function Dashboard() {
                 name: lastMonthMvp.name,
                 category: lastMonthMvp.metric === 'sales' ? 'Top performer — Sales team' : 'Top performer — Technical team',
                 subtitle: 'In recognition of outstanding work',
-                detail: mvpAchievement,
                 signerName: store.session?.name,
                 // "Director" reads better on a signed certificate than the internal role
                 // name "owner" — every other role is shown as-is, just capitalized.
