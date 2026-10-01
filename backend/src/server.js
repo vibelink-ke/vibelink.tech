@@ -10710,11 +10710,17 @@ app.get('/api/platform/sms-revenue', superAdminOnly, wrap(async (req, res) => {
  * mid-flight with Safaricom ('processing') or already confirmed ('paid'). 'cancelled'/'failed' rows
  * are excluded on purpose: that money was already folded back into a fresh pending row (cancelPayout,
  * jobs.js), so counting them too would double it.
+ *
+ * `settled` is the gross amount accrued for a paid settlement, not what actually reached the tenant's
+ * phone/till/bank — a 'tiered' settlement_fee_mode tenant has Safaricom's own B2C fee deducted first
+ * (sendPayout, jobs.js), so `settled_fees` is broken out separately: settled - settled_fees is the real
+ * net amount sent.
  */
 app.get('/api/platform/tenant-balances', superAdminOnly, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select t.id as tenant_id, t.name as tenant,
             coalesce(sum(s.amount) filter (where s.status = 'paid'), 0) as settled,
+            coalesce(sum(s.fee) filter (where s.status = 'paid'), 0) as settled_fees,
             coalesce(sum(s.amount) filter (where s.status in ('pending', 'processing')), 0) as remaining,
             coalesce(sum(s.amount) filter (where s.status in ('paid', 'pending', 'processing')), 0) as collected
        from tenants t

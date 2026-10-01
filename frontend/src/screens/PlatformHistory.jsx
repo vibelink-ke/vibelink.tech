@@ -46,6 +46,12 @@ export default function PlatformHistory() {
               { key: 'tenant', label: 'Tenant', render: (r) => <span style={{ fontWeight: 600 }}>{r.tenant}</span> },
               { key: 'collected', label: 'Collected', align: 'right', render: (r) => <span style={money}>KES {kes(r.collected)}</span> },
               { key: 'settled', label: 'Settled', align: 'right', render: (r) => <span style={{ ...money, color: color.green }}>KES {kes(r.settled)}</span> },
+              {
+                key: 'fee', label: 'Of which fee', align: 'right',
+                render: (r) => (Number(r.settled_fees) > 0
+                  ? <span style={{ ...money, color: color.muted }}>KES {kes(r.settled_fees)}</span>
+                  : <span style={{ color: color.muted }}>—</span>),
+              },
               { key: 'remaining', label: 'Remaining', align: 'right', render: (r) => <span style={{ ...money, color: Number(r.remaining) > 0 ? color.amberInk : color.muted, fontWeight: 700 }}>KES {kes(r.remaining)}</span> },
             ]}
           />
