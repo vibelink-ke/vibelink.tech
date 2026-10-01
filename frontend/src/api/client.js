@@ -127,6 +127,8 @@ export const api = {
   platformMarkSettlementPaid: (id, receipt) => post(`/api/platform/settlements/${id}/mark-paid`, { receipt }),
   platformPayouts: (tenantId) => get(`/api/platform/payouts${tenantId ? `?tenantId=${tenantId}` : ''}`),
   platformPayIns: (tenantId) => get(`/api/platform/pay-ins${tenantId ? `?tenantId=${tenantId}` : ''}`),
+  platformSmsRevenue: () => get('/api/platform/sms-revenue'),
+  platformTenantBalances: () => get('/api/platform/tenant-balances'),
 
   // ── catalogue ──
   tariffs: () => get('/api/tariffs'),

@@ -10683,6 +10683,49 @@ app.get('/api/platform/pay-ins', superAdminOnly, wrap(async (req, res) => {
   res.json(rows);
 }));
 
+/**
+ * A third kind of platform income, alongside payouts/pay-ins above: a tenant buying more SMS credit
+ * (see /api/sms/buy-credits and daraja.js's 'sms_credit' purpose). The money lands as a regular
+ * `payments` row under the platform OWNER's own tenant_id — that is whose Daraja credentials the STK
+ * push actually went out on — with the real buyer named in payload.for_tenant, so it is looked up
+ * there rather than by tenant_id directly.
+ */
+app.get('/api/platform/sms-revenue', superAdminOnly, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select p.id, (p.payload->>'for_tenant')::uuid as tenant_id, coalesce(t.name, 'Unknown tenant') as tenant,
+            (p.payload->>'quantity')::int as quantity, p.amount, p.payer_phone as phone, p.provider_ref as reference,
+            p.applied_at as at
+       from payments p
+       left join tenants t on t.id = (p.payload->>'for_tenant')::uuid
+      where p.payload->>'type' = 'sms_credit'
+      order by p.applied_at desc
+      limit 500`);
+  res.json(rows);
+}));
+
+/**
+ * What a platform-collect tenant has had come in, what has actually been paid out to them, and what
+ * is still sitting with the platform waiting to go — the running total behind the single 'pending'
+ * settlements row each tenant accrues into (accrueSettlement, payments/apply.js) plus whatever is
+ * mid-flight with Safaricom ('processing') or already confirmed ('paid'). 'cancelled'/'failed' rows
+ * are excluded on purpose: that money was already folded back into a fresh pending row (cancelPayout,
+ * jobs.js), so counting them too would double it.
+ */
+app.get('/api/platform/tenant-balances', superAdminOnly, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select t.id as tenant_id, t.name as tenant,
+            coalesce(sum(s.amount) filter (where s.status = 'paid'), 0) as settled,
+            coalesce(sum(s.amount) filter (where s.status in ('pending', 'processing')), 0) as remaining,
+            coalesce(sum(s.amount) filter (where s.status in ('paid', 'pending', 'processing')), 0) as collected
+       from tenants t
+       left join settlements s on s.tenant_id = t.id
+      where t.platform_collect_enabled and t.deleted_at is null
+      group by t.id, t.name
+     having coalesce(sum(s.amount) filter (where s.status in ('paid', 'pending', 'processing')), 0) > 0
+      order by t.name`);
+  res.json(rows);
+}));
+
 app.post('/api/platform/settlements/:id/cancel', superAdminOnly, wrap(async (req, res) => {
   const { cancelPayout } = await import('./jobs.js');
   try {
