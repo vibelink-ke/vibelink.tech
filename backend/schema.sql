@@ -3130,3 +3130,17 @@ alter table tenants add column if not exists email_templates jsonb not null defa
 -- the spot rarely has a real address yet, only wherever the rep happened to be standing (see /work/my-leads).
 alter table leads add column if not exists lat numeric(9,6);
 alter table leads add column if not exists lng numeric(9,6);
+
+-- Some tenants want to go back to being charged by usage (hotspot_commission_pct + pppoe_client_rate,
+-- both already columns on this table from the older billing model) instead of the flat fee tiered on
+-- total revenue — both modes stay available per tenant, chosen here; flat_monthly_fee still overrides
+-- either one exactly as before (see charges.js's FIGURES). Every tenant that already exists is backfilled
+-- to 'tiered' explicitly, so this migration does not silently change what anyone currently pays — only
+-- a tenant an admin deliberately switches, or signs up from now on (the column default), starts on
+-- 'revenue', which is the main model again for new tenants.
+alter table tenants add column if not exists billing_mode text;
+update tenants set billing_mode = 'tiered' where billing_mode is null;
+alter table tenants alter column billing_mode set default 'revenue';
+alter table tenants alter column billing_mode set not null;
+alter table tenants drop constraint if exists tenants_billing_mode_check;
+alter table tenants add constraint tenants_billing_mode_check check (billing_mode in ('revenue', 'tiered'));

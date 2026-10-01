@@ -12642,10 +12642,39 @@ app.post('/api/platform/charges/:id/status', superAdminOnly, wrap(async (req, re
   res.json(c);
 }));
 
+/**
+ * Set the usage-billing rates (hotspot_commission_pct, pppoe_client_rate) for every tenant at
+ * once — for the admin who wants one rate across the board rather than visiting each tenant's
+ * own Edit screen. Only touches tenants on 'revenue' billing_mode; a 'tiered' tenant has no use
+ * for these rates (see charges.js). `alsoNew` additionally changes the column default, so a
+ * tenant that signs up after this keeps the new rate too.
+ */
+app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
+  const has = (k) => req.body?.[k] !== undefined && req.body?.[k] !== null && req.body?.[k] !== '';
+  const pppoe = has('pppoeClientRate') ? Number(req.body.pppoeClientRate) : null;
+  const hotspot = has('hotspotCommissionPct') ? Number(req.body.hotspotCommissionPct) : null;
+  if (pppoe === null && hotspot === null) return res.status(400).json({ error: 'Enter a PPPoE rate, a hotspot percentage, or both.' });
+  if (pppoe !== null && !(pppoe >= 0 && pppoe <= 100000)) return res.status(400).json({ error: 'The PPPoE rate must be zero or more.' });
+  if (hotspot !== null && !(hotspot >= 0 && hotspot <= 100)) return res.status(400).json({ error: 'The hotspot percentage must be between 0 and 100.' });
+
+  const sets = [];
+  const vals = [];
+  if (pppoe !== null) { vals.push(pppoe); sets.push(`pppoe_client_rate=$${vals.length}`); }
+  if (hotspot !== null) { vals.push(hotspot); sets.push(`hotspot_commission_pct=$${vals.length}`); }
+  const { rowCount } = await pool.query(`update tenants set ${sets.join(', ')} where deleted_at is null and billing_mode = 'revenue'`, vals);
+  if (req.body?.alsoNew) {
+    // validated numbers, formatted here — DDL cannot take a parameter
+    if (pppoe !== null) await pool.query(`alter table tenants alter column pppoe_client_rate set default ${pppoe.toFixed(2)}`);
+    if (hotspot !== null) await pool.query(`alter table tenants alter column hotspot_commission_pct set default ${hotspot.toFixed(2)}`);
+  }
+  res.json({ ok: true, updated: rowCount, pppoeClientRate: pppoe, hotspotCommissionPct: hotspot, alsoNew: !!req.body?.alsoNew });
+}));
+
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
-                   'settlement_frequency', 'settlement_time', 'flat_monthly_fee',
+                   'settlement_frequency', 'settlement_time', 'flat_monthly_fee', 'billing_mode',
+                   'hotspot_commission_pct', 'pppoe_client_rate',
                    'max_concurrent_clients'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
@@ -12667,6 +12696,17 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   }
   if ('settlement_frequency' in req.body && !['daily', 'weekly', 'manual'].includes(req.body.settlement_frequency)) {
     return res.status(400).json({ error: 'Settlement frequency must be daily, weekly or manual.' });
+  }
+  if ('billing_mode' in req.body && !['revenue', 'tiered'].includes(req.body.billing_mode)) {
+    return res.status(400).json({ error: 'Billing mode must be revenue or tiered.' });
+  }
+  if ('hotspot_commission_pct' in req.body) {
+    const v = Number(req.body.hotspot_commission_pct);
+    if (!(v >= 0 && v <= 100)) return res.status(400).json({ error: 'The hotspot commission must be between 0 and 100.' });
+  }
+  if ('pppoe_client_rate' in req.body) {
+    const v = Number(req.body.pppoe_client_rate);
+    if (!(v >= 0 && v <= 100000)) return res.status(400).json({ error: 'The PPPoE rate must be zero or more.' });
   }
   const { rows: [t] } = await pool.query(
     `update tenants set ${sets.map((k, i) => `${k}=$${i + 2}`).join(', ')} where id=$1 returning *`,

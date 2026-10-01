@@ -1,24 +1,28 @@
 import { pool, config, platformCollectConfig } from './db.js';
 
 /**
- * What tenants are charged each month for using the platform: a flat fee
- * tiered on their own total revenue that month (hotspot + PPPoE payments
- * combined) — under KES 10,000 pays 1,000, 10,001–20,000 pays 2,000, over
- * 20,000 pays 3,000. Replaces the old per-active-PPPoE-client-plus-hotspot-%
- * model, which needed a rate set correctly per tenant and still didn't scale
- * with what a small tenant could actually afford.
+ * What tenants are charged each month for using the platform — one of two
+ * models, chosen per tenant (tenants.billing_mode, see FIGURES below):
+ *   - 'revenue': a percentage of the tenant's own hotspot revenue plus a
+ *     fixed amount per active PPPoE client, at that tenant's own rates.
+ *   - 'tiered': a flat fee tiered on total revenue that month (hotspot +
+ *     PPPoE payments combined) — under KES 10,000 pays 1,000, 10,001–20,000
+ *     pays 2,000, over 20,000 pays 3,000.
+ * A new tenant starts on 'revenue'; an existing one keeps whatever it was
+ * on before this choice existed ('tiered', the only model there used to be)
+ * until an admin deliberately switches it.
  *
  * A tenant's own flat_monthly_fee, when the platform owner has set one,
- * overrides the tier entirely — the same "editable per tenant" escape hatch
- * the old model had, just simpler: there is no separate "usage" mode to
- * switch into any more, only whether an override is set or left blank.
+ * overrides either mode entirely — a number here always wins, regardless
+ * of billing_mode.
  *
  * A self-hosted tenant's revenue never reaches this platform's `payments`
- * table at all (it happens on their own server), so they cannot be tiered —
- * the signup route already requires a flat fee for them for that reason.
+ * table at all (it happens on their own server), so neither mode can work
+ * for them — the signup route already requires a flat fee for them for
+ * that reason.
  *
  * A closed month is written once to tenant_charges and never rewritten, so a
- * later tier or rate change cannot alter a statement already sent. The
+ * later rate, tier or mode change cannot alter a statement already sent. The
  * current month, and any month without a stored statement, is worked out
  * live.
  */
@@ -82,18 +86,41 @@ const BILLABLE = `
   and t.subdomain <> 'demo'
   and t.id is distinct from (select tenant_id from staff where is_super_admin and tenant_id is not null limit 1)`;
 
+/**
+ * Two billing modes live side by side, chosen per tenant (tenants.billing_mode):
+ *   - 'revenue': a percentage of the tenant's own HOTSPOT revenue (hotspot_commission_pct)
+ *     plus a fixed amount per ACTIVE PPPoE client (pppoe_client_rate) — the original model,
+ *     both rates editable per tenant, defaulting to 3% and KES 16.
+ *   - 'tiered': a flat fee tiered on total revenue (hotspot + PPPoE payments combined) —
+ *     under KES 10,000 pays 1,000, 10,001-20,000 pays 2,000, over 20,000 pays 3,000.
+ * flat_monthly_fee, when set, overrides either mode with a fixed amount — nothing to do
+ * with which mode is chosen, same escape hatch either way.
+ */
 const FIGURES = `
-  select t.id as tenant_id, t.name, t.subdomain, t.billing_ref,
-         -- hotspot_revenue now carries TOTAL revenue (hotspot + PPPoE combined) — what the
-         -- tier below is based on, not hotspot sales alone. hotspot_pct/hotspot_fee/pppoe_rate/
-         -- pppoe_fee are kept at 0 rather than dropped from the row: a statement already drawn
-         -- under the old per-PPPoE-client + hotspot % model still carries its real historic
-         -- values in these same columns, and this keeps every past and future row the same shape.
-         rev.total as hotspot_revenue, 0::numeric as hotspot_pct, 0::numeric as hotspot_fee,
-         p.active as pppoe_active, 0::numeric as pppoe_rate, 0::numeric as pppoe_fee,
-         coalesce(t.flat_monthly_fee, tier.fee) as flat_fee,
-         coalesce(t.flat_monthly_fee, tier.fee) as total
+  select t.id as tenant_id, t.name, t.subdomain, t.billing_ref, t.billing_mode,
+         case when t.billing_mode = 'revenue' then hs.total else rev.total end as hotspot_revenue,
+         case when t.billing_mode = 'revenue' then t.hotspot_commission_pct else 0 end as hotspot_pct,
+         case when t.flat_monthly_fee is not null then 0
+              when t.billing_mode = 'revenue' then round(hs.total * t.hotspot_commission_pct / 100, 2)
+              else 0 end as hotspot_fee,
+         p.active as pppoe_active,
+         case when t.billing_mode = 'revenue' then t.pppoe_client_rate else 0 end as pppoe_rate,
+         case when t.flat_monthly_fee is not null then 0
+              when t.billing_mode = 'revenue' then p.active * t.pppoe_client_rate
+              else 0 end as pppoe_fee,
+         case when t.billing_mode = 'revenue' then coalesce(t.flat_monthly_fee, 0) else coalesce(t.flat_monthly_fee, tier.fee) end as flat_fee,
+         case
+           when t.flat_monthly_fee is not null then t.flat_monthly_fee
+           when t.billing_mode = 'revenue' then round(hs.total * t.hotspot_commission_pct / 100, 2) + p.active * t.pppoe_client_rate
+           else tier.fee
+         end as total
     from tenants t
+   cross join lateral (
+     -- Hotspot-only revenue (voucher sales), for 'revenue' mode's commission — not the same
+     -- figure as rev.total below, which combines hotspot and PPPoE for the tier.
+     select coalesce(sum(pay.amount), 0) as total from payments pay
+      where pay.tenant_id = t.id and pay.status = 'applied' and pay.voucher_id is not null
+        and pay.received_at >= $1 and pay.received_at < $2) hs
    cross join lateral (
      select coalesce(sum(pay.amount), 0) as total from payments pay
       where pay.tenant_id = t.id and pay.status = 'applied'
