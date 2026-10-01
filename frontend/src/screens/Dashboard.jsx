@@ -364,8 +364,12 @@ export default function Dashboard() {
                 company: store.session?.company,
                 title: `Employee of the Month — ${lastMonthMvp.month}`,
                 name: lastMonthMvp.name,
+                category: lastMonthMvp.metric === 'sales' ? 'Top performer — Sales team' : 'Top performer — Technical team',
                 subtitle: 'In recognition of outstanding work',
                 detail: mvpAchievement,
+                signerName: store.session?.name,
+                signerTitle: store.session?.role ? store.session.role[0].toUpperCase() + store.session.role.slice(1) : undefined,
+                logoUrl: '/api/public/favicon',
               });
             }}
             style={{ marginLeft: 'auto' }}
