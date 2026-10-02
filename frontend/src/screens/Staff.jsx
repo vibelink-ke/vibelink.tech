@@ -189,6 +189,23 @@ export default function Staff() {
     }
   };
 
+  // Reset a password from the list: new password made, old sessions ended, and the person told by SMS and
+  // email. The password is never shown here unless nothing could be delivered.
+  const resetAndNotify = async (s) => {
+    if (!window.confirm(`Reset ${s.name}'s password?\n\nA new one is made and sent to them${s.email ? ' by SMS and email' : ' by SMS'}. They are signed out everywhere and their old password stops working.`)) return;
+    try {
+      const r = await api.resetStaffPassword(s.id, { notify: true });
+      if (r.password) {
+        window.prompt(`The password was reset, but neither the text nor the email could be sent. Give ${s.name} this password:`, r.password);
+      } else {
+        const via = [r.notified?.sms && 'SMS', r.notified?.email && 'email'].filter(Boolean).join(' and ');
+        store.toast(`${s.name}'s password was reset and sent by ${via}`);
+      }
+    } catch (e) {
+      store.toast(`Could not reset: ${e.message}`);
+    }
+  };
+
   const removeStaff = async (s) => {
     try {
       await api.deleteStaff(s.id);
@@ -249,6 +266,9 @@ export default function Staff() {
                     </span>
                     <span onClick={() => openIdCard(s)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
                       Staff ID
+                    </span>
+                    <span onClick={() => resetAndNotify(s)} style={{ color: color.amberInk, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}>
+                      Reset password
                     </span>
                     {/*
                       Always shown, even on an owner's own row — the server

@@ -11596,8 +11596,12 @@ app.put('/api/staff/:id', requirePermission('staff.edit'), wrap(async (req, res)
  */
 app.post('/api/staff/:id/password', requirePermission('staff.edit'), wrap(async (req, res) => {
   const { rows: [target] } = await pool.query(
-    'select id from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+    'select id, name, phone, email, username, role from staff where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!target) return res.status(404).json({ error: 'No such member of staff' });
+  // Taking over an owner's login is an owner's call, same as every other change to an owner.
+  if (target.role === 'owner' && req.session?.role !== 'owner' && !req.session?.is_super_admin) {
+    return res.status(403).json({ error: "Only an owner can reset another owner's password." });
+  }
 
   const fresh = generatePassword(12);
   await pool.query('update staff set password_hash=$2 where id=$1', [target.id, await auth.hashPassword(fresh)]);
@@ -11605,7 +11609,31 @@ app.post('/api/staff/:id/password', requirePermission('staff.edit'), wrap(async 
   // account back — matters just as much for a staff member as for a tenant.
   await pool.query('delete from admin_sessions where staff_id=$1', [target.id]);
 
-  res.json({ password: fresh });
+  // The plain form: the new password comes back to whoever pressed it, to read out or copy.
+  if (!req.body?.notify) return res.json({ password: fresh });
+
+  // Reset and tell them: the new password goes straight to the staff member by SMS, and by email when they
+  // have one, so nobody has to relay it. Best-effort per channel; the password is handed back to the admin
+  // only when NOTHING reached the person, so a reset never leaves them locked out with no way to learn it.
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const brand = req.tenant.name || 'Vibelink';
+  const link = `https://${req.tenant.subdomain}.${root}`;
+  const login = target.username ?? target.email ?? target.phone;
+  const smsMod = await import('./sms.js');
+  const smsOk = target.phone
+    ? await smsMod.send(req.tenant.id, target.phone, 'custom', {
+      body: `${brand}: an administrator reset your password. Sign in at ${link} with ${login} and password ${fresh} — change it after you sign in.`,
+    }).then((r) => r?.ok === true).catch(() => false)
+    : false;
+  let emailOk = null;
+  if (target.email) {
+    const emailMod = await import('./email.js');
+    const t = await emailMod.template(req.tenant.id, 'staff_password_reset');
+    const vars = { company: brand, name: target.name ?? '', link, username: login, password: fresh };
+    emailOk = await emailMod.sendSystem(req.tenant.id, target.email, emailMod.fill(t.subject, vars), emailMod.fill(t.body, vars))
+      .then(() => true).catch(() => false);
+  }
+  res.json({ notified: { sms: smsOk, email: emailOk }, ...(smsOk || emailOk ? {} : { password: fresh }) });
 }));
 
 /**

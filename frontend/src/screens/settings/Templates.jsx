@@ -38,6 +38,7 @@ const EMAIL_LABELS = {
   magic_link: { label: 'Sign-in link', hint: 'Sent to a staff member who asked to sign in by email link' },
   customer_credentials: { label: 'Customer portal login details', hint: "Sent when a customer's portal password is (re)generated" },
   staff_invite: { label: "New staff member's invite", hint: 'Sent once, when a staff member is added' },
+  staff_password_reset: { label: "Staff password reset", hint: "Sent when an admin presses Reset password on a staff member (the text message goes out with it)" },
 };
 
 /** One editable SMS template: a single textarea, defaulting to the built-in wording. */

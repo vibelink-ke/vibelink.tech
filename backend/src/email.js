@@ -178,6 +178,10 @@ export const DEFAULTS = {
     subject: 'Your {company} account login details',
     body: 'Your {company} customer portal login has been set.\n\nAccount number: {account}\nPassword: {password}',
   },
+  staff_password_reset: {
+    subject: 'Your {company} password has been reset',
+    body: 'Hello {name},\n\nAn administrator reset your password.\n\nSign in: {link}\nUsername: {username}\nNew password: {password}\n\nChange it after you sign in. If you were not expecting this, tell your administrator.',
+  },
   staff_invite: {
     subject: "You've been invited to {company}",
     body: 'Set up your login: {link}\n\nThis link expires in 3 days. If this wasn\'t expected, ignore it.',
@@ -190,6 +194,7 @@ export const PLACEHOLDERS = [
   { token: 'link',     desc: 'The actual reset, sign-in or invite link — the email has no working action without it' },
   { token: 'account',  desc: "The customer's account number" },
   { token: 'password', desc: 'A freshly generated password' },
+  { token: 'username', desc: "The staff member's sign-in name (their username, else email or phone)" },
 ];
 
 const render = (tpl, vars) => String(tpl ?? '').replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
