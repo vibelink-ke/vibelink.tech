@@ -3173,3 +3173,10 @@ create unique index if not exists tpc_tenant_provider_scope_shortcode
 alter table routers add column if not exists collection_mode text not null default 'default';
 alter table routers drop constraint if exists routers_collection_mode_check;
 alter table routers add constraint routers_collection_mode_check check (collection_mode in ('default', 'platform', 'own'));
+
+-- "One default per channel" is per scope too: the platform's own paybill (scope 'platform', hidden from the owner's own
+-- Settings → Gateways) could be flagged default and then blocked the owner's ISP from saving its first paybill, with
+-- a "shortcode already saved" error and an empty list. The shortcode rule above already has scope in it; this matches it.
+drop index if exists tpc_one_default_per_provider;
+create unique index if not exists tpc_one_default_per_provider_scope
+  on tenant_payment_config (tenant_id, provider, scope) where is_default;
