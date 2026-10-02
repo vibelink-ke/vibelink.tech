@@ -12777,13 +12777,14 @@ app.post('/api/tenants/:id/activate', superAdminOnly, wrap(async (req, res) => {
   }
   const { rows: [t] } = await pool.query(
     `update tenants set status = 'active', converted_at = coalesce(converted_at, now()),
-            -- The days asked for, but never short of the end of the month after next, so the
-            -- first statement (due on the 1st of that month) does not arrive after the licence ends.
-            licence_ends = greatest(
-              (greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' days')::interval)::date,
-              (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
+            -- Added on top of whatever is left. The days asked for, but never short of the end of
+            -- the month after next counted from today, so the first statement (due on the 1st of
+            -- that month) does not arrive after the licence ends.
+            licence_ends = (greatest(coalesce(licence_ends, current_date), current_date)
+              + greatest($2::int, (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date - current_date)
+                * interval '1 day')::date
       where id = $1 returning id, name, status, licence_ends, converted_at`,
-    [req.params.id, days]);
+    [req.params.id, Math.round(days)]);
   if (!t) return res.status(404).json({ error: 'not found' });
   res.json(t);
 }));

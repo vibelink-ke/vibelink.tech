@@ -248,9 +248,10 @@ async function allocateCredit(c, tenantId) {
       `update tenants
           set billing_credit = billing_credit - $2,
               status = 'active',
-              -- One month from today: their monthly statements are already being drawn and
-              -- each one they pay adds a month. Only a first activation needs the longer cover.
-              licence_ends = (current_date + interval '1 month')::date
+              -- One month on top of whatever is left (from today if nothing is): their monthly
+              -- statements are already being drawn and each one they pay adds a month. Only a
+              -- first activation needs the longer cover.
+              licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + interval '1 month')::date
         where id = $1`, [tenantId, reinstateFee(s.flat_monthly_fee)]);
     credit = Number(s.billing_credit) - reinstateFee(s.flat_monthly_fee);
   }
@@ -275,12 +276,14 @@ async function activateIfPaid(c, tenantId) {
         set billing_credit = billing_credit - $2,
             converted_at = now(),
             status = case when status = 'suspended' then status else 'active' end,
-            -- At least ACTIVATION_DAYS, and never short of the end of the month after next:
-            -- the first statement is for the first full month after activation and is drawn
-            -- on the 1st of the month after that, so the licence must reach it.
-            licence_ends = greatest(
-              (greatest(coalesce(licence_ends, current_date), current_date) + ($3 || ' days')::interval)::date,
-              (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date)
+            -- Added ON TOP of whatever is left of the trial (or licence). The cover bought is at
+            -- least ACTIVATION_DAYS and never short of the end of the month after next, counted
+            -- from today: the first statement is for the first full month after activation and is
+            -- drawn on the 1st of the month after that, so the licence must reach it. Taking the
+            -- later of "remaining + days" and that date used to swallow the remaining days.
+            licence_ends = (greatest(coalesce(licence_ends, current_date), current_date)
+              + greatest($3::int, (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date - current_date)
+                * interval '1 day')::date
       where id = $1`, [tenantId, ACTIVATION_FEE, ACTIVATION_DAYS]);
   return true;
 }
