@@ -49,5 +49,19 @@
       "An expired licence now locks the dashboard completely — only the licence and payment page opens. Customers and hotspot visitors are never affected.",
       "Tenants who host for themselves can be billed a flat monthly fee, and their server shows the licence-expired page if it lapses."
     ]
+  },
+  {
+    "date": "2026-10-02",
+    "title": "Invoice links, SaaS revenue overview, smarter leads",
+    "items": [
+      "SaaS revenue: recurring revenue, collection rate, churn, next-month forecast and who owes what.",
+      "Tenants can be billed by revenue share or a flat tier; licence days are added on top of what is left, and spare credit turns into licence months.",
+      "Payout & pay-in history now shows SMS credit sales and each tenant's collected, settled and remaining balance.",
+      "Invoices: download a PDF, and share a link a customer can open and pay from with an M-Pesa prompt — no login needed.",
+      "Leads: filter by stage, installer and channel; assign an installer to many at once; add the package they asked about; see why leads are lost; new Insights tab.",
+      "A lead's referrer (the channel) earns the commission and the sales credit; \"Installer\" is the technician who follows up the installation.",
+      "Staff: a Reset password button that sends the new password by SMS and email.",
+      "Popups, toasts and update notices now open on the screen in dark mode instead of far down the page."
+    ]
   }
 ]
