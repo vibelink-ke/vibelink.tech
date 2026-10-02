@@ -64,12 +64,13 @@ export function nextMonthKey(key) {
 }
 
 /**
- * Where a new tenant's licence runs to. There is no trial: the rest of the sign-up month is free, the next month is the
- * first one billed, and that month's statement is due on the 5th after it, so that is the date they are covered to.
- * Paying a statement moves it on to the due date of the one after (see allocateCredit).
+ * Where a new tenant's licence runs to. There is no trial: the sign-up month is free (a statement of nothing is raised
+ * for it at month end), and the licence runs to that statement's due date, the 5th of the next month at 10:00. Signing
+ * up on the 1st gives about five weeks, on the 21st about two. That statement settles by itself and the licence moves
+ * on to the next one's due date (see allocateCredit).
  */
 export function signupLicenceEnds(now = Date.now()) {
-  return statementDueAt(nextMonthKey(currentMonthKey(now))).slice(0, 10);
+  return statementDueAt(currentMonthKey(now)).slice(0, 10);
 }
 
 /** The Nairobi month before `key`. */
@@ -105,12 +106,10 @@ export function activationUntil(now = Date.now()) {
 }
 
 // Tenants that pay: activated ones (converted_at), not the platform owner's own
-// tenant and not the public demo. A trial is never invoiced, and a tenant's first
-// statement is the first full month after it was activated — nothing for the
-// month it converted in, which was partly free.
+// tenant and not the public demo. The month a tenant signed up in gets a statement too, but a free one (see FIGURES).
 const BILLABLE = `
   t.status in ('active', 'readonly')
-  and t.converted_at is not null and t.converted_at < $1::timestamptz
+  and t.converted_at is not null and t.converted_at < $2::timestamptz
   and t.subdomain <> 'demo'
   and t.id is distinct from (select tenant_id from staff where is_super_admin and tenant_id is not null limit 1)`;
 
@@ -124,8 +123,9 @@ const BILLABLE = `
  * flat_monthly_fee, when set, overrides either mode with a fixed amount — nothing to do
  * with which mode is chosen, same escape hatch either way.
  */
-const FIGURES = `
-  select t.id as tenant_id, t.name, t.subdomain, t.billing_ref, t.billing_mode,
+const FIGURES_RAW = `
+  select t.converted_at >= $1::timestamptz as free_month,
+         t.id as tenant_id, t.name, t.subdomain, t.billing_ref, t.billing_mode,
          case when t.billing_mode = 'revenue' then hs.total else rev.total end as hotspot_revenue,
          case when t.billing_mode = 'revenue' then t.hotspot_commission_pct else 0 end as hotspot_pct,
          case when t.flat_monthly_fee is not null then 0
@@ -160,10 +160,21 @@ const FIGURES = `
      select case when rev.total < 10000 then 1000 when rev.total <= 20000 then 2000 else 3000 end as fee) tier
    where ${BILLABLE}`;
 
+// The month a tenant signed up in is free: it still gets a statement, but of nothing, which settles by itself and rolls
+// the licence on to the next due date.
+const FIGURES = `
+  select r.tenant_id, r.name, r.subdomain, r.billing_ref, r.billing_mode, r.hotspot_revenue, r.hotspot_pct,
+         case when r.free_month then 0 else r.hotspot_fee end as hotspot_fee,
+         r.pppoe_active, r.pppoe_rate,
+         case when r.free_month then 0 else r.pppoe_fee end as pppoe_fee,
+         case when r.free_month then 0 else r.flat_fee end as flat_fee,
+         case when r.free_month then 0 else r.total end as total
+    from (${FIGURES_RAW}) r`;
+
 /** Every billable tenant's figures for a month, worked out now. */
 export async function liveCharges(key) {
   const w = monthWindow(key);
-  const { rows } = await pool.query(`${FIGURES} order by t.name`, [w.start, w.end]);
+  const { rows } = await pool.query(`${FIGURES} order by r.name`, [w.start, w.end]);
   return rows;
 }
 

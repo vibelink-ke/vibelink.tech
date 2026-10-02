@@ -576,7 +576,7 @@ function sendSignupWelcome({ tenant, staff, sub, user, email, phone }) {
   const portal = `https://${sub}.${root}`;
   const first = String(staff.name ?? '').trim().split(/\s+/)[0] || 'there';
   const signIn = user || email;
-  const trialLine = 'The rest of this month is free; billing starts from the 1st of next month.';
+  const trialLine = 'The rest of this month is free; your first statement is for next month.';
 
   import('./email.js').then((mail) => mail.sendSystem(
     tenant.id, email, 'Welcome to Vibelink — your portal is ready',
