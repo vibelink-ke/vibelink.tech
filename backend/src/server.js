@@ -12744,7 +12744,48 @@ app.get('/api/platform/revenue-overview', superAdminOnly, wrap(async (req, res) 
     if (age <= 1) buckets.current += owed; else if (age === 2) buckets.one += owed; else buckets.twoPlus += owed;
   }
 
+  // Churn: tenants with a statement in the month before the last closed one but none in the last — they
+  // stopped being billed (suspended, removed, or no longer active). New: the reverse.
+  const [{ rows: churnRows }, { rows: newRows }] = prev && last ? await Promise.all([
+    pool.query(
+      `select t.name from tenant_charges p join tenants t on t.id = p.tenant_id
+        where to_char(p.month, 'YYYY-MM') = $1
+          and not exists (select 1 from tenant_charges c where c.tenant_id = p.tenant_id and to_char(c.month, 'YYYY-MM') = $2)
+        order by t.name`, [prev.month, last.month]),
+    pool.query(
+      `select count(*)::int as n from tenant_charges c
+        where to_char(c.month, 'YYYY-MM') = $2
+          and not exists (select 1 from tenant_charges p where p.tenant_id = c.tenant_id and to_char(p.month, 'YYYY-MM') = $1)`,
+      [prev.month, last.month]),
+  ]) : [{ rows: [] }, { rows: [{ n: 0 }] }];
+  const prevStatements = billedRows.find((r) => r.m === prev?.month)?.n ?? 0;
+
+  // Next month, as far as it can be known now: each billable tenant's fixed fee, else what their latest
+  // statement came to. Revenue-share and tiered tenants can still move with their own revenue.
+  const owner = await ownerTenantId();
+  const { rows: [fc] } = await pool.query(
+    `select coalesce(sum(coalesce(t.flat_monthly_fee,
+              (select c.total from tenant_charges c where c.tenant_id = t.id order by c.month desc limit 1), 0)), 0) as total,
+            count(*)::int as n
+       from tenants t
+      where t.status in ('active', 'readonly') and t.converted_at is not null and t.subdomain <> 'demo'
+        and t.deleted_at is null and t.id is distinct from $1::uuid`, [owner]);
+
+  // The last closed month's billing by how each tenant is charged.
+  const { rows: modeRows } = last ? await pool.query(
+    `select case when t.flat_monthly_fee is not null then 'fixed' else t.billing_mode end as model,
+            sum(c.total) as total, count(*)::int as tenants
+       from tenant_charges c join tenants t on t.id = c.tenant_id
+      where to_char(c.month, 'YYYY-MM') = $1 group by 1 order by 2 desc`, [last.month]) : { rows: [] };
+
   res.json({
+    byModel: modeRows.map((r) => ({ model: r.model, total: Number(r.total), tenants: r.tenants })),
+    churn: {
+      lost: churnRows.map((r) => r.name),
+      gained: newRows[0]?.n ?? 0,
+      rate: prevStatements > 0 ? (churnRows.length / prevStatements) * 100 : null,
+    },
+    forecast: { nextMonth: Number(fc?.total ?? 0), tenants: fc?.n ?? 0 },
     series,
     kpis: {
       mrr: last?.billed ?? 0,

@@ -46,6 +46,7 @@ function downloadCsv(month, rows) {
   URL.revokeObjectURL(a.href);
 }
 
+const MODEL_LABEL = { revenue: 'Revenue share (hotspot % + per PPPoE client)', tiered: 'Flat fee tiered on revenue', fixed: 'Fixed monthly fee' };
 const shortMonth = (key) => new Date(`${key}-01T00:00:00Z`).toLocaleDateString('en-KE', { month: 'short', timeZone: 'UTC' });
 const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
 
@@ -99,7 +100,7 @@ const LegendDot = ({ c, label }) => (
  */
 function Overview({ overview }) {
   if (!overview) return null;
-  const { kpis, series, aging, overdue } = overview;
+  const { kpis, series, aging, overdue, churn, forecast, byModel } = overview;
   const pct = (n) => (n == null ? '—' : `${n.toFixed(0)}%`);
   const change = kpis.mrrChangePct;
   const thisMonth = series[series.length - 1];
@@ -121,6 +122,13 @@ function Overview({ overview }) {
         />
         <Stat label="Outstanding" value={`KES ${kes(kpis.outstanding)}`} tone={kpis.outstanding > 0 ? color.amberInk : undefined} hint="unpaid statements" />
         <Stat label="SMS credit sales" value={`KES ${kes(thisMonth.sms)}`} hint="this month, on top of statements" />
+        <Stat
+          label="Tenant churn"
+          value={pct(churn.rate)}
+          tone={churn.lost.length ? color.rust : undefined}
+          hint={churn.lost.length ? `lost: ${churn.lost.join(', ')}` : `none lost · ${churn.gained} new, last closed month`}
+        />
+        <Stat label="Expected next month" value={`KES ${kes(forecast.nextMonth)}`} hint={`${forecast.tenants} billable tenants, at their fixed fee or latest statement`} />
       </Grid>
 
       <Card title="Billed vs received" subtitle="Last 12 months. Received is cash that came in that month (statements, activation fees); this month's billed figure is an estimate.">
@@ -131,6 +139,22 @@ function Overview({ overview }) {
         </div>
         <TrendChart series={series} />
       </Card>
+
+      {byModel.length > 0 && (
+        <Card title="By how tenants are charged" subtitle="Last closed month's billing, split by billing model">
+          <Table
+            rowKey={(r) => r.model}
+            toolbar="never"
+            rows={byModel}
+            columns={[
+              { key: 'model', label: 'Model', render: (r) => <span style={{ fontWeight: 600 }}>{MODEL_LABEL[r.model] ?? r.model}</span> },
+              { key: 'tenants', label: 'Tenants', align: 'right', render: (r) => r.tenants },
+              { key: 'share', label: 'Share', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>{kpis.mrr > 0 ? `${Math.round((r.total / kpis.mrr) * 100)}%` : '—'}</span> },
+              { key: 'total', label: 'Billed', align: 'right', render: (r) => <span style={{ ...money, fontWeight: 700 }}>KES {kes(r.total)}</span> },
+            ]}
+          />
+        </Card>
+      )}
 
       {overdue.length > 0 && (
         <Card
