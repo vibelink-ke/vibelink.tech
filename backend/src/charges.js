@@ -44,6 +44,19 @@ export function currentMonthKey(now = Date.now()) {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * When a month's statement is due: by default the 5th of the following month at 10:00 Nairobi. The same for every
+ * tenant — there is no per-tenant override yet.
+ */
+export const STATEMENT_DUE_DAY = 5;
+export const STATEMENT_DUE_HOUR = 10;
+export function statementDueAt(key) {
+  const [y, m] = key.split('-').map(Number);
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  return `${ny}-${String(nm).padStart(2, '0')}-${String(STATEMENT_DUE_DAY).padStart(2, '0')}T${String(STATEMENT_DUE_HOUR).padStart(2, '0')}:00:00+03:00`;
+}
+
 /** The Nairobi month before `key`. */
 export function previousMonthKey(key) {
   const [y, m] = key.split('-').map(Number);
@@ -431,7 +444,8 @@ export async function billingSummary(tenantId) {
     prepaidMonths: Number(t?.prepaid_months ?? 0),
     amountSuggested: suggested,
     amountDue: trialEnded || reinstate ? Math.max(0, (reinstate ? reinstateFee(t.flat_monthly_fee) : ACTIVATION_FEE) - credit) : Math.max(0, owed - credit),
-    statements: statements.slice(0, 12),
+    statements: statements.slice(0, 12).map((s) => ({ ...s, due_at: statementDueAt(s.month) })),
+    dueDay: STATEMENT_DUE_DAY, dueHour: STATEMENT_DUE_HOUR,
     paybill,
     canPrompt: !!paybill,
   };

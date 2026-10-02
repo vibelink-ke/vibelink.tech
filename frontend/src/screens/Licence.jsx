@@ -225,7 +225,7 @@ export default function Licence() {
         <Table
           toolbar="never"
           rowKey={(s) => s.id}
-          empty="No statements yet — the first is drawn on the 1st of next month"
+          empty="No statements yet — the first is raised on the last day of the month"
           rows={data.statements}
           columns={[
             { key: 'month', label: 'Month', render: (s) => <span style={{ fontWeight: 600 }}>{monthLabel(s.month)}</span> },
@@ -237,6 +237,15 @@ export default function Licence() {
               ? [{ key: 'flat', label: 'Flat fee', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13 }}>{Number(s.flat_fee) > 0 ? `KES ${kes(s.flat_fee)}` : '—'}</span> }]
               : []),
             { key: 'total', label: 'Total', align: 'right', render: (s) => <span style={{ fontFamily: font.mono, fontSize: 13, fontWeight: 700 }}>KES {kes(s.total)}</span> },
+            {
+              key: 'due', label: 'Pay by',
+              render: (s) => {
+                const late = (s.status === 'open' || s.status === 'invoiced') && new Date(s.due_at) < new Date();
+                return <span style={{ fontSize: 12.5, color: late ? color.rust : undefined, fontWeight: late ? 600 : 400 }}>
+                  {new Date(s.due_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', timeZone: 'Africa/Nairobi' })}{late ? ' · overdue' : ''}
+                </span>;
+              },
+            },
             {
               key: 'status', label: 'Status',
               render: (s) => (

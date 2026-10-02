@@ -71,7 +71,9 @@
       "Declaring a lead won now raises the installation ticket automatically (assigned to the lead's installer, with who to call and what they bought); adding the client from the lead attaches them to that ticket.",
       "Sales leaderboard now counts the service package fee only — installation fees, top-ups and months paid ahead no longer inflate a salesperson's figure (Leads → Performance and Employee of the Month).",
       "Payments → All transactions shows the voucher code issued for hotspot (KopoKopo) payments, and the phone number the prompt was sent to.",
-      "Licence & billing: the amount box is pre-filled with what you owe, or, when nothing is invoiced yet, what this month's statement stands at so far."
+      "Licence & billing: the amount box is pre-filled with what you owe, or, when nothing is invoiced yet, what this month's statement stands at so far.",
+      "Monthly tenant statements are now raised on the last day of the month (23:55), instead of the 1st of the next month.",
+      "Each monthly statement now shows when it is due: by default the 5th of the next month at 10:00 AM (Licence & billing → Pay by)."
     ]
   }
 ]

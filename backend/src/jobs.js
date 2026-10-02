@@ -82,6 +82,10 @@ export function startJobs() {
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
   cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
   cron.schedule('0 1 * * *', safely('generateMonthlyCharges', generateMonthlyCharges));
+  // Statements are raised on the last day of the month (30th/31st, 28th/29th in February), at 23:55 Nairobi. Fires at
+  // :55 of every hour on days 28-31 so it does not depend on the server's own timezone; the job checks the Nairobi
+  // clock itself. The 1am run above stays as the catch-up for a month that was missed.
+  cron.schedule('55 * 28-31 * *', safely('generateMonthEndCharges', generateMonthEndCharges));
   cron.schedule('*/5 * * * *', safely('closeStaleSessions', closeStaleSessions));
   cron.schedule('0 20 * * *', safely('ownerBrief', ownerBrief));
   // Tenant billing is WHMCS's job now. Vibelink used to raise its own SaaS
@@ -1678,9 +1682,18 @@ export async function settleTenants() {
  * skip a month; anything already written is left alone, so only the first
  * successful run of the month does anything.
  */
-async function generateMonthlyCharges() {
+async function generateMonthEndCharges() {
+  const { currentMonthKey } = await import('./charges.js');
+  const nairobi = new Date(Date.now() + 3 * 3600 * 1000);
+  const tomorrow = new Date(nairobi.getTime() + 24 * 3600 * 1000);
+  // Only in the last hour of the last day of the Nairobi month.
+  if (nairobi.getUTCHours() !== 23 || tomorrow.getUTCDate() !== 1) return;
+  await generateMonthlyCharges(currentMonthKey());
+}
+
+async function generateMonthlyCharges(forKey) {
   const { currentMonthKey, previousMonthKey, snapshotCharges, monthWindow, settleAllFromCredit } = await import('./charges.js');
-  const key = previousMonthKey(currentMonthKey());
+  const key = typeof forKey === 'string' ? forKey : previousMonthKey(currentMonthKey());
   const made = await snapshotCharges(key);
   // Anything a tenant has already paid ahead, and any statement of nothing, settles now.
   await settleAllFromCredit();
