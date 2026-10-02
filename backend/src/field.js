@@ -55,10 +55,13 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     const { rows: [shift] } = await pool.query(
       'select started_at from field_shifts where tenant_id=$1 and staff_id=$2 and ended_at is null',
       [req.tenant.id, me(req)]);
+    const may = async (key) => !!req.session?.is_super_admin || await hasPermission(req.tenant.id, req.session?.role, key);
     res.json({
       id: me(req), name: req.session.name, role: req.session.role,
       company: req.session.company ?? req.tenant.name,
       shift: shift ? { active: true, since: shift.started_at } : { active: false },
+      // What the New tab offers: only what the permission matrix lets this login actually do.
+      can: { ticket: await may('tickets.edit'), lead: await may('leads.create') },
     });
   }));
 
@@ -390,6 +393,60 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     serial: it.serial_number, mac: it.mac_address, quantity: it.quantity, unit: it.unit,
     inMyVan: it.assigned_staff_id != null,
   });
+
+  // ── raising work from the phone: a support ticket, or a lead ───────────
+  // Both check the same permission the office screen does (tickets.edit, leads.create), on top of
+  // field.use, so the matrix stays the one place that decides who may do what.
+  const PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
+
+  app.post('/api/field/tickets', use, requirePermission('tickets.edit'), wrap(async (req, res) => {
+    const subject = String(req.body?.subject ?? '').trim().slice(0, 200);
+    if (!subject) return res.status(400).json({ error: 'Say what the problem is.' });
+    const priority = PRIORITIES.has(req.body?.priority) ? req.body.priority : 'medium';
+    const kind = req.body?.kind === 'install' ? 'install' : 'repair';
+    const subscriberId = req.body?.subscriberId || null;
+    if (subscriberId) {
+      const { rowCount } = await pool.query('select 1 from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, subscriberId]);
+      if (!rowCount) return res.status(404).json({ error: 'No such customer.' });
+    }
+    // Same promise-keeping as the office's New ticket: an enabled SLA policy for this priority sets the due time.
+    const { rows: [policy] } = await pool.query(
+      `select id, resolve_mins from sla_policies
+        where tenant_id=$1 and priority=$2 and coalesce(enabled, true) order by resolve_mins asc limit 1`,
+      [req.tenant.id, priority]);
+    const { rows: [t] } = await pool.query(
+      `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at, kind, assigned_to)
+       values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, $4, $5, $6, $7, $8)
+       returning id, number, subject, kind, priority, status`,
+      [req.tenant.id, subject, subscriberId, priority, policy?.id ?? null,
+       policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null, kind,
+       req.body?.assignToMe === false ? null : me(req)]);
+    const note = String(req.body?.note ?? '').trim();
+    if (note) {
+      await pool.query(
+        'insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,$3,$4,true)',
+        [req.tenant.id, t.id, req.session.name, note.slice(0, 2000)]);
+    }
+    res.json(t);
+  }));
+
+  app.post('/api/field/leads', use, requirePermission('leads.create'), wrap(async (req, res) => {
+    const name = String(req.body?.name ?? '').trim().slice(0, 120);
+    const phone = String(req.body?.phone ?? '').trim().slice(0, 30);
+    if (!name) return res.status(400).json({ error: 'Enter their name.' });
+    if (phone.replace(/[^0-9]/g, '').length < 9) return res.status(400).json({ error: 'Enter a phone number we can reach them on.' });
+    const lat = num(req.body?.lat); const lng = num(req.body?.lng);
+    const { rows: [l] } = await pool.query(
+      `insert into leads (tenant_id, name, phone, source, assigned_to, created_by, lat, lng)
+       values ($1,$2,$3,'field visit',$4,$4,$5,$6) returning id, name, phone, status`,
+      [req.tenant.id, name, phone, me(req), validLat(lat) && validLng(lng) ? lat : null, validLat(lat) && validLng(lng) ? lng : null]);
+    const note = String(req.body?.note ?? '').trim();
+    if (note) {
+      await pool.query('insert into lead_notes (tenant_id, lead_id, author, body) values ($1,$2,$3,$4)',
+        [req.tenant.id, l.id, req.session.name, note.slice(0, 2000)]);
+    }
+    res.json(l);
+  }));
 
   // What the technician is carrying, and the counted stock they can draw on.
   app.get('/api/field/inventory', use, wrap(async (req, res) => {

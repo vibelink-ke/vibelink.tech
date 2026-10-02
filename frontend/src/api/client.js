@@ -119,6 +119,8 @@ export const api = {
   fieldClose: (id, body) => post(`/api/field/jobs/${id}/close`, body),
   fieldCustomers: (q) => get(`/api/field/customers?q=${encodeURIComponent(q)}`),
   fieldCustomer: (id) => get(`/api/field/customers/${id}`),
+  fieldCreateTicket: (body) => post('/api/field/tickets', body),
+  fieldCreateLead: (body) => post('/api/field/leads', body),
   fieldReconnect: (id) => post(`/api/field/customers/${id}/reconnect`, {}),
   fieldTeam: () => get('/api/field/team'),
   fieldTrail: (staffId) => get(`/api/field/team/${staffId}/trail`),

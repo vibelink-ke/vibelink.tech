@@ -83,7 +83,7 @@ export const DEFAULT_PERMISSIONS = {
   'dashboard.finance': { owner: true, cashier: true, technician: false, support: false, sales: false },
 
   'leads.view':      { owner: true, cashier: false, technician: false, support: false, sales: true },
-  'leads.create':    { owner: true, cashier: false, technician: false, support: false, sales: true },
+  'leads.create':    { owner: true, cashier: false, technician: true, support: false, sales: true },
   'leads.edit':      { owner: true, cashier: false, technician: false, support: false, sales: true },
   'leads.delete':    all(),
 

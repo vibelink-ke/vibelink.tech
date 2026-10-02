@@ -5,6 +5,7 @@ import { api } from '../../api/client';
 import { useStore } from '../../state/store';
 import Toast from '../../app/Toast';
 import FieldJob from './FieldJob';
+import FieldNew from './FieldNew';
 import { FieldContext, useField } from './fieldContext';
 import { FieldCustomers, FieldCustomer } from './FieldCustomers';
 import { Btn, Chip, Dot, distanceKm, page, panel, prettyKm, timeAgo } from './fieldKit';
@@ -101,6 +102,7 @@ export default function FieldApp() {
           <Route path="/field/job/:id" element={<FieldJob />} />
           <Route path="/field/customers" element={<FieldCustomers />} />
           <Route path="/field/customers/:id" element={<FieldCustomer />} />
+          <Route path="/field/new" element={<FieldNew />} />
           <Route path="/field/me" element={<Me />} />
           <Route path="*" element={<Navigate to="/field" replace />} />
         </Routes>
@@ -111,6 +113,7 @@ export default function FieldApp() {
         }}>
           <NavLink to="/field" end style={tab}>Jobs</NavLink>
           <NavLink to="/field/customers" style={tab}>Customers</NavLink>
+          {(me?.can?.ticket || me?.can?.lead) && <NavLink to="/field/new" style={tab}>New</NavLink>}
           <NavLink to="/field/me" style={tab}>Me</NavLink>
         </nav>
       </div>

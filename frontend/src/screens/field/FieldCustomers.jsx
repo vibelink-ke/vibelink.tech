@@ -4,6 +4,7 @@ import { color } from '../../theme/tokens';
 import { api } from '../../api/client';
 import { useStore } from '../../state/store';
 import { Btn, Chip, Dot, mapsLink, page, panel, timeAgo } from './fieldKit';
+import { useField } from './fieldContext';
 
 /** Look a customer up: who they are, whether they are online, what speed they are on. Never money. */
 export function FieldCustomers() {
@@ -45,6 +46,7 @@ export function FieldCustomer() {
   const { id } = useParams();
   const navigate = useNavigate();
   const store = useStore();
+  const { me } = useField();
   const [c, setC] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -85,6 +87,9 @@ export function FieldCustomer() {
           {c.phone && <Btn href={`tel:${c.phone}`} tone="quiet" style={{ flex: 1 }}>Call</Btn>}
           {nav && <Btn href={nav} tone="quiet" style={{ flex: 1 }}>Navigate</Btn>}
         </div>
+        {me?.can?.ticket && (
+          <Btn tone="quiet" onClick={() => navigate(`/field/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`)}>Raise a ticket</Btn>
+        )}
         {c.pppoe_user && c.service === 'pppoe' && (
           <Btn tone="quiet" busy={busy} onClick={reconnect}>Reset their connection</Btn>
         )}
