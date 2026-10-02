@@ -79,12 +79,14 @@ export default function FieldSales() {
 
   const createLead = async () => {
     if (!newLead.name.trim()) return store.toast('Enter a name first');
+    // The database needs a phone for every lead, so it is asked for rather than offered as optional.
+    if (newLead.phone.replace(/[^0-9]/g, '').length < 9) return store.toast('Enter a phone number we can reach them on');
     setAdding(true);
     try {
       const pos = await currentPosition();
       const created = await api.createLead({
         name: newLead.name.trim(),
-        phone: newLead.phone.trim() || null,
+        phone: newLead.phone.trim(),
         source: 'field visit',
         assignedTo: store.session?.id,
         ...(pos ?? {}),
@@ -113,7 +115,7 @@ export default function FieldSales() {
           <input
             value={newLead.phone}
             onChange={(e) => setNewLead((s) => ({ ...s, phone: e.target.value }))}
-            placeholder="Phone (optional)"
+            placeholder="Phone"
             style={inputStyle}
           />
           <button type="button" onClick={createLead} disabled={adding} style={{ ...btnStyle, background: color.green, color: '#fff', border: 'none', fontWeight: 700 }}>
