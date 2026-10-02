@@ -276,7 +276,7 @@ export default function Settings() {
   const [smtp, setSmtp] = useState({ host: '', port: '587', security: SECURITY[0], user: '', pass: '', from: '', fromName: '' });
   const [prefs, setPrefs] = useState({
     hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps',
-    taxRate: '', taxInclusive: 'Yes',
+    taxRate: '', taxInclusive: 'Yes', installationFee: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -1025,6 +1025,25 @@ export default function Settings() {
           <div style={{ marginTop: 14 }}>
             <Button variant="primary" onClick={() => persist({ prefs }, 'Preferences')} disabled={saving}>
               {saving ? 'Saving…' : 'Save preferences'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'prefs' && (
+        <Card
+          title="Installation fee"
+          subtitle="What a new client is charged to be connected. It is added as an invoice when you add the client, and can be changed (or set to 0) for any one client on the Add client form."
+          style={{ marginTop: 14 }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            <Field label="Standard installation fee (KES)" hint="Leave blank or 0 to charge nothing by default. Separate from the package price — commission is worked out on the package only.">
+              <Input type="number" min="0" step="50" value={prefs.installationFee} onChange={setP('installationFee')} placeholder="e.g. 2000" />
+            </Field>
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <Button variant="primary" onClick={() => persist({ prefs }, 'Installation fee')} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
             </Button>
           </div>
         </Card>

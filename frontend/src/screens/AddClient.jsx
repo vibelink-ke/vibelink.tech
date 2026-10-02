@@ -7,6 +7,7 @@ import { Button, Card, Field, Input, Screen, Select } from '../ui/primitives';
 
 /** Field defaults transcribed from `state.newClient` in the mockup. */
 const BLANK = {
+  installationFee: '',
   account: '',
   login: '',
   password: '',
@@ -220,6 +221,7 @@ export default function AddClient() {
         category: f.category || null,
         identification: f.identification || null,
         billingType: f.billing || null,
+        installationFee: f.installationFee === '' ? undefined : Number(f.installationFee),
         allowDuplicatePhone: differentCustomer || !!linkedAccount,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
@@ -348,6 +350,14 @@ export default function AddClient() {
             </Field>
             <Field label="Billing">
               <Select value={f.billing} onChange={set('billing')} options={BILLING} />
+            </Field>
+            <Field
+              label="Installation fee (KES)"
+              hint={Number(store.settings?.prefs?.installationFee) > 0
+                ? `Standard is KES ${Number(store.settings.prefs.installationFee).toLocaleString('en-KE')} — leave blank to charge it, change it for this client, or enter 0 to waive it.`
+                : 'Leave blank for the standard fee (none is set), or enter what to charge for installing this client.'}
+            >
+              <Input type="number" min="0" value={f.installationFee} onChange={set('installationFee')} placeholder={String(Number(store.settings?.prefs?.installationFee) || 0)} />
             </Field>
           </div>
         </Card>

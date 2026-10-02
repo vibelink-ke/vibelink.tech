@@ -9302,6 +9302,22 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
     if (!rowCount) return res.status(404).json({ error: 'No such referrer' });
     referrerId = referredBy;
   }
+  // Installation fee: the business's standard one (Settings → Preferences) unless the form changed it; 0 waives it.
+  // Settled before anything is created: changing it from the standard is a billing decision (the same one as raising an
+  // invoice by hand), so someone who cannot raise invoices is refused up front rather than after the client exists.
+  let installFee = 0;
+  {
+    const { rows: [cfg] } = await pool.query(
+      "select prefs->>'installationFee' as fee from app_settings where tenant_id=$1", [req.tenant.id]).catch(() => ({ rows: [] }));
+    const standard = Number(cfg?.fee) > 0 ? Number(cfg.fee) : 0;
+    const given = req.body?.installationFee;
+    const asked = given === undefined || given === null || given === '' ? standard : Number(given);
+    if (!Number.isFinite(asked) || asked < 0 || asked > 1_000_000) return res.status(400).json({ error: 'The installation fee must be zero or more.' });
+    if (asked !== standard && !req.session?.is_super_admin && !(await hasPermission(req.tenant.id, req.session?.role, 'clients.invoices'))) {
+      return res.status(403).json({ error: 'Only someone who can raise invoices can change the installation fee.' });
+    }
+    installFee = asked;
+  }
   // Converting a won lead into a client — validated up front so the whole
   // request fails cleanly instead of creating the subscriber and then
   // silently failing to link it back.
@@ -9341,6 +9357,18 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
 
   if (leadId) {
     await pool.query('update leads set subscriber_id=$2 where id=$1 and tenant_id=$3', [leadId, s.id, req.tenant.id]);
+  }
+
+  // One-time installation fee, as an ordinary open invoice due today: it shows in Invoices, can be paid from the pay
+  // link, and is nothing to do with the package price (commission stays on the package).
+  if (installFee > 0) {
+    await pool.query(
+      `insert into invoices (tenant_id, subscriber_id, number, amount, paid, status, due_date, reason)
+       values ($1, $2,
+               'INV' || to_char(now(),'YYMMDD') ||
+                 lpad((select count(*) + 1 from invoices where tenant_id=$1 and number like 'INV' || to_char(now(),'YYMMDD') || '%')::text, 3, '0'),
+               $3, 0, 'open', current_date, 'Installation fee')`,
+      [req.tenant.id, s.id, installFee]);
   }
 
   // Before responding, not after: the operator's next move is to hand over the
