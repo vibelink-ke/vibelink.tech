@@ -413,12 +413,24 @@ export function Tabs({ tabs, value, onChange }) {
 
 /* ── overlays ─────────────────────────────────────────────── */
 
+/**
+ * Dialogs are drawn on <body>, not inside the page. Dark mode puts a CSS filter on the page's root element, and
+ * a filtered ancestor becomes the containing block for position: fixed — so a dialog inside it was laid out
+ * against the whole page's height, not the screen: the overlay covered everything and the box sat centred
+ * far down the page until you scrolled to it. The dark filter is applied to the overlay itself instead (an
+ * element's own filter does not move its own fixed position), so the dialog looks the same as before.
+ */
+const darkClass = () => (document.documentElement.classList.contains('om-dark-root') ? 'om-dark' : undefined);
+const overlayText = { fontFamily: font.sans, color: color.ink };
+
 export function Modal({ open, title, onClose, footer, width = 520, children }) {
   if (!open) return null;
-  return (
+  return createPortal(
     <div
+      className={darkClass()}
       onClick={onClose}
       style={{
+        ...overlayText,
         position: 'fixed',
         inset: 0,
         background: 'rgba(18,33,29,.42)',
@@ -471,7 +483,8 @@ export function Modal({ open, title, onClose, footer, width = 520, children }) {
           </footer>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -503,10 +516,12 @@ export function Drawer({ open, title, subtitle, actions, onClose, children, widt
   const initials = typeof title === 'string'
     ? title.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase()
     : '';
-  return (
+  return createPortal(
     <div
+      className={darkClass()}
       onClick={onClose}
       style={{
+        ...overlayText,
         position: 'fixed', inset: 0, background: 'rgba(18,33,29,.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, zIndex: 55,
       }}
@@ -603,7 +618,8 @@ export function Drawer({ open, title, subtitle, actions, onClose, children, widt
           {children}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
