@@ -960,7 +960,7 @@ export default function Leads() {
                   value={rf.commissionType}
                   onChange={setR('commissionType')}
                   options={[
-                    { value: 'percent', label: '% of first payment' },
+                    { value: 'percent', label: '% of the service package' },
                     { value: 'fixed', label: 'Flat amount (KES)' },
                   ]}
                 />
@@ -1018,7 +1018,7 @@ export default function Leads() {
                             </div>
                           ),
                         },
-                        { key: 'basis_amount', label: 'On payment of', align: 'right', render: (c) => kes(c.basis_amount) },
+                        { key: 'basis_amount', label: 'On package of', align: 'right', render: (c) => kes(c.basis_amount) },
                         { key: 'amount', label: 'Commission', align: 'right', render: (c) => kes(c.amount) },
                         {
                           key: 'status',

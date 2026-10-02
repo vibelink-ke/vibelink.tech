@@ -476,11 +476,17 @@ export async function applyMatched(tenantId, paymentId, subscriberId) {
 }
 
 /**
- * One-time commission, on the client's first applied payment only — the
+ * One-time commission, earned on the client's first applied payment only — the
  * unique (subscriber_id) constraint on referral_commissions is what makes
  * that a database guarantee rather than something this function has to get
  * right on its own every time it's called; on conflict do nothing is the
  * whole enforcement.
+ *
+ * What it is a percentage OF is the service package the client signed up for
+ * (their price: custom price if they have one, else the plan's), not the money
+ * that happened to come in — a first payment can be a top-up, several periods
+ * paid ahead, or a wallet credit, none of which is what was sold. A client with
+ * no package yet falls back to the payment itself.
  */
 async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
   const { rows: [already] } = await c.query(
@@ -491,8 +497,13 @@ async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
     'select id, commission_type, commission_rate from referrers where id=$1', [sub.referred_by]);
   if (!ref) return;   // referrer was deleted since — nothing to credit
 
+  const { rows: [pkg] } = await c.query(
+    `select coalesce(s.custom_price, p.price) as price
+       from subscribers s left join plans p on p.id = s.plan_id where s.id=$1`, [subId]);
+  const basis = Number(pkg?.price) > 0 ? Number(pkg.price) : Number(amount);
+
   const commission = ref.commission_type === 'percent'
-    ? (Number(amount) * Number(ref.commission_rate)) / 100
+    ? (basis * Number(ref.commission_rate)) / 100
     : Number(ref.commission_rate);
   if (!(commission > 0)) return;
 
@@ -500,7 +511,7 @@ async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
     `insert into referral_commissions (tenant_id, referrer_id, subscriber_id, payment_id, basis_amount, amount)
      values ($1,$2,$3,$4,$5,$6)
      on conflict (subscriber_id) do nothing`,
-    [tenantId, ref.id, subId, paymentId, amount, commission]);
+    [tenantId, ref.id, subId, paymentId, basis, commission]);
 }
 
 /** Fuzzy match for till/typo'd references. Learns the payer phone on success. */

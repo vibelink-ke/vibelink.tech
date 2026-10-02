@@ -65,7 +65,8 @@
       "Payment gateways: the platform paybill can now be saved even when the owner's own ISP portal uses the same paybill number.",
       "Site payment profiles: choose per site whether customers pay through the platform (settled to you) or your own paybill, so one ISP can use both.",
       "Tickets: the list now shows the client on every ticket (name, account and location), and marks installations.",
-      "Leads: a won lead has a Raise installation ticket button, and adding the client from a won lead goes straight to the ticket with the client and installer already chosen."
+      "Leads: a won lead has a Raise installation ticket button, and adding the client from a won lead goes straight to the ticket with the client and installer already chosen.",
+      "Referral commission is now a percentage of the service package the client signed up for, not of the money their first payment happened to be."
     ]
   }
 ]
