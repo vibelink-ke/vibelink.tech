@@ -3802,9 +3802,12 @@ app.post('/api/sms/test', async (req, res) => {
 // every query below runs with RLS active (see withTenant in db.js for writes).
 app.get('/api/tickets', requirePermission('tickets.view'), async (req, res) => {
   const { rows } = await pool.query(
-    `select t.*, sp.name as sla_policy_name
+    `select t.*, sp.name as sla_policy_name,
+            sub.name as subscriber_name, sub.account_code as subscriber_account, sub.line_label as subscriber_line,
+            sub.phone as subscriber_phone, sub.location as subscriber_location
        from tickets t
        left join sla_policies sp on sp.id = t.sla_policy_id
+       left join subscribers sub on sub.id = t.subscriber_id and sub.tenant_id = t.tenant_id
       where t.tenant_id=$1
       order by t.created_at desc`,
     [req.tenant.id]);

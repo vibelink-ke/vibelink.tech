@@ -200,6 +200,7 @@ export default function Tickets() {
               render: (t) => (
                 <span onClick={() => openDetail(t)} style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
                   <span style={{ fontWeight: 600, color: color.green }}>{t.subject}</span>
+                  {t.kind === 'install' && <Badge tone={{ bg: '#e3ecfb', fg: '#2f5fb3' }}>Install</Badge>}
                   {t.source === 'portal' && (
                     <span
                       title="Raised by the customer themselves, not staff"
@@ -213,6 +214,20 @@ export default function Tickets() {
                   )}
                 </span>
               ),
+            },
+            {
+              key: 'client',
+              label: 'Client',
+              render: (t) => (t.subscriber_name ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  <span style={{ fontWeight: 600 }}>
+                    {t.subscriber_name}{t.subscriber_line ? ` — ${t.subscriber_line}` : ''}
+                  </span>
+                  <span style={{ fontSize: 11.5, color: color.muted }}>
+                    {[t.subscriber_account, t.subscriber_location].filter(Boolean).join(' · ')}
+                  </span>
+                </div>
+              ) : <span style={{ color: color.muted }}>—</span>),
             },
             { key: 'priority', label: 'Priority', render: (t) => <Badge tone={prioTone(t.priority)}>{t.priority}</Badge> },
             {

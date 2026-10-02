@@ -63,7 +63,8 @@
       "Staff: a Reset password button that sends the new password by SMS and email.",
       "Popups, toasts and update notices now open on the screen in dark mode instead of far down the page.",
       "Payment gateways: the platform paybill can now be saved even when the owner's own ISP portal uses the same paybill number.",
-      "Site payment profiles: choose per site whether customers pay through the platform (settled to you) or your own paybill, so one ISP can use both."
+      "Site payment profiles: choose per site whether customers pay through the platform (settled to you) or your own paybill, so one ISP can use both.",
+      "Tickets: the list now shows the client on every ticket (name, account and location), and marks installations."
     ]
   }
 ]
