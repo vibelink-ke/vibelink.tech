@@ -439,6 +439,7 @@ export const api = {
   technicians: () => get('/api/staff?role=technician'),
   salesReps: () => get('/api/staff?role=sales'),
   salesPerformance: () => get('/api/leads/sales-performance'),
+  leadInsights: () => get('/api/leads/insights'),
 
   siteProfiles: () => get('/api/site-profiles'),
   createSiteProfile: (p) => post('/api/site-profiles', p),

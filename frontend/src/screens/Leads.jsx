@@ -3,10 +3,15 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import { exportTable } from '../lib/export';
+import ExportMenu from '../ui/ExportMenu';
 import { Badge, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table, Tabs, Textarea } from '../ui/primitives';
 
 const STAGES = ['new', 'contacted', 'won', 'lost'];
 const CHANNELS = ['manual', 'walk-in', 'referral', 'facebook', 'field visit', 'call'];
+const LOST_REASONS = ['Too expensive', 'No coverage in their area', 'Chose a competitor', 'No answer / unreachable', 'Not ready yet', 'Other'];
+const digits9 = (p) => String(p ?? '').replace(/[^0-9]/g, '').slice(-9);
+const waLink = (p) => `https://wa.me/254${digits9(p)}`;
 
 const stageTone = (s) =>
   s === 'won'
@@ -25,7 +30,7 @@ const referrerTypeTone = (t) =>
     : t === 'customer' ? { bg: color.amberBg, fg: color.amberInk }
     : { bg: '#e2ebe5', fg: color.green };
 
-const LEAD_BLANK = { name: '', phone: '', source: 'manual', referredBy: '', assignedTo: '', nextFollowUp: '' };
+const LEAD_BLANK = { name: '', phone: '', source: 'manual', referredBy: '', assignedTo: '', nextFollowUp: '', interestedPlanId: '' };
 
 /** yyyy-mm-dd for a date <input>, from whatever ISO string the API sent. */
 const toDateInput = (iso) => (iso ? String(iso).slice(0, 10) : '');
@@ -80,11 +85,55 @@ export default function Leads() {
   const [leadBusy, setLeadBusy] = useState(false);
   const setL = (k) => (e) => setLf((s) => ({ ...s, [k]: e.target.value }));
 
+  // Narrowing a long pipeline, picking several to act on, and the reason prompt for a lost lead.
+  const [fStage, setFStage] = useState('all');   // all | active | a stage — everything by default, so a won lead's Convert button is never hidden
+  const [fAssignee, setFAssignee] = useState('');
+  const [fSource, setFSource] = useState('');
+  const [fQuick, setFQuick] = useState('');         // '' | overdue | today | unassigned | stale
+  const [selectedLeads, setSelectedLeads] = useState(new Set());
+  const [bulkAssignTo, setBulkAssignTo] = useState('');
+  const [lostFor, setLostFor] = useState(null);     // the lead about to be marked lost
+  const [lostReason, setLostReason] = useState(LOST_REASONS[0]);
+  const [lostOther, setLostOther] = useState('');
+  const [insights, setInsights] = useState(null);
+  useEffect(() => {
+    if (tab !== 'insights') return;
+    setInsights(null);
+    api.leadInsights().then(setInsights).catch(() => store.toast('Could not load insights'));
+  }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const won = leads.filter((l) => l.status === 'won').length;
   const activeLeads = leads.filter((l) => l.status !== 'won' && l.status !== 'lost').length;
   const conversionRate = leads.length ? Math.round((won / leads.length) * 100) : 0;
   const dueToday = leads.filter((l) => l.status !== 'won' && l.status !== 'lost' && isDueToday(l.next_follow_up)).length;
   const overdue = leads.filter((l) => l.status !== 'won' && l.status !== 'lost' && isOverdue(l.next_follow_up) && !isDueToday(l.next_follow_up)).length;
+
+  const isOpen = (l) => l.status !== 'won' && l.status !== 'lost';
+  // Quiet for a week with nothing logged on it: the ones that go cold if nobody picks them up.
+  const isStale = (l) => isOpen(l) && Date.now() - new Date(l.last_activity_at ?? l.created_at).getTime() > 7 * 86400000;
+  const staleCount = leads.filter(isStale).length;
+  const pipelineValue = leads.filter(isOpen).reduce((n, l) => n + Number(l.plan_price ?? 0), 0);
+  const sources = [...new Set(leads.map((l) => l.source).filter(Boolean))];
+  const shown = leads.filter((l) => {
+    if (fStage === 'active' ? !isOpen(l) : fStage !== 'all' && l.status !== fStage) return false;
+    if (fAssignee === 'none' ? l.assigned_to : fAssignee && l.assigned_to !== fAssignee) return false;
+    if (fSource && l.source !== fSource) return false;
+    if (fQuick === 'overdue' && !(isOpen(l) && isOverdue(l.next_follow_up) && !isDueToday(l.next_follow_up))) return false;
+    if (fQuick === 'today' && !(isOpen(l) && isDueToday(l.next_follow_up))) return false;
+    if (fQuick === 'unassigned' && !(isOpen(l) && !l.assigned_to)) return false;
+    if (fQuick === 'stale' && !isStale(l)) return false;
+    return true;
+  });
+
+  /** Another lead, or a customer, already on this number (last nine digits, so 07.. and +2547.. match). */
+  const duplicateOf = (phone, ignoreId) => {
+    const d = digits9(phone);
+    if (d.length < 9) return null;
+    const lead = leads.find((l) => l.id !== ignoreId && digits9(l.phone) === d);
+    if (lead) return `a lead already: ${lead.name} (${lead.status})`;
+    const client = clients.find((c) => digits9(c.phone) === d);
+    return client ? `already a customer: ${client.name}` : null;
+  };
 
   /**
    * A lead a customer sends your way often names someone who has never been
@@ -118,23 +167,28 @@ export default function Leads() {
       name: l.name, phone: l.phone, source: l.source ?? 'manual',
       referredBy: l.referrer_id ? `referrer:${l.referrer_id}` : '',
       assignedTo: l.assigned_to ?? '', nextFollowUp: toDateInput(l.next_follow_up),
+      interestedPlanId: l.interested_plan_id ?? '',
     });
     setLeadOpen(true);
   };
 
   const saveLead = async () => {
     if (!lf.name.trim() || !lf.phone.trim()) return store.toast('Name and phone are required');
+    const dup = duplicateOf(lf.phone, leadEdit?.id);
+    if (dup && !window.confirm(`This number is ${dup}.\n\nSave it anyway?`)) return;
     const [kind, refId] = lf.referredBy ? lf.referredBy.split(':') : [null, null];
     setLeadBusy(true);
     try {
       const body = {
         name: lf.name.trim(), phone: lf.phone.trim(), source: lf.source,
         assignedTo: lf.assignedTo || null, nextFollowUp: lf.nextFollowUp || null,
+        interestedPlanId: lf.interestedPlanId || null,
       };
       if (leadEdit) {
         const patchBody = {
           name: body.name, phone: body.phone, source: body.source,
           assigned_to: body.assignedTo, next_follow_up: body.nextFollowUp,
+          interested_plan_id: body.interestedPlanId,
           referrer_id: kind === 'referrer' ? refId : null,
         };
         if (kind === 'client') patchBody.referred_by_client_id = refId;
@@ -199,6 +253,8 @@ export default function Leads() {
 
   const changeStage = (l) => async (e) => {
     const status = e.target.value;
+    // A lead being written off is asked why, so the reasons add up to something.
+    if (status === 'lost') { setLostReason(LOST_REASONS[0]); setLostOther(''); setLostFor(l); return; }
     const previous = l.status;
     store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? { ...x, status } : x)));
     try {
@@ -209,6 +265,62 @@ export default function Leads() {
       store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? { ...x, status: previous } : x)));
       store.toast(`Could not update: ${err.message}`);
     }
+  };
+
+  const confirmLost = async () => {
+    const l = lostFor;
+    const reason = lostReason === 'Other' ? (lostOther.trim() || 'Other') : lostReason;
+    setLostFor(null);
+    try {
+      const updated = await api.updateLead(l.id, { status: 'lost', lost_reason: reason });
+      store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? updated : x)));
+      store.toast(`${l.name} → lost (${reason})`);
+    } catch (err) {
+      store.toast(`Could not update: ${err.message}`);
+    }
+  };
+
+  /** Move the follow-up date without opening the editor: tomorrow, in three days, next week, or clear it. */
+  const setFollowUp = async (l, days) => {
+    const next = days == null ? null : new Date(Date.now() + days * 86400000).toLocaleDateString('en-CA', { timeZone: 'Africa/Nairobi' });
+    try {
+      const updated = await api.updateLead(l.id, { next_follow_up: next });
+      store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? { ...x, ...updated } : x)));
+      setLeadViewing((v) => (v && v.id === l.id ? { ...v, ...updated } : v));
+      store.toast(next ? `Follow-up set for ${new Date(next).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}` : 'Follow-up cleared');
+    } catch (err) {
+      store.toast(`Could not update: ${err.message}`);
+    }
+  };
+
+  const bulkAssign = async () => {
+    const ids = [...selectedLeads];
+    if (!ids.length || bulkAssignTo === '') return;
+    const to = bulkAssignTo === 'none' ? null : bulkAssignTo;
+    try {
+      const done = await Promise.all(ids.map((id) => api.updateLead(id, { assigned_to: to })));
+      const byId = new Map(done.map((u) => [u.id, u]));
+      const name = staff.find((s) => s.id === to)?.name;
+      store.setCollection('leads', (ls) => ls.map((x) => (byId.has(x.id)
+        ? { ...x, ...byId.get(x.id), assignee_name: name ?? null } : x)));
+      store.toast(`${ids.length} lead${ids.length === 1 ? '' : 's'} ${to ? `assigned to ${name}` : 'unassigned'}`);
+      setSelectedLeads(new Set());
+      setBulkAssignTo('');
+    } catch (err) {
+      store.toast(`Could not assign: ${err.message}`);
+    }
+  };
+
+  const exportLeads = async (format) => {
+    const rows = [
+      ['Name', 'Phone', 'Stage', 'Channel', 'Package', 'Assigned to', 'Follow-up', 'Lost reason', 'Added'],
+      ...shown.map((l) => [
+        l.name, l.phone, l.status, l.source ?? '', l.plan_title ?? '', l.assignee_name ?? '',
+        l.next_follow_up ? toDateInput(l.next_follow_up) : '', l.lost_reason ?? '', toDateInput(l.created_at),
+      ]),
+    ];
+    const n = await exportTable(format, 'leads', rows, { title: 'Leads', subtitle: `${shown.length} of ${leads.length}` });
+    store.toast(n ? `Exported ${n} lead(s)` : 'Nothing to export');
   };
 
   const confirmDeleteLead = async () => {
@@ -322,7 +434,10 @@ export default function Leads() {
       subtitle="Prospective subscribers, and whoever brings them in."
       actions={
         tab === 'pipeline' ? (
-          <Button variant="primary" onClick={openAddLead}>+ Add lead</Button>
+          <>
+            <ExportMenu onExport={exportLeads} disabled={!shown.length} />
+            <Button variant="primary" onClick={openAddLead}>+ Add lead</Button>
+          </>
         ) : tab === 'referrers' ? (
           <Button variant="primary" onClick={openAddReferrer}>+ Add referrer</Button>
         ) : null
@@ -334,6 +449,7 @@ export default function Leads() {
         tabs={[
           { id: 'pipeline', label: 'Pipeline' },
           { id: 'referrers', label: 'Referrers' },
+          { id: 'insights', label: 'Insights' },
           { id: 'performance', label: 'Performance' },
         ]}
       />
@@ -346,16 +462,72 @@ export default function Leads() {
             <Stat label="Overdue" value={overdue} tone={overdue ? color.rust : undefined} hint="past their follow-up date" />
             <Stat label="Won" value={won} tone={won ? color.green : undefined} hint="converted to clients" />
             <Stat label="Conversion" value={`${conversionRate}%`} hint="won / total" />
+            <Stat label="Open pipeline" value={kes(pipelineValue)} hint="a month, for leads with a package" />
+            <Stat label="Gone quiet" value={staleCount} tone={staleCount ? color.rust : undefined} hint="open, nothing for 7+ days" />
           </Grid>
 
-          <Card title="Pipeline">
+          <Card>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <Field label="Stage">
+                <Select value={fStage} onChange={(e) => setFStage(e.target.value)} options={[
+                  { value: 'active', label: 'Still in play' }, { value: 'all', label: 'Everything' },
+                  ...STAGES.map((s) => ({ value: s, label: s })),
+                ]} />
+              </Field>
+              <Field label="Assigned to">
+                <Select value={fAssignee} onChange={(e) => setFAssignee(e.target.value)} options={[
+                  { value: '', label: 'Anyone' }, { value: 'none', label: 'Unassigned' },
+                  ...staff.map((s) => ({ value: s.id, label: s.name })),
+                ]} />
+              </Field>
+              <Field label="Channel">
+                <Select value={fSource} onChange={(e) => setFSource(e.target.value)} options={[{ value: '', label: 'Any' }, ...sources]} />
+              </Field>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingBottom: 2 }}>
+                {[['overdue', 'Overdue'], ['today', 'Due today'], ['unassigned', 'Unassigned'], ['stale', 'Gone quiet']].map(([k, label]) => (
+                  <Button key={k} variant={fQuick === k ? 'primary' : undefined} onClick={() => setFQuick(fQuick === k ? '' : k)}>{label}</Button>
+                ))}
+              </div>
+            </div>
+            {selectedLeads.size > 0 && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
+                <span style={{ fontSize: 13 }}>{selectedLeads.size} selected</span>
+                <Select value={bulkAssignTo} onChange={(e) => setBulkAssignTo(e.target.value)} options={[
+                  { value: '', label: 'Assign to…' }, { value: 'none', label: 'Unassigned' },
+                  ...staff.map((s) => ({ value: s.id, label: s.name })),
+                ]} />
+                <Button variant="primary" onClick={bulkAssign} disabled={bulkAssignTo === ''}>Apply</Button>
+                <Button onClick={() => setSelectedLeads(new Set())}>Clear</Button>
+              </div>
+            )}
+          </Card>
+
+          <Card title="Pipeline" subtitle={`${shown.length} of ${leads.length}`}>
             <Table
               rowKey={(l) => l.id}
-              empty="No leads yet"
-              rows={leads}
+              empty="No leads match"
+              rows={shown}
+              select={{ id: (l) => l.id, selected: selectedLeads, setSelected: setSelectedLeads }}
               columns={[
                 { key: 'name', label: 'Name', render: (l) => <span style={{ fontWeight: 600 }}>{l.name}</span> },
-                { key: 'phone', label: 'Phone', render: (l) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{l.phone}</span> },
+                {
+                  key: 'phone',
+                  label: 'Phone',
+                  render: (l) => (
+                    <div>
+                      <span style={{ fontFamily: font.mono, fontSize: 12 }}>{l.phone}</span>
+                      <div style={{ display: 'flex', gap: 8, fontSize: 11.5 }}>
+                        <a href={`tel:${l.phone}`} style={{ color: color.green, fontWeight: 600 }}>Call</a>
+                        <a href={waLink(l.phone)} target="_blank" rel="noreferrer" style={{ color: color.green, fontWeight: 600 }}>WhatsApp</a>
+                      </div>
+                    </div>
+                  ),
+                },
+                {
+                  key: 'plan',
+                  label: 'Package',
+                  render: (l) => (l.plan_title ? <span>{l.plan_title}</span> : <span style={{ color: color.muted }}>—</span>),
+                },
                 {
                   key: 'source',
                   label: 'Channel',
@@ -463,6 +635,13 @@ export default function Leads() {
               <Field label="Phone">
                 <Input value={lf.phone} onChange={setL('phone')} placeholder="07xx xxx xxx" />
               </Field>
+              <Field label="Package they asked about" hint="Optional — sizes the pipeline in money">
+                <Select
+                  value={lf.interestedPlanId}
+                  onChange={setL('interestedPlanId')}
+                  options={[{ value: '', label: '— not sure yet —' }, ...(store.plans ?? []).map((p) => ({ value: p.id, label: `${p.title} · ${kes(p.price)}` }))]}
+                />
+              </Field>
               <Field label="Channel" hint="How this lead reached you">
                 <Select value={lf.source} onChange={setL('source')} options={CHANNELS} />
               </Field>
@@ -496,6 +675,7 @@ export default function Leads() {
                 <div>
                 <KV k="Phone" v={leadViewing.phone} />
                 <KV k="Channel" v={leadViewing.source ?? '—'} />
+                <KV k="Package" v={leadViewing.plan_title ? `${leadViewing.plan_title} · ${kes(leadViewing.plan_price)}` : '—'} />
                 <KV k="Referred by" v={leadViewing.referrer_name ?? '—'} />
                 <KV k="Assigned to" v={leadViewing.assignee_name ?? '—'} />
                 <KV
@@ -509,10 +689,29 @@ export default function Leads() {
                   }
                 />
                 <KV k="Stage" v={<Badge tone={stageTone(leadViewing.status)}>{leadViewing.status}</Badge>} />
+                {leadViewing.status === 'lost' && <KV k="Lost because" v={leadViewing.lost_reason ?? 'No reason given'} />}
+                <KV k="First reached" v={leadViewing.first_contacted_at ? new Date(leadViewing.first_contacted_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Not yet'} />
+                <KV k="Last activity" v={new Date(leadViewing.last_activity_at ?? leadViewing.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })} />
                 <KV
                   k="Added"
                   v={leadViewing.created_at ? new Date(leadViewing.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'}
                 />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <a href={`tel:${leadViewing.phone}`} style={{ textDecoration: 'none' }}><Button>Call</Button></a>
+                    <a href={waLink(leadViewing.phone)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}><Button>WhatsApp</Button></a>
+                  </div>
+                  {isOpen(leadViewing) && (
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span style={{ fontSize: 12.5, color: color.muted }}>Follow up:</span>
+                      <Button onClick={() => setFollowUp(leadViewing, 1)}>Tomorrow</Button>
+                      <Button onClick={() => setFollowUp(leadViewing, 3)}>In 3 days</Button>
+                      <Button onClick={() => setFollowUp(leadViewing, 7)}>Next week</Button>
+                      {leadViewing.next_follow_up && <Button onClick={() => setFollowUp(leadViewing, null)}>Clear</Button>}
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -544,6 +743,30 @@ export default function Leads() {
             )}
           </Drawer>
 
+          {/* Why a lead was lost */}
+          <Modal
+            open={!!lostFor}
+            title={`Why was ${lostFor?.name ?? 'this lead'} lost?`}
+            onClose={() => setLostFor(null)}
+            footer={
+              <>
+                <Button onClick={() => setLostFor(null)}>Cancel</Button>
+                <Button variant="primary" onClick={confirmLost}>Mark as lost</Button>
+              </>
+            }
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Field label="Reason" hint="Kept so you can see, over time, what is costing you customers">
+                <Select value={lostReason} onChange={(e) => setLostReason(e.target.value)} options={LOST_REASONS} />
+              </Field>
+              {lostReason === 'Other' && (
+                <Field label="Tell us more">
+                  <Input value={lostOther} onChange={(e) => setLostOther(e.target.value)} />
+                </Field>
+              )}
+            </div>
+          </Modal>
+
           {/* Delete lead */}
           <Modal
             open={!!leadDeleting}
@@ -561,6 +784,54 @@ export default function Leads() {
             </p>
           </Modal>
         </>
+      )}
+
+      {tab === 'insights' && (
+        !insights ? (
+          <p style={{ color: color.muted, fontSize: 13.5 }}>Working it out…</p>
+        ) : (
+          <>
+            <Grid min={200} gap={14}>
+              <Stat
+                label="Time to first contact"
+                value={insights.hoursToContact == null ? '—' : insights.hoursToContact < 1 ? `${Math.round(insights.hoursToContact * 60)} min` : insights.hoursToContact < 48 ? `${insights.hoursToContact.toFixed(1)} h` : `${(insights.hoursToContact / 24).toFixed(1)} days`}
+                hint="average, last 90 days — the faster, the more win"
+              />
+              <Stat label="Time to win" value={insights.daysToWin == null ? '—' : `${insights.daysToWin.toFixed(1)} days`} hint="from added to won" />
+              <Stat label="Gone quiet" value={insights.stale} tone={insights.stale ? color.rust : undefined} hint="open, nothing for 7+ days" />
+              <Stat label="Open pipeline" value={kes(insights.pipelineValue.monthly)} hint={`a month, ${insights.pipelineValue.leadsWithPlan} lead${insights.pipelineValue.leadsWithPlan === 1 ? '' : 's'} with a package`} />
+            </Grid>
+
+            <Card title="Where leads come from" subtitle="Per channel: how many, how many became customers">
+              <Table
+                rowKey={(r) => r.source}
+                toolbar="never"
+                empty="No leads yet"
+                rows={insights.bySource}
+                columns={[
+                  { key: 'source', label: 'Channel', render: (r) => <span style={{ fontWeight: 600 }}>{r.source}</span> },
+                  { key: 'total', label: 'Leads', align: 'right', render: (r) => r.total },
+                  { key: 'won', label: 'Won', align: 'right', render: (r) => <span style={{ color: color.green }}>{r.won}</span> },
+                  { key: 'lost', label: 'Lost', align: 'right', render: (r) => <span style={{ color: r.lost ? color.rust : color.muted }}>{r.lost}</span> },
+                  { key: 'rate', label: 'Won %', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.rate}%</span> },
+                ]}
+              />
+            </Card>
+
+            <Card title="Why leads are lost" subtitle="Asked each time a lead is marked lost">
+              <Table
+                rowKey={(r) => r.reason}
+                toolbar="never"
+                empty="No lost leads yet"
+                rows={insights.lostReasons}
+                columns={[
+                  { key: 'reason', label: 'Reason', render: (r) => r.reason },
+                  { key: 'n', label: 'Leads', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.n}</span> },
+                ]}
+              />
+            </Card>
+          </>
+        )
       )}
 
       {tab === 'referrers' && (

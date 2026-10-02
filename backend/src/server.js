@@ -3861,8 +3861,10 @@ async function ensureStaffReferrer(tenantId, staffId, name, phone) {
 
 app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   const { rows } = await pool.query(
-    `select l.*, r.name as referrer_name, r.staff_id as referrer_staff_id, st.name as assignee_name, cb.name as created_by_name
+    `select l.*, r.name as referrer_name, r.staff_id as referrer_staff_id, st.name as assignee_name, cb.name as created_by_name,
+            pl.title as plan_title, pl.price as plan_price
        from leads l
+       left join plans pl on pl.id = l.interested_plan_id
        left join referrers r on r.id = l.referrer_id
        left join staff st on st.id = l.assigned_to
        left join staff cb on cb.id = l.created_by
@@ -3885,6 +3887,47 @@ app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
  * explicitly named as a lead's referrer (every staff member is one automatically — ensureStaffReferrer — but only
  * earns by being chosen, never just by being assigned the work).
  */
+/**
+ * How the pipeline is actually doing, beyond the list: where leads come from and which channels convert, why
+ * the lost ones were lost, how fast a new lead is reached and how long a win takes, what the open pipeline is
+ * worth a month, and how many have gone quiet. Source rows include only leads old enough to have had a chance
+ * (every one, here — won and lost are final), so the rate is honest rather than diluted by this week's new ones.
+ */
+app.get('/api/leads/insights', requirePermission('leads.view'), wrap(async (req, res) => {
+  const t = req.tenant.id;
+  const [funnel, bySource, lost, speed, stale, value] = await Promise.all([
+    pool.query('select status, count(*)::int as n from leads where tenant_id=$1 group by status', [t]),
+    pool.query(
+      `select coalesce(source, 'unknown') as source, count(*)::int as total,
+              count(*) filter (where status='won')::int as won, count(*) filter (where status='lost')::int as lost
+         from leads where tenant_id=$1 group by 1 order by total desc`, [t]),
+    pool.query(
+      `select coalesce(nullif(lost_reason, ''), 'No reason given') as reason, count(*)::int as n
+         from leads where tenant_id=$1 and status='lost' group by 1 order by n desc`, [t]),
+    pool.query(
+      `select avg(extract(epoch from (first_contacted_at - created_at)) / 3600) filter (where first_contacted_at is not null and created_at > now() - interval '90 days') as hours_to_contact,
+              avg(extract(epoch from (won_at - created_at)) / 86400) filter (where won_at is not null) as days_to_win
+         from leads where tenant_id=$1`, [t]),
+    pool.query(
+      `select count(*)::int as n from leads
+        where tenant_id=$1 and status in ('new', 'contacted') and coalesce(last_activity_at, created_at) < now() - interval '7 days'`, [t]),
+    pool.query(
+      `select coalesce(sum(p.price), 0) as monthly, count(*)::int as with_plan
+         from leads l join plans p on p.id = l.interested_plan_id
+        where l.tenant_id=$1 and l.status in ('new', 'contacted')`, [t]),
+  ]);
+  const num = (v) => (v == null ? null : Number(v));
+  res.json({
+    funnel: Object.fromEntries(funnel.rows.map((r) => [r.status, r.n])),
+    bySource: bySource.rows.map((r) => ({ ...r, rate: r.total ? Math.round((r.won / r.total) * 100) : 0 })),
+    lostReasons: lost.rows,
+    hoursToContact: num(speed.rows[0]?.hours_to_contact),
+    daysToWin: num(speed.rows[0]?.days_to_win),
+    stale: stale.rows[0]?.n ?? 0,
+    pipelineValue: { monthly: Number(value.rows[0]?.monthly ?? 0), leadsWithPlan: value.rows[0]?.with_plan ?? 0 },
+  });
+}));
+
 app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(async (req, res) => {
   /**
    * Three CTEs, each aggregated down to one row per staff member before anything is joined to `staff` — a plain
@@ -3970,7 +4013,12 @@ app.get('/api/team/eotm', requirePermission('tickets.view'), wrap(async (req, re
 }));
 
 app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
-  const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp, lat, lng } = req.body;
+  const { name, phone, source, referrerId, referredByClientId, assignedTo, nextFollowUp, lat, lng, interestedPlanId } = req.body;
+
+  if (interestedPlanId) {
+    const { rowCount } = await pool.query('select 1 from plans where id=$1 and tenant_id=$2', [interestedPlanId, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such package' });
+  }
 
   let referrer = null;
   if (referrerId) {
@@ -3992,10 +4040,10 @@ app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
   }
 
   const { rows: [l] } = await pool.query(
-    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up, created_by, lat, lng)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+    `insert into leads (tenant_id, name, phone, source, referrer_id, assigned_to, next_follow_up, created_by, lat, lng, interested_plan_id, last_activity_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, now()) returning *`,
     [req.tenant.id, name, phone, source ?? 'manual', referrer, assignedTo || null, nextFollowUp || null,
-     req.session?.staff_id ?? null, lat ?? null, lng ?? null]);
+     req.session?.staff_id ?? null, lat ?? null, lng ?? null, interestedPlanId || null]);
   res.json(l);
 });
 
@@ -4021,6 +4069,7 @@ app.post('/api/leads/:id/notes', wrap(async (req, res) => {
   const { rows: [n] } = await pool.query(
     `insert into lead_notes (tenant_id, lead_id, author, body) values ($1,$2,$3,$4) returning *`,
     [req.tenant.id, req.params.id, req.session?.name ?? 'system', body]);
+  await pool.query('update leads set last_activity_at = now() where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   res.json(n);
 }));
 
@@ -11790,7 +11839,7 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
     req.body.referrer_id = await referrerForSubscriber(req.tenant.id, req.body.referred_by_client_id);
   }
 
-  const allowed = ['status', 'name', 'phone', 'source', 'referrer_id', 'assigned_to', 'next_follow_up'];
+  const allowed = ['status', 'name', 'phone', 'source', 'referrer_id', 'assigned_to', 'next_follow_up', 'interested_plan_id', 'lost_reason'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
 
@@ -11803,6 +11852,11 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
     const { rowCount } = await pool.query(
       'select 1 from staff where id=$1 and tenant_id=$2', [req.body.assigned_to, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+  if (sets.includes('interested_plan_id') && req.body.interested_plan_id) {
+    const { rowCount } = await pool.query(
+      'select 1 from plans where id=$1 and tenant_id=$2', [req.body.interested_plan_id, req.tenant.id]);
+    if (!rowCount) return res.status(404).json({ error: 'No such package' });
   }
 
   /**
@@ -11822,8 +11876,15 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
   const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
   if (sets.includes('status')) {
     // Only when status is actually part of this update — the same $n placeholder status itself already got above.
-    setClauses.push(`won_at = case when $${sets.indexOf('status') + 3}::text = 'won' then coalesce(won_at, now()) else null end`);
+    setClauses.push(`won_at = case when ${sets.indexOf('status') + 3}::text = 'won' then coalesce(won_at, now()) else null end`);
+    // The first time anyone reached them: moving off 'new' for the first time is the best signal there is.
+    setClauses.push(`first_contacted_at = case when ${sets.indexOf('status') + 3}::text <> 'new' then coalesce(first_contacted_at, now()) else first_contacted_at end`);
+    // A reason belongs to a lost lead only: reopening it drops the old one (unless a new one came with this save).
+    if (!sets.includes('lost_reason')) {
+      setClauses.push(`lost_reason = case when ${sets.indexOf('status') + 3}::text = 'lost' then lost_reason else null end`);
+    }
   }
+  setClauses.push('last_activity_at = now()');
 
   const { rows: [l] } = await pool.query(
     `update leads set ${setClauses.join(', ')}

@@ -3150,3 +3150,10 @@ alter table tenants add constraint tenants_billing_mode_check check (billing_mod
 -- while their licence runs out before the next statement is even drawn. A statement drawn later for a month
 -- already paid this way is settled against this counter instead of being charged and extending the licence again.
 alter table tenants add column if not exists prepaid_months int not null default 0;
+
+-- Leads: what package they asked about (sizes the pipeline in money), why a lost one was lost, when we first
+-- reached them (speed to lead) and the last time anything happened on it (finds the ones going cold).
+alter table leads add column if not exists interested_plan_id uuid references plans on delete set null;
+alter table leads add column if not exists lost_reason text;
+alter table leads add column if not exists first_contacted_at timestamptz;
+alter table leads add column if not exists last_activity_at timestamptz;
