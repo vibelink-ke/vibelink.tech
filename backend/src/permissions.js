@@ -64,6 +64,7 @@ export const DEFAULT_PERMISSIONS = {
   // Where the team is right now (only while they are on shift).
   'field.locations': { owner: true, cashier: false, technician: false, support: false, sales: false },
   'field.update_location': { owner: true, cashier: false, technician: true, support: false, sales: false },
+  'field.view_credentials': { owner: true, cashier: false, technician: true, support: false, sales: false },
   // Closing a ticket normally needs a photo of the finished work; these roles work from the office.
   'tickets.close_without_photo': { owner: true, cashier: true, technician: false, support: true, sales: false },
   'tickets.delete':  all(),
@@ -244,6 +245,7 @@ export const PERMISSION_META = [
   { key: 'field.use',      page: 'Field app', action: 'Use the technician app' },
   { key: 'field.locations', page: 'Field app', action: 'See where technicians are' },
   { key: 'field.update_location', page: 'Field app', action: "Update a customer's location from the field" },
+  { key: 'field.view_credentials', page: 'Field app', action: "See a customer's PPPoE username and password (read-only)" },
   { key: 'tickets.close_without_photo', page: 'Tickets', action: 'Close a job without a photo' },
   { key: 'tickets.delete', page: 'Tickets', action: 'Delete' },
   { key: 'tickets.view_team', page: 'Tickets', action: 'See every job across the team (Team jobs)' },

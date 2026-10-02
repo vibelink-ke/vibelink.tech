@@ -43,6 +43,11 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
    * shift (which needs location on). The office — the owner or platform owner, helping from a desk — is not
    * the field team and is exempt. /me, /shift and /location are not behind this: they are how a shift starts.
    */
+  // A technician sets up a customer's equipment with the PPPoE login, so it is shown — read-only: nothing under
+  // /api/field writes it, and the office routes that do need clients.edit, which a technician does not have.
+  const mayCreds = async (req) => !!req.session?.is_super_admin
+    || await hasPermission(req.tenant.id, req.session?.role, 'field.view_credentials');
+
   const onShift = async (req, res, next) => {
     try {
       if (req.session?.is_super_admin || req.session?.role === 'owner') return next();
@@ -78,7 +83,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       company: req.session.company ?? req.tenant.name,
       shift: shift ? { active: true, since: shift.started_at } : { active: false },
       // What the New tab offers: only what the permission matrix lets this login actually do.
-      can: { ticket: await may('tickets.edit'), lead: await may('leads.create'), location: await may('field.update_location') },
+      can: { ticket: await may('tickets.edit'), lead: await may('leads.create'), location: await may('field.update_location'), credentials: await may('field.view_credentials') },
     });
   }));
 
@@ -193,7 +198,8 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     const { rows: equipment } = await pool.query(
       `select id, name, category, serial_number, mac_address, quantity, deducted, needs_review, review_reason, created_at
          from job_equipment where tenant_id=$1 and ticket_id=$2 order by created_at`, [req.tenant.id, job.id]);
-    res.json({ ...j, mine: j.assigned_to === me(req), notes, photos, equipment, pppoe_user: creds?.pppoe_user ?? null, pppoe_pass: creds?.pppoe_pass ?? null });
+    const seeCreds = await mayCreds(req);
+    res.json({ ...j, mine: j.assigned_to === me(req), notes, photos, equipment, pppoe_user: creds?.pppoe_user ?? null, pppoe_pass: seeCreds ? (creds?.pppoe_pass ?? null) : null });
   }));
 
   // Take an unassigned job.
@@ -374,7 +380,10 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     const { rows: jobs } = await pool.query(
       `select id, number, subject, kind, status, created_at from tickets
         where tenant_id=$1 and subscriber_id=$2 order by created_at desc limit 8`, [req.tenant.id, c.id]);
-    res.json({ ...c, state: stateOf(c), expires_at: undefined, jobs });
+    const { rows: [cr] } = (await mayCreds(req))
+      ? await pool.query('select pppoe_pass from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, c.id])
+      : { rows: [] };
+    res.json({ ...c, state: stateOf(c), expires_at: undefined, jobs, pppoe_pass: cr?.pppoe_pass ?? null });
   }));
 
   // Drop the customer's session so their router dials back in fresh (a first thing to try on a repair).

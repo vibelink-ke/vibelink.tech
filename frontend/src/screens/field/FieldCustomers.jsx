@@ -50,6 +50,7 @@ export function FieldCustomer() {
   const [c, setC] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showPass, setShowPass] = useState(false);
 
   const load = () => api.fieldCustomer(id).then(setC).catch((e) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -110,6 +111,21 @@ export function FieldCustomer() {
           <Btn tone="quiet" busy={busy} onClick={reconnect}>Reset their connection</Btn>
         )}
       </div>
+      {c.service === 'pppoe' && c.pppoe_user && (
+        <div style={panel}>
+          <div style={{ fontWeight: 600 }}>PPPoE login</div>
+          <div style={{ fontSize: 14 }}>User: <b style={{ fontFamily: 'monospace' }}>{c.pppoe_user}</b></div>
+          {me?.can?.credentials ? (
+            <div style={{ fontSize: 14 }}>
+              Password: <b style={{ fontFamily: 'monospace' }}>{showPass ? (c.pppoe_pass ?? '—') : '••••••'}</b>{' '}
+              <span onClick={() => setShowPass((v) => !v)} style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }}>{showPass ? 'Hide' : 'Show'}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 12.5, color: color.muted }}>Your login cannot see the password.</div>
+          )}
+          <div style={{ fontSize: 12, color: color.muted }}>Read-only — changes are made by the office.</div>
+        </div>
+      )}
       {c.jobs?.length > 0 && (
         <div style={panel}>
           <div style={{ fontWeight: 600 }}>Recent jobs</div>
