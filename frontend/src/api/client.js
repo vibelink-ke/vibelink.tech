@@ -105,7 +105,7 @@ export const api = {
   dashboardHotspot: () => get('/api/dashboard/hotspot'),
   // ── field technician app ──
   fieldMe: () => get('/api/field/me'),
-  fieldShift: (action) => post('/api/field/shift', { action }),
+  fieldShift: (action, pos) => post('/api/field/shift', { action, ...(pos ?? {}) }),
   fieldLocation: (body) => post('/api/field/location', body),
   fieldJobs: () => get('/api/field/jobs'),
   fieldJob: (id) => get(`/api/field/jobs/${id}`),

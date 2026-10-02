@@ -8,7 +8,7 @@ import FieldJob from './FieldJob';
 import FieldNew from './FieldNew';
 import { FieldContext, useField } from './fieldContext';
 import { FieldCustomers, FieldCustomer } from './FieldCustomers';
-import { Btn, Chip, Dot, distanceKm, page, panel, prettyKm, timeAgo } from './fieldKit';
+import { Btn, Chip, Dot, distanceKm, getAccuratePosition, page, panel, prettyKm, timeAgo } from './fieldKit';
 import { cachedGet, queueRemove, retryItem, useQueue } from './offline';
 
 /**
@@ -19,12 +19,15 @@ import { cachedGet, queueRemove, retryItem, useQueue } from './offline';
  * cannot track in the background, so the phone screen stays on (a wake lock asks it to) while on shift.
  */
 const SEND_EVERY_MS = 45000;
+const MAX_SEND_ACCURACY_M = 150;   // matches the server: worse than this is not trusted
 
 export default function FieldApp() {
   const store = useStore();
   const [me, setMe] = useState(null);
   const [pos, setPos] = useState(null);
   const [geoError, setGeoError] = useState('');
+  const [watchTry, setWatchTry] = useState(0);   // bumped to start the position watch again after a refusal
+  const [blocked, setBlocked] = useState(false);   // location permission refused or taken away during a shift
   const [lastSent, setLastSent] = useState(null);
   const ticketRef = useRef(null);
   const setTicketId = useCallback((id) => { ticketRef.current = id; }, []);
@@ -51,6 +54,13 @@ export default function FieldApp() {
     const onPos = (p) => {
       const here = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy };
       setPos(here);
+      setBlocked(false);
+      // A reading this rough is a tower or Wi-Fi guess, not where the phone is: keep the last good one on
+      // the map (the server ignores it too) and say why nothing is going out.
+      if (here.accuracy > MAX_SEND_ACCURACY_M) {
+        setGeoError(`GPS signal is weak (about ${Math.round(here.accuracy)} m) — not shared until it improves. Move into the open.`);
+        return;
+      }
       setGeoError('');
       const now = Date.now();
       if (now - last < SEND_EVERY_MS) return;
@@ -60,8 +70,12 @@ export default function FieldApp() {
         if (/shift/i.test(e.message ?? '')) loadMe();
       });
     };
-    const id = navigator.geolocation.watchPosition(onPos, (e) => setGeoError(e.message || 'Location is off — switch it on to share it.'), {
-      enableHighAccuracy: true, maximumAge: 15000, timeout: 30000,
+    const id = navigator.geolocation.watchPosition(onPos, (e) => {
+      // Permission taken away mid-shift: nothing can be shared, so the app stops until it is back on.
+      if (e.code === 1) setBlocked(true);
+      else setGeoError(e.message || 'Location is off — switch it on to share it.');
+    }, {
+      enableHighAccuracy: true, maximumAge: 5000, timeout: 30000,
     });
     // Ask the phone not to lock the screen: a locked page stops reporting.
     let lock = null;
@@ -74,7 +88,7 @@ export default function FieldApp() {
       document.removeEventListener('visibilitychange', again);
       lock?.release?.().catch(() => {});
     };
-  }, [shiftActive, loadMe]);
+  }, [shiftActive, loadMe, watchTry]);
 
   const value = useMemo(() => ({ me, loadMe, pos, geoError, lastSent, setTicketId, shiftActive }),
     [me, loadMe, pos, geoError, lastSent, setTicketId, shiftActive]);
@@ -117,6 +131,20 @@ export default function FieldApp() {
           <NavLink to="/field/me" style={tab}>Me</NavLink>
         </nav>
       </div>
+      {shiftActive && blocked && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(20,28,24,.94)', color: '#fff', display: 'flex',
+          flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 28, textAlign: 'center',
+        }}>
+          <div style={{ fontSize: 20, fontWeight: 700 }}>Location is off</div>
+          <div style={{ fontSize: 14.5, lineHeight: 1.5, maxWidth: 340 }}>
+            You are on shift, and the office needs your location while you are. Allow location for this app in the browser
+            settings, then tap Try again. Or end your shift.
+          </div>
+          <Btn onClick={() => getAccuratePosition({ maxWaitMs: 8000 }).then(() => { setBlocked(false); setWatchTry((n) => n + 1); }).catch(() => store.toast('Still off — allow location in the browser settings'))}>Try again</Btn>
+          <Btn tone="quiet" onClick={() => api.fieldShift('end').then(() => { setBlocked(false); loadMe(); }).catch((e) => store.toast(e.message))}>End shift</Btn>
+        </div>
+      )}
       <Toast />
     </FieldContext.Provider>
   );
@@ -194,11 +222,15 @@ function Me() {
   const toggle = async () => {
     setBusy(true);
     try {
-      if (!shiftActive && navigator.geolocation) {
-        // Ask now, while a person is looking at the phone, rather than in the middle of a job.
-        await new Promise((resolve) => navigator.geolocation.getCurrentPosition(resolve, resolve, { timeout: 8000 }));
+      if (shiftActive) {
+        await api.fieldShift('end');
+      } else {
+        // A shift needs location: ask now, while a person is looking at the phone, and wait for a fix
+        // good enough to trust. Refused or unavailable means no shift, not a shift that shares nothing.
+        store.toast('Getting your location…');
+        const here = await getAccuratePosition({ targetM: 50, maxWaitMs: 20000 });
+        await api.fieldShift('start', here);
       }
-      await api.fieldShift(shiftActive ? 'end' : 'start');
       await loadMe();
       store.toast(shiftActive ? 'Shift ended — your location is no longer shared' : 'Shift started — keep this app open');
     } catch (e) {

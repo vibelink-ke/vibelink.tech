@@ -17,6 +17,8 @@ import crypto from 'node:crypto';
 
 const PHOTO_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PHOTO_MAX_BYTES = 4 * 1024 * 1024;   // the app shrinks photos well below this before sending
+// Readings worse than this (metres) are not trusted: the shift will not start on one and the map ignores them.
+const MAX_ACCURACY_M = 150;
 const KINDS = new Set(['before', 'after', 'other']);   // 'serial' is only ever made by recording equipment
 
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
@@ -68,9 +70,22 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   app.post('/api/field/shift', use, wrap(async (req, res) => {
     const action = String(req.body?.action ?? '');
     if (action === 'start') {
+      // A shift only exists with location on: starting needs a real, reasonably accurate fix, so there is
+      // no way to be "on shift" while sharing nothing (or a wildly wrong place) with the office.
+      const lat = num(req.body?.lat); const lng = num(req.body?.lng); const accuracy = num(req.body?.accuracy);
+      if (!validLat(lat) || !validLng(lng)) {
+        return res.status(400).json({ error: 'Location is required to start a shift. Switch it on for this app and try again.' });
+      }
+      if (Number.isFinite(accuracy) && accuracy > MAX_ACCURACY_M) {
+        return res.status(400).json({ error: `Your location is not accurate enough yet (about ${Math.round(accuracy)} m). Step into the open, wait for the GPS to settle and try again.` });
+      }
       await pool.query(
         `insert into field_shifts (tenant_id, staff_id) values ($1,$2)
          on conflict (staff_id) where ended_at is null do nothing`, [req.tenant.id, me(req)]);
+      await pool.query(
+        `insert into staff_locations (tenant_id, staff_id, lat, lng, accuracy, at) values ($1,$2,$3,$4,$5, now())
+         on conflict (staff_id) do update set lat=excluded.lat, lng=excluded.lng, accuracy=excluded.accuracy, ticket_id=null, at=now()`,
+        [req.tenant.id, me(req), lat, lng, Number.isFinite(accuracy) ? accuracy : null]);
     } else if (action === 'end') {
       await pool.query(
         'update field_shifts set ended_at=now() where tenant_id=$1 and staff_id=$2 and ended_at is null',
@@ -94,6 +109,9 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     const { rows: [shift] } = await pool.query(
       'select 1 from field_shifts where tenant_id=$1 and staff_id=$2 and ended_at is null', [req.tenant.id, me(req)]);
     if (!shift) return res.status(409).json({ error: 'Start your shift first — location is only shared while you are on shift.' });
+    // A cell-tower or Wi-Fi guess hundreds of metres off would drag the pin (and the trail) to the wrong
+    // street: keep the last good position instead of overwriting it with a poor one.
+    if (Number.isFinite(accuracy) && accuracy > MAX_ACCURACY_M) return res.json({ ok: true, skipped: true });
 
     const ticketId = req.body?.ticketId ? String(req.body.ticketId) : null;
     await pool.query(

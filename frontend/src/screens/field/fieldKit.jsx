@@ -75,6 +75,39 @@ export function getPosition(opts = {}) {
 }
 
 /**
+ * A position good enough to trust. A phone's first fix is often a cell-tower or Wi-Fi guess hundreds of
+ * metres out; GPS needs a few seconds in the open to settle. This watches until a reading is within
+ * targetM metres, or gives the best one it saw when time runs out. Rejects when the person says no to
+ * location, or there was no reading at all.
+ */
+export function getAccuratePosition({ targetM = 50, maxWaitMs = 20000 } = {}) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) return reject(new Error('This phone cannot share its location.'));
+    let best = null;
+    let done = false;
+    let timer;
+    let id;
+    const finish = (err) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      navigator.geolocation.clearWatch(id);
+      if (best) resolve(best); else reject(err ?? new Error('Could not get your location.'));
+    };
+    id = navigator.geolocation.watchPosition(
+      (p) => {
+        const here = { lat: p.coords.latitude, lng: p.coords.longitude, accuracy: p.coords.accuracy };
+        if (!best || here.accuracy < best.accuracy) best = here;
+        if (here.accuracy <= targetM) finish();
+      },
+      (e) => finish(Object.assign(new Error(e.code === 1 ? 'Location is switched off for this app. Allow it in the browser settings and try again.' : (e.message || 'Could not get your location.')), { denied: e.code === 1 })),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: maxWaitMs },
+    );
+    timer = setTimeout(() => finish(), maxWaitMs);
+  });
+}
+
+/**
  * A photo from the camera, shrunk before it is sent: a modern phone photo is 4 to 10 MB, which on a
  * site with one bar of signal never arrives. Longest side 1280 px, JPEG. The orientation the phone
  * recorded is applied, so it is not sent sideways.
