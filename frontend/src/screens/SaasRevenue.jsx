@@ -46,6 +46,115 @@ function downloadCsv(month, rows) {
   URL.revokeObjectURL(a.href);
 }
 
+const shortMonth = (key) => new Date(`${key}-01T00:00:00Z`).toLocaleDateString('en-KE', { month: 'short', timeZone: 'UTC' });
+const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(Math.round(n)));
+
+/** Billed vs received per month — grouped bars, plus SMS credit sales as a third series. */
+function TrendChart({ series }) {
+  const W = 720;
+  const H = 210;
+  const pad = { l: 38, r: 8, t: 10, b: 24 };
+  const top = Math.max(1000, ...series.flatMap((s) => [s.billed, s.received, s.sms]));
+  const step = (W - pad.l - pad.r) / series.length;
+  const bar = Math.min(14, step / 4);
+  const y = (v) => pad.t + (H - pad.t - pad.b) * (1 - v / top);
+  const ticks = [0, 0.5, 1].map((f) => f * top);
+  const series3 = [['billed', color.mint], ['received', color.green], ['sms', color.amber]];
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Billed, received and SMS revenue by month">
+      {ticks.map((t) => (
+        <g key={t}>
+          <line x1={pad.l} x2={W - pad.r} y1={y(t)} y2={y(t)} stroke={color.line} />
+          <text x={pad.l - 6} y={y(t) + 4} textAnchor="end" fontSize="10" fill={color.muted}>{compact(t)}</text>
+        </g>
+      ))}
+      {series.map((s, i) => {
+        const x0 = pad.l + i * step + step / 2 - (bar * 3 + 4) / 2;
+        return (
+          <g key={s.month} opacity={s.current ? 0.6 : 1}>
+            {series3.map(([k, fill], j) => (
+              <rect key={k} x={x0 + j * (bar + 2)} y={y(s[k])} width={bar} height={Math.max(0, y(0) - y(s[k]))} rx="2" fill={fill}>
+                <title>{`${shortMonth(s.month)} ${s.month.slice(0, 4)} — ${k}: KES ${kes(s[k])}${s.current && k === 'billed' ? ' (estimate)' : ''}`}</title>
+              </rect>
+            ))}
+            <text x={pad.l + i * step + step / 2} y={H - 8} textAnchor="middle" fontSize="10" fill={color.muted}>{shortMonth(s.month)}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+const LegendDot = ({ c, label }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: color.muted }}>
+    <span style={{ width: 10, height: 10, borderRadius: 3, background: c }} />{label}
+  </span>
+);
+
+/**
+ * The platform's own revenue at a glance, above the per-tenant table: recurring revenue (what the last
+ * closed month billed), how much of what is billed actually gets paid, how much is still owed and for how
+ * long, and the other income stream (SMS credit sales). Billed and received are kept apart on purpose:
+ * a tenant who pays ahead or late makes received differ from billed month to month.
+ */
+function Overview({ overview }) {
+  if (!overview) return null;
+  const { kpis, series, aging, overdue } = overview;
+  const pct = (n) => (n == null ? '—' : `${n.toFixed(0)}%`);
+  const change = kpis.mrrChangePct;
+  const thisMonth = series[series.length - 1];
+  return (
+    <>
+      <Grid min={190} gap={14}>
+        <Stat
+          label="Monthly recurring revenue"
+          value={`KES ${kes(kpis.mrr)}`}
+          hint={change == null ? 'last closed month billed' : `${change >= 0 ? '▲' : '▼'} ${Math.abs(change).toFixed(0)}% vs the month before`}
+        />
+        <Stat label="Annualised (ARR)" value={`KES ${kes(kpis.arr)}`} hint="last closed month × 12" />
+        <Stat label="Average per tenant" value={`KES ${kes(kpis.arpa)}`} hint={`${kpis.payingTenants} paying tenants`} />
+        <Stat
+          label="Collection rate"
+          value={pct(kpis.collectionRate)}
+          tone={kpis.collectionRate != null && kpis.collectionRate < 80 ? color.rust : undefined}
+          hint="of billed, last 3 closed months"
+        />
+        <Stat label="Outstanding" value={`KES ${kes(kpis.outstanding)}`} tone={kpis.outstanding > 0 ? color.amberInk : undefined} hint="unpaid statements" />
+        <Stat label="SMS credit sales" value={`KES ${kes(thisMonth.sms)}`} hint="this month, on top of statements" />
+      </Grid>
+
+      <Card title="Billed vs received" subtitle="Last 12 months. Received is cash that came in that month (statements, activation fees); this month's billed figure is an estimate.">
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
+          <LegendDot c={color.mint} label="Billed" />
+          <LegendDot c={color.green} label="Received from tenants" />
+          <LegendDot c={color.amber} label="SMS credit sales" />
+        </div>
+        <TrendChart series={series} />
+      </Card>
+
+      {overdue.length > 0 && (
+        <Card
+          title="Who owes what"
+          subtitle={`KES ${kes(aging.current)} current · KES ${kes(aging.one)} one month late · KES ${kes(aging.twoPlus)} two or more months late`}
+        >
+          <Table
+            rowKey={(r) => r.tenantId}
+            toolbar="never"
+            rows={overdue}
+            columns={[
+              { key: 'tenant', label: 'Tenant', render: (r) => <span style={{ fontWeight: 600 }}>{r.tenant}</span> },
+              { key: 'n', label: 'Statements', align: 'right', render: (r) => r.statements },
+              { key: 'oldest', label: 'Oldest', render: (r) => monthLabel(r.oldest) },
+              { key: 'credit', label: 'Credit held', align: 'right', render: (r) => <span style={{ ...money, color: color.muted }}>{r.credit > 0 ? `KES ${kes(r.credit)}` : '—'}</span> },
+              { key: 'owed', label: 'Owes', align: 'right', render: (r) => <span style={{ ...money, fontWeight: 700 }}>KES {kes(r.owed)}</span> },
+            ]}
+          />
+        </Card>
+      )}
+    </>
+  );
+}
+
 /**
  * What each tenant owes the platform for a month: a percentage of their hotspot
  * revenue plus a rate per active PPPoE client, at THEIR rate (set here, per
@@ -61,6 +170,7 @@ export default function SaasRevenue() {
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [overview, setOverview] = useState(null);
 
   // Above the early return below, because hooks cannot be skipped.
   const load = async (key = month) => {
@@ -72,6 +182,9 @@ export default function SaasRevenue() {
       setData(null);
     }
   };
+  useEffect(() => {
+    if (store.isPlatformOwner) api.platformRevenueOverview().then(setOverview).catch(() => setOverview(null));
+  }, [store.isPlatformOwner]);
   useEffect(() => {
     if (!store.isPlatformOwner) return;
     setData(null);
@@ -171,6 +284,8 @@ export default function SaasRevenue() {
         </div>
       }
     >
+      <Overview overview={overview} />
+
       {error && <p style={{ color: color.rust }}>Could not load: {error}</p>}
       {!data && !error && <p style={{ color: color.muted }}>Working it out…</p>}
 

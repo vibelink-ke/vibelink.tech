@@ -473,6 +473,7 @@ export const api = {
   restoreTenant: (id) => post(`/api/tenants/${id}/restore`, {}),
   purgeTenant: (id, body) => post(`/api/tenants/${id}/purge`, body),
   // what tenants owe the platform each month
+  platformRevenueOverview: () => get('/api/platform/revenue-overview'),
   platformCharges: (month) => get(`/api/platform/charges${month ? `?month=${month}` : ''}`),
   generateCharges: (month) => post('/api/platform/charges/generate', { month }),
   setChargeStatus: (id, status) => post(`/api/platform/charges/${id}/status`, { status }),

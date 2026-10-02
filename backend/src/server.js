@@ -14,7 +14,7 @@ import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
 import { generateDueBills } from './bills.js';
-import { currentMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
+import { currentMonthKey, previousMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -12667,6 +12667,96 @@ app.get('/api/platform/charges', superAdminOnly, wrap(async (req, res) => {
       hotspotRevenue: sum('hotspot_revenue'), hotspotFee: sum('hotspot_fee'),
       pppoeActive: sum('pppoe_active'), pppoeFee: sum('pppoe_fee'), total: sum('total'),
     },
+  });
+}));
+
+/**
+ * The platform's own revenue picture, for the SaaS revenue page: what was billed to tenants each month
+ * against what actually came in, SMS credit sales as a second income stream, what is still unpaid and for
+ * how long, and the usual recurring-revenue ratios. "Billed" is the stored statements for closed months and
+ * the live estimate for the current one (chargesFor). "Received" is cash from tenants (tenant_payments,
+ * which also covers activation fees) by the Nairobi month it landed in — a different thing from billed, since
+ * a tenant can pay ahead or late.
+ */
+app.get('/api/platform/revenue-overview', superAdminOnly, wrap(async (req, res) => {
+  const count = 12;
+  const nowKey = currentMonthKey();
+  const keys = [];
+  for (let k = nowKey, i = 0; i < count; i++, k = previousMonthKey(k)) keys.unshift(k);
+  const first = keys[0];
+  const w = monthWindow(first);
+
+  const [{ rows: billedRows }, { rows: receivedRows }, { rows: smsRows }, { rows: openRows }, live] = await Promise.all([
+    pool.query(
+      `select to_char(month, 'YYYY-MM') as m, sum(total) as billed, sum(total) filter (where status = 'paid') as paid, count(*)::int as n
+         from tenant_charges where month >= $1::date group by 1`, [w.month]),
+    pool.query(
+      `select to_char(created_at at time zone 'Africa/Nairobi', 'YYYY-MM') as m, sum(amount) as received
+         from tenant_payments where created_at >= $1::timestamptz group by 1`, [w.start]),
+    pool.query(
+      `select to_char(applied_at at time zone 'Africa/Nairobi', 'YYYY-MM') as m, sum(amount) as sms
+         from payments where payload->>'type' = 'sms_credit' and applied_at >= $1::timestamptz group by 1`, [w.start]),
+    pool.query(
+      `select c.tenant_id, t.name as tenant, sum(c.total) as owed, count(*)::int as statements,
+              to_char(min(c.month), 'YYYY-MM') as oldest, t.billing_credit
+         from tenant_charges c join tenants t on t.id = c.tenant_id
+        where c.status in ('open', 'invoiced') and c.total > 0 and t.deleted_at is null
+        group by c.tenant_id, t.name, t.billing_credit order by min(c.month), sum(c.total) desc`),
+    chargesFor(nowKey),
+  ]);
+
+  const by = (rows, k) => Object.fromEntries(rows.map((r) => [r.m, Number(r[k])]));
+  const billedBy = by(billedRows, 'billed');
+  const paidBy = by(billedRows, 'paid');
+  const receivedBy = by(receivedRows, 'received');
+  const smsBy = by(smsRows, 'sms');
+  const liveTotal = live.reduce((n, r) => n + Number(r.total ?? 0), 0);
+
+  const series = keys.map((m) => ({
+    month: m,
+    billed: m === nowKey ? liveTotal : (billedBy[m] ?? 0),
+    billedPaid: paidBy[m] ?? 0,
+    received: receivedBy[m] ?? 0,
+    sms: smsBy[m] ?? 0,
+    current: m === nowKey,
+  }));
+
+  // Ratios from CLOSED months only — the current one is an estimate that grows all month.
+  const closed = series.filter((s) => !s.current);
+  const last = closed[closed.length - 1];
+  const lastStatements = billedRows.find((r) => r.m === last?.month)?.n ?? 0;
+  const lastThree = closed.slice(-3);
+  const billed3 = lastThree.reduce((n, s) => n + s.billed, 0);
+  const paid3 = lastThree.reduce((n, s) => n + s.billedPaid, 0);
+  const prev = closed[closed.length - 2];
+
+  const thisMonthIndex = (m) => (Number(nowKey.slice(0, 4)) * 12 + Number(nowKey.slice(5))) - (Number(m.slice(0, 4)) * 12 + Number(m.slice(5)));
+  // Per statement, not per tenant: a statement is drawn on the 1st for the month before, so one for last
+  // month is simply current; older ones are late by however many months have passed since.
+  const { rows: openByMonth } = await pool.query(
+    `select to_char(c.month, 'YYYY-MM') as m, sum(c.total) as owed
+       from tenant_charges c join tenants t on t.id = c.tenant_id
+      where c.status in ('open', 'invoiced') and c.total > 0 and t.deleted_at is null group by 1`);
+  const buckets = { current: 0, one: 0, twoPlus: 0 };
+  for (const r of openByMonth) {
+    const age = thisMonthIndex(r.m);
+    const owed = Number(r.owed);
+    if (age <= 1) buckets.current += owed; else if (age === 2) buckets.one += owed; else buckets.twoPlus += owed;
+  }
+
+  res.json({
+    series,
+    kpis: {
+      mrr: last?.billed ?? 0,
+      mrrChangePct: prev?.billed > 0 ? ((last.billed - prev.billed) / prev.billed) * 100 : null,
+      arr: (last?.billed ?? 0) * 12,
+      arpa: lastStatements > 0 ? (last.billed / lastStatements) : 0,
+      payingTenants: lastStatements,
+      collectionRate: billed3 > 0 ? (paid3 / billed3) * 100 : null,
+      outstanding: openRows.reduce((n, r) => n + Number(r.owed), 0),
+    },
+    aging: buckets,
+    overdue: openRows.map((r) => ({ tenantId: r.tenant_id, tenant: r.tenant, owed: Number(r.owed), statements: r.statements, oldest: r.oldest, credit: Number(r.billing_credit) })),
   });
 }));
 
