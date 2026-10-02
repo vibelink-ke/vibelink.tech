@@ -389,7 +389,7 @@ export default function ClientDetail() {
   }, [tab, client?.id]);
 
   const [addingService, setAddingService] = useState(null);
-  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
+  const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '', location: '', lat: '', lng: '' });
   const [serviceBusy, setServiceBusy] = useState(false);
   const [serviceFreeIps, setServiceFreeIps] = useState({ addresses: [], pools: [], loading: false });
   useEffect(() => {
@@ -412,7 +412,7 @@ export default function ClientDetail() {
   };
 
   const openAddService = async () => {
-    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '' });
+    setServiceForm({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '', location: '', lat: '', lng: '' });
     setAddingService(client);
     try {
       const { account, password } = await api.newSubscriberCredentials();
@@ -435,6 +435,9 @@ export default function ClientDetail() {
           pppoe_user: serviceForm.pppoeUser || null,
           pppoe_pass: serviceForm.pppoePass || null,
           static_ip: serviceForm.staticIp || null,
+          location: serviceForm.location || null,
+          lat: serviceForm.lat === '' ? null : Number(serviceForm.lat),
+          lng: serviceForm.lng === '' ? null : Number(serviceForm.lng),
         });
         store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
         store.toast(`Service added to ${addingService.account_code}`);
@@ -461,6 +464,9 @@ export default function ClientDetail() {
         pppoePass: serviceForm.pppoePass || null,
         staticIp: serviceForm.staticIp || null,
         lineLabel: serviceForm.lineLabel.trim(),
+        location: serviceForm.location || null,
+        lat: serviceForm.lat === '' ? null : Number(serviceForm.lat),
+        lng: serviceForm.lng === '' ? null : Number(serviceForm.lng),
         allowDuplicatePhone: true,
       });
       store.setCollection('clients', (cs) => [created, ...cs]);
@@ -583,6 +589,9 @@ export default function ClientDetail() {
       expires_at: editing.expires_at || null,
       autopay: editing.autopay || null,
       location: editing.location || null,
+      // Each service line is its own place: its own pin, separate from the account's other lines.
+      lat: editing.lat === '' || editing.lat == null ? null : Number(editing.lat),
+      lng: editing.lng === '' || editing.lng == null ? null : Number(editing.lng),
     };
     // Sent only when changed: any credential change drops the customer's live
     // session, so an untouched Save must not do that.
@@ -760,6 +769,17 @@ export default function ClientDetail() {
                       />
                       <KV k="Expiry" v={line.expires_at ? new Date(line.expires_at).toLocaleString('en-KE') : '—'} />
                       <KV k="Router" v={lineRouter?.name ?? '—'} />
+                      <KV
+                        k="Location"
+                        v={
+                          <span style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <span>{line.location || (line.lat != null ? 'Pinned on the map' : 'Not set')}</span>
+                            {line.lat != null && line.lng != null && (
+                              <a href={`https://www.google.com/maps?q=${line.lat},${line.lng}`} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, fontWeight: 600, color: color.green }}>Open map</a>
+                            )}
+                          </span>
+                        }
+                      />
                       {soOn && onuByLine.get(line.id) && (
                         <KV
                           k="Signal"
@@ -1302,6 +1322,20 @@ export default function ClientDetail() {
                 <Input value={serviceForm.lineLabel} onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))} autoFocus />
               </Field>
             )}
+            <Field label="Location of this service" span={2} hint="Its own place — a second line is often a different building">
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <Input value={serviceForm.location} onChange={(e) => setServiceForm((s) => ({ ...s, location: e.target.value }))} placeholder="Kilimani, Block C" style={{ flex: '2 1 160px' }} />
+                <Button
+                  onClick={() => navigator.geolocation?.getCurrentPosition(
+                    (g) => setServiceForm((s) => ({ ...s, lat: g.coords.latitude.toFixed(6), lng: g.coords.longitude.toFixed(6) })),
+                    () => store.toast('Could not read this device\'s location'),
+                    { enableHighAccuracy: true, timeout: 10000 },
+                  )}
+                >
+                  {serviceForm.lat ? 'Pin set — redo' : 'Use my location'}
+                </Button>
+              </div>
+            </Field>
             <Field label="Plan">
               <Select
                 value={serviceForm.planId}
@@ -1436,8 +1470,30 @@ export default function ClientDetail() {
                 );
               })()}
             </Field>
-            <Field label="Location">
+            <Field label="Location" hint="Where this service is — its own place, not the account's">
               <Input value={editing.location ?? ''} onChange={(e) => setEditing((s) => ({ ...s, location: e.target.value }))} placeholder="Kilimani, Block C" />
+            </Field>
+            <Field label="Pin on the map" span={2}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <Input value={editing.lat ?? ''} onChange={(e) => setEditing((s) => ({ ...s, lat: e.target.value }))} placeholder="Latitude" style={{ flex: 1, minWidth: 120 }} />
+                  <Input value={editing.lng ?? ''} onChange={(e) => setEditing((s) => ({ ...s, lng: e.target.value }))} placeholder="Longitude" style={{ flex: 1, minWidth: 120 }} />
+                  <Button
+                    onClick={() => navigator.geolocation?.getCurrentPosition(
+                      (g) => setEditing((s) => ({ ...s, lat: g.coords.latitude.toFixed(6), lng: g.coords.longitude.toFixed(6) })),
+                      () => store.toast('Could not read this device\'s location'),
+                      { enableHighAccuracy: true, timeout: 10000 },
+                    )}
+                  >
+                    Use my location
+                  </Button>
+                </div>
+                <LocationMap
+                  lat={editing.lat === '' || editing.lat == null ? null : Number(editing.lat)}
+                  lng={editing.lng === '' || editing.lng == null ? null : Number(editing.lng)}
+                  onChange={(la, lo) => setEditing((s) => ({ ...s, lat: la.toFixed(6), lng: lo.toFixed(6) }))}
+                />
+              </div>
             </Field>
             <Field label="Auto-pay" hint="Charge this gateway automatically before expiry">
               <Select value={editing.autopay ?? ''} onChange={(e) => setEditing((s) => ({ ...s, autopay: e.target.value }))} options={AUTOPAY_OPTIONS} />
