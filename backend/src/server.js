@@ -13658,7 +13658,7 @@ app.post('/api/payment-gateways', requirePermission('payment_gateways.edit'), wr
     res.json({ id: g.id, ok: true });
   } catch (e) {
     await c.query('rollback');
-    if (e.code === '23505') return res.status(409).json({ error: 'That shortcode is already saved for this channel — edit the existing one instead of adding it again.' });
+    if (e.code === '23505') return res.status(409).json({ error: `That shortcode is already saved for this channel — edit the existing one instead of adding it again. (rule: ${e.constraint ?? 'unknown'})` });
     throw e;
   } finally {
     c.release();
