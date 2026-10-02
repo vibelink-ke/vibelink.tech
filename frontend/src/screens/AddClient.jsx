@@ -229,6 +229,15 @@ export default function AddClient() {
       // living on this form, so land there next instead of the bare list.
       // Adding another line to an existing account already picked its
       // service right here, so that one still goes back to the list.
+      if (fromLeadId) {
+        // Converted from a won lead: straight to the installation ticket, with this client already chosen and the
+        // lead's installer (if one was set) already on it.
+        const lead = (store.leads ?? []).find((l) => l.id === fromLeadId);
+        const q = new URLSearchParams({ new: '1', client: created.id, subject: `Installation — ${created.name}`, kind: 'install' });
+        if (lead?.assigned_to) q.set('assign', lead.assigned_to);
+        navigate(`/tickets?${q.toString()}`);
+        return;
+      }
       navigate(linkedAccount ? '/clients' : `/clients/${created.id}?tab=services`);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);

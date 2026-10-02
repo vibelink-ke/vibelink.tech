@@ -24,7 +24,7 @@ const overdue = (t) => t.due_at && t.status !== 'resolved' && new Date(t.due_at)
 export default function Tickets() {
   const store = useStore();
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ subject: '', subscriberId: '', priority: 'medium', description: '' });
+  const [f, setF] = useState({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', description: '' });
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('open');
 
@@ -53,10 +53,12 @@ export default function Tickets() {
     try {
       const created = await api.createTicket({ subject: f.subject, subscriberId: f.subscriberId || null, priority: f.priority });
       if (f.description.trim()) await api.updateTicket(created.id, { description: f.description });
-      store.setCollection('tickets', (ts) => [{ ...created, description: f.description || null }, ...ts]);
+      // From a won lead the installer it was assigned to is the one to send.
+      if (f.assignTo) await api.updateTicket(created.id, { assigned_to: f.assignTo });
+      store.setCollection('tickets', (ts) => [{ ...created, description: f.description || null, assigned_to: f.assignTo || created.assigned_to }, ...ts]);
       store.toast(`${created.number} raised`);
       setOpen(false);
-      setF({ subject: '', subscriberId: '', priority: 'medium', description: '' });
+      setF({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', description: '' });
     } catch (e) {
       store.toast(`Could not raise the ticket: ${e.message}`);
     } finally {
@@ -99,6 +101,21 @@ export default function Tickets() {
     openDetail(t);
     setParams((sp) => { sp.delete('open'); return sp; }, { replace: true });
   }, [openId, tickets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Coming from a won lead or a freshly added client ("?new=1&client=…&subject=…"): the raise dialog opens with the
+  // client already chosen, so nobody has to find them again in the list.
+  useEffect(() => {
+    if (params.get('new') !== '1') return;
+    setF((s) => ({
+      ...s,
+      subject: params.get('subject') ?? '',
+      subscriberId: params.get('client') ?? '',
+      assignTo: params.get('assign') ?? '',
+      ...(params.get('kind') === 'install' && 'kind' in s ? { kind: 'install' } : {}),
+    }));
+    setOpen(true);
+    setParams((sp) => { ['new', 'client', 'subject', 'kind', 'assign'].forEach((k) => sp.delete(k)); return sp; }, { replace: true });
+  }, [params]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [approving, setApproving] = useState(false);
   const approvePlanChange = async (t) => {

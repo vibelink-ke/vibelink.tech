@@ -247,6 +247,12 @@ export default function Leads() {
    * commission link made here survives into the real account) rather than
    * asking the operator to retype a lead they're looking straight at.
    */
+  /** A won lead that is already a client: raise the installation ticket with that client chosen for you. */
+  const raiseInstallTicket = (l) => {
+    const q = new URLSearchParams({ new: '1', client: l.subscriber_id, subject: `Installation — ${l.name}`, kind: 'install' });
+    if (l.assigned_to) q.set('assign', l.assigned_to);
+    navigate(`/tickets?${q.toString()}`);
+  };
   const convertToClient = (l) => {
     const params = new URLSearchParams({ name: l.name, phone: l.phone, leadId: l.id });
     if (l.referrer_id) params.set('referredBy', l.referrer_id);
@@ -603,7 +609,7 @@ export default function Leads() {
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       {l.status === 'won' && (
                         l.subscriber_id
-                          ? <Button onClick={() => navigate(`/clients/${l.subscriber_id}`)}>View client</Button>
+                          ? <><Button variant="primary" onClick={() => raiseInstallTicket(l)}>Install ticket</Button><Button onClick={() => navigate(`/clients/${l.subscriber_id}`)}>View client</Button></>
                           : <Button variant="primary" onClick={() => convertToClient(l)}>Convert</Button>
                       )}
                       <Button onClick={() => viewLead(l)}>View</Button>
@@ -669,7 +675,11 @@ export default function Leads() {
           <Drawer
             open={!!leadViewing}
             title={leadViewing?.name}
-            actions={leadViewing?.status === 'won' ? <Button variant="primary" onClick={() => convertToClient(leadViewing)}>Convert to client</Button> : undefined}
+            actions={leadViewing?.status === 'won'
+              ? (leadViewing.subscriber_id
+                ? <Button variant="primary" onClick={() => raiseInstallTicket(leadViewing)}>Raise installation ticket</Button>
+                : <Button variant="primary" onClick={() => convertToClient(leadViewing)}>Convert to client</Button>)
+              : undefined}
             onClose={() => setLeadViewing(null)}
           >
             {leadViewing && (
