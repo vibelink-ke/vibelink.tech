@@ -39,6 +39,21 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   const me = (req) => req.session?.staff_id ?? null;
 
   /**
+   * No shift, no work: every route that shows or changes field work refuses until the person has started a
+   * shift (which needs location on). The office — the owner or platform owner, helping from a desk — is not
+   * the field team and is exempt. /me, /shift and /location are not behind this: they are how a shift starts.
+   */
+  const onShift = async (req, res, next) => {
+    try {
+      if (req.session?.is_super_admin || req.session?.role === 'owner') return next();
+      const { rowCount } = await pool.query(
+        'select 1 from field_shifts where tenant_id=$1 and staff_id=$2 and ended_at is null', [req.tenant.id, me(req)]);
+      if (!rowCount) return res.status(409).json({ error: 'Start your shift first — no work can be seen or done while you are off shift.', needsShift: true });
+      return next();
+    } catch (e) { return next(e); }
+  };
+
+  /**
    * The job the caller may act on: one assigned to them. The owner (or anyone else the matrix lets
    * close a ticket without a photo) may act on any job, so they can help from the office.
    */
@@ -150,7 +165,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       left join plans p on p.id = s.plan_id
       left join routers r on r.id = s.router_id`;
 
-  app.get('/api/field/jobs', use, wrap(async (req, res) => {
+  app.get('/api/field/jobs', use, onShift, wrap(async (req, res) => {
     const { rows } = await pool.query(
       `${JOB_SELECT}
         where t.tenant_id=$1 and t.status <> 'resolved'
@@ -162,7 +177,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     res.json(rows.map((j) => ({ ...j, mine: j.assigned_to === me(req) })));
   }));
 
-  app.get('/api/field/jobs/:id', use, wrap(async (req, res) => {
+  app.get('/api/field/jobs/:id', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     const { rows: [j] } = await pool.query(`${JOB_SELECT} where t.tenant_id=$1 and t.id=$2`, [req.tenant.id, job.id]);
@@ -182,7 +197,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // Take an unassigned job.
-  app.post('/api/field/jobs/:id/claim', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/claim', use, onShift, wrap(async (req, res) => {
     const { rows: [t] } = await pool.query(
       `update tickets set assigned_to=$3, status=case when status='open' then 'in_progress' else status end, updated_at=now()
         where tenant_id=$1 and id=$2 and assigned_to is null and status <> 'resolved' returning id`,
@@ -191,7 +206,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     res.json({ ok: true });
   }));
 
-  app.post('/api/field/jobs/:id/start', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/start', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     await pool.query(
@@ -203,7 +218,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     res.json({ ok: true });
   }));
 
-  app.post('/api/field/jobs/:id/notes', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/notes', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     const body = String(req.body?.body ?? '').trim();
@@ -216,7 +231,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // ── photos ─────────────────────────────────────────────────────────────
-  app.post('/api/field/jobs/:id/photos', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/photos', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     const photo = parsePhoto(req.body?.dataUrl);
@@ -248,7 +263,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // ── closing a job ──────────────────────────────────────────────────────
-  app.post('/api/field/jobs/:id/close', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/close', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     if (job.status === 'resolved') return res.status(409).json({ error: 'This job is already closed.' });
@@ -324,7 +339,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     return c.status;
   };
 
-  app.get('/api/field/customers', use, wrap(async (req, res) => {
+  app.get('/api/field/customers', use, onShift, wrap(async (req, res) => {
     const q = String(req.query.q ?? '').trim();
     if (q.length < 2) return res.json([]);
     const like = `%${q.replace(/[%_]/g, '')}%`;
@@ -341,7 +356,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
 
   // Pin a customer's service line where the phone is standing. Only that line: a second service is often a
   // different building. Needs a trustworthy fix, same bar as starting a shift.
-  app.post('/api/field/customers/:id/location', use, requirePermission('field.update_location'), wrap(async (req, res) => {
+  app.post('/api/field/customers/:id/location', use, onShift, requirePermission('field.update_location'), wrap(async (req, res) => {
     const lat = num(req.body?.lat); const lng = num(req.body?.lng); const accuracy = num(req.body?.accuracy);
     if (!validLat(lat) || !validLng(lng)) return res.status(400).json({ error: 'A valid position is needed.' });
     if (Number.isFinite(accuracy) && accuracy > MAX_ACCURACY_M) {
@@ -353,7 +368,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     res.json({ ok: true, lat: c.lat, lng: c.lng });
   }));
 
-  app.get('/api/field/customers/:id', use, wrap(async (req, res) => {
+  app.get('/api/field/customers/:id', use, onShift, wrap(async (req, res) => {
     const { rows: [c] } = await pool.query(`${CUSTOMER_SELECT} where s.tenant_id=$1 and s.id=$2`, [req.tenant.id, req.params.id]);
     if (!c) return res.status(404).json({ error: 'No such customer' });
     const { rows: jobs } = await pool.query(
@@ -363,7 +378,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // Drop the customer's session so their router dials back in fresh (a first thing to try on a repair).
-  app.post('/api/field/customers/:id/reconnect', use, wrap(async (req, res) => {
+  app.post('/api/field/customers/:id/reconnect', use, onShift, wrap(async (req, res) => {
     const { rows: [c] } = await pool.query(
       `select s.pppoe_user, r.host, r.secret from subscribers s left join routers r on r.id = s.router_id
         where s.tenant_id=$1 and s.id=$2`, [req.tenant.id, req.params.id]);
@@ -442,7 +457,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   // field.use, so the matrix stays the one place that decides who may do what.
   const PRIORITIES = new Set(['low', 'medium', 'high', 'critical']);
 
-  app.post('/api/field/tickets', use, requirePermission('tickets.edit'), wrap(async (req, res) => {
+  app.post('/api/field/tickets', use, onShift, requirePermission('tickets.edit'), wrap(async (req, res) => {
     const subject = String(req.body?.subject ?? '').trim().slice(0, 200);
     if (!subject) return res.status(400).json({ error: 'Say what the problem is.' });
     const priority = PRIORITIES.has(req.body?.priority) ? req.body.priority : 'medium';
@@ -473,7 +488,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     res.json(t);
   }));
 
-  app.post('/api/field/leads', use, requirePermission('leads.create'), wrap(async (req, res) => {
+  app.post('/api/field/leads', use, onShift, requirePermission('leads.create'), wrap(async (req, res) => {
     const name = String(req.body?.name ?? '').trim().slice(0, 120);
     const phone = String(req.body?.phone ?? '').trim().slice(0, 30);
     if (!name) return res.status(400).json({ error: 'Enter their name.' });
@@ -492,7 +507,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // What the technician is carrying, and the counted stock they can draw on.
-  app.get('/api/field/inventory', use, wrap(async (req, res) => {
+  app.get('/api/field/inventory', use, onShift, wrap(async (req, res) => {
     const { rows } = await pool.query(
       `select * from inventory_items
         where tenant_id=$1 and status = 'in_stock'
@@ -503,7 +518,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // "What is this?" for a serial or MAC just read off a label: the inventory item, and who already uses the device.
-  app.post('/api/field/equipment/lookup', use, wrap(async (req, res) => {
+  app.post('/api/field/equipment/lookup', use, onShift, wrap(async (req, res) => {
     const mac = macOf(req.body?.mac); const serial = cleanSerial(req.body?.serial);
     if (!mac && !serial) return res.status(400).json({ error: 'Give a serial number or a MAC address.' });
     const item = await findItem(req.tenant.id, { mac, serial, staffId: me(req) });
@@ -529,7 +544,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
    * no photo. A device the inventory does not know, or one already installed for someone else, is
    * still recorded, but flagged for the office to check rather than silently guessed at.
    */
-  app.post('/api/field/jobs/:id/equipment', use, wrap(async (req, res) => {
+  app.post('/api/field/jobs/:id/equipment', use, onShift, wrap(async (req, res) => {
     const job = await jobFor(req, res, req.params.id);
     if (!job) return;
     if (job.status === 'resolved') return res.status(409).json({ error: 'This job is already closed.' });

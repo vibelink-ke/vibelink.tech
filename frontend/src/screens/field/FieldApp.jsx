@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Navigate, NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { Navigate, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { color, font } from '../../theme/tokens';
 import { api } from '../../api/client';
 import { useStore } from '../../state/store';
@@ -46,6 +46,10 @@ export default function FieldApp() {
   }, []);
 
   const shiftActive = !!me?.shift?.active;
+  // Off shift, nothing but the Me page (where a shift is started) is shown: no jobs, customers or forms.
+  // The office (owner) is not the field team and is not held to it; the server enforces the same rule.
+  const { pathname } = useLocation();
+  const offShift = !!me && !shiftActive && me.role !== 'owner' && !pathname.startsWith('/field/me');
 
   useEffect(() => {
     if (!shiftActive) return undefined;
@@ -111,6 +115,7 @@ export default function FieldApp() {
 
         <SyncBanner />
 
+        {offShift ? <ShiftGate /> : (
         <Routes>
           <Route path="/field" element={<Jobs />} />
           <Route path="/field/job/:id" element={<FieldJob />} />
@@ -120,6 +125,7 @@ export default function FieldApp() {
           <Route path="/field/me" element={<Me />} />
           <Route path="*" element={<Navigate to="/field" replace />} />
         </Routes>
+        )}
 
         <nav style={{
           position: 'fixed', left: 0, right: 0, bottom: 0, display: 'flex', background: '#fff',
@@ -147,6 +153,22 @@ export default function FieldApp() {
       )}
       <Toast />
     </FieldContext.Provider>
+  );
+}
+
+/** What is shown instead of any work while off shift. */
+function ShiftGate() {
+  const navigate = useNavigate();
+  return (
+    <div style={page}>
+      <div style={{ ...panel, gap: 12 }}>
+        <div style={{ fontWeight: 700, fontSize: 18 }}>You are off shift</div>
+        <div style={{ fontSize: 14, color: '#4a524c', lineHeight: 1.5 }}>
+          Jobs, customers and everything else stay hidden until you start your shift, and starting it needs your location switched on.
+        </div>
+        <Btn onClick={() => navigate('/field/me')}>Go to Me and start my shift</Btn>
+      </div>
+    </div>
   );
 }
 
