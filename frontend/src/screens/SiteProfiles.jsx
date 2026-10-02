@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { site: '', router: '', provider: 'daraja', shortcode: '', account: '', paymentConfigId: '' };
+const BLANK = { collect: 'own', site: '', router: '', provider: 'daraja', shortcode: '', account: '', paymentConfigId: '' };
 const PROVIDERS = [
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
   { value: 'kopokopo', label: 'KopoKopo till (hotspot)' },
@@ -43,7 +43,33 @@ export default function SiteProfiles() {
     setF((s) => ({ ...s, provider, paymentConfigId: '', shortcode: '' }));
   };
 
+  const platformOn = !!store.session?.platformCollectEnabled;
+  const platformSites = (store.routers ?? []).filter((r) => r.collection_mode === 'platform');
+
+  /** A router's own say on where its customers pay (routers.collection_mode): saved on the router itself. */
+  const setSiteMode = async (routerId, mode) => {
+    const updated = await api.updateRouter(routerId, { collectionMode: mode });
+    store.setCollection('routers', (rs) => rs.map((r) => (r.id === updated.id ? updated : r)));
+    return updated;
+  };
+
   const save = async () => {
+    // Through the platform: no paybill to pick — customers at this router pay the platform's, settled to the tenant.
+    if (f.collect === 'platform') {
+      if (!f.router) return store.toast('Pick the router (site) that should collect through the platform');
+      setBusy(true);
+      try {
+        const r = await setSiteMode(f.router, 'platform');
+        store.toast(`${r.name}: customers now pay through the platform`);
+        setOpen(false);
+        setF(BLANK);
+      } catch (e) {
+        store.toast(`Could not save: ${e.message}`);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     if (!f.site.trim() || !f.shortcode.trim()) return store.toast('Site and shortcode are required');
     setBusy(true);
     try {
@@ -58,6 +84,8 @@ export default function SiteProfiles() {
         paymentConfigId: f.provider === 'kopokopo' ? null : (f.paymentConfigId || null),
       });
       store.setCollection('siteProfiles', (ps) => [...ps.filter((p) => p.id !== created.id), created]);
+      // Pinned to a router and the platform is available: say outright that this site is the tenant's own.
+      if (f.router && platformOn) await setSiteMode(f.router, 'own').catch(() => {});
       store.toast(`${created.site} profile saved`);
       setOpen(false);
       setF(BLANK);
@@ -81,7 +109,7 @@ export default function SiteProfiles() {
   return (
     <Screen
       title="Site payment profiles"
-      subtitle="Which paybill or till the customers at each site pay into. Only needed when you run more than one shortcode."
+      subtitle="Which paybill or till the customers at each site pay into — your own, or the platform's (settled to you). Only needed when you run more than one shortcode, or mix both."
       actions={
         <Button variant="primary" onClick={() => setOpen(true)}>
           + Add profile
@@ -92,6 +120,7 @@ export default function SiteProfiles() {
         <Stat label="Profiles" value={profiles.length} hint="configured" />
         <Stat label="Sites covered" value={new Set(profiles.map((p) => p.site)).size} hint="distinct sites" />
         <Stat label="Shortcodes" value={new Set(profiles.map((p) => p.shortcode)).size} hint="in use" />
+        <Stat label="Via the platform" value={platformSites.length} hint="sites collecting through it" />
         <Stat label="Routers" value={(store.routers ?? []).length} hint="onboarded" />
       </Grid>
 
@@ -130,6 +159,31 @@ export default function SiteProfiles() {
         />
       </Card>
 
+      {platformSites.length > 0 && (
+        <Card title="Sites collecting through the platform" subtitle="Customers here pay the platform's paybill; what they pay is settled to your payout details, whatever gateways you also have.">
+          <Table
+            rowKey={(r) => r.id}
+            toolbar="never"
+            rows={platformSites}
+            columns={[
+              { key: 'name', label: 'Router (site)', render: (r) => <span style={{ fontWeight: 600 }}>{r.name}</span> },
+              { key: 'how', label: 'Pays', render: () => <Badge tone="default">platform paybill</Badge> },
+              {
+                key: 'act', label: '', align: 'right',
+                render: (r) => (
+                  <span
+                    onClick={() => setSiteMode(r.id, 'default').then(() => store.toast(`${r.name} follows the account again`)).catch((e) => store.toast(e.message))}
+                    style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}
+                  >
+                    Remove
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+
       <Modal
         open={open}
         title="Add site profile"
@@ -144,6 +198,32 @@ export default function SiteProfiles() {
         }
       >
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field
+            label="Customers at this site pay"
+            span={2}
+            hint={platformOn ? undefined : 'The platform option needs "Platform collects on my behalf" switched on first (Settings → Gateways).'}
+          >
+            <Select
+              value={f.collect}
+              onChange={set('collect')}
+              options={[
+                { value: 'own', label: 'My own paybill or till' },
+                { value: 'platform', label: platformOn ? "Through the platform — settled to me" : "Through the platform (not switched on yet)" },
+              ]}
+            />
+          </Field>
+          {f.collect === 'platform' ? (
+            <>
+              <Field label="Router (site)" span={2} hint="Everything on this router — hotspot sales and PPPoE renewals — pays the platform paybill, even if you also have your own gateway.">
+                <Select
+                  value={f.router}
+                  onChange={set('router')}
+                  options={[{ value: '', label: 'Choose a router…' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+                />
+              </Field>
+            </>
+          ) : (
+          <>
           <Field label="Site name" span={2}>
             <Input value={f.site} onChange={set('site')} placeholder="Kimumu" />
           </Field>
@@ -183,6 +263,8 @@ export default function SiteProfiles() {
           <Field label="Account prefix" hint="Prepended to what the client types">
             <Input value={f.account} onChange={set('account')} placeholder="KIM-" />
           </Field>
+          </>
+          )}
         </div>
       </Modal>
     </Screen>
