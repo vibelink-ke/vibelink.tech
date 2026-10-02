@@ -3157,3 +3157,11 @@ alter table leads add column if not exists interested_plan_id uuid references pl
 alter table leads add column if not exists lost_reason text;
 alter table leads add column if not exists first_contacted_at timestamptz;
 alter table leads add column if not exists last_activity_at timestamptz;
+
+-- A shortcode is unique per tenant, channel AND whose it is. The platform owner's own ISP portal and the platform's
+-- paybill (scope 'platform', kept in the admin console) are the same company and often the same paybill number;
+-- the old index ignored scope, so saving the platform's paybill failed with "already saved" whenever the owner's
+-- own ISP gateway had that number.
+drop index if exists tpc_tenant_provider_shortcode;
+create unique index if not exists tpc_tenant_provider_scope_shortcode
+  on tenant_payment_config (tenant_id, provider, scope, coalesce(shortcode, ''));

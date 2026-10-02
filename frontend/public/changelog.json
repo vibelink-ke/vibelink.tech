@@ -61,7 +61,8 @@
       "Leads: filter by stage, installer and channel; assign an installer to many at once; add the package they asked about; see why leads are lost; new Insights tab.",
       "A lead's referrer (the channel) earns the commission and the sales credit; \"Installer\" is the technician who follows up the installation.",
       "Staff: a Reset password button that sends the new password by SMS and email.",
-      "Popups, toasts and update notices now open on the screen in dark mode instead of far down the page."
+      "Popups, toasts and update notices now open on the screen in dark mode instead of far down the page.",
+      "Payment gateways: the platform paybill can now be saved even when the owner's own ISP portal uses the same paybill number."
     ]
   }
 ]
