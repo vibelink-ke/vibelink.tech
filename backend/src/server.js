@@ -10175,6 +10175,9 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
              -- carried only voucher_id, which named nothing a person could
              -- read on this screen.
              v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up,
+             -- Payments recorded before the payer's number was kept fall back to the number the STK prompt was sent to.
+             coalesce(pay.payer_phone, (select sr.phone from stk_requests sr
+                                         where sr.tenant_id = pay.tenant_id and sr.checkout_id = pay.payload->>'checkoutId' limit 1)) as payer_phone,
              -- Whose PPPoE account this actually applied to — a payment matched
              -- by account number carried only subscriber_id, so confirming a
              -- specific customer's payment landed meant a database query.
