@@ -3144,3 +3144,9 @@ alter table tenants alter column billing_mode set default 'revenue';
 alter table tenants alter column billing_mode set not null;
 alter table tenants drop constraint if exists tenants_billing_mode_check;
 alter table tenants add constraint tenants_billing_mode_check check (billing_mode in ('revenue', 'tiered'));
+
+-- Months of licence already bought with spare credit (charges.js's allocateCredit): credit left once every
+-- statement is paid is turned into whole months straight away, so a tenant paying ahead is not left on credit
+-- while their licence runs out before the next statement is even drawn. A statement drawn later for a month
+-- already paid this way is settled against this counter instead of being charged and extending the licence again.
+alter table tenants add column if not exists prepaid_months int not null default 0;

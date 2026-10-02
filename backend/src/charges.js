@@ -196,6 +196,17 @@ export async function platformPaybill() {
 }
 
 /**
+ * What one month costs this tenant, for turning spare credit into months of licence: their fixed
+ * monthly fee when they have one, else the total of their latest statement, else the activation fee.
+ */
+async function monthlyFee(c, tenantId, flat) {
+  if (Number(flat) > 0) return Number(flat);
+  const { rows: [last] } = await c.query(
+    'select total from tenant_charges where tenant_id = $1 and total > 0 order by month desc limit 1', [tenantId]);
+  return Number(last?.total) > 0 ? Number(last.total) : ACTIVATION_FEE;
+}
+
+/**
  * Pay the oldest unpaid statements out of the tenant's credit, oldest first,
  * stopping at the first one the credit cannot cover. Each statement paid buys
  * one month of licence, counted from whichever is later — today or the date the
@@ -203,22 +214,38 @@ export async function platformPaybill() {
  * late never gets a month for less. A tenant whose licence has lapsed is
  * switched back on the moment it is paid up to a future date.
  *
+ * Credit left over once every statement is paid is turned into whole months of licence straight
+ * away (at monthlyFee above), added on top of the days already left — otherwise a tenant who pays
+ * ahead sits on credit while their licence runs out before the next statement is even drawn. Those
+ * months are remembered in prepaid_months, and a statement drawn later for a month already paid
+ * this way is settled without charging or extending again.
+ *
  * A statement of nothing (no hotspot sales, no active PPPoE clients) is paid
  * automatically: there is nothing to owe, and it should not cost them access.
  * Must run inside a transaction; the tenant row is locked.
  */
 async function allocateCredit(c, tenantId) {
-  const { rows: [t] } = await c.query('select billing_credit from tenants where id = $1 for update', [tenantId]);
+  const { rows: [t] } = await c.query(
+    'select billing_credit, prepaid_months, converted_at, status, flat_monthly_fee from tenants where id = $1 for update', [tenantId]);
   let credit = Number(t?.billing_credit ?? 0);
+  let prepaid = Number(t?.prepaid_months ?? 0);
   const { rows: due } = await c.query(
     `select id, total from tenant_charges
       where tenant_id = $1 and status in ('open', 'invoiced')
       order by month for update`, [tenantId]);
 
   let paid = 0;
+  let blocked = false;
   for (const s of due) {
+    if (prepaid > 0) {
+      // A month already bought with spare credit: nothing to charge, and the licence was extended then.
+      prepaid -= 1;
+      paid += 1;
+      await c.query("update tenant_charges set status = 'paid', paid_at = now() where id = $1", [s.id]);
+      continue;
+    }
     const total = Number(s.total);
-    if (credit + 0.005 < total) break;
+    if (credit + 0.005 < total) { blocked = true; break; }
     credit -= total;
     paid += 1;
     await c.query("update tenant_charges set status = 'paid', paid_at = now() where id = $1", [s.id]);
@@ -227,11 +254,26 @@ async function allocateCredit(c, tenantId) {
           set licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + interval '1 month')::date
         where id = $1`, [tenantId]);
   }
+
+  if (!blocked && t?.converted_at && t.status !== 'suspended') {
+    const fee = await monthlyFee(c, tenantId, t.flat_monthly_fee);
+    const months = Math.floor((credit + 0.005) / fee);
+    if (months > 0) {
+      credit -= months * fee;
+      prepaid += months;
+      await c.query(
+        `update tenants
+            set licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + ($2 || ' months')::interval)::date
+          where id = $1`, [tenantId, String(months)]);
+    }
+  }
+
   await c.query(
     `update tenants
         set billing_credit = $2,
+            prepaid_months = $3,
             status = case when status = 'readonly' and licence_ends >= current_date then 'active' else status end
-      where id = $1`, [tenantId, Math.max(0, credit)]);
+      where id = $1`, [tenantId, Math.max(0, credit), prepaid]);
 
   // A paying tenant whose licence ran out with nothing left to pay (their activation
   // ended before the first statement was drawn) has no statement for a payment to
@@ -324,7 +366,7 @@ export async function applyTenantPayment(tenantId, amount, { method, reference =
 export async function settleAllFromCredit() {
   const { rows } = await pool.query(
     `select id from tenants
-      where billing_credit > 0
+      where billing_credit > 0 or prepaid_months > 0
          or id in (select tenant_id from tenant_charges where status in ('open', 'invoiced') and total = 0)`);
   for (const { id } of rows) {
     const c = await pool.connect();
@@ -344,7 +386,7 @@ export async function settleAllFromCredit() {
 /** Everything the Licence & billing page shows for one tenant. */
 export async function billingSummary(tenantId) {
   const { rows: [t] } = await pool.query(
-    `select name, status, licence_ends, billing_ref, billing_credit, converted_at, flat_monthly_fee,
+    `select name, status, licence_ends, billing_ref, billing_credit, prepaid_months, converted_at, flat_monthly_fee,
             (licence_ends - current_date) as days_left,
             (licence_ends is not null and licence_ends < current_date) as licence_lapsed
        from tenants where id = $1`, [tenantId]);
@@ -378,6 +420,7 @@ export async function billingSummary(tenantId) {
     daysLeft: t?.days_left == null ? null : Number(t.days_left),
     billingRef: t?.billing_ref ?? null,
     credit,
+    prepaidMonths: Number(t?.prepaid_months ?? 0),
     amountDue: trialEnded || reinstate ? Math.max(0, (reinstate ? reinstateFee(t.flat_monthly_fee) : ACTIVATION_FEE) - credit) : Math.max(0, owed - credit),
     statements: statements.slice(0, 12),
     paybill,

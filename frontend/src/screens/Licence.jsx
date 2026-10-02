@@ -167,7 +167,7 @@ export default function Licence() {
 
       <Grid min={200} gap={14}>
         <Stat label={data.trialEnded ? 'Activation fee' : 'Due now'} value={`KES ${kes(data.amountDue)}`} tone={data.amountDue > 0 ? color.rust : undefined} />
-        <Stat label="Credit on account" value={`KES ${kes(data.credit)}`} hint={data.credit > 0 ? 'settles your next statement' : undefined} />
+        <Stat label="Credit on account" value={`KES ${kes(data.credit)}`} hint={data.prepaidMonths > 0 ? `${data.prepaidMonths} month${data.prepaidMonths === 1 ? '' : 's'} already added to your licence` : data.credit > 0 ? 'settles your next statement' : undefined} />
         <Stat label="Your reference" value={data.billingRef ?? '—'} />
       </Grid>
 
