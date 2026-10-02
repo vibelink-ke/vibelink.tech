@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { color } from '../../theme/tokens';
 import { api } from '../../api/client';
 import { useStore } from '../../state/store';
-import { Btn, Chip, Dot, mapsLink, page, panel, timeAgo } from './fieldKit';
+import { Btn, Chip, Dot, getAccuratePosition, mapsLink, page, panel, timeAgo } from './fieldKit';
 import { useField } from './fieldContext';
 
 /** Look a customer up: who they are, whether they are online, what speed they are on. Never money. */
@@ -54,6 +54,19 @@ export function FieldCustomer() {
   const load = () => api.fieldCustomer(id).then(setC).catch((e) => setError(e.message));
   useEffect(() => { load(); }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const updateLocation = async () => {
+    setBusy(true);
+    try {
+      store.toast('Getting the location…');
+      const here = await getAccuratePosition({ targetM: 30, maxWaitMs: 20000 });
+      if (!window.confirm(`Save this spot as ${c.name}'s location? (accuracy about ${Math.round(here.accuracy)} m)`)) return;
+      await api.fieldSetLocation(id, here);
+      store.toast('Location saved');
+      await load();
+    } catch (e) { store.toast(e.message); }
+    finally { setBusy(false); }
+  };
+
   const reconnect = async () => {
     if (!window.confirm(`Drop ${c.name}'s connection so their router dials in again? They will be offline for a few seconds.`)) return;
     setBusy(true);
@@ -87,6 +100,9 @@ export function FieldCustomer() {
           {c.phone && <Btn href={`tel:${c.phone}`} tone="quiet" style={{ flex: 1 }}>Call</Btn>}
           {nav && <Btn href={nav} tone="quiet" style={{ flex: 1 }}>Navigate</Btn>}
         </div>
+        {me?.can?.location && (
+          <Btn tone="quiet" busy={busy} onClick={updateLocation}>{c.lat != null ? 'Update location to where I am' : 'Set location to where I am'}</Btn>
+        )}
         {me?.can?.ticket && (
           <Btn tone="quiet" onClick={() => navigate(`/field/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`)}>Raise a ticket</Btn>
         )}

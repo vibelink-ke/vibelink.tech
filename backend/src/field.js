@@ -63,7 +63,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       company: req.session.company ?? req.tenant.name,
       shift: shift ? { active: true, since: shift.started_at } : { active: false },
       // What the New tab offers: only what the permission matrix lets this login actually do.
-      can: { ticket: await may('tickets.edit'), lead: await may('leads.create') },
+      can: { ticket: await may('tickets.edit'), lead: await may('leads.create'), location: await may('field.update_location') },
     });
   }));
 
@@ -270,9 +270,20 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       }
     }
 
-    // An install also leaves the customer's exact spot on the map.
-    const lat = num(req.body?.lat); const lng = num(req.body?.lng);
-    if (job.subscriber_id && validLat(lat) && validLng(lng) && req.body?.saveLocation) {
+    // An install also leaves the customer's exact spot on the map — and cannot be closed without it: a
+    // technician at the site is the only one who knows where the connection really is. The office (anyone the
+    // matrix lets close without a photo) is not at the site, so it is exempt, same as the photo rule.
+    const lat = num(req.body?.lat); const lng = num(req.body?.lng); const accuracy = num(req.body?.accuracy);
+    const mustLocate = job.kind === 'install' && !!job.subscriber_id && !skip;
+    if (mustLocate) {
+      if (!validLat(lat) || !validLng(lng)) {
+        return res.status(409).json({ error: "Save the customer's location before closing an install. Switch location on for this app and try again.", needsLocation: true });
+      }
+      if (Number.isFinite(accuracy) && accuracy > MAX_ACCURACY_M) {
+        return res.status(409).json({ error: `The location is not accurate enough (about ${Math.round(accuracy)} m). Step into the open, wait for the GPS to settle and try again.`, needsLocation: true });
+      }
+    }
+    if (job.subscriber_id && validLat(lat) && validLng(lng) && (mustLocate || req.body?.saveLocation)) {
       await pool.query('update subscribers set lat=$3, lng=$4 where tenant_id=$1 and id=$2',
         [req.tenant.id, job.subscriber_id, lat, lng]);
     }
@@ -326,6 +337,20 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
         order by s.name limit 20`,
       [req.tenant.id, like, digits.length >= 6 ? digits : '']);
     res.json(rows.map((c) => ({ ...c, state: stateOf(c), expires_at: undefined })));
+  }));
+
+  // Pin a customer's service line where the phone is standing. Only that line: a second service is often a
+  // different building. Needs a trustworthy fix, same bar as starting a shift.
+  app.post('/api/field/customers/:id/location', use, requirePermission('field.update_location'), wrap(async (req, res) => {
+    const lat = num(req.body?.lat); const lng = num(req.body?.lng); const accuracy = num(req.body?.accuracy);
+    if (!validLat(lat) || !validLng(lng)) return res.status(400).json({ error: 'A valid position is needed.' });
+    if (Number.isFinite(accuracy) && accuracy > MAX_ACCURACY_M) {
+      return res.status(400).json({ error: `That reading is not accurate enough (about ${Math.round(accuracy)} m). Step outside the building, wait for the GPS to settle and try again.` });
+    }
+    const { rows: [c] } = await pool.query(
+      'update subscribers set lat=$3, lng=$4 where tenant_id=$1 and id=$2 returning id, lat, lng', [req.tenant.id, req.params.id, lat, lng]);
+    if (!c) return res.status(404).json({ error: 'No such customer' });
+    res.json({ ok: true, lat: c.lat, lng: c.lng });
   }));
 
   app.get('/api/field/customers/:id', use, wrap(async (req, res) => {

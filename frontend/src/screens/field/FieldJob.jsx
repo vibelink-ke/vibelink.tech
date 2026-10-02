@@ -4,7 +4,7 @@ import { color } from '../../theme/tokens';
 import { api } from '../../api/client';
 import { useStore } from '../../state/store';
 import { useField } from './fieldContext';
-import { Btn, Chip, Dot, getPosition, mapsLink, page, panel, resizePhoto, timeAgo } from './fieldKit';
+import { Btn, Chip, Dot, getAccuratePosition, getPosition, mapsLink, page, panel, resizePhoto, timeAgo } from './fieldKit';
 import AddEquipment from './FieldEquipment';
 import { cachedGet, doOrQueue, useQueue } from './offline';
 
@@ -67,11 +67,19 @@ export default function FieldJob() {
   const close = async () => {
     setBusy('close');
     try {
-      const p = await getPosition().catch(() => null);
+      // An install is closed on the spot where the connection is, so it needs a trustworthy fix; a repair only
+      // saves one when asked to.
+      let p = null;
+      if (job.kind === 'install' && job.customer_id) {
+        store.toast('Getting the customer\'s location…');
+        p = await getAccuratePosition({ targetM: 30, maxWaitMs: 20000 });
+      } else {
+        p = await getPosition().catch(() => null);
+      }
       const r = await doOrQueue('close', { jobId: id, body: {
         note: closeNote.trim() || undefined,
-        lat: p?.lat, lng: p?.lng,
-        saveLocation: !!(p && saveLoc),
+        lat: p?.lat, lng: p?.lng, accuracy: p?.accuracy,
+        saveLocation: !!(p && (saveLoc || (job.kind === 'install' && job.customer_id))),
         noEquipment: noEquipment || undefined,
       } });
       store.toast(r.queued ? 'Saved on the phone — the job closes when the signal returns' : 'Job closed');
@@ -242,7 +250,12 @@ export default function FieldJob() {
             <>
               <textarea value={closeNote} onChange={(e) => setCloseNote(e.target.value)} rows={3} placeholder="Summary of the work (optional)"
                 style={{ width: '100%', boxSizing: 'border-box', borderRadius: 10, border: `1px solid ${color.line}`, padding: 10, fontSize: 15, fontFamily: 'inherit' }} />
-              {(install || job.customer_lat == null) && job.customer_id && (
+              {install && job.customer_id && (
+                <div style={{ fontSize: 13.5, color: '#4a524c' }}>
+                  Closing saves where you are standing as this customer's location, so stay at the install. The job cannot be closed without it.
+                </div>
+              )}
+              {!install && job.customer_lat == null && job.customer_id && (
                 <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 14 }}>
                   <input type="checkbox" checked={saveLoc} onChange={(e) => setSaveLoc(e.target.checked)} />
                   Save this spot as the customer's location

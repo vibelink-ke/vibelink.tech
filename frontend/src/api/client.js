@@ -121,6 +121,7 @@ export const api = {
   fieldCustomer: (id) => get(`/api/field/customers/${id}`),
   fieldCreateTicket: (body) => post('/api/field/tickets', body),
   fieldCreateLead: (body) => post('/api/field/leads', body),
+  fieldSetLocation: (id, body) => post(`/api/field/customers/${id}/location`, body),
   fieldReconnect: (id) => post(`/api/field/customers/${id}/reconnect`, {}),
   fieldTeam: () => get('/api/field/team'),
   fieldTrail: (staffId) => get(`/api/field/team/${staffId}/trail`),
