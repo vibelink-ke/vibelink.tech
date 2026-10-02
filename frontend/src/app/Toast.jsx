@@ -1,13 +1,23 @@
 import React from 'react';
 import { color, radius } from '../theme/tokens';
+import { createPortal } from 'react-dom';
 import { useStore } from '../state/store';
+import { useInDark } from '../ui/inDark';
 
 export default function Toast() {
   const { toastMsg, toastAction, dismissToast } = useStore();
-  if (!toastMsg) return null;
+  const [markRef, dark] = useInDark();
+  const marker = <span ref={markRef} hidden />;
+  if (!toastMsg) return marker;
   const clickable = !!toastAction;
+  // Drawn on <body>: inside the dark page's filtered root, position: fixed meant "bottom of the whole page",
+  // so on a long page the toast sat far below the screen. See useInDark.
   return (
+    <>
+      {marker}
+      {createPortal(
     <div
+      className={dark ? 'om-dark' : undefined}
       role="status"
       aria-live="polite"
       onClick={clickable ? () => { toastAction.onClick(); dismissToast(); } : undefined}
@@ -54,6 +64,9 @@ export default function Toast() {
           </button>
         </>
       )}
-    </div>
+    </div>,
+        document.body,
+      )}
+    </>
   );
 }

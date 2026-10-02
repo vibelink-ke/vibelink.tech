@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { color, radius } from '../theme/tokens';
+import { useInDark } from '../ui/inDark';
 
 /**
  * A deploy replaces the static frontend files while a tenant's tab is still
@@ -23,6 +25,7 @@ export default function UpdateAvailableBanner() {
   // put the banner straight back.
   const newest = useRef(null);
   const dismissed = useRef(null);
+  const [markRef, dark] = useInDark();
 
   useEffect(() => {
     let stopped = false;
@@ -54,10 +57,16 @@ export default function UpdateAvailableBanner() {
     };
   }, []);
 
-  if (!available) return null;
+  const marker = <span ref={markRef} hidden />;
+  if (!available) return marker;
 
+  // Drawn on <body>, for the same reason as the toast: see useInDark.
   return (
+    <>
+      {marker}
+      {createPortal(
     <div
+      className={dark ? 'om-dark' : undefined}
       style={{
         position: 'fixed', bottom: 18, right: 18, zIndex: 1000,
         display: 'flex', flexDirection: 'column', gap: 10,
@@ -99,6 +108,9 @@ export default function UpdateAvailableBanner() {
           Update now
         </button>
       </div>
-    </div>
+    </div>,
+        document.body,
+      )}
+    </>
   );
 }
