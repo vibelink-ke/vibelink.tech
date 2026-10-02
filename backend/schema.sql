@@ -141,6 +141,8 @@ alter table voucher_devices add column if not exists router_id uuid references r
 -- instead of re-attempting a live router connection for every device ever
 -- bound, forever (this row is never deleted, by design, as history).
 alter table voucher_devices add column if not exists unbound_at timestamptz;
+-- When the device's reserved IP (its static DHCP lease) was given back, a week after its plan expired.
+alter table voucher_devices add column if not exists lease_released_at timestamptz;
 
 -- PPPoE MAC-lock rows written the old way — a radcheck Calling-Station-Id
 -- check-item (op '=='). rlm_sql rejects its ENTIRE authorize() result on any

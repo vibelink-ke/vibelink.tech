@@ -2454,6 +2454,9 @@ export async function bindDeviceByMac(conn, { mac, downKbps, upKbps, comment = '
   if (leases[0]) {
     if (leases[0]['dynamic'] !== 'false' && leases[0]['dynamic'] !== undefined) {
       await cmd(conn, 'pin device DHCP lease', '/ip/dhcp-server/lease/make-static', [`=.id=${idOf(leases[0])}`]);
+      // Marked as ours: the reservation is given back a week after the plan expires (releaseDeviceLease), and only a
+      // lease carrying this mark is ever removed.
+      await cmd(conn, 'mark device DHCP lease', '/ip/dhcp-server/lease/set', [`=.id=${idOf(leases[0])}`, `=comment=${label}`]);
     }
   } else {
     throw new Error('This device has no DHCP lease yet — it needs to be connected to the WiFi first.');
@@ -2523,6 +2526,19 @@ export async function deviceQueueCounters(conn) {
  * a bypassed device (nothing to find there), but real for one that instead
  * typed a voucher code and got a normal authenticated session.
  */
+/**
+ * Give back the IP reserved for a device: remove its static DHCP lease, but only one this system made (marked in
+ * bindDeviceByMac). Called a week after the device's plan expired; until then the lease stays so the same TV or
+ * console keeps its address and is reconnected on the same IP when it pays again.
+ */
+export async function releaseDeviceLease(conn, { mac }) {
+  const MAC = String(mac).toUpperCase();
+  const leases = await conn.write('/ip/dhcp-server/lease/print', [`?mac-address=${MAC}`]);
+  for (const l of leases) {
+    if (isManaged(l)) await cmd(conn, 'release device DHCP lease', '/ip/dhcp-server/lease/remove', [`=.id=${idOf(l)}`]);
+  }
+}
+
 export async function unbindDeviceByMac(conn, { mac }) {
   const MAC = String(mac).toUpperCase();
   const bindings = await conn.write('/ip/hotspot/ip-binding/print', [`?mac-address=${MAC}`]);

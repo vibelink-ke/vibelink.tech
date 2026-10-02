@@ -436,6 +436,38 @@ export async function expireAndSuspend() {
     }
   }
 
+  // A week after a device's plan expired, give its reserved IP back. Until then the static lease stays, so the same
+  // TV or console comes back on the same address (and is re-bound on it) the moment it pays again. Not released while
+  // the device holds a newer voucher.
+  const { rows: lapsedLeases } = await pool.query(
+    `select d.id as device_row_id, d.mac, r.host, r.api_port, r.service_user, r.service_password_enc
+       from voucher_devices d
+       join vouchers v on v.id = d.voucher_id
+       join routers r on r.id = d.router_id
+      where d.unbound_at is not null and d.lease_released_at is null
+        and v.expires_at < now() - interval '7 days'
+        and v.tenant_id in (${enabledTenants})
+        and r.service_user is not null and r.service_password_enc is not null
+        and not exists (select 1 from voucher_devices d2 join vouchers v2 on v2.id = d2.voucher_id
+                         where d2.mac = d.mac and d2.router_id = d.router_id and v2.expires_at >= now() - interval '7 days')`,
+    ['expireAndSuspend']);
+  if (lapsedLeases.length) {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    for (const d of lapsedLeases) {
+      try {
+        const conn = await ros.connect({
+          host: String(d.host).split('/')[0], port: d.api_port ?? 8728,
+          user: d.service_user, password: secrets.decrypt(d.service_password_enc), timeoutSec: 8,
+        });
+        try { await ros.releaseDeviceLease(conn, { mac: d.mac }); } finally { ros.close(conn); }
+        await pool.query('update voucher_devices set lease_released_at = now() where id = $1', [d.device_row_id]);
+      } catch (e) {
+        console.warn('releaseDeviceLease failed for', d.mac, '-', e.message);
+      }
+    }
+  }
+
   await pool.query(
     `update vouchers set status='expired'
      where status='in_use' and expires_at < now() and tenant_id in (${enabledTenants})`,
