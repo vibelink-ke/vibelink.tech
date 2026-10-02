@@ -70,7 +70,8 @@
       "Installation fee: set a standard fee under Settings → Preferences; adding a client charges it as an invoice, and you can change it or waive it for any one client.",
       "Declaring a lead won now raises the installation ticket automatically (assigned to the lead's installer, with who to call and what they bought); adding the client from the lead attaches them to that ticket.",
       "Sales leaderboard now counts the service package fee only — installation fees, top-ups and months paid ahead no longer inflate a salesperson's figure (Leads → Performance and Employee of the Month).",
-      "Payments → All transactions shows the voucher code issued for hotspot (KopoKopo) payments, and the phone number the prompt was sent to."
+      "Payments → All transactions shows the voucher code issued for hotspot (KopoKopo) payments, and the phone number the prompt was sent to.",
+      "Licence & billing: the amount box is pre-filled with what you owe, or, when nothing is invoiced yet, what this month's statement stands at so far."
     ]
   }
 ]

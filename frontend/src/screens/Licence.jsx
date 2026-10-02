@@ -55,7 +55,7 @@ export default function Licence() {
     try {
       const d = canView ? await api.billing() : await api.licence();
       setData(d);
-      setAmount((a) => (a === '' && d.amountDue > 0 ? String(Math.round(d.amountDue)) : a));
+      setAmount((a) => (a !== '' ? a : d.amountDue > 0 ? String(Math.round(d.amountDue)) : d.amountSuggested > 0 ? String(d.amountSuggested) : a));
       setError(null);
       window.dispatchEvent(new Event('vibelink:licence-changed'));
       // Paid up: leave the locked page and open the dashboard.
@@ -179,7 +179,7 @@ export default function Licence() {
                 <Field label="M-Pesa number">
                   <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="07xx xxx xxx" autoComplete="tel" disabled={busy} />
                 </Field>
-                <Field label="Amount (KES)" hint={data.trialEnded ? 'The activation fee' : data.amountDue > 0 ? 'What is due now — change it to pay part, or ahead' : 'Nothing is due — enter an amount to pay ahead'}>
+                <Field label="Amount (KES)" hint={data.trialEnded ? 'The activation fee' : data.amountDue > 0 ? 'What is due now — change it to pay part, or ahead' : data.amountSuggested > 0 ? 'Nothing is invoiced yet — this is what this month stands at so far. Change it to pay more or less' : 'Nothing is due — enter an amount to pay ahead'}>
                   <Input type="number" min="10" value={amount} onChange={(e) => setAmount(e.target.value)} disabled={busy} />
                 </Field>
                 <div>

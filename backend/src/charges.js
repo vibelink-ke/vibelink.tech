@@ -404,6 +404,14 @@ export async function billingSummary(tenantId) {
   const trialEnded = readOnly && !t?.converted_at;
   // A paying tenant locked out with no statement to pay reinstates with the activation fee.
   const reinstate = readOnly && !!t?.converted_at && owed === 0;
+  // Nothing invoiced yet but the licence is running down: what this month's statement stands at so far (the figure the
+  // next statement will be built from), so the pay box can offer it instead of an empty field.
+  let suggested = null;
+  if (!trialEnded && !reinstate && owed - credit <= 0) {
+    const mine = (await liveCharges(currentMonthKey())).find((r) => r.tenant_id === tenantId);
+    const est = mine ? Math.round(Number(mine.total) - credit) : 0;
+    if (est >= 10) suggested = est;
+  }
   return {
     tenant: t?.name ?? null,
     status: t?.status ?? 'active',
@@ -421,6 +429,7 @@ export async function billingSummary(tenantId) {
     billingRef: t?.billing_ref ?? null,
     credit,
     prepaidMonths: Number(t?.prepaid_months ?? 0),
+    amountSuggested: suggested,
     amountDue: trialEnded || reinstate ? Math.max(0, (reinstate ? reinstateFee(t.flat_monthly_fee) : ACTIVATION_FEE) - credit) : Math.max(0, owed - credit),
     statements: statements.slice(0, 12),
     paybill,
