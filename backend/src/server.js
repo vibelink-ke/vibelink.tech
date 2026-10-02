@@ -3949,16 +3949,19 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
        -- brought_* is the whole point of "Employee of the month": not a count of leads, but what the clients this
        -- person actually signed up (leads.subscriber_id, set once a lead becomes a client) have paid the business —
        -- this month, and lifetime.
-       select l.assigned_to as staff_id,
+       -- Credited to the person on the channel: the lead's referrer when that is a staff member. assigned_to is the
+       -- technician following up the installation, who is not the one selling.
+       select r.staff_id as staff_id,
               count(*) as leads_assigned,
               count(*) filter (where l.status = 'won') as leads_won,
               count(*) filter (where l.status = 'won' and l.won_at >= date_trunc('month', now())) as won_this_month,
               coalesce(sum(sv.total), 0) as brought_total,
               coalesce(sum(sv.this_month), 0) as brought_this_month
          from leads l
+         join referrers r on r.id = l.referrer_id
          left join sub_value sv on sv.subscriber_id = l.subscriber_id
-        where l.tenant_id = $1 and l.assigned_to is not null
-        group by l.assigned_to
+        where l.tenant_id = $1 and r.staff_id is not null
+        group by r.staff_id
      ),
      comm_stats as (
        -- Separate from the above on purpose: commission is only ever earned by whoever was explicitly named as a
@@ -4037,6 +4040,13 @@ app.post('/api/leads', requirePermission('leads.create'), async (req, res) => {
     const { rowCount } = await pool.query(
       'select 1 from staff where id=$1 and tenant_id=$2', [assignedTo, req.tenant.id]);
     if (!rowCount) return res.status(404).json({ error: 'No such staff member' });
+  }
+
+  // A lead a staff member brings in from the field is theirs: they are the channel, so they are the referrer
+  // (and earn the commission) unless someone else was named. Who goes to install is assigned separately.
+  if (!referrer && (source ?? 'manual') === 'field visit' && req.session?.staff_id) {
+    const { rows: [me] } = await pool.query('select name, phone from staff where id=$1 and tenant_id=$2', [req.session.staff_id, req.tenant.id]);
+    if (me) referrer = await ensureStaffReferrer(req.tenant.id, req.session.staff_id, me.name, me.phone);
   }
 
   const { rows: [l] } = await pool.query(

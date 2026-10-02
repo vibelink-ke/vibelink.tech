@@ -34,7 +34,8 @@ export default function FieldSales() {
   const mine = useMemo(() => {
     const myId = store.session?.id;
     return (store.leads ?? [])
-      .filter((l) => l.assigned_to === myId && l.status !== 'won' && l.status !== 'lost')
+      // Leads I brought in (still open), and any lead the office has put me down to install — the second is not selling.
+      .filter((l) => (l.referrer_staff_id === myId && l.status !== 'won' && l.status !== 'lost') || (l.assigned_to === myId && l.status !== 'lost'))
       .sort((a, b) => new Date(b.created_at ?? 0) - new Date(a.created_at ?? 0));
   }, [store.leads, store.session]);
 
@@ -88,7 +89,6 @@ export default function FieldSales() {
         name: newLead.name.trim(),
         phone: newLead.phone.trim(),
         source: 'field visit',
-        assignedTo: store.session?.id,
         ...(pos ?? {}),
       });
       store.setCollection('leads', (ls) => [created, ...ls]);
@@ -166,6 +166,8 @@ export default function FieldSales() {
                 )}
               </div>
 
+              {l.status === 'won' && <div style={{ fontSize: 12.5, color: color.green, fontWeight: 600 }}>Won — follow up the installation</div>}
+              {l.status !== 'won' && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {l.status !== 'contacted' && (
                   <button type="button" disabled={busyId === l.id} onClick={() => setStatus(l, 'contacted')}
@@ -182,6 +184,7 @@ export default function FieldSales() {
                   Lost
                 </button>
               </div>
+              )}
 
               {noteFor === l.id ? (
                 <div style={{ display: 'flex', gap: 8 }}>

@@ -10,6 +10,8 @@ import { Badge, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Sel
 const STAGES = ['new', 'contacted', 'won', 'lost'];
 const CHANNELS = ['manual', 'walk-in', 'referral', 'facebook', 'field visit', 'call'];
 const LOST_REASONS = ['Too expensive', 'No coverage in their area', 'Chose a competitor', 'No answer / unreachable', 'Not ready yet', 'Other'];
+/** Who can be the installer: the technicians, or everyone when the team has none set up as one. */
+const installersOf = (staff) => { const t = staff.filter((s) => s.role === 'technician'); return t.length ? t : staff; };
 const digits9 = (p) => String(p ?? '').replace(/[^0-9]/g, '').slice(-9);
 const waLink = (p) => `https://wa.me/254${digits9(p)}`;
 
@@ -303,7 +305,7 @@ export default function Leads() {
       const name = staff.find((s) => s.id === to)?.name;
       store.setCollection('leads', (ls) => ls.map((x) => (byId.has(x.id)
         ? { ...x, ...byId.get(x.id), assignee_name: name ?? null } : x)));
-      store.toast(`${ids.length} lead${ids.length === 1 ? '' : 's'} ${to ? `assigned to ${name}` : 'unassigned'}`);
+      store.toast(`${ids.length} lead${ids.length === 1 ? '' : 's'}: ${to ? `${name} will follow up the installation` : 'installer cleared'}`);
       setSelectedLeads(new Set());
       setBulkAssignTo('');
     } catch (err) {
@@ -313,7 +315,7 @@ export default function Leads() {
 
   const exportLeads = async (format) => {
     const rows = [
-      ['Name', 'Phone', 'Stage', 'Channel', 'Package', 'Assigned to', 'Follow-up', 'Lost reason', 'Added'],
+      ['Name', 'Phone', 'Stage', 'Channel', 'Package', 'Installer', 'Follow-up', 'Lost reason', 'Added'],
       ...shown.map((l) => [
         l.name, l.phone, l.status, l.source ?? '', l.plan_title ?? '', l.assignee_name ?? '',
         l.next_follow_up ? toDateInput(l.next_follow_up) : '', l.lost_reason ?? '', toDateInput(l.created_at),
@@ -474,17 +476,17 @@ export default function Leads() {
                   ...STAGES.map((s) => ({ value: s, label: s })),
                 ]} />
               </Field>
-              <Field label="Assigned to">
+              <Field label="Installer">
                 <Select value={fAssignee} onChange={(e) => setFAssignee(e.target.value)} options={[
-                  { value: '', label: 'Anyone' }, { value: 'none', label: 'Unassigned' },
-                  ...staff.map((s) => ({ value: s.id, label: s.name })),
+                  { value: '', label: 'Anyone' }, { value: 'none', label: 'None yet' },
+                  ...installersOf(staff).map((s) => ({ value: s.id, label: s.name })),
                 ]} />
               </Field>
               <Field label="Channel">
                 <Select value={fSource} onChange={(e) => setFSource(e.target.value)} options={[{ value: '', label: 'Any' }, ...sources]} />
               </Field>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', paddingBottom: 2 }}>
-                {[['overdue', 'Overdue'], ['today', 'Due today'], ['unassigned', 'Unassigned'], ['stale', 'Gone quiet']].map(([k, label]) => (
+                {[['overdue', 'Overdue'], ['today', 'Due today'], ['unassigned', 'No installer'], ['stale', 'Gone quiet']].map(([k, label]) => (
                   <Button key={k} variant={fQuick === k ? 'primary' : undefined} onClick={() => setFQuick(fQuick === k ? '' : k)}>{label}</Button>
                 ))}
               </div>
@@ -493,8 +495,8 @@ export default function Leads() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
                 <span style={{ fontSize: 13 }}>{selectedLeads.size} selected</span>
                 <Select value={bulkAssignTo} onChange={(e) => setBulkAssignTo(e.target.value)} options={[
-                  { value: '', label: 'Assign to…' }, { value: 'none', label: 'Unassigned' },
-                  ...staff.map((s) => ({ value: s.id, label: s.name })),
+                  { value: '', label: 'Set installer…' }, { value: 'none', label: 'No installer' },
+                  ...installersOf(staff).map((s) => ({ value: s.id, label: s.name })),
                 ]} />
                 <Button variant="primary" onClick={bulkAssign} disabled={bulkAssignTo === ''}>Apply</Button>
                 <Button onClick={() => setSelectedLeads(new Set())}>Clear</Button>
@@ -565,12 +567,12 @@ export default function Leads() {
                 { key: 'badge', label: '', render: (l) => <Badge tone={stageTone(l.status)}>{l.status}</Badge> },
                 {
                   key: 'assignee',
-                  label: 'Assigned',
+                  label: 'Installer',
                   render: (l) => (
                     <div>
                       {l.assignee_name
                         ? <span onClick={() => navigate(`/staff?open=${l.assigned_to}`)} style={{ color: color.ink, fontWeight: 600, cursor: 'pointer', textDecoration: 'underline dotted' }}>{l.assignee_name}</span>
-                        : <span style={{ color: color.muted }}>unassigned</span>}
+                        : <span style={{ color: color.muted }}>none yet</span>}
                       {l.created_by_name && (
                         <div style={{ fontSize: 11.5, color: color.muted }}>
                           added by{' '}
@@ -647,14 +649,14 @@ export default function Leads() {
               </Field>
               {/* Meaningful mainly when the channel above is "referral", but
                   not locked to it — a walk-in can still mention who sent them. */}
-              <Field label="Referred by" hint="Optional — who to credit and pay commission to">
+              <Field label="Referred by (channel)" hint="Who brought this lead in — they earn the commission and the sales credit">
                 <Select value={lf.referredBy} onChange={setL('referredBy')} options={referredByOptions} />
               </Field>
-              <Field label="Assign to" hint="Who's chasing this one">
+              <Field label="Installer" hint="The technician who follows up the installation. Not who earns the commission — that is the referrer above.">
                 <Select
                   value={lf.assignedTo}
                   onChange={setL('assignedTo')}
-                  options={[{ value: '', label: '— unassigned —' }, ...staff.map((s) => ({ value: s.id, label: s.name }))]}
+                  options={[{ value: '', label: '— none yet —' }, ...installersOf(staff).map((s) => ({ value: s.id, label: s.name }))]}
                 />
               </Field>
               <Field label="Next follow-up" hint="Optional">
@@ -677,7 +679,7 @@ export default function Leads() {
                 <KV k="Channel" v={leadViewing.source ?? '—'} />
                 <KV k="Package" v={leadViewing.plan_title ? `${leadViewing.plan_title} · ${kes(leadViewing.plan_price)}` : '—'} />
                 <KV k="Referred by" v={leadViewing.referrer_name ?? '—'} />
-                <KV k="Assigned to" v={leadViewing.assignee_name ?? '—'} />
+                <KV k="Installer" v={leadViewing.assignee_name ?? '—'} />
                 <KV
                   k="Next follow-up"
                   v={
@@ -1058,7 +1060,7 @@ export default function Leads() {
                 on Team jobs, not here — this is about the money leads have brought in, and who earns commission
                 for it, which is a different question with a different, deliberately chosen answer (see the
                 comment on PATCH /api/leads/:id). */}
-            <Card title="Sales leaderboard" subtitle="Ranked by what the leads assigned to them have actually brought in this month">
+            <Card title="Sales leaderboard" subtitle="Ranked by what the leads they brought in (as the channel) have actually paid this month">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   const max = Math.max(1, ...perf.map((p) => Number(p.brought_this_month)));
@@ -1095,7 +1097,7 @@ export default function Leads() {
                 rows={perf}
                 columns={[
                   { key: 'name', label: 'Name', render: (p) => <span style={{ fontWeight: 600 }}>{p.name}</span> },
-                  { key: 'leads_assigned', label: 'Assigned', align: 'right' },
+                  { key: 'leads_assigned', label: 'Brought in', align: 'right' },
                   { key: 'leads_won', label: 'Won', align: 'right' },
                   {
                     key: 'rate', label: 'Conversion', align: 'right',

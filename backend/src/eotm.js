@@ -30,12 +30,15 @@ async function jobsLane(tenantId, start, end) {
 
 async function salesLane(tenantId, start, end) {
   const { rows } = await pool.query(
-    `select l.assigned_to as staff_id,
+    // Credited to whoever brought the lead in (its referrer, when that is a staff member) — assigned_to is the
+    // technician following up the installation, which is not selling.
+    `select r.staff_id as staff_id,
             coalesce(sum(p.amount) filter (where p.status='applied' and p.received_at >= $2 and p.received_at < $3), 0) as n
        from leads l
+       join referrers r on r.id = l.referrer_id
        join payments p on p.subscriber_id = l.subscriber_id and p.tenant_id = l.tenant_id
-      where l.tenant_id=$1 and l.assigned_to is not null
-      group by l.assigned_to
+      where l.tenant_id=$1 and r.staff_id is not null
+      group by r.staff_id
      having coalesce(sum(p.amount) filter (where p.status='applied' and p.received_at >= $2 and p.received_at < $3), 0) > 0`,
     [tenantId, start, end]);
   return rows;
