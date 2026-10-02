@@ -231,6 +231,12 @@ export default function AddClient() {
       // living on this form, so land there next instead of the bare list.
       // Adding another line to an existing account already picked its
       // service right here, so that one still goes back to the list.
+      if (fromLeadId && created.install_ticket_id) {
+        // The installation ticket was raised when the lead was won; it now has this client on it. Go to it.
+        store.reload({ quiet: true });
+        navigate(`/tickets?open=${created.install_ticket_id}`);
+        return;
+      }
       if (fromLeadId) {
         // Converted from a won lead: straight to the installation ticket, with this client already chosen and the
         // lead's installer (if one was set) already on it.

@@ -249,6 +249,9 @@ export default function Leads() {
    */
   /** A won lead that is already a client: raise the installation ticket with that client chosen for you. */
   const raiseInstallTicket = (l) => {
+    // Raised automatically when the lead was won: open that one rather than making a second.
+    const existing = (store.tickets ?? []).find((t) => t.lead_id === l.id);
+    if (existing) return navigate(`/tickets?open=${existing.id}`);
     const q = new URLSearchParams({ new: '1', client: l.subscriber_id, subject: `Installation — ${l.name}`, kind: 'install' });
     if (l.assigned_to) q.set('assign', l.assigned_to);
     navigate(`/tickets?${q.toString()}`);
@@ -268,7 +271,8 @@ export default function Leads() {
     try {
       const updated = await api.updateLead(l.id, { status });
       store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? updated : x)));
-      store.toast(`${l.name} → ${status}`);
+      store.toast(updated.install_ticket_number ? `${l.name} → ${status} — installation ticket ${updated.install_ticket_number} raised` : `${l.name} → ${status}`);
+      if (updated.install_ticket_id) store.reload({ quiet: true });   // brings the new ticket into the list
     } catch (err) {
       store.setCollection('leads', (ls) => ls.map((x) => (x.id === l.id ? { ...x, status: previous } : x)));
       store.toast(`Could not update: ${err.message}`);

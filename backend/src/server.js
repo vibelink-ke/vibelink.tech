@@ -3887,6 +3887,40 @@ async function ensureStaffReferrer(tenantId, staffId, name, phone) {
   return created.id;
 }
 
+/**
+ * A lead declared won becomes work: an installation ticket is raised for it straight away, assigned to the installer
+ * the lead was given (if any), carrying what the technician needs — who to call, what they bought, where they are. The
+ * client usually does not exist yet at this point (converting the lead creates them), so the ticket starts without one
+ * and gets the client attached when the lead is converted (POST /api/subscribers with leadId). Once per lead: a lead
+ * that is reopened and won again does not get a second ticket.
+ */
+async function raiseInstallTicket(tenantId, lead, authorName) {
+  const { rowCount } = await pool.query('select 1 from tickets where tenant_id=$1 and lead_id=$2', [tenantId, lead.id]);
+  if (rowCount) return null;
+  const { rows: [policy] } = await pool.query(
+    `select id, resolve_mins from sla_policies
+      where tenant_id=$1 and priority='medium' and coalesce(enabled, true) order by resolve_mins asc limit 1`, [tenantId]);
+  const { rows: [t] } = await pool.query(
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at, assigned_to, lead_id)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium', $4, $5, $6, $7)
+     returning id, number`,
+    [tenantId, `Installation — ${lead.name}`, lead.subscriber_id ?? null, policy?.id ?? null,
+     policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null, lead.assigned_to ?? null, lead.id]);
+  const { rows: [plan] } = lead.interested_plan_id
+    ? await pool.query('select title from plans where id=$1 and tenant_id=$2', [lead.interested_plan_id, tenantId])
+    : { rows: [] };
+  const lines = [
+    `Lead won: ${lead.name}, ${lead.phone}.`,
+    plan?.title ? `Package: ${plan.title}.` : 'Package not chosen yet.',
+    lead.lat != null && lead.lng != null ? `Pinned location: https://www.google.com/maps?q=${lead.lat},${lead.lng}` : null,
+    lead.source ? `Channel: ${lead.source}.` : null,
+  ].filter(Boolean);
+  await pool.query(
+    'insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,$3,$4,true)',
+    [tenantId, t.id, authorName ?? 'system', lines.join('\n')]);
+  return t;
+}
+
 app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   const { rows } = await pool.query(
     `select l.*, r.name as referrer_name, r.staff_id as referrer_staff_id, st.name as assignee_name, cb.name as created_by_name,
@@ -9355,8 +9389,13 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
   await logActivity(req, s.id, s.account_code, sameAccount.length ? 'Service added' : 'Account created',
     label ? `Line "${label}"` : null);
 
+  // Converting a won lead: its installation ticket (raised when it was won) gets this client attached.
+  let installTicketId = null;
   if (leadId) {
     await pool.query('update leads set subscriber_id=$2 where id=$1 and tenant_id=$3', [leadId, s.id, req.tenant.id]);
+    await pool.query('update tickets set subscriber_id=$3 where tenant_id=$1 and lead_id=$2 and subscriber_id is null', [req.tenant.id, leadId, s.id]);
+    const { rows: [tk] } = await pool.query('select id from tickets where tenant_id=$1 and lead_id=$2 limit 1', [req.tenant.id, leadId]);
+    installTicketId = tk?.id ?? null;
   }
 
   // One-time installation fee, as an ordinary open invoice due today: it shows in Invoices, can be paid from the pay
@@ -9407,7 +9446,7 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
        secrets.configured() ? secrets.encrypt(portalPassword) : null]);
   }
 
-  res.json({ ...s, portal_password: portalPassword });
+  res.json({ ...s, portal_password: portalPassword, install_ticket_id: installTicketId });
 
   // After responding: a customer is created whether or not their phone is
   // reachable, and the operator should not wait on an SMS gateway to find out.
@@ -11825,6 +11864,10 @@ app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req
   const { rows: [before] } = sets.includes('assigned_to')
     ? await pool.query('select assigned_to from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
     : { rows: [null] };
+  // Whether this save is the one that makes it won — read first, since the update below overwrites it.
+  const { rows: [wonBefore] } = sets.includes('status') && req.body.status === 'won'
+    ? await pool.query('select status from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
+    : { rows: [] };
   const vals = [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])];
   const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
   if (sets.includes('status')) {
@@ -11964,7 +12007,12 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
      where tenant_id=$1 and id=$2 returning *`,
     vals);
   if (!l) return res.status(404).json({ error: 'not found' });
-  res.json(l);
+  // Won for the first time: raise the installation ticket. A failure here must not undo the lead being won.
+  let installTicket = null;
+  if (wonBefore && wonBefore.status !== 'won') {
+    installTicket = await raiseInstallTicket(req.tenant.id, l, req.session?.name).catch((e) => { console.error('raiseInstallTicket', e.message); return null; });
+  }
+  res.json({ ...l, install_ticket_id: installTicket?.id ?? null, install_ticket_number: installTicket?.number ?? null });
 }));
 
 app.delete('/api/leads/:id', requirePermission('leads.delete'), wrap(async (req, res) => {

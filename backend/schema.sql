@@ -3180,3 +3180,8 @@ alter table routers add constraint routers_collection_mode_check check (collecti
 drop index if exists tpc_one_default_per_provider;
 create unique index if not exists tpc_one_default_per_provider_scope
   on tenant_payment_config (tenant_id, provider, scope) where is_default;
+
+-- The installation ticket raised automatically when a lead is declared won: remembered on the ticket so it is only ever
+-- raised once per lead, and so converting the lead to a client can attach the new client to it.
+alter table tickets add column if not exists lead_id uuid references leads on delete set null;
+create index if not exists tickets_lead_idx on tickets (lead_id) where lead_id is not null;

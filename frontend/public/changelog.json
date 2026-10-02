@@ -67,7 +67,8 @@
       "Tickets: the list now shows the client on every ticket (name, account and location), and marks installations.",
       "Leads: a won lead has a Raise installation ticket button, and adding the client from a won lead goes straight to the ticket with the client and installer already chosen.",
       "Referral commission is now a percentage of the service package the client signed up for, not of the money their first payment happened to be.",
-      "Installation fee: set a standard fee under Settings → Preferences; adding a client charges it as an invoice, and you can change it or waive it for any one client."
+      "Installation fee: set a standard fee under Settings → Preferences; adding a client charges it as an invoice, and you can change it or waive it for any one client.",
+      "Declaring a lead won now raises the installation ticket automatically (assigned to the lead's installer, with who to call and what they bought); adding the client from the lead attaches them to that ticket."
     ]
   }
 ]
