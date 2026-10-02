@@ -74,7 +74,7 @@
       "Licence & billing: the amount box is pre-filled with what you owe, or, when nothing is invoiced yet, what this month's statement stands at so far.",
       "Monthly tenant statements are now raised on the last day of the month (23:55), instead of the 1st of the next month.",
       "Each monthly statement now shows when it is due: by default the 5th of the next month at 10:00 AM (Licence & billing → Pay by).",
-      "No more free trial: the month a tenant signs up in is free, and the licence runs to the 5th of the next month at 10:00 AM (sign up on the 1st: about five weeks; on the 21st: about two).",
+      "No more free trial: a new tenant is free until the 5th of the next month at 10:00 AM (sign up on the 1st: about five weeks; on the 21st: about two), then pays each month by the 5th.",
       "A statement unpaid by its due time (the 5th, 10:00 AM) now locks the licence until it is paid.",
       "The licence counter in the top bar counts down to the exact lock time (days and hours, then hours and minutes)."
     ]
