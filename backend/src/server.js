@@ -1256,7 +1256,9 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   // No gateway of the tenant's own — same fallback PPPoE already gets via
   // stkPushForSubscriber: route through the platform owner's paybill instead
   // of leaving the guest with a hard failure, when the tenant opted into it.
-  const usePlatformCollect = !kk && !daraja && !piggyback && !!tenant.platform_collect_enabled;
+  // The router can overrule it: a site set to 'platform' pays the platform paybill even when the tenant has their
+  // own gateway, and one set to 'own' never does.
+  const usePlatformCollect = viaPlatform(await routerCollection(tenant.id, routerId), tenant.platform_collect_enabled, !!(kk || daraja || piggyback));
   if (!kk && !daraja && !piggyback && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
@@ -1266,12 +1268,12 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
 
   try {
     let checkoutId;
-    if (kk) {
+    if (kk && !usePlatformCollect) {
       const gw = await import('./payments/kopokopo.js');
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac: null, routerId, service: 'hotspot',
       });
-    } else if (piggyback) {
+    } else if (piggyback && !usePlatformCollect) {
       const { rows: [owner] } = await pool.query(
         "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
       if (!owner) return res.status(503).json({ error: 'The platform Daraja app is not set up yet — ask the platform owner.' });
@@ -1778,8 +1780,8 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
         + 'Add it under Hotspot → Settings → Payment gateways.',
     });
   }
-  // Same platform-paybill fallback as /hotspot/buy above.
-  const usePlatformCollect = !kk && !daraja && !piggyback && !!tenant.platform_collect_enabled;
+  // Same platform-paybill rule as /hotspot/buy above, router override included.
+  const usePlatformCollect = viaPlatform(await routerCollection(tenant.id, router.id), tenant.platform_collect_enabled, !!(kk || daraja || piggyback));
   if (!kk && !daraja && !piggyback && !usePlatformCollect) {
     return res.status(503).json({
       error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
@@ -1789,12 +1791,12 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
 
   try {
     let checkoutId;
-    if (kk) {
+    if (kk && !usePlatformCollect) {
       const gw = await import('./payments/kopokopo.js');
       checkoutId = await gw.stkPush(tenant.id, {
         phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, label, service: 'hotspot',
       });
-    } else if (piggyback) {
+    } else if (piggyback && !usePlatformCollect) {
       const { rows: [owner] } = await pool.query(
         "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
       if (!owner) return res.status(503).json({ error: 'The platform Daraja app is not set up yet — ask the platform owner.' });
@@ -2627,8 +2629,16 @@ app.get('/portal/me', wrap(async (req, res) => {
   // could show a PPPoE customer the KopoKopo till — enabled_pppoe scopes it
   // to gateways this subscriber's service can actually use.
   const { rows: [gw] } = await pool.query(
-    `select coalesce(sp.shortcode, tpc.shortcode) as shortcode
+    `select case when rt.collection_mode = 'platform' and plat.shortcode is not null then plat.shortcode
+                 else coalesce(sp.shortcode, tpc.shortcode) end as shortcode
        from subscribers sub
+       left join routers rt on rt.id = sub.router_id
+       left join lateral (
+         select pc.shortcode from tenant_payment_config pc
+           join staff ow on ow.tenant_id = pc.tenant_id and ow.is_super_admin
+          where pc.scope = 'platform' and pc.shortcode is not null
+          order by (pc.provider = 'daraja') desc limit 1
+       ) plat on true
        left join site_profiles sp on sp.router_id = sub.router_id and sp.tenant_id = sub.tenant_id
        left join lateral (
          select shortcode from tenant_payment_config
@@ -2754,6 +2764,21 @@ app.get('/portal/usage', wrap(async (req, res) => {
  * purpose.tenant_id is who the money is actually for. handleStkResult
  * reads purpose to decide which one applies.
  */
+/** The router's own say on where its customers pay: 'default' | 'platform' | 'own' (routers.collection_mode). */
+async function routerCollection(tenantId, routerId) {
+  if (!routerId) return 'default';
+  const { rows: [r] } = await pool.query('select collection_mode from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
+  return r?.collection_mode ?? 'default';
+}
+
+/**
+ * Does this payment go through the platform's paybill? A router set to 'platform' always does (when the tenant has
+ * platform collection on), one set to 'own' never does, and 'default' keeps the long-standing rule: the platform
+ * only steps in for a tenant with no gateway of their own.
+ */
+const viaPlatform = (mode, platformOn, hasOwnGateway) =>
+  (mode === 'platform' ? !!platformOn : mode === 'own' ? false : (!hasOwnGateway && !!platformOn));
+
 async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose, routerId }) {
   const { rows: [t] } = await pool.query(
     'select subdomain, platform_collect_enabled, settlement_commission_pct from tenants where id=$1', [tenantId]);
@@ -2768,7 +2793,7 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
   const { config } = await import('./db.js');
   const ownDaraja = await config(tenantId, 'daraja');
 
-  if (!ownDaraja && t?.platform_collect_enabled) {
+  if (viaPlatform(await routerCollection(tenantId, routerId), t?.platform_collect_enabled, !!ownDaraja)) {
     const { rows: [owner] } = await pool.query(
       "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
     if (!owner) throw Object.assign(new Error('Platform collection is not set up yet — ask the platform owner.'), { status: 503 });
@@ -6992,7 +7017,13 @@ app.patch('/api/routers/:id/location', requirePermission('routers.edit'), wrap(a
 }));
 
 app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, res) => {
-  const { name, host, secret, apiPort, role, nasIdentifier, upstreamProvider } = req.body ?? {};
+  const { name, host, secret, apiPort, role, nasIdentifier, upstreamProvider, collectionMode } = req.body ?? {};
+  if (collectionMode !== undefined) {
+    if (!['default', 'platform', 'own'].includes(collectionMode)) return res.status(400).json({ error: 'Collection must be default, platform or own.' });
+    if (collectionMode === 'platform' && !req.tenant.platform_collect_enabled) {
+      return res.status(400).json({ error: 'Turn on "Platform collects on my behalf" first (Settings → Gateways), then a site can use it.' });
+    }
+  }
   // A typed-in value overrides auto-detection until the operator clears the
   // field again — clearing it (empty string, not "unset") hands it back to
   // the background sweep rather than leaving it permanently blank.
@@ -7007,12 +7038,13 @@ app.put('/api/routers/:id', requirePermission('routers.edit'), wrap(async (req, 
        role              = coalesce(nullif($7,''), role),
        nas_identifier    = coalesce(nullif($8,''), nas_identifier),
        upstream_provider = case when $9::boolean then nullif($10,'') else upstream_provider end,
-       upstream_source   = case when $9::boolean then (case when $10 = '' then 'auto' else 'manual' end) else upstream_source end
+       upstream_source   = case when $9::boolean then (case when $10 = '' then 'auto' else 'manual' end) else upstream_source end,
+       collection_mode   = coalesce($11, collection_mode)
      where id=$1 and tenant_id=$2
      returning *`,
     [req.params.id, req.tenant.id, name ?? '', host ?? '', secret ?? '',
      apiPort ? Number(apiPort) : null, role ?? '', nasIdentifier ?? '',
-     upstreamSet, upstreamValue]);
+     upstreamSet, upstreamValue, collectionMode ?? null]);
   if (!r) return res.status(404).json({ error: 'No such router' });
   if (secret) repushRadiusSecret(req.tenant.id, r.id);
   res.json(r);
@@ -9367,7 +9399,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
       where s.id = $1 and s.tenant_id = $2`, [subscriberId, tenantId]);
   if (!s) return;
 
-  const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId)), ...extra };
+  const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId, s.router_id ?? null)), ...extra };
   // Duplicates would text the same handset twice when both fields match.
   const numbers = [...new Set([s.phone, s.phone_alt].filter(Boolean))];
   for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});

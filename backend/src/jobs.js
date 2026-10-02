@@ -765,8 +765,9 @@ async function remind() {
   // its gateways once per subscriber.
   const orgCache = new Map();
   for (const s of rows) {
-    if (!orgCache.has(s.tenant_id)) orgCache.set(s.tenant_id, await orgVars(s.tenant_id));
-    const org = orgCache.get(s.tenant_id);
+    const orgKey = `${s.tenant_id}:${s.router_id ?? ''}`;
+    if (!orgCache.has(orgKey)) orgCache.set(orgKey, await orgVars(s.tenant_id, s.router_id ?? null));
+    const org = orgCache.get(orgKey);
     const paybill = s.service === 'hotspot' ? org.paybillHotspot : org.paybillPppoe;
     await send(s.tenant_id, s.phone, 'reminder',
       { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code,

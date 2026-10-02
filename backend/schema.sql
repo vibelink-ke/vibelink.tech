@@ -3165,3 +3165,11 @@ alter table leads add column if not exists last_activity_at timestamptz;
 drop index if exists tpc_tenant_provider_shortcode;
 create unique index if not exists tpc_tenant_provider_scope_shortcode
   on tenant_payment_config (tenant_id, provider, scope, coalesce(shortcode, ''));
+
+-- Where a site's customers pay, router by router: 'default' follows the account (their own gateway when they have
+-- one, else the platform's paybill if platform collection is on), 'platform' always pays through the platform paybill
+-- and is settled to the tenant, 'own' always pays the tenant's own gateway and never touches the platform. Lets one
+-- ISP collect through the platform at site A and through its own paybill at site B.
+alter table routers add column if not exists collection_mode text not null default 'default';
+alter table routers drop constraint if exists routers_collection_mode_check;
+alter table routers add constraint routers_collection_mode_check check (collection_mode in ('default', 'platform', 'own'));

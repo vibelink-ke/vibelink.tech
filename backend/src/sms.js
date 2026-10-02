@@ -287,9 +287,14 @@ export function subscriberVars(s, org = {}) {
 const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till: 'manual_till', bankstk: 'bankstk' };
 
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
-export async function orgVars(tenantId) {
+export async function orgVars(tenantId, routerId = null) {
   const { rows: [t] } = await pool.query(
     'select name, support_phone, subdomain, platform_collect_enabled from tenants where id=$1', [tenantId]);
+  // A router can say where its own customers pay (routers.collection_mode); only matters when one is given.
+  const { rows: [rt] } = routerId
+    ? await pool.query('select collection_mode from routers where id=$1 and tenant_id=$2', [routerId, tenantId]).catch(() => ({ rows: [] }))
+    : { rows: [] };
+  const siteMode = rt?.collection_mode ?? 'default';
   const { rows: gws } = await pool.query(
     `select provider, shortcode, enabled_pppoe, enabled_hotspot from tenant_payment_config
       where tenant_id=$1 and shortcode is not null and scope = 'tenant'
@@ -315,7 +320,9 @@ export async function orgVars(tenantId) {
    * a tenant with their own gateway for one service and platform-collect for
    * the other keeps naming its own.
    */
-  if ((!paybillPppoe || !paybillHotspot) && t?.platform_collect_enabled) {
+  // 'platform' sites name the platform's paybill even when the tenant has their own; 'own' sites never fall back to it.
+  if (siteMode === 'platform' && t?.platform_collect_enabled) { paybillPppoe = ''; paybillHotspot = ''; }
+  if ((!paybillPppoe || !paybillHotspot) && t?.platform_collect_enabled && siteMode !== 'own') {
     const { rows: [owner] } = await pool.query(
       'select tenant_id from staff where is_super_admin and tenant_id is not null limit 1');
     if (owner) {

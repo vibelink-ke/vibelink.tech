@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
-import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Stat, Table, Textarea } from '../ui/primitives';
+import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 
 // No secret here. The server mints one when the field arrives empty, and
 // Configure pushes it to the router, so nobody types or even sees it during
@@ -376,6 +376,7 @@ export default function Routers() {
     upstreamProvider: r.upstream_provider ?? '',
     originalUpstreamProvider: r.upstream_provider ?? '',
     upstreamSource: r.upstream_source ?? 'auto',
+    collectionMode: r.collection_mode ?? 'default',
   });
 
   // Coming from the top-bar search ("?open=<router id>"): open it for editing directly.
@@ -962,6 +963,7 @@ export default function Routers() {
       const updated = await api.updateRouter(edit.id, {
         name: edit.name, host: edit.host, secret: edit.secret,
         apiPort: Number(edit.apiPort) || undefined, role: edit.role,
+        collectionMode: edit.collectionMode,
         // Only sent when the operator actually touched it — otherwise a
         // save that changes nothing about the upstream field would still
         // resend its pre-filled current value and get treated as a manual
@@ -2414,6 +2416,21 @@ Revoke anyway?`
                   {detecting === edit.id ? 'Detecting…' : 'Detect now'}
                 </Button>
               </div>
+            </Field>
+            <Field
+              label="Where customers at this site pay"
+              span={2}
+              hint="For a tenant that has platform collection on and also their own gateway: pick per site. 'Platform' customers pay the platform paybill and you are settled to your payout details; 'Own' customers pay your own paybill and the platform never touches the money."
+            >
+              <Select
+                value={edit.collectionMode ?? 'default'}
+                onChange={(e) => setEdit((s) => ({ ...s, collectionMode: e.target.value }))}
+                options={[
+                  { value: 'default', label: 'Follow the account (own gateway if I have one, else the platform)' },
+                  { value: 'platform', label: 'Through the platform — settled to me' },
+                  { value: 'own', label: 'My own gateway' },
+                ]}
+              />
             </Field>
             <Field label="RADIUS shared secret" span={2}>
               <div style={{ display: 'flex', gap: 8 }}>

@@ -97,7 +97,7 @@ export async function sendToSubscriber(tenantId, subscriberId, subject, body) {
       where s.id = $1 and s.tenant_id = $2`, [subscriberId, tenantId]);
   if (!s?.email) return { ok: false, error: 'Customer has no email address' };
 
-  const vars = subscriberVars(s, await orgVars(tenantId));
+  const vars = subscriberVars(s, await orgVars(tenantId, s.router_id ?? null));
   const fill = (t) => String(t ?? '').replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
   return send(tenantId, s.email, fill(subject), fill(body));
 }
