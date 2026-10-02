@@ -800,7 +800,7 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
       // callback inflated the tenant's pending settlement balance for
       // money collected only once.
       const result = await applyPayment(p.tenant_id, {
-        provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
+        provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: tx.name ?? null,
         rawAccount: null, payload: { checkoutId },
         target: p.subscriber_id
           ? { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null }
@@ -890,7 +890,7 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      * far end supplies when the correct one is already sitting in this row.
      */
     await applyPayment(req.tenant_id, {
-      provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: null,
+      provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone, name: tx.name ?? null,
       rawAccount: null, payload: { checkoutId },
       target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null }
                               : { type: 'hotspot', planId: p.plan_id, mac: p.mac, routerId: p.router_id, label: p.label }

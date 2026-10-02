@@ -105,7 +105,8 @@ router.post('/stk', async (req, res) => {
    */
   await handleStkResult('kopokopo', checkoutId,
     d.status === 'Success' ? 0 : 1, d.status,
-    { ref: ev.reference, amount: ev.amount, phone: ev.sender_phone_number }
+    { ref: ev.reference, amount: ev.amount, phone: ev.sender_phone_number,
+      name: [ev.sender_first_name, ev.sender_middle_name, ev.sender_last_name].filter(Boolean).join(' ') || null }
   ).catch(console.error);
 });
 

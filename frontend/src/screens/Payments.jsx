@@ -704,7 +704,10 @@ export default function Payments() {
                   label: 'Customer',
                   // The account this actually applied to, not who M-Pesa said
                   // paid — a shared or family phone means those can differ.
-                  render: (r) => r.customer_name ? r.customer_name.trim().split(/\s+/)[0] : '—',
+                  // A guest hotspot payment has no account; KopoKopo still gives the payer's name.
+                  render: (r) => (r.customer_name || r.payer_name)
+                    ? (r.customer_name || r.payer_name).trim().split(/\s+/).slice(0, r.customer_name ? 1 : 2).join(' ')
+                    : '—',
                 },
                 { key: 'payer_phone', label: 'Phone', render: (r) => phone(r.payer_phone) },
                 {

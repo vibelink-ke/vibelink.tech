@@ -69,7 +69,9 @@
       "Referral commission is now a percentage of the service package the client signed up for, not of the money their first payment happened to be.",
       "Installation fee: set a standard fee under Settings → Preferences; adding a client charges it as an invoice, and you can change it or waive it for any one client.",
       "Declaring a lead won now raises the installation ticket automatically (assigned to the lead's installer, with who to call and what they bought); adding the client from the lead attaches them to that ticket.",
-      "Sales leaderboard now counts the service package fee only — installation fees, top-ups and months paid ahead no longer inflate a salesperson's figure (Leads → Performance and Employee of the Month)."
+      "Sales leaderboard now counts the service package fee only — installation fees, top-ups and months paid ahead no longer inflate a salesperson's figure (Leads → Performance and Employee of the Month).",
+      "KopoKopo payments now record and show the payer's name next to their phone number (Payments → All transactions).",
+      "KopoKopo payments now record and show the payer's name next to their phone number (Payments → All transactions)."
     ]
   }
 ]
