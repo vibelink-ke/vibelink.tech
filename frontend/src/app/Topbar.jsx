@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { color, font, radius, TOPBAR_H } from '../theme/tokens';
@@ -178,6 +178,8 @@ export default function Topbar() {
   const isMobile = useMediaQuery('(max-width: 900px)');
   const navigate = useNavigate();
   const licence = useLicence();
+  const [, setNow] = useState(0);   // re-render every 30s so the licence countdown keeps counting
+  useEffect(() => { const t = setInterval(() => setNow((n) => n + 1), 30000); return () => clearInterval(t); }, []);
   const { searchQuery, setSearchQuery } = store;
   const results = useSearchResults(searchQuery, store);
   const hasQuery = searchQuery.trim().length > 0;
@@ -394,6 +396,16 @@ export default function Topbar() {
         if (expired) {
           text = licence.trialEnded ? 'Trial ended' : 'Expired';
           tone = color.rust;
+        } else if (licence?.lockAt) {
+          // Counts down to the exact moment access stops, not just whole days.
+          const ms = new Date(licence.lockAt).getTime() - Date.now();
+          const mins = Math.max(0, Math.floor(ms / 60000));
+          const d = Math.floor(mins / 1440);
+          const h = Math.floor((mins % 1440) / 60);
+          const m = mins % 60;
+          text = d >= 2 ? `${d} days ${h}h` : d === 1 ? `1 day ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+          if (licence.trial) text = `Trial · ${text}`;
+          tone = ms <= 3 * 86400000 ? color.rust : ms <= 14 * 86400000 ? color.amberInk : '#0f7a5f';
         } else if (days != null) {
           const unit = days === 1 ? 'day' : 'days';
           text = days <= 0 ? 'Ends today' : `${days} ${unit}`;

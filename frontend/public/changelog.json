@@ -73,7 +73,10 @@
       "Payments → All transactions shows the voucher code issued for hotspot (KopoKopo) payments, and the phone number the prompt was sent to.",
       "Licence & billing: the amount box is pre-filled with what you owe, or, when nothing is invoiced yet, what this month's statement stands at so far.",
       "Monthly tenant statements are now raised on the last day of the month (23:55), instead of the 1st of the next month.",
-      "Each monthly statement now shows when it is due: by default the 5th of the next month at 10:00 AM (Licence & billing → Pay by)."
+      "Each monthly statement now shows when it is due: by default the 5th of the next month at 10:00 AM (Licence & billing → Pay by).",
+      "No more free trial: every tenant gets the rest of their sign-up month free, and billing starts the 1st of the next month.",
+      "A statement unpaid by its due time (the 5th, 10:00 AM) now locks the licence until it is paid.",
+      "The licence counter in the top bar counts down to the exact lock time (days and hours, then hours and minutes)."
     ]
   }
 ]

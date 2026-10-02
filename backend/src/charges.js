@@ -57,6 +57,21 @@ export function statementDueAt(key) {
   return `${ny}-${String(nm).padStart(2, '0')}-${String(STATEMENT_DUE_DAY).padStart(2, '0')}T${String(STATEMENT_DUE_HOUR).padStart(2, '0')}:00:00+03:00`;
 }
 
+/** The Nairobi month after `key`. */
+export function nextMonthKey(key) {
+  const [y, m] = key.split('-').map(Number);
+  return m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Where a new tenant's licence runs to. There is no trial: the rest of the sign-up month is free, the next month is the
+ * first one billed, and that month's statement is due on the 5th after it, so that is the date they are covered to.
+ * Paying a statement moves it on to the due date of the one after (see allocateCredit).
+ */
+export function signupLicenceEnds(now = Date.now()) {
+  return statementDueAt(nextMonthKey(currentMonthKey(now))).slice(0, 10);
+}
+
 /** The Nairobi month before `key`. */
 export function previousMonthKey(key) {
   const [y, m] = key.split('-').map(Number);
@@ -243,7 +258,7 @@ async function allocateCredit(c, tenantId) {
   let credit = Number(t?.billing_credit ?? 0);
   let prepaid = Number(t?.prepaid_months ?? 0);
   const { rows: due } = await c.query(
-    `select id, total from tenant_charges
+    `select id, total, to_char(month, 'YYYY-MM') as month_key from tenant_charges
       where tenant_id = $1 and status in ('open', 'invoiced')
       order by month for update`, [tenantId]);
 
@@ -262,10 +277,10 @@ async function allocateCredit(c, tenantId) {
     credit -= total;
     paid += 1;
     await c.query("update tenant_charges set status = 'paid', paid_at = now() where id = $1", [s.id]);
+    // Paid for a month: covered until the next month's statement falls due (the 5th, 10:00), never shortened.
     await c.query(
-      `update tenants
-          set licence_ends = (greatest(coalesce(licence_ends, current_date), current_date) + interval '1 month')::date
-        where id = $1`, [tenantId]);
+      `update tenants set licence_ends = greatest(coalesce(licence_ends, date '1970-01-01'), $2::date) where id = $1`,
+      [tenantId, statementDueAt(nextMonthKey(s.month_key)).slice(0, 10)]);
   }
 
   if (!blocked && t?.converted_at && t.status !== 'suspended') {
@@ -425,8 +440,14 @@ export async function billingSummary(tenantId) {
     const est = mine ? Math.round(Number(mine.total) - credit) : 0;
     if (est >= 10) suggested = est;
   }
+  // The moment access stops if nothing is paid: the earliest unpaid statement's due time; with none outstanding, the
+  // next statement's due time (what the licence date is set to).
+  const unpaid = statements.filter((s) => s.status === 'open' || s.status === 'invoiced').map((s) => statementDueAt(s.month)).sort()[0];
+  const endsDay = t?.licence_ends ? (t.licence_ends instanceof Date ? t.licence_ends.toISOString() : String(t.licence_ends)).slice(0, 10) : null;
+  const lockAt = readOnly ? null : (unpaid ?? (endsDay ? `${endsDay}T${String(STATEMENT_DUE_HOUR).padStart(2, '0')}:00:00+03:00` : null));
   return {
     tenant: t?.name ?? null,
+    lockAt,
     status: t?.status ?? 'active',
     readOnly,
     trial: t?.status === 'trial' && !readOnly,

@@ -14,7 +14,7 @@ import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
 import { generateDueBills } from './bills.js';
-import { currentMonthKey, previousMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
+import { signupLicenceEnds, currentMonthKey, previousMonthKey, chargesFor, snapshotCharges, monthWindow, billingSummary, ownerTenantId, ACTIVATION_FEE, reinstateFee } from './charges.js';
 import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
@@ -520,11 +520,11 @@ app.post('/api/auth/signup', wrap(async (req, res) => {
   try {
     await c.query('begin');
     ({ rows: [tenant] } = await c.query(
-      // A new sign-up gets a trial that ends. TENANT_TRIAL_DAYS sets how long (14 by
-      // default); 0 leaves it open-ended, as sign-ups were before this existed.
-      `insert into tenants (name, subdomain, status, support_phone, licence_ends)
-       values ($1,$2,'trial',$3, case when $4::int > 0 then current_date + $4::int end) returning *`,
-      [company, sub, phone ?? null, Number(process.env.TENANT_TRIAL_DAYS ?? 14)]));
+      // No trial: a new tenant is active from the start. The rest of the sign-up month is free, the next month is the
+      // first billed, and the licence runs to that statement's due date (the 5th, 10:00): see charges.signupLicenceEnds.
+      `insert into tenants (name, subdomain, status, support_phone, licence_ends, converted_at)
+       values ($1,$2,'active',$3, $4::date, now()) returning *`,
+      [company, sub, phone ?? null, signupLicenceEnds()]));
     ({ rows: [staff] } = await c.query(
       `insert into staff (tenant_id, name, phone, email, username, role, password_hash)
        values ($1,$2,$3,$4,$5,'owner',$6) returning *`,
@@ -576,8 +576,7 @@ function sendSignupWelcome({ tenant, staff, sub, user, email, phone }) {
   const portal = `https://${sub}.${root}`;
   const first = String(staff.name ?? '').trim().split(/\s+/)[0] || 'there';
   const signIn = user || email;
-  const trialEnds = tenant.licence_ends ? new Date(tenant.licence_ends).toISOString().slice(0, 10) : null;
-  const trialLine = trialEnds ? `Your free trial runs until ${trialEnds}.` : 'Your trial has started.';
+  const trialLine = 'The rest of this month is free; billing starts from the 1st of next month.';
 
   import('./email.js').then((mail) => mail.sendSystem(
     tenant.id, email, 'Welcome to Vibelink — your portal is ready',
@@ -2335,7 +2334,7 @@ app.get('/api/instance/licence', ...instance(async (id, _req, res) => {
   res.json({
     tenant: b.tenant, status: b.status, readOnly: b.readOnly, trial: b.trial, trialEnded: b.trialEnded,
     activationFee: b.activation?.fee ?? null, amountDue: b.amountDue,
-    licenceEnds: b.licenceEnds, daysLeft: b.daysLeft,
+    licenceEnds: b.licenceEnds, daysLeft: b.daysLeft, lockAt: b.lockAt,
     expiringSoon: b.daysLeft != null && b.daysLeft <= 7,
   });
 }));
@@ -5653,6 +5652,7 @@ app.get('/api/licence', wrap(async (req, res) => {
     readOnly,
     trial: row?.status === 'trial' && !readOnly,
     trialEnded,
+    lockAt: readOnly ? null : (row?.licence_ends ? `${new Date(row.licence_ends).toISOString().slice(0, 10)}T10:00:00+03:00` : null),
     activationFee: trialEnded ? ACTIVATION_FEE : reinstate ? reinstateFee(row?.flat_monthly_fee) : null,
     amountDue,
     licenceEnds: row?.licence_ends ?? null,
@@ -12757,11 +12757,9 @@ app.post('/api/tenants', superAdminOnly, wrap(async (req, res) => {
     `insert into tenants (name, subdomain, flat_monthly_fee, support_phone, hosting,
                           status, converted_at, licence_ends)
      values ($1,$2,$3,$4,$5,
-             case when $5 = 'self' then 'active' else 'trial' end,
-             case when $5 = 'self' then now() end,
-             case when $5 = 'self' then (date_trunc('month', current_date) + interval '3 months' - interval '1 day')::date end)
+             'active', now(), $6::date)
      returning *`,
-    [name, subdomain, flat, supportPhone ?? null, hosting]);
+    [name, subdomain, flat, supportPhone ?? null, hosting, signupLicenceEnds()]);
 
   // Nothing is set up on the platform for a self-hosted tenant: no help articles,
   // no support login. Their software runs on their own server.

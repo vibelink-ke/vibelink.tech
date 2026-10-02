@@ -1843,6 +1843,22 @@ async function ownerBrief() {
  * working contact info keep full access indefinitely is worse than a missed notice.
  */
 export async function expireTenantLicences() {
+  // Pay what credit already covers first, so a tenant who has paid ahead is never locked for a statement they cover.
+  {
+    const { settleAllFromCredit } = await import('./charges.js');
+    await settleAllFromCredit();
+  }
+  // The lock: a statement still unpaid after its due time (the 5th of the next month, 10:00 Nairobi) ends the licence
+  // now. Setting the date to yesterday hands the tenant to the ordinary expiry below (read-only + the notice), and
+  // paying the statement moves the date forward again.
+  await pool.query(`
+    update tenants t set licence_ends = current_date - 1
+     where t.status = 'active' and t.converted_at is not null and t.subdomain <> 'demo'
+       and t.licence_ends is not null and t.licence_ends >= current_date
+       and exists (select 1 from tenant_charges c
+                    where c.tenant_id = t.id and c.status in ('open', 'invoiced')
+                      and ((c.month + interval '1 month' + interval '4 days 10 hours') at time zone 'Africa/Nairobi') < now())`);
+
   const { rows: expiring } = await pool.query(`
     select id, name, licence_ends from tenants
      where status in ('active', 'trial')
