@@ -32,14 +32,20 @@ async function salesLane(tenantId, start, end) {
   const { rows } = await pool.query(
     // Credited to whoever brought the lead in (its referrer, when that is a staff member) — assigned_to is the
     // technician following up the installation, which is not selling.
+    // Package fees only: per client, what they paid in the period capped at one package's price, so an installation
+    // fee, a top-up or periods paid ahead do not count as selling.
     `select r.staff_id as staff_id,
-            coalesce(sum(p.amount) filter (where p.status='applied' and p.received_at >= $2 and p.received_at < $3), 0) as n
+            coalesce(sum(least(w.amt, coalesce(nullif(coalesce(s.custom_price, pl.price), 0), w.amt))), 0) as n
        from leads l
        join referrers r on r.id = l.referrer_id
-       join payments p on p.subscriber_id = l.subscriber_id and p.tenant_id = l.tenant_id
+       join subscribers s on s.id = l.subscriber_id
+       left join plans pl on pl.id = s.plan_id
+       join (select subscriber_id, sum(amount) as amt from payments
+              where tenant_id=$1 and status='applied' and received_at >= $2 and received_at < $3
+              group by subscriber_id) w on w.subscriber_id = l.subscriber_id
       where l.tenant_id=$1 and r.staff_id is not null
       group by r.staff_id
-     having coalesce(sum(p.amount) filter (where p.status='applied' and p.received_at >= $2 and p.received_at < $3), 0) > 0`,
+     having sum(w.amt) > 0`,
     [tenantId, start, end]);
   return rows;
 }

@@ -1074,7 +1074,7 @@ export default function Leads() {
                 on Team jobs, not here — this is about the money leads have brought in, and who earns commission
                 for it, which is a different question with a different, deliberately chosen answer (see the
                 comment on PATCH /api/leads/:id). */}
-            <Card title="Sales leaderboard" subtitle="Ranked by what the leads they brought in (as the channel) have actually paid this month">
+            <Card title="Sales leaderboard" subtitle="Ranked by the package fees the leads they brought in (as the channel) paid this month — installation fees and top-ups are not counted">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   const max = Math.max(1, ...perf.map((p) => Number(p.brought_this_month)));
@@ -1118,7 +1118,7 @@ export default function Leads() {
                     render: (p) => `${p.leads_assigned > 0 ? Math.round((p.leads_won / p.leads_assigned) * 100) : 0}%`,
                   },
                   {
-                    key: 'brought_total', label: 'Brought to the company', align: 'right',
+                    key: 'brought_total', label: 'Package fees brought in', align: 'right',
                     render: (p) => kes(p.brought_total),
                   },
                   {

@@ -3998,14 +3998,23 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
    * with more than one of either. Aggregating each piece separately first, then joining single rows, cannot fan out.
    */
   const { rows } = await pool.query(
-    `with sub_value as (
-       -- What each subscriber has actually paid — real money collected, not a plan's list price.
-       select subscriber_id,
-              sum(amount) filter (where status = 'applied') as total,
-              sum(amount) filter (where status = 'applied' and received_at >= date_trunc('month', now())) as this_month
+    `with monthly as (
+       select subscriber_id, date_trunc('month', received_at) as m, sum(amount) as amt
          from payments
-        where tenant_id = $1
-        group by subscriber_id
+        where tenant_id = $1 and status = 'applied' and subscriber_id is not null
+        group by 1, 2
+     ),
+     sub_value as (
+       -- What each subscriber has paid towards their SERVICE PACKAGE: per month, at most one package's price. A first
+       -- payment that also covers an installation fee, a top-up or several periods ahead counts only as the package it
+       -- bought. A client with no package price set counts what they paid.
+       select mo.subscriber_id,
+              sum(least(mo.amt, coalesce(nullif(coalesce(s.custom_price, p.price), 0), mo.amt))) as total,
+              sum(least(mo.amt, coalesce(nullif(coalesce(s.custom_price, p.price), 0), mo.amt))) filter (where mo.m = date_trunc('month', now())) as this_month
+         from monthly mo
+         join subscribers s on s.id = mo.subscriber_id
+         left join plans p on p.id = s.plan_id
+        group by mo.subscriber_id
      ),
      lead_stats as (
        -- brought_* is the whole point of "Employee of the month": not a count of leads, but what the clients this
