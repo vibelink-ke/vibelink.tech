@@ -10,6 +10,7 @@ import { useInvoicePay } from '../ui/invoicePay';
 import ExportMenu from '../ui/ExportMenu';
 import { Signal, StatusBadge } from './SmartOlt';
 import ExpiryCalendar from './clients/ExpiryCalendar';
+import ClientInvoices from './clients/ClientInvoices';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 import { useTable, TableToolbar, TableFooter } from '../ui/paging';
 
@@ -189,6 +190,7 @@ export default function Clients() {
   const [view, setView] = useState('list');
   const [selected, setSelected] = useState(() => new Set());
   const [editing, setEditing] = useState(null);
+  const [invoicesFor, setInvoicesFor] = useState(null);   // { name, lines } of the account whose invoices are open
   const actionMenu = useActionMenu();
 
   // For tenants with SmartOLT: each client's ONU (signal, or LOS/offline), one column in the list.
@@ -772,6 +774,7 @@ export default function Clients() {
                       >
                         <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}`); }}>View</MenuItem>
                         <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}?tab=services`); }}>Services</MenuItem>
+                        <MenuItem onClick={() => { actionMenu.close(); setInvoicesFor({ name: c.name, lines }); }}>Invoices</MenuItem>
                         <MenuItem onClick={() => { actionMenu.close(); setEditing({ ...c, credit: c.wallet_balance ?? 0 }); }}>
                           Edit client
                         </MenuItem>
@@ -790,6 +793,13 @@ export default function Clients() {
         <TableFooter t={t} total={visibleAccounts.length} always />
       </div>
       )}
+
+      <ClientInvoices
+        open={!!invoicesFor}
+        name={invoicesFor?.name ?? ''}
+        lines={invoicesFor?.lines ?? []}
+        onClose={() => setInvoicesFor(null)}
+      />
 
       <Modal
         open={!!editing}

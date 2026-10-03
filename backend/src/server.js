@@ -3090,8 +3090,9 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
          order by is_default desc nulls last limit 1
       ) tpc on true
       left join lateral (
+        -- Only invoices already due count against the balance; one dated in the future is not owed yet.
         select sum(amount - paid) amount from invoices
-         where subscriber_id = s.id and status in ('open','partial')
+         where subscriber_id = s.id and status in ('open','partial') and due_date <= current_date
       ) owed on true
       /**
        * The open session — but only if it is still being talked about.

@@ -80,7 +80,8 @@
       "A named TV, console or device keeps its reserved IP for a week after its plan expires, so it reconnects on the same address when it pays again; the IP is given back after 7 days.",
       "Fixed expiry reminders, one-off SMS and bulk SMS naming the tenant's own paybill for customers on a router set to collect through the platform; the {paybill} tag now follows the customer's router.",
       "Site payment profiles can now be viewed and edited, not just added or deleted.",
-      "A client with an unpaid invoice now shows a negative balance (-KES) in the client list and on their account."
+      "A client with a due, unpaid invoice now shows a negative balance (-KES) in the client list and on their account.",
+      "Clients table: a new Invoices action lists a client's unpaid invoices and lets you create, edit and delete them without leaving the page."
     ]
   }
 ]
