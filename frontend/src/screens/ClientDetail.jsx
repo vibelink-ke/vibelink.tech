@@ -681,6 +681,15 @@ export default function ClientDetail() {
           <span style={{ fontWeight: 700, color: color.ink }}>
             KES {kes(client.wallet_balance)}
           </span>{' '}
+          {(() => {
+            // Unpaid invoices across the whole account make the balance negative.
+            const lines = (store.clients ?? []).filter((c) => c.account_code === client.account_code);
+            const wallet = Number(client.wallet_balance ?? 0);
+            const owed = (lines.length ? lines : [client]).reduce((a, l) => a + (wallet - Number(l.net_balance ?? wallet)), 0);
+            return owed - wallet > 0.5
+              ? <span style={{ color: color.rust, fontWeight: 700 }} title="Unpaid invoices outstanding">· Balance -KES {kes(owed - wallet)}</span>
+              : null;
+          })()}{' '}
           <a
             onClick={() => { setWalletAdjust({ amount: String(Number(client.wallet_balance ?? 0)), reason: '' }); setWalletError(''); }}
             style={{ fontSize: 12, fontWeight: 600, color: color.green, cursor: 'pointer' }}

@@ -640,7 +640,16 @@ export default function Clients() {
                           under a multi-service account already reports the
                           same number; take it from any one of them rather
                           than summing, which would count it once per line. */}
-                      KES {kes(lines[0]?.wallet_balance ?? 0)}
+                      {(() => {
+                        // A client with an unpaid (open or partly paid) invoice shows what they owe as a negative balance:
+                        // the pooled wallet minus every line's outstanding invoices (net_balance is wallet minus one line's).
+                        const wallet = Number(lines[0]?.wallet_balance ?? 0);
+                        const owed = lines.reduce((a, l) => a + (Number(l.wallet_balance ?? 0) - Number(l.net_balance ?? l.wallet_balance ?? 0)), 0);
+                        const net = wallet - owed;
+                        return net < -0.5
+                          ? <span style={{ color: color.rust }} title="Has an unpaid invoice">-KES {kes(-net)}</span>
+                          : <>KES {kes(net)}</>;
+                      })()}
                     </td>
                     <td style={{ ...td, fontSize: 12.5, color: color.muted }}>
                       {c.email || '—'}
