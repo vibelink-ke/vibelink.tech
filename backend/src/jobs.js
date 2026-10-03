@@ -792,7 +792,7 @@ async function autoCharge() {
 
 async function remind() {
   const { rows } = await pool.query(`
-    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service
+    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service, s.router_id
     from subscribers s
     where s.status='active' and s.expires_at between now() and now() + interval '3 days'
       and s.tenant_id in (${enabledTenants})`, ['remind']);

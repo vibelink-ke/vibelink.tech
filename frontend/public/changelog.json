@@ -77,7 +77,8 @@
       "No more free trial: a new tenant is free until the 5th of the next month at 10:00 AM (sign up on the 1st: about five weeks; on the 21st: about two), then pays each month by the 5th.",
       "A statement unpaid by its due time (the 5th, 10:00 AM) now locks the licence until it is paid.",
       "The licence counter in the top bar counts down to the exact lock time (days and hours, then hours and minutes).",
-      "A named TV, console or device keeps its reserved IP for a week after its plan expires, so it reconnects on the same address when it pays again; the IP is given back after 7 days."
+      "A named TV, console or device keeps its reserved IP for a week after its plan expires, so it reconnects on the same address when it pays again; the IP is given back after 7 days.",
+      "Fixed expiry reminders, one-off SMS and bulk SMS naming the tenant's own paybill for customers on a router set to collect through the platform; the {paybill} tag now follows the customer's router."
     ]
   }
 ]

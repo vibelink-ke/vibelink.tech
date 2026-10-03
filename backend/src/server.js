@@ -5089,7 +5089,8 @@ app.post('/api/messages', requirePermission('messaging.send'), async (req, res) 
       [subscriberId, req.tenant.id]);
     phone = s?.phone ?? null;
     if (s) {
-      const org = await sms.orgVars(req.tenant.id);
+      // The subscriber's own router decides which paybill the {paybill} tag names (platform or the tenant's own).
+      const org = await sms.orgVars(req.tenant.id, s.router_id ?? null);
       filled = sms.fill(body, sms.subscriberVars(s, org));
     }
   }
@@ -12293,7 +12294,6 @@ app.post('/api/sms/send', requirePermission('messaging.send'), wrap(async (req, 
    * and the rest emptied, which is the existing behaviour for a token with no
    * value — never the literal braces.
    */
-  const org = await sms.orgVars(req.tenant.id);
   const { rows: [s] } = await pool.query(
     `select ${sms.SUBSCRIBER_VARS_SQL}
        from subscribers s
@@ -12301,6 +12301,8 @@ app.post('/api/sms/send', requirePermission('messaging.send'), wrap(async (req, 
        left join routers r on r.id = s.router_id
       where s.tenant_id=$1 and (s.phone=$2 or s.phone_alt=$2) limit 1`,
     [req.tenant.id, phone]);
+  // Looked up after the subscriber so their router can decide which paybill the {paybill} tag names.
+  const org = await sms.orgVars(req.tenant.id, s?.router_id ?? null);
 
   const vars = s ? sms.subscriberVars(s, org) : { ...org };
   await sms.send(req.tenant.id, phone, 'custom', { ...vars, body: sms.fill(body, vars) });
@@ -12384,9 +12386,12 @@ app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (
 
   res.json({ queued: recipients.length });
 
-  // One lookup for the whole run rather than per recipient.
-  const org = await sms.orgVars(req.tenant.id);
+  // One lookup per router for the run (each router can name its own paybill), not one per recipient.
+  const orgByRouter = new Map();
   for (const s of recipients) {
+    const key = s.router_id ?? '';
+    if (!orgByRouter.has(key)) orgByRouter.set(key, await sms.orgVars(req.tenant.id, s.router_id ?? null));
+    const org = orgByRouter.get(key);
     // Expanded per recipient — the whole point of the tags is that each person
     // gets their own name, account and expiry rather than a form letter.
     const vars = sms.subscriberVars(s, org);
