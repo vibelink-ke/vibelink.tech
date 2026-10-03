@@ -336,8 +336,8 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   // going out and this callback landing.
   const { rows: [inv] } = await c.query(
     invoiceId
-      ? "select * from invoices where id=$2 and subscriber_id=$1 and status in ('open','partial')"
-      : "select * from invoices where subscriber_id=$1 and status in ('open','partial') order by due_date limit 1",
+      ? "select * from invoices where id=$2 and subscriber_id=$1 and status in ('open','partial') and plan_id is not null"
+      : "select * from invoices where subscriber_id=$1 and status in ('open','partial') and plan_id is not null order by due_date limit 1",
     invoiceId ? [subId, invoiceId] : [subId]
   );
   /**
@@ -354,7 +354,36 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
      returning balance`,
     [tenantId, sub.account_code]);
 
-  const available = Number(amount) + Number(wallet.balance);
+  /**
+   * What the client already owes comes first. Invoices that are not for the package itself (an installation fee, a
+   * router, any invoice raised by hand: plan_id is null) and whose due date has arrived are a debt: every payment, and
+   * any credit already in the wallet, clears them oldest first before a single shilling goes towards service. Only
+   * what is left buys time. A package (renewal) invoice is not a debt in this sense: paying it is what buys the
+   * service, so it is settled further down as before.
+   */
+  const { rows: debts } = await c.query(
+    `select id, amount, paid from invoices
+      where subscriber_id=$1 and status in ('open','partial') and plan_id is null and due_date <= current_date
+      order by ($2::uuid is not null and id = $2::uuid) desc, due_date, created_at`,
+    [subId, invoiceId]);
+  let pool = Number(amount) + Number(wallet.balance);
+  let debtCleared = 0;
+  let firstDebtId = null;
+  for (const d of debts) {
+    if (pool <= 0) break;
+    const owing = Number(d.amount) - Number(d.paid);
+    const take = Math.min(pool, owing);
+    if (!(take > 0)) continue;
+    await c.query(
+      "update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1",
+      [d.id, take]);
+    pool -= take;
+    debtCleared += take;
+    firstDebtId ??= d.id;
+  }
+  // The part of this payment (as opposed to the wallet) left for the package.
+  const forService = Math.max(0, Number(amount) - debtCleared);
+  const available = pool;
   // Auto-renewing from an existing balance (no fresh payment, no invoice being paid down — see
   // jobs.js's renewFromWallet) has to buy service at whatever the customer's price is RIGHT NOW.
   // A stale open invoice from before their custom price was set or changed would otherwise decide
@@ -408,18 +437,18 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   await c.query(
     `update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2`,
     [tenantId, sub.account_code, credit]);
-  if (inv) {
+  if (inv && forService > 0) {
     await c.query(
       "update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1",
-      [inv.id, amount]
+      [inv.id, forService]
     );
   }
   await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, service='pppoe', applied_at=now() where id=$1",
-    [paymentId, subId, inv?.id ?? null]);
+    [paymentId, subId, (forService > 0 ? inv?.id : null) ?? firstDebtId ?? inv?.id ?? null]);
 
   if (sub.referred_by) await creditReferral(c, tenantId, sub, subId, amount, paymentId);
 
-  return { expires, partial: !full, balance: credit };
+  return { expires, partial: !full, balance: credit, debtCleared };
 }
 
 /**
