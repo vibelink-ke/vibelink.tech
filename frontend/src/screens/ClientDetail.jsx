@@ -10,6 +10,8 @@ import ClientOnu from './clients/ClientOnu';
 import { Signal, StatusBadge } from './SmartOlt';
 import { downloadInvoice } from '../lib/export';
 import { useInvoicePay } from '../ui/invoicePay';
+import { useInvoiceEditor } from './clients/invoiceEditor';
+import { useInvoiceActions } from './clients/ClientInvoices';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -129,6 +131,9 @@ const areaPath = (values, w, h, max) => {
 export default function ClientDetail() {
   const store = useStore();
   const pay = useInvoicePay(store);
+  const [openInvoiceEditor, invoiceEditor] = useInvoiceEditor();
+  const invoiceActions = useInvoiceActions();
+  const canEditInvoices = !!store.session?.perms?.['clients.invoices'];
   const navigate = useNavigate();
   const { id } = useParams();
   const [params, setParams] = useSearchParams();
@@ -1115,7 +1120,11 @@ export default function ClientDetail() {
 
       {tab === 'invoices' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Invoices</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 0 8px' }}>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>Invoices</span>
+            {canEditInvoices && <Button size="sm" variant="primary" onClick={() => openInvoiceEditor(siblings)}>+ Create invoice</Button>}
+          </div>
+          {invoiceEditor}
           {(() => {
             const ids = new Set(siblings.map((s) => s.id));
             const invoices = (store.invoices ?? [])
@@ -1167,6 +1176,13 @@ export default function ClientDetail() {
                           >
                             Click to pay
                           </span>
+                        )}
+                        <span style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }} onClick={() => invoiceActions.view(inv)}>View</span>
+                        {canEditInvoices && (
+                          <span style={{ color: color.green, fontWeight: 600, cursor: 'pointer' }} onClick={() => openInvoiceEditor(siblings, inv)}>Edit</span>
+                        )}
+                        {canEditInvoices && (
+                          <span style={{ color: color.rust, fontWeight: 600, cursor: 'pointer' }} onClick={() => invoiceActions.remove(inv)}>Delete</span>
                         )}
                       </span>
                     </div>
