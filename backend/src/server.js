@@ -12171,6 +12171,29 @@ app.post('/api/site-profiles', requirePermission('site_profiles.edit'), wrap(asy
   res.json(p);
 }));
 
+// Edit a profile in place (the POST above is an upsert by site name, so renaming a site through it would leave the old one behind).
+app.put('/api/site-profiles/:id', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
+  const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
+  if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
+  try {
+    const { rowCount } = await pool.query(
+      `update site_profiles set site=$3, router_id=$4, provider=$5, shortcode=$6, account_prefix=$7, payment_config_id=$8
+        where tenant_id=$1 and id=$2`,
+      [req.tenant.id, req.params.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null]);
+    if (!rowCount) return res.status(404).json({ error: 'not found' });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'Another profile already uses that site name.' });
+    throw e;
+  }
+  const { rows: [p] } = await pool.query(
+    `select p.*, r.name as router_name, tpc.label as payment_config_label, tpc.shortcode as payment_config_shortcode
+       from site_profiles p
+       left join routers r on r.id = p.router_id
+       left join tenant_payment_config tpc on tpc.id = p.payment_config_id
+      where p.tenant_id=$1 and p.id=$2`, [req.tenant.id, req.params.id]);
+  res.json(p);
+}));
+
 app.delete('/api/site-profiles/:id', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
   await pool.query('delete from site_profiles where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
   res.json({ ok: true });

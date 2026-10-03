@@ -20,6 +20,19 @@ export default function SiteProfiles() {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState(BLANK);
+  const [editing, setEditing] = useState(null);   // the profile being edited, or null when adding
+  const [view, setView] = useState(false);          // read-only look at a profile
+
+  const close = () => { setOpen(false); setEditing(null); setView(false); setF(BLANK); };
+  const openProfile = (p, readOnly) => {
+    setF({
+      ...BLANK, site: p.site, router: p.router_id ?? '', provider: p.provider, shortcode: p.shortcode ?? '',
+      account: p.account_prefix ?? '', paymentConfigId: p.payment_config_id ?? '',
+    });
+    setEditing(readOnly ? null : p);
+    setView(readOnly);
+    setOpen(true);
+  };
 
   const profiles = store.siteProfiles ?? [];
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -73,7 +86,7 @@ export default function SiteProfiles() {
     if (!f.site.trim() || !f.shortcode.trim()) return store.toast('Site and shortcode are required');
     setBusy(true);
     try {
-      const created = await api.createSiteProfile({
+      const body = {
         site: f.site,
         routerId: f.router || null,
         provider: f.provider,
@@ -82,13 +95,13 @@ export default function SiteProfiles() {
         // Hotspot always uses the tenant's one default gateway, by design —
         // only PPPoE payments can be routed to a specific paybill per site.
         paymentConfigId: f.provider === 'kopokopo' ? null : (f.paymentConfigId || null),
-      });
+      };
+      const created = editing ? await api.updateSiteProfile(editing.id, body) : await api.createSiteProfile(body);
       store.setCollection('siteProfiles', (ps) => [...ps.filter((p) => p.id !== created.id), created]);
       // Pinned to a router and the platform is available: say outright that this site is the tenant's own.
       if (f.router && platformOn) await setSiteMode(f.router, 'own').catch(() => {});
       store.toast(`${created.site} profile saved`);
-      setOpen(false);
-      setF(BLANK);
+      close();
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     } finally {
@@ -111,7 +124,7 @@ export default function SiteProfiles() {
       title="Site payment profiles"
       subtitle="Which paybill or till the customers at each site pay into — your own, or the platform's (settled to you). Only needed when you run more than one shortcode, or mix both."
       actions={
-        <Button variant="primary" onClick={() => setOpen(true)}>
+        <Button variant="primary" onClick={() => { setEditing(null); setView(false); setF(BLANK); setOpen(true); }}>
           + Add profile
         </Button>
       }
@@ -150,8 +163,10 @@ export default function SiteProfiles() {
               label: '',
               align: 'right',
               render: (p) => (
-                <span onClick={() => remove(p)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
-                  Delete
+                <span style={{ display: 'inline-flex', gap: 14 }}>
+                  <span onClick={() => openProfile(p, true)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>View</span>
+                  <span onClick={() => openProfile(p, false)} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Edit</span>
+                  <span onClick={() => remove(p)} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>Delete</span>
                 </span>
               ),
             },
@@ -186,17 +201,25 @@ export default function SiteProfiles() {
 
       <Modal
         open={open}
-        title="Add site profile"
-        onClose={() => setOpen(false)}
+        title={view ? 'Site payment profile' : editing ? 'Edit site profile' : 'Add site profile'}
+        onClose={close}
         footer={
-          <>
-            <Button onClick={() => setOpen(false)}>Cancel</Button>
-            <Button variant="primary" onClick={save} disabled={busy}>
-              {busy ? 'Saving…' : 'Add profile'}
-            </Button>
-          </>
+          view ? (
+            <>
+              <Button onClick={close}>Close</Button>
+              <Button variant="primary" onClick={() => { const p = profiles.find((x) => x.site === f.site); if (p) openProfile(p, false); }}>Edit</Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={close}>Cancel</Button>
+              <Button variant="primary" onClick={save} disabled={busy}>
+                {busy ? 'Saving…' : editing ? 'Save changes' : 'Add profile'}
+              </Button>
+            </>
+          )
         }
       >
+        <fieldset disabled={view} style={{ border: 0, margin: 0, padding: 0, minWidth: 0 }}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field
             label="Customers at this site pay"
@@ -266,6 +289,7 @@ export default function SiteProfiles() {
           </>
           )}
         </div>
+        </fieldset>
       </Modal>
     </Screen>
   );

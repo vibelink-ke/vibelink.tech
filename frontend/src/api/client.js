@@ -443,6 +443,7 @@ export const api = {
 
   siteProfiles: () => get('/api/site-profiles'),
   createSiteProfile: (p) => post('/api/site-profiles', p),
+  updateSiteProfile: (id, p) => put(`/api/site-profiles/${id}`, p),
   deleteSiteProfile: (id) => del(`/api/site-profiles/${id}`),
 
   settings: () => get('/api/settings'),
