@@ -834,6 +834,26 @@ export default function ClientDetail() {
                       {connectionStatus(line) && (
                         <KV k="Connection" v={<span style={{ color: connectionStatus(line).dot }}>{connectionStatus(line).text}</span>} />
                       )}
+                      {line.service === 'pppoe' && line.online && line.session_started && (
+                        <KV
+                          k="This session"
+                          v={(() => {
+                            const secs = Math.max(0, Math.floor((Date.now() - new Date(line.session_started).getTime()) / 1000));
+                            const d = Math.floor(secs / 86400);
+                            const h = Math.floor((secs % 86400) / 3600);
+                            const m = Math.floor((secs % 3600) / 60);
+                            const up = d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+                            return (
+                              <span title="Time connected, and data moved since it connected (as of the router's last accounting update, every few minutes)">
+                                Online {up}
+                                {line.session_down_bytes != null && (
+                                  <span style={{ color: color.muted }}> · ↓ {fmtBytes(line.session_down_bytes)} · ↑ {fmtBytes(line.session_up_bytes)}</span>
+                                )}
+                              </span>
+                            );
+                          })()}
+                        />
+                      )}
                       <RowActions>
                         {line.id !== client.id && (
                           <RowAction onClick={() => navigate(`/clients/${line.id}`)} title="Open this line's own page — including its own Live data tab">

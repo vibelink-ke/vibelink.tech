@@ -85,7 +85,7 @@
       "When a client pays, what they already owe (installation fee and other due invoices) is cleared first, oldest first; only the rest buys service or goes to the wallet.",
       "Hotspot plans: a name like \"2 devices\" must match the Devices field, and changing a plan's device count now updates the routers and the codes already sold, so a second device can connect.",
       "Client → Live data now shows how long the customer has been online this session and how much they have downloaded and uploaded in that time.",
-      "Routers → System info now shows the data the router has carried since it last started (its uplink, and each port) next to its uptime."
+      "Routers → System info shows the data the router has carried since it last started, and each client's PPPoE service shows how long it has been online and the data used in that session."
     ]
   }
 ]

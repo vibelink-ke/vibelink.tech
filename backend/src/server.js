@@ -3063,6 +3063,10 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
            coalesce(host(live.address), host(a.framedipaddress)) as current_ip,
            live.username is not null    as online_from_router,
            a.acctstarttime              as session_started,
+           -- What this connection has moved so far (as of the router's last accounting update): input is what the customer
+           -- sent (their upload), output is what they received (their download).
+           a.acctinputoctets            as session_up_bytes,
+           a.acctoutputoctets           as session_down_bytes,
            coalesce(a.acctupdatetime, a.acctstarttime, live.seen_at, last.seen) as last_seen,
            -- Per-router override from site_profiles, falling back to the
            -- tenant's default gateway — this used to be picked purely
@@ -3107,7 +3111,7 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
        * enough that a dead session is not still "online" an hour later.
        */
       left join lateral (
-        select framedipaddress, acctstarttime, acctupdatetime
+        select framedipaddress, acctstarttime, acctupdatetime, acctinputoctets, acctoutputoctets
           from radacct
          where username = s.pppoe_user
            and acctstoptime is null
