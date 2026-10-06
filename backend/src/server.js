@@ -3098,7 +3098,7 @@ app.post('/portal/verify-code', async (req, res) => {
  * and when they differ the second one is the one that matters.
  */
 app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) => {
-  const { rows } = await pool.query(`
+  const listSql = `
     select s.*,
            (a.framedipaddress is not null or live.username is not null) as online,
            -- The router's own answer first when we have a fresh one: if
@@ -3193,7 +3193,19 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
      -- page of one. Past 200 real subscribers, the oldest ones simply
      -- stopped existing anywhere in the app — not disconnected, just
      -- invisible.
-     order by s.created_at desc`, [req.tenant.id]);
+     order by s.created_at desc`;
+  // The online-but-no-internet join (line_health) must never blank the whole list: if that table has not been created yet
+  // on this server, run the same query without it.
+  let rows;
+  try {
+    ({ rows } = await pool.query(listSql, [req.tenant.id]));
+  } catch (e) {
+    if (e.code !== '42P01' || !/line_health/.test(String(e.message))) throw e;
+    const plain = listSql
+      .replace(/ *case when lh\.checked_at[\s\S]*?as line_bad_since,\n/, '')
+      .replace(/ *left join line_health lh[^\n]*\n/, '');
+    ({ rows } = await pool.query(plain, [req.tenant.id]));
+  }
   res.json(rows);
 });
 
