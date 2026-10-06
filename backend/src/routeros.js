@@ -1831,10 +1831,35 @@ export async function subscriberTraffic(conn, pppoeUser) {
   // down/up here, already correctly mapped, so nothing downstream has to
   // re-derive the direction or risk getting it backwards — as the caller
   // briefly did, showing every customer's download as "upload" and back.
+  // How long this session has been up and what it has moved since it started. Best-effort: the speed above is the
+  // point of the call, so a router that will not answer either of these still returns it.
+  let uptimeSec = null;
+  let downBytes = null;
+  let upBytes = null;
+  try {
+    const [active] = await conn.write('/ppp/active/print', [`?name=${pppoeUser}`]);
+    uptimeSec = parseRosDuration(active?.uptime);
+  } catch { /* leave null */ }
+  try {
+    const [ifc] = await conn.write('/interface/print', ['=stats=', `?name=<pppoe-${pppoeUser}>`]);
+    // Same direction rule as above: tx is what the router sent to the customer (their download).
+    if (ifc) { downBytes = Number(ifc['tx-byte'] ?? 0); upBytes = Number(ifc['rx-byte'] ?? 0); }
+  } catch { /* leave null */ }
   return {
     downKbps: Math.round(Number(r['tx-bits-per-second'] ?? 0) / 1000),
     upKbps: Math.round(Number(r['rx-bits-per-second'] ?? 0) / 1000),
+    uptimeSec, downBytes, upBytes,
   };
+}
+
+/** RouterOS durations ("1w2d3h4m5s", "3h20m") in seconds, or null when absent. */
+function parseRosDuration(s) {
+  if (!s) return null;
+  const units = { w: 604800, d: 86400, h: 3600, m: 60, s: 1 };
+  let total = 0;
+  let any = false;
+  for (const [, n, u] of String(s).matchAll(/(\d+)([wdhms])/g)) { total += Number(n) * units[u]; any = true; }
+  return any ? total : null;
 }
 
 /**

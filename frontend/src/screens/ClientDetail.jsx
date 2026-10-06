@@ -1244,7 +1244,7 @@ export default function ClientDetail() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 0 8px', flexWrap: 'wrap', gap: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 600 }}>Live bandwidth</div>
             {liveTraffic && !liveTraffic.error && (
-              <div style={{ display: 'flex', gap: 18, fontSize: 13, fontWeight: 600 }}>
+              <div style={{ display: 'flex', gap: 18, fontSize: 13, fontWeight: 600, flexWrap: 'wrap' }}>
                 <span style={{ color: color.rust }}>↓ {(liveTraffic.downKbps / 1000).toFixed(2)} Mbps</span>
                 <span style={{ color: color.mint }}>↑ {(liveTraffic.upKbps / 1000).toFixed(2)} Mbps</span>
               </div>
@@ -1268,6 +1268,40 @@ export default function ClientDetail() {
                   <path d={areaPath(upSeries, 600, 160, peak)} fill={color.mint} opacity={0.3} />
                   <path d={areaPath(upSeries, 600, 160, peak)} fill="none" stroke={color.mint} strokeWidth={1.5} />
                 </svg>
+                {liveTraffic.uptimeSec != null && (
+                  <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', padding: '14px 0 6px' }}>
+                    <div>
+                      <div style={{ fontSize: 11.5, color: color.muted }}>Online for</div>
+                      <div style={{ fontSize: 17, fontWeight: 700 }}>
+                        {(() => {
+                          const s = liveTraffic.uptimeSec;
+                          const d = Math.floor(s / 86400);
+                          const h = Math.floor((s % 86400) / 3600);
+                          const m = Math.floor((s % 3600) / 60);
+                          return d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
+                        })()}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: color.muted }}>this session</div>
+                    </div>
+                    {liveTraffic.downBytes != null && (
+                      <>
+                        <div>
+                          <div style={{ fontSize: 11.5, color: color.muted }}>Downloaded</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: color.rust }}>{fmtBytes(liveTraffic.downBytes)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11.5, color: color.muted }}>Uploaded</div>
+                          <div style={{ fontSize: 17, fontWeight: 700, color: color.mint }}>{fmtBytes(liveTraffic.upBytes)}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11.5, color: color.muted }}>Total used</div>
+                          <div style={{ fontSize: 17, fontWeight: 700 }}>{fmtBytes(liveTraffic.downBytes + liveTraffic.upBytes)}</div>
+                          <div style={{ fontSize: 11.5, color: color.muted }}>since it connected</div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
                 <div style={{ fontSize: 11.5, color: color.muted, paddingTop: 4 }}>
                   Live from the router · updates every 2s · last read {new Date(liveTraffic.at).toLocaleTimeString('en-KE')}
                 </div>
