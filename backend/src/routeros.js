@@ -3060,7 +3060,35 @@ export async function systemInfo(conn) {
     // into seconds, since that's exactly how Winbox itself shows it and an operator
     // comparing the two should see the same string.
     uptime: res?.uptime ?? null,
+    ...(await uplinkUsage(conn)),
   };
+}
+
+/**
+ * What the router has carried since it last started: the counters on the interface its default route leaves through
+ * (the uplink), plus every physical port. RouterOS interface counters restart at zero on a reboot, so this covers
+ * exactly the uptime period. Best-effort: a router that will not answer returns nothing and the rest of System info
+ * still shows.
+ */
+async function uplinkUsage(conn) {
+  try {
+    const bytes = (v) => (v == null ? null : Number(v));
+    const ifaces = await conn.write('/interface/print', ['=stats=']);
+    // The interface the active default route uses: gateway-status reads "10.0.0.1 reachable via ether1".
+    const routes = await conn.write('/ip/route/print', ['?dst-address=0.0.0.0/0']).catch(() => []);
+    const active = routes.find((r) => r.active === 'true' && r.disabled !== 'true') ?? routes[0];
+    const via = /via\s+(\S+)/.exec(String(active?.['gateway-status'] ?? ''))?.[1]
+      ?? String(active?.['immediate-gw'] ?? '').split('%')[1] ?? null;
+    const up = via ? ifaces.find((i) => i.name === via) : null;
+    return {
+      uplink: up ? { name: up.name, rxBytes: bytes(up['rx-byte']), txBytes: bytes(up['tx-byte']) } : null,
+      ports: ifaces.filter((i) => i.type === 'ether').map((i) => ({
+        name: i.name, running: i.running === 'true', rxBytes: bytes(i['rx-byte']), txBytes: bytes(i['tx-byte']),
+      })),
+    };
+  } catch {
+    return { uplink: null, ports: [] };
+  }
 }
 
 /**

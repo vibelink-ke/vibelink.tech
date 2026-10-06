@@ -1794,6 +1794,30 @@ Revoke anyway?`
                 <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>UPTIME</div>
                 <div style={{ fontSize: 22, fontWeight: 700, fontFamily: font.mono }}>{sysInfo.result.uptime ?? '—'}</div>
               </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>
+                  DATA USED SINCE IT STARTED{sysInfo.result.uplink ? ` · UPLINK ${sysInfo.result.uplink.name}` : ''}
+                </div>
+                {sysInfo.result.uplink ? (
+                  <div style={{ display: 'flex', gap: 22, flexWrap: 'wrap', fontFamily: font.mono }}>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: color.rust }}>↓ {formatBytes(sysInfo.result.uplink.rxBytes)}</span>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: color.mint }}>↑ {formatBytes(sysInfo.result.uplink.txBytes)}</span>
+                    <span style={{ fontSize: 17, fontWeight: 700 }}>= {formatBytes((sysInfo.result.uplink.rxBytes || 0) + (sysInfo.result.uplink.txBytes || 0))}</span>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: color.muted }}>The router did not say which port it uses to reach the internet.</div>
+                )}
+                {sysInfo.result.ports?.length > 0 && (
+                  <div style={{ display: 'grid', gap: 3, marginTop: 8, fontSize: 12.5 }}>
+                    {sysInfo.result.ports.map((p) => (
+                      <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={{ color: p.running ? color.ink : color.muted }}>{p.name}{p.running ? '' : ' (down)'}</span>
+                        <span style={{ fontFamily: font.mono, color: color.muted }}>↓ {formatBytes(p.rxBytes)} · ↑ {formatBytes(p.txBytes)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div>
                 <div style={{ fontSize: 12, color: color.muted, marginBottom: 4 }}>MEMORY FREE</div>
                 <div style={{ fontSize: 15, fontFamily: font.mono }}>
