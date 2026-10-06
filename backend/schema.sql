@@ -141,6 +141,24 @@ alter table voucher_devices add column if not exists router_id uuid references r
 -- instead of re-attempting a live router connection for every device ever
 -- bound, forever (this row is never deleted, by design, as history).
 alter table voucher_devices add column if not exists unbound_at timestamptz;
+-- Is a connected PPPoE line actually passing traffic? One row per online line, refreshed by the checkOnlineLines job.
+-- state: ok (traffic moving), idle (nothing moving but the customer's device answers a ping), unreachable (online on the
+-- router, nothing moving, and the device does not answer): the "online but no internet" case.
+create table if not exists line_health (
+  tenant_id   uuid not null references tenants on delete cascade,
+  pppoe_user  text not null,
+  router_id   uuid references routers on delete cascade,
+  address     text,
+  rx_bytes    bigint,
+  tx_bytes    bigint,
+  uptime_sec  int,
+  ping_ok     boolean,
+  state       text not null default 'ok',
+  bad_since   timestamptz,
+  checked_at  timestamptz not null default now(),
+  primary key (tenant_id, pppoe_user)
+);
+
 -- When the device's reserved IP (its static DHCP lease) was given back, a week after its plan expired.
 alter table voucher_devices add column if not exists lease_released_at timestamptz;
 

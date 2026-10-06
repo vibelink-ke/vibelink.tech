@@ -467,6 +467,7 @@ export const api = {
   createSiteProfile: (p) => post('/api/site-profiles', p),
   updateSiteProfile: (id, p) => put(`/api/site-profiles/${id}`, p),
   deleteSiteProfile: (id) => del(`/api/site-profiles/${id}`),
+  diagnoseLine: (id) => get(`/api/subscribers/${id}/diagnose`),
 
   settings: () => get('/api/settings'),
   updateMe: (me) => patch('/api/me', me),

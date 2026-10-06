@@ -110,6 +110,7 @@ const TABS = [
 // this is PPPoE-only, same as Live data above.
 const connectionStatus = (line) => {
   if (line.service !== 'pppoe') return null;
+  if (line.online && line.line_state === 'unreachable') return { text: 'Online, but not answering (no internet?)', dot: color.amberInk };
   if (line.online) return { text: 'Online now', dot: color.green };
   if (!line.last_seen) return { text: 'Never connected', dot: color.muted };
   const when = new Date(line.last_seen).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -133,6 +134,7 @@ export default function ClientDetail() {
   const pay = useInvoicePay(store);
   const [openInvoiceEditor, invoiceEditor] = useInvoiceEditor();
   const invoiceActions = useInvoiceActions();
+  const [diag, setDiag] = useState(null);   // { busy } | { error } | the /diagnose result
   const canEditInvoices = !!store.session?.perms?.['clients.invoices'];
   const navigate = useNavigate();
   const { id } = useParams();
@@ -1270,6 +1272,37 @@ export default function ClientDetail() {
               </div>
             )}
           </div>
+          {client?.service === 'pppoe' && (
+            <div style={{ borderBottom: `1px solid ${color.line}`, paddingBottom: 12, marginBottom: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                <Button
+                  size="sm"
+                  disabled={!!diag?.busy}
+                  onClick={async () => {
+                    setDiag({ busy: true });
+                    try { setDiag(await api.diagnoseLine(client.id)); } catch (e) { setDiag({ error: e.message }); }
+                  }}
+                >
+                  {diag?.busy ? 'Checking the line…' : 'Online but no internet? Diagnose'}
+                </Button>
+                {diag?.at && <span style={{ fontSize: 11.5, color: color.muted }}>checked {new Date(diag.at).toLocaleTimeString('en-KE')}</span>}
+              </div>
+              {diag?.error && <div style={{ fontSize: 13, color: color.rust, paddingTop: 8 }}>{diag.error}</div>}
+              {diag?.findings && (
+                <div style={{ display: 'grid', gap: 8, paddingTop: 10 }}>
+                  {diag.findings.map((f, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 10, fontSize: 13, alignItems: 'flex-start' }}>
+                      <span style={{
+                        marginTop: 5, width: 9, height: 9, borderRadius: 99, flex: 'none',
+                        background: f.level === 'bad' ? color.rust : f.level === 'warn' ? color.amberInk : color.green,
+                      }} />
+                      <span>{f.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {client?.service !== 'pppoe' ? (
             <Empty>Live data is only available for PPPoE lines right now.</Empty>
           ) : liveTraffic === null ? (

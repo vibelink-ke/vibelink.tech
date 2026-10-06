@@ -61,6 +61,8 @@ const FILTERS = [
   { key: 'online', label: 'Online', match: (c) => !!c.online },
   { key: 'owing', label: 'Owing but online', match: (c) => !!c.online
       && ['expired', 'suspended', 'paused'].includes(c.status) },
+  // Connected on the router, moving nothing and not answering a ping (jobs.js checkOnlineLines).
+  { key: 'noinet', label: 'Online, no internet', match: (c) => !!c.online && c.line_state === 'unreachable' },
   { key: 'grace', label: 'Grace period', match: (c) => c.status === 'grace' },
   { key: 'expired', label: 'Expired', match: (c) => c.status === 'expired' },
   // Paused and suspended are different states now, so they need different tabs —
@@ -111,6 +113,7 @@ function connection(c) {
     return { kind: 'split', label: blocked ? 'Online · blocked' : 'Online · expired', colour: color.rust, weight: 700 };
   }
   if (blocked) return { kind: 'blocked', label: 'Blocked', colour: color.rust, weight: 700 };
+  if (online && c.line_state === 'unreachable') return { kind: 'noinet', label: 'Online · not answering (no internet?)', colour: color.amberInk, weight: 700 };
   if (online) return { kind: 'online', label: 'Online', colour: ONLINE_GREEN, weight: 600 };
   const seen = seenAgo(c.last_seen);
   return { kind: 'offline', label: seen === 'never seen' ? 'Offline' : `Offline · ${seen}`, colour: color.muted, weight: 500 };
@@ -121,6 +124,7 @@ const DOT_FILL = {
   offline: color.mutedSoft,
   blocked: color.rust,
   split: `linear-gradient(90deg, ${color.rust} 50%, ${ONLINE_GREEN} 50%)`,
+  noinet: color.amber,
 };
 
 function ConnDot({ kind }) {
@@ -674,6 +678,7 @@ export default function Clients() {
                           offline: { bg: color.tileBg, fg: color.muted },
                           blocked: { bg: color.rustBg, fg: color.rust },
                           split: { bg: color.rustBg, fg: color.rust },
+                          noinet: { bg: color.amberBg, fg: color.amberInk },
                         };
                         const conn = connection(c);
                         const tint = multi ? { bg: color.tileBg, fg: color.green } : CONN_PILL[conn.kind];

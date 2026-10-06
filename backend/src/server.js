@@ -3110,6 +3110,10 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
            -- sent (their upload), output is what they received (their download).
            a.acctinputoctets            as session_up_bytes,
            a.acctoutputoctets           as session_down_bytes,
+           -- Connected on the router but not passing traffic and not answering (see checkOnlineLines in jobs.js); only
+           -- trusted while the check is recent.
+           case when lh.checked_at > now() - interval '30 minutes' then lh.state end as line_state,
+           case when lh.checked_at > now() - interval '30 minutes' then lh.bad_since end as line_bad_since,
            coalesce(a.acctupdatetime, a.acctstarttime, live.seen_at, last.seen) as last_seen,
            -- Per-router override from site_profiles, falling back to the
            -- tenant's default gateway — this used to be picked purely
@@ -3125,6 +3129,7 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
            coalesce(w.balance, 0) - coalesce(owed.amount, 0) as net_balance
       from subscribers s
       left join account_wallets w on w.tenant_id = s.tenant_id and w.account_code = s.account_code
+      left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
       left join site_profiles sp on sp.router_id = s.router_id and sp.tenant_id = s.tenant_id
       left join lateral (
         -- /api/subscribers is PPPoE-only (see the comment on this route above),
@@ -9968,6 +9973,76 @@ app.get('/api/subscribers/:id/live-traffic', requirePermission('clients.view'), 
   }
 }));
 
+/**
+ * "Online but no internet": ask the router about this one line and turn the answers into plain findings, worst first.
+ * The account itself comes first (an expired or suspended customer stays connected but is sent to the pay page, which
+ * looks exactly like no internet), then the router's session, whether the router itself has internet, whether the
+ * customer's device answers, and whether anything is moving.
+ */
+app.get('/api/subscribers/:id/diagnose', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query(
+    `select s.pppoe_user, s.service, s.status, s.expires_at, r.name as router_name, r.host, r.api_port, r.service_user, r.service_password_enc
+       from subscribers s left join routers r on r.id = s.router_id
+      where s.id=$1 and s.tenant_id=$2`, [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'No such subscriber' });
+  if (s.service !== 'pppoe' || !s.pppoe_user) return res.status(400).json({ error: 'The diagnosis is for PPPoE lines.' });
+
+  const findings = [];
+  const add = (level, text) => findings.push({ level, text });
+  const expired = s.expires_at && new Date(s.expires_at) < new Date();
+  if (s.status === 'suspended' || s.status === 'paused') {
+    add('bad', `The account is ${s.status}. The router can show them as connected, but they are sent to the pay page, which looks like no internet. Resume the account or take a payment.`);
+  } else if (s.status === 'expired' || expired) {
+    add('bad', `The package expired on ${new Date(s.expires_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short', year: 'numeric' })}. They stay connected but cannot browse until they pay or you extend them.`);
+  }
+
+  let d = null;
+  if (!s.host || !s.service_user || !s.service_password_enc) {
+    add('warn', 'This router has not been Configured yet, so it cannot be asked.');
+  } else {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    let conn;
+    try {
+      conn = await ros.connect({
+        host: String(s.host).split('/')[0], port: s.api_port ?? 8728,
+        user: s.service_user, password: secrets.decrypt(s.service_password_enc), timeoutSec: 8,
+      });
+      d = await ros.diagnoseLine(conn, s.pppoe_user);
+    } catch (e) {
+      add('warn', `Could not reach ${s.router_name ?? 'the router'}: ${e.message}`);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+
+  if (d) {
+    if (!d.session) {
+      add('bad', `Not connected on ${s.router_name ?? 'the router'} right now. Check the customer's router or ONU is on, then the cable.`);
+    } else {
+      if (d.uplink && d.uplink.received === 0) {
+        add('bad', `${s.router_name ?? 'The router'} itself cannot reach the internet, so every customer on it is affected. Check its uplink.`);
+      }
+      if (d.ping && d.ping.received === 0) {
+        add('warn', `The router cannot reach the customer's device at ${d.session.address}. The line is up but nothing answers: check the ONU or CPE power and cable, restart it, or look at the fibre signal.`);
+      } else if (d.ping) {
+        add('ok', `The customer's device answers the router (${d.ping.avgMs ?? '?'} ms).`);
+      }
+      const idle = d.traffic && d.traffic.downKbps < 5 && d.traffic.upKbps < 5;
+      if (idle && d.ping && d.ping.received > 0) {
+        add('warn', 'Connected and reachable but almost nothing is moving. This is usually the own router or WiFi of the customer: wrong DNS, DHCP not handing out addresses, or the WiFi bridged wrongly. Ask them to restart it, then check its DNS and DHCP.');
+      }
+      if (!findings.some((f) => f.level === 'bad' || f.level === 'warn')) {
+        add('ok', 'The line looks healthy from the router: connected, answering, and the router has internet. If they still cannot browse, the fault is on their side (WiFi, DNS or the device).');
+      }
+    }
+  }
+
+  const order = { bad: 0, warn: 1, ok: 2 };
+  findings.sort((a, b) => order[a.level] - order[b.level]);
+  res.json({ findings, session: d?.session ?? null, traffic: d?.traffic ?? null, ping: d?.ping ?? null, uplink: d?.uplink ?? null, at: new Date().toISOString() });
+}));
+
 app.get('/api/subscribers/:id/activity', requirePermission('clients.view'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     'select account_code from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
@@ -14199,6 +14274,7 @@ const AUTOMATION_JOBS = [
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
   { job: 'syncOnlineCustomers', name: 'Sync online customers', cron: '*/30 * * * * *', detail: 'Every 30 seconds, reads who each router says is connected and records it, so a customer who was already online is shown with the right address without having to disconnect and reconnect' },
   { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
+  { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },
   { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },
   { job: 'generateMonthEndCharges', name: 'Tenant statements — month end', cron: '55 * 28-31 * *', detail: 'On the last day of the month at 23:55 Nairobi, raises each tenant statement for the month that is ending, so it is payable from the 30th/31st instead of waiting for the 1st' },

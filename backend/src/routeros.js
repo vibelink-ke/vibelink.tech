@@ -1852,6 +1852,44 @@ export async function subscriberTraffic(conn, pppoeUser) {
   };
 }
 
+/**
+ * Every PPPoE session on the router with what it has moved so far: user, address, how long it has been up, and the
+ * byte counters of its interface (tx is what the router sent to the customer, i.e. their download).
+ * One pass for the whole router, so the "online but no internet" check does not ask once per customer.
+ */
+export async function pppoeSessionCounters(conn) {
+  const active = await conn.write('/ppp/active/print', ['?service=pppoe']);
+  const ifaces = await conn.write('/interface/print', ['=stats=', '?type=pppoe-in']).catch(() => []);
+  const byName = new Map(ifaces.map((i) => [i.name, i]));
+  return active.filter((a) => a.name).map((a) => {
+    const i = byName.get(`<pppoe-${a.name}>`);
+    return {
+      user: a.name,
+      address: a.address ?? null,
+      uptimeSec: parseRosDuration(a.uptime),
+      rx: i && i['rx-byte'] != null ? Number(i['rx-byte']) : null,
+      tx: i && i['tx-byte'] != null ? Number(i['tx-byte']) : null,
+    };
+  });
+}
+
+/**
+ * "Why is this customer online with no internet?" from the router's side: is the session really up, does the
+ * customer's device answer the router, is anything moving, and can the router itself reach the internet. The caller
+ * turns the raw answers into plain-language findings.
+ */
+export async function diagnoseLine(conn, pppoeUser) {
+  const [active] = await conn.write('/ppp/active/print', [`?name=${pppoeUser}`]);
+  if (!active) return { session: null };
+  const traffic = await subscriberTraffic(conn, pppoeUser).catch(() => null);
+  const ping = active.address ? await pingHost(conn, active.address, 3).catch(() => null) : null;
+  const uplink = await pingHost(conn, '8.8.8.8', 2).catch(() => null);
+  return {
+    session: { address: active.address ?? null, uptimeSec: parseRosDuration(active.uptime), callerId: active['caller-id'] ?? null },
+    traffic, ping, uplink,
+  };
+}
+
 /** RouterOS durations ("1w2d3h4m5s", "3h20m") in seconds, or null when absent. */
 function parseRosDuration(s) {
   if (!s) return null;

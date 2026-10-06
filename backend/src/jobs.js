@@ -72,6 +72,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
+  // Every 10 minutes: which online PPPoE lines are connected but passing nothing and not answering (online, no internet).
+  cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
   // Every 30s, the routers' own lists of who is connected are written into the system, so nobody has to drop and redial to be seen.
   cron.schedule('*/30 * * * * *', safely('syncOnlineCustomers', syncOnlineCustomersJob));
   // TR-069: pull the ACS's device list, link newly-seen devices to whichever subscriber's serial matches, and
@@ -1988,6 +1990,87 @@ async function syncTr069DevicesJob() {
     }
   } finally {
     tr069PassRunning = false;
+  }
+}
+
+/**
+ * Online but no internet. A line the router lists as connected can still be unusable: the CPE is hung, the ONU or
+ * cable is faulty, or the far end stopped answering while the PPPoE session stayed up. Each pass reads every PPPoE
+ * session's counters (one call per router) and compares them with the last pass. A line whose counters did not move
+ * is pinged from the router; one that does not answer is marked unreachable. Idle-but-answering lines are not
+ * flagged: a quiet household is not a fault. Pings per router are capped so a big router cannot stall the pass.
+ */
+let onlineLinesRunning = false;
+async function checkOnlineLines() {
+  if (onlineLinesRunning) return;
+  onlineLinesRunning = true;
+  const PINGS_PER_ROUTER = 40;
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const { rows: routers } = await pool.query(
+      `select id, tenant_id, name, host, api_port, service_user, service_password_enc
+         from routers
+        where status = 'up' and autoconfig_last_ok = true and role in ('pppoe','both')
+          and service_user is not null and service_password_enc is not null
+          and tenant_id in (${enabledTenants})`, ['checkOnlineLines']);
+
+    for (const r of routers) {
+      let conn;
+      try {
+        conn = await ros.connect({
+          host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
+          user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8,
+        });
+        const sessions = await ros.pppoeSessionCounters(conn);
+        const { rows: prevRows } = await pool.query(
+          'select pppoe_user, rx_bytes, tx_bytes, uptime_sec, state, bad_since from line_health where tenant_id=$1 and router_id=$2',
+          [r.tenant_id, r.id]);
+        const prev = new Map(prevRows.map((p) => [p.pppoe_user, p]));
+        let pinged = 0;
+        for (const s of sessions) {
+          const p = prev.get(s.user);
+          const moved = !p || s.rx == null || s.tx == null
+            || (p.uptime_sec != null && s.uptimeSec != null && s.uptimeSec < p.uptime_sec)   // a new session
+            || Number(p.rx_bytes) !== s.rx || Number(p.tx_bytes) !== s.tx;
+          let state = 'ok';
+          let pingOk = null;
+          let badSince = null;
+          if (!moved) {
+            if (s.address && pinged < PINGS_PER_ROUTER) {
+              pinged += 1;
+              const ping = await ros.pingHost(conn, s.address, 2).catch(() => null);
+              if (ping) {
+                pingOk = ping.received > 0;
+                state = pingOk ? 'idle' : 'unreachable';
+                badSince = pingOk ? null : (p?.bad_since ?? new Date());
+              } else { state = p?.state ?? 'idle'; badSince = p?.bad_since ?? null; }
+            } else {
+              // Over the cap this pass: keep what we last knew rather than guess.
+              state = p?.state ?? 'idle';
+              badSince = p?.bad_since ?? null;
+            }
+          }
+          await pool.query(
+            `insert into line_health (tenant_id, pppoe_user, router_id, address, rx_bytes, tx_bytes, uptime_sec, ping_ok, state, bad_since, checked_at)
+             values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+             on conflict (tenant_id, pppoe_user) do update set router_id=excluded.router_id, address=excluded.address,
+               rx_bytes=excluded.rx_bytes, tx_bytes=excluded.tx_bytes, uptime_sec=excluded.uptime_sec, ping_ok=excluded.ping_ok,
+               state=excluded.state, bad_since=excluded.bad_since, checked_at=now()`,
+            [r.tenant_id, s.user, r.id, s.address, s.rx, s.tx, s.uptimeSec, pingOk, state, badSince]);
+        }
+        // Lines that are no longer connected on this router drop out.
+        await pool.query(
+          'delete from line_health where tenant_id=$1 and router_id=$2 and pppoe_user <> all($3::text[])',
+          [r.tenant_id, r.id, sessions.map((s) => s.user)]);
+      } catch (e) {
+        console.warn('checkOnlineLines:', r.name, '-', e.message);
+      } finally {
+        if (conn) ros.close(conn);
+      }
+    }
+  } finally {
+    onlineLinesRunning = false;
   }
 }
 
