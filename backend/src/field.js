@@ -34,7 +34,7 @@ export function parsePhoto(dataUrl) {
   return { mime: m[1], buf };
 }
 
-export function registerField(app, { pool, requirePermission, hasPermission, wrap, radius }) {
+export function registerField(app, { pool, requirePermission, hasPermission, wrap, radius, ensureStaffReferrer }) {
   const use = requirePermission('field.use');
   const me = (req) => req.session?.staff_id ?? null;
 
@@ -503,10 +503,13 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
     if (!name) return res.status(400).json({ error: 'Enter their name.' });
     if (phone.replace(/[^0-9]/g, '').length < 9) return res.status(400).json({ error: 'Enter a phone number we can reach them on.' });
     const lat = num(req.body?.lat); const lng = num(req.body?.lng);
+    // The person who met them is the channel — the referrer, who earns the commission. Nobody is assigned: the
+    // installer (a technician) is picked later by the office.
+    const referrerId = await ensureStaffReferrer(req.tenant.id, me(req), req.session.name, null);
     const { rows: [l] } = await pool.query(
-      `insert into leads (tenant_id, name, phone, source, assigned_to, created_by, lat, lng)
-       values ($1,$2,$3,'field visit',$4,$4,$5,$6) returning id, name, phone, status`,
-      [req.tenant.id, name, phone, me(req), validLat(lat) && validLng(lng) ? lat : null, validLat(lat) && validLng(lng) ? lng : null]);
+      `insert into leads (tenant_id, name, phone, source, referrer_id, created_by, last_activity_at, lat, lng)
+       values ($1,$2,$3,'field visit',$4,$5, now(),$6,$7) returning id, name, phone, status`,
+      [req.tenant.id, name, phone, referrerId, me(req), validLat(lat) && validLng(lng) ? lat : null, validLat(lat) && validLng(lng) ? lng : null]);
     const note = String(req.body?.note ?? '').trim();
     if (note) {
       await pool.query('insert into lead_notes (tenant_id, lead_id, author, body) values ($1,$2,$3,$4)',

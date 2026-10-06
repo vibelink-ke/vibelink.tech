@@ -2461,7 +2461,7 @@ app.use('/api', (req, res, next) => {
 
 // The field technician app's API (field.js). After the sign-in guard above: every route needs a session.
 registerField(app, {
-  pool, requirePermission, hasPermission, wrap,
+  pool, requirePermission, hasPermission, wrap, ensureStaffReferrer,
   radius: { disconnectSubscriberSession: async (...a) => (await import('./radius.js')).disconnectSubscriberSession(...a) },
 });
 
@@ -3949,8 +3949,8 @@ async function raiseInstallTicket(tenantId, lead, authorName) {
     `select id, resolve_mins from sla_policies
       where tenant_id=$1 and priority='medium' and coalesce(enabled, true) order by resolve_mins asc limit 1`, [tenantId]);
   const { rows: [t] } = await pool.query(
-    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at, assigned_to, lead_id)
-     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium', $4, $5, $6, $7)
+    `insert into tickets (tenant_id, number, subject, subscriber_id, priority, sla_policy_id, due_at, assigned_to, lead_id, kind)
+     values ($1, 'TK-' || substr(gen_random_uuid()::text,1,6), $2, $3, 'medium', $4, $5, $6, $7, 'install')
      returning id, number`,
     [tenantId, `Installation — ${lead.name}`, lead.subscriber_id ?? null, policy?.id ?? null,
      policy ? new Date(Date.now() + policy.resolve_mins * 60000) : null, lead.assigned_to ?? null, lead.id]);

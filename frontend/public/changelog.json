@@ -85,7 +85,10 @@
       "When a client pays, what they already owe (installation fee and other due invoices) is cleared first, oldest first; only the rest buys service or goes to the wallet.",
       "Hotspot plans: a name like \"2 devices\" must match the Devices field, and changing a plan's device count now updates the routers and the codes already sold, so a second device can connect.",
       "Client → Live data now shows how long the customer has been online this session and how much they have downloaded and uploaded in that time.",
-      "Routers → System info shows the data the router has carried since it last started, and each client's PPPoE service shows how long it has been online and the data used in that session."
+      "Routers → System info shows the data the router has carried since it last started, and each client's PPPoE service shows how long it has been online and the data used in that session.",
+      "New: the field technician app (Field app in the menu, also installable on a phone): jobs, closing photos, customer look-up with their PPPoE login, shifts with an accurate location, equipment with serial photos and stock deduction, raising tickets and leads from the phone, working with no signal. Turn it on per role with \"Use the technician app\".",
+      "New: Field team shows where technicians are while they are on shift. Tickets have a job type (repair or install), and a ticket's photos and equipment show on it.",
+      "Leads: a lead logged from the field shows its pinned location with a View on map link."
     ]
   }
 ]

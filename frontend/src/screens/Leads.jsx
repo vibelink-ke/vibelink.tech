@@ -692,6 +692,21 @@ export default function Leads() {
                 <KV k="Phone" v={leadViewing.phone} />
                 <KV k="Channel" v={leadViewing.source ?? '—'} />
                 <KV k="Package" v={leadViewing.plan_title ? `${leadViewing.plan_title} · ${kes(leadViewing.plan_price)}` : '—'} />
+                {leadViewing.lat != null && leadViewing.lng != null && (
+                  <KV
+                    k="Location pinned"
+                    v={
+                      <a
+                        href={`https://maps.google.com/?q=${leadViewing.lat},${leadViewing.lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: color.green, fontWeight: 600 }}
+                      >
+                        View on map
+                      </a>
+                    }
+                  />
+                )}
                 <KV k="Referred by" v={leadViewing.referrer_name ?? '—'} />
                 <KV k="Installer" v={leadViewing.assignee_name ?? '—'} />
                 <KV
