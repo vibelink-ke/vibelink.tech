@@ -384,7 +384,7 @@ export default function ClientDetail() {
       try {
         const out = await api.subscriberLiveTraffic(client.id);
         if (!live) return;
-        setLiveTraffic({ downKbps: out.downKbps, upKbps: out.upKbps, at: out.at, error: null });
+        setLiveTraffic({ downKbps: out.downKbps, upKbps: out.upKbps, at: out.at, uptimeSec: out.uptimeSec, downBytes: out.downBytes, upBytes: out.upBytes, error: null });
         setLiveSamples((s) => [...s, { downKbps: out.downKbps, upKbps: out.upKbps }].slice(-30));
       } catch (e) {
         if (live) setLiveTraffic({ downKbps: null, upKbps: null, at: null, error: e.message });
@@ -394,6 +394,28 @@ export default function ClientDetail() {
     const id = setInterval(tick, 2000);
     return () => { live = false; clearInterval(id); };
   }, [tab, client?.id]);
+
+  // Each online PPPoE service's session, read from its router while the Services tab is open: how long it has been up
+  // and what it has moved since. Straight from the router, so it works even when RADIUS accounting is not reporting.
+  const [lineSessions, setLineSessions] = useState({});
+  useEffect(() => {
+    if (tab !== 'services') return undefined;
+    let live = true;
+    const read = async () => {
+      for (const l of siblings) {
+        if (l.service !== 'pppoe' || !l.online) continue;
+        try {
+          const out = await api.subscriberLiveTraffic(l.id);
+          if (live) setLineSessions((m) => ({ ...m, [l.id]: { uptimeSec: out.uptimeSec, downBytes: out.downBytes, upBytes: out.upBytes } }));
+        } catch (e) {
+          if (live) setLineSessions((m) => ({ ...m, [l.id]: { error: true } }));
+        }
+      }
+    };
+    read();
+    const id = setInterval(read, 30000);
+    return () => { live = false; clearInterval(id); };
+  }, [tab, siblings]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const [addingService, setAddingService] = useState(null);
   const [serviceForm, setServiceForm] = useState({ lineLabel: '', planId: '', routerId: '', staticIp: '', pppoeUser: '', pppoePass: '', location: '', lat: '', lng: '' });
@@ -836,20 +858,28 @@ export default function ClientDetail() {
                       {connectionStatus(line) && (
                         <KV k="Connection" v={<span style={{ color: connectionStatus(line).dot }}>{connectionStatus(line).text}</span>} />
                       )}
-                      {line.service === 'pppoe' && line.online && line.session_started && (
+                      {line.service === 'pppoe' && line.online && (
                         <KV
                           k="This session"
                           v={(() => {
-                            const secs = Math.max(0, Math.floor((Date.now() - new Date(line.session_started).getTime()) / 1000));
-                            const d = Math.floor(secs / 86400);
-                            const h = Math.floor((secs % 86400) / 3600);
-                            const m = Math.floor((secs % 3600) / 60);
+                            // The router's own reading first; the accounting record as a fallback.
+                            const rs = lineSessions[line.id];
+                            const secs = rs?.uptimeSec != null ? rs.uptimeSec
+                              : line.session_started ? Math.max(0, Math.floor((Date.now() - new Date(line.session_started).getTime()) / 1000)) : null;
+                            const down = rs?.downBytes ?? line.session_down_bytes;
+                            const upB = rs?.upBytes ?? line.session_up_bytes;
+                            if (secs == null && down == null) {
+                              return <span style={{ color: color.muted }}>{rs?.error ? 'The router did not answer' : 'Reading from the router…'}</span>;
+                            }
+                            const d = Math.floor((secs ?? 0) / 86400);
+                            const h = Math.floor(((secs ?? 0) % 86400) / 3600);
+                            const m = Math.floor(((secs ?? 0) % 3600) / 60);
                             const up = d > 0 ? `${d}d ${h}h ${m}m` : h > 0 ? `${h}h ${m}m` : `${m}m`;
                             return (
-                              <span title="Time connected, and data moved since it connected (as of the router's last accounting update, every few minutes)">
-                                Online {up}
-                                {line.session_down_bytes != null && (
-                                  <span style={{ color: color.muted }}> · ↓ {fmtBytes(line.session_down_bytes)} · ↑ {fmtBytes(line.session_up_bytes)}</span>
+                              <span title="Time connected, and data moved since it connected (read from the router, refreshed every 30 seconds)">
+                                {secs != null && <>Online {up}</>}
+                                {down != null && (
+                                  <span style={{ color: color.muted }}>{secs != null ? ' · ' : ''}↓ {fmtBytes(down)} · ↑ {fmtBytes(upB)}</span>
                                 )}
                               </span>
                             );

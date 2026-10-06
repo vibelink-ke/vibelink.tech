@@ -90,7 +90,8 @@
       "New: Field team shows where technicians are while they are on shift. Tickets have a job type (repair or install), and a ticket's photos and equipment show on it.",
       "Leads: a lead logged from the field shows its pinned location with a View on map link.",
       "Online but no internet: every 10 minutes the system checks online PPPoE lines; one that is connected, moving nothing and not answering a ping is flagged \"Online · not answering\" in the clients list (and has its own filter).",
-      "Client → Live data has a Diagnose button that checks the account, the router session, the router's own internet, the customer's device and the traffic, and says the likely cause in plain words."
+      "Client → Live data has a Diagnose button that checks the account, the router session, the router's own internet, the customer's device and the traffic, and says the likely cause in plain words.",
+      "Fixed: the online time and data used for a PPPoE service now show on the Services tab and the Live data tab (they were not being displayed). They are read straight from the router."
     ]
   }
 ]
