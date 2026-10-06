@@ -76,7 +76,7 @@ function radiusDate(date) {
  * Kept unsuffixed for the ordinary devices<=1 case so an existing profile
  * (and every voucher already pointed at it) needs no migration.
  */
-function hotspotCookieProfile(durationMin, devices = 1) {
+export function hotspotCookieProfile(durationMin, devices = 1) {
   const minutes = Math.min(Math.max(Math.round(Number(durationMin) || 1440), 1), 1440);
   const d = Math.max(1, Math.round(Number(devices) || 1));
   return d > 1 ? `hs-cookie-${minutes}-d${d}` : `hs-cookie-${minutes}`;

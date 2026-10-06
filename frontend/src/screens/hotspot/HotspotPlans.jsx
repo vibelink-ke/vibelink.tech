@@ -69,8 +69,16 @@ export default function HotspotPlans() {
     visible: !!v.visible,
   });
 
+  // A plan named "... 2 devices" with Devices left at 1 would sell a code that refuses the second device.
+  const deviceMismatch = (v) => {
+    const m = /(\d+)\s*devices?\b/i.exec(v.title ?? '');
+    return m && Number(m[1]) !== (Number(v.devices) || 1) ? Number(m[1]) : null;
+  };
+
   const create = async () => {
     if (!f.title.trim() || !f.price) return store.toast('Title and price are required');
+    const said = deviceMismatch(f);
+    if (said) return store.toast(`The name says ${said} devices but Devices is ${Number(f.devices) || 1}. Make them match.`);
     setBusy(true);
     try {
       const created = await api.createPlan({ service: 'hotspot', ...payload(f) });
@@ -87,10 +95,14 @@ export default function HotspotPlans() {
 
   const saveEdit = async () => {
     if (!editing.title?.trim() || !editing.price) return store.toast('Title and price are required');
+    const said = deviceMismatch(editing);
+    if (said) return store.toast(`The name says ${said} devices but Devices is ${Number(editing.devices) || 1}. Make them match.`);
     try {
       const updated = await api.updatePlan(editing.id, payload(editing));
       store.setCollection('hsPlans', (ps) => ps.map((p) => (p.id === updated.id ? updated : p)));
-      store.toast(`${updated.title} updated`);
+      store.toast(updated.profileSync && !updated.profileSync.synced
+        ? `${updated.title} saved, but codes already sold could not be moved to the new device limit: ${updated.profileSync.failed?.join(', ') || 'router unreachable'} did not answer. Save again once it is online.`
+        : `${updated.title} updated`);
       setEditing(null);
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);

@@ -82,7 +82,8 @@
       "Site payment profiles can now be viewed and edited, not just added or deleted.",
       "A client with a due, unpaid invoice now shows a negative balance (-KES) in the client list and on their account.",
       "Clients table: a new Invoices action, and each client's Invoices page, let you create, view, edit and delete invoices. New invoices are itemised (description, quantity, price) with quick-add lines for installation, package, router and reconnection, payment terms (due now, 3, 7, 14, 30 days or a date) and the tax worked out in the total.",
-      "When a client pays, what they already owe (installation fee and other due invoices) is cleared first, oldest first; only the rest buys service or goes to the wallet."
+      "When a client pays, what they already owe (installation fee and other due invoices) is cleared first, oldest first; only the rest buys service or goes to the wallet.",
+      "Hotspot plans: a name like \"2 devices\" must match the Devices field, and changing a plan's device count now updates the routers and the codes already sold, so a second device can connect."
     ]
   }
 ]

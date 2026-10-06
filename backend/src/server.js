@@ -10988,7 +10988,48 @@ app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res
   res.json({ ...row, site_ids: sites });
 }));
 
+/**
+ * A hotspot plan's device count (or length) decides which router profile its codes log in under (hs-cookie-<minutes>[-d<n>]),
+ * and that profile's shared-users is what lets a second device in. Changing the count on a plan therefore has to do two
+ * things in order, or codes already sold keep refusing the second device (or are cut off by a profile the router lacks):
+ * make sure the profile exists on every hotspot router, then move the plan's live codes onto it. If any router cannot be
+ * reached the codes are left on their current profile and the caller is told, rather than risk pointing them at a
+ * profile that router does not have.
+ */
+async function syncPlanDeviceProfile(tenantId, plan) {
+  const { hotspotCookieProfile, ensureHotspotProfiles } = await import('./radius.js');
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { rows: routers } = await pool.query(
+    `select id, name, host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null and service_password_enc is not null`, [tenantId]);
+  const { rows: [hs] } = await pool.query('select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1', [tenantId]);
+  const failed = [];
+  for (const rt of routers) {
+    let conn;
+    try {
+      conn = await ros.connect({
+        host: String(rt.host).split('/')[0], port: rt.api_port ?? 8728,
+        user: rt.service_user, password: secrets.decrypt(rt.service_password_enc), timeoutSec: 8,
+      });
+      await ensureHotspotProfiles(conn, pool, tenantId, hs);
+    } catch (e) {
+      failed.push(rt.name);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+  if (failed.length) return { synced: false, failed };
+  await pool.query(
+    `update radreply set value = $3
+      where tenant_id = $1 and attribute = 'Mikrotik-Group'
+        and username in (select code from vouchers where plan_id = $2 and status <> 'expired')`,
+    [tenantId, plan.id, hotspotCookieProfile(plan.duration_min, plan.devices)]);
+  return { synced: true, failed: [] };
+}
+
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
+  const { rows: [before] } = await pool.query('select devices, duration_min, service from plans where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
@@ -11009,6 +11050,11 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
      dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
      visible ?? null, contentionRatio ?? null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
+  // The device count or length changed on a hotspot plan: bring the routers and the codes already sold along with it.
+  let profileSync = null;
+  if (row.service === 'hotspot' && before && (Number(before.devices) !== Number(row.devices) || Number(before.duration_min) !== Number(row.duration_min))) {
+    profileSync = await syncPlanDeviceProfile(req.tenant.id, row).catch((e) => ({ synced: false, failed: [], error: e.message }));
+  }
 
   // routerIds undefined means "field wasn't sent" — leave the sites alone.
   // An explicit array (including []) replaces the set wholesale: [] is how
@@ -11030,7 +11076,7 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
     siteIds = siteRows.map((r) => r.router_id);
   }
   if (row.service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
-  res.json({ ...row, site_ids: siteIds });
+  res.json({ ...row, site_ids: siteIds, profileSync });
 }));
 
 /**
