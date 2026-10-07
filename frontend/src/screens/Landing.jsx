@@ -533,7 +533,11 @@ export default function Landing({ onRegister }) {
           padding: '20px 22px', display: 'flex', justifyContent: 'space-between',
           flexWrap: 'wrap', gap: 10, fontSize: 13, color: color.muted,
         }}>
-          <span>© {new Date().getFullYear()} Vibelink</span>
+          <span>
+            © {new Date().getFullYear()} Vibelink ·{' '}
+            <a href="#cookies" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new Event('vibelink:cookie-settings')); }}
+               style={{ color: 'inherit', textDecoration: 'underline' }}>Cookie settings</a>
+          </span>
           <span>Nairobi, Kenya · {SUPPORT_EMAIL}</span>
         </Section>
       </footer>

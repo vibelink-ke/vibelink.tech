@@ -2,6 +2,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import App from './App';
+import CookieBanner from './ui/CookieBanner';
 import { StoreProvider } from './state/store';
 import './theme/global.css';
 
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')).render(
       <StoreProvider>
         <App />
       </StoreProvider>
+      <CookieBanner />
     </BrowserRouter>
   </React.StrictMode>
 );

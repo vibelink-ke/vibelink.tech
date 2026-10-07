@@ -97,7 +97,8 @@
       "Client → Communication now lists every SMS and email the customer has received, including the automatic ones (receipts, reminders, expiry notices), not just messages typed on the Messaging screen.",
       "Settings → Organisation: choose the country (Kenya, Uganda, Tanzania, Rwanda, Ghana, Nigeria, Zambia, South Africa and more) and the currency. Customers' phone numbers are now read and texted in that country's format instead of always as Kenyan numbers.",
       "New payment methods outside Kenya: Flutterwave (Uganda, Tanzania, Rwanda, Ghana, Zambia, Cameroon, Côte d'Ivoire, Senegal), Paystack (Ghana, Nigeria, South Africa), AzamPay (Tanzania) and Yo! Payments (Uganda). Add them under Settings → Payment gateways, pick one for the hotspot under Hotspot → Settings, and click Webhook URL to see what to paste into the provider's dashboard.",
-      "Hotspot pages show prices in the tenant's own currency, and a payment link when the provider needs one."
+      "Hotspot pages show prices in the tenant's own currency, and a payment link when the provider needs one.",
+      "A cookie notice appears the first time someone opens the site: Accept all or Essential only, remembered for a year, and changeable from Cookie settings in the footer."
     ]
   }
 ]
