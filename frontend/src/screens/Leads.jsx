@@ -248,9 +248,14 @@ export default function Leads() {
    * asking the operator to retype a lead they're looking straight at.
    */
   /** A won lead that is already a client: raise the installation ticket with that client chosen for you. */
+  // The installation ticket of a won lead: the one raised from it, or any installation ticket on the same client.
+  const installTicketOf = (l) => (store.tickets ?? []).find((t) => t.lead_id === l.id)
+    ?? (l.subscriber_id ? (store.tickets ?? []).find((t) => t.kind === 'install' && t.subscriber_id === l.subscriber_id) : undefined);
+  const installDone = (l) => installTicketOf(l)?.status === 'resolved';
+
   const raiseInstallTicket = (l) => {
     // Raised automatically when the lead was won: open that one rather than making a second.
-    const existing = (store.tickets ?? []).find((t) => t.lead_id === l.id);
+    const existing = installTicketOf(l);
     if (existing) return navigate(`/tickets?open=${existing.id}`);
     const q = new URLSearchParams({ new: '1', client: l.subscriber_id, subject: `Installation — ${l.name}`, kind: 'install' });
     if (l.assigned_to) q.set('assign', l.assigned_to);
@@ -613,7 +618,12 @@ export default function Leads() {
                     <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                       {l.status === 'won' && (
                         l.subscriber_id
-                          ? <><Button variant="primary" onClick={() => raiseInstallTicket(l)}>Install ticket</Button><Button onClick={() => navigate(`/clients/${l.subscriber_id}`)}>View client</Button></>
+                          ? <>
+                              {installDone(l)
+                                ? <Button onClick={() => raiseInstallTicket(l)} title="The installation ticket is resolved">✓ Installed</Button>
+                                : <Button variant="primary" onClick={() => raiseInstallTicket(l)}>{installTicketOf(l) ? 'Install ticket' : 'Raise install ticket'}</Button>}
+                              <Button onClick={() => navigate(`/clients/${l.subscriber_id}`)}>View client</Button>
+                            </>
                           : <Button variant="primary" onClick={() => convertToClient(l)}>Convert</Button>
                       )}
                       <Button onClick={() => viewLead(l)}>View</Button>
@@ -681,7 +691,9 @@ export default function Leads() {
             title={leadViewing?.name}
             actions={leadViewing?.status === 'won'
               ? (leadViewing.subscriber_id
-                ? <Button variant="primary" onClick={() => raiseInstallTicket(leadViewing)}>Raise installation ticket</Button>
+                ? (installDone(leadViewing)
+                  ? <Button onClick={() => raiseInstallTicket(leadViewing)}>✓ Installed — view ticket</Button>
+                  : <Button variant="primary" onClick={() => raiseInstallTicket(leadViewing)}>{installTicketOf(leadViewing) ? 'Open installation ticket' : 'Raise installation ticket'}</Button>)
                 : <Button variant="primary" onClick={() => convertToClient(leadViewing)}>Convert to client</Button>)
               : undefined}
             onClose={() => setLeadViewing(null)}

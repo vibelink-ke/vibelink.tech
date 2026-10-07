@@ -99,7 +99,8 @@
       "New payment methods outside Kenya: Flutterwave (Uganda, Tanzania, Rwanda, Ghana, Zambia, Cameroon, Côte d'Ivoire, Senegal), Paystack (Ghana, Nigeria, South Africa), AzamPay (Tanzania) and Yo! Payments (Uganda). Add them under Settings → Payment gateways, pick one for the hotspot under Hotspot → Settings, and click Webhook URL to see what to paste into the provider's dashboard.",
       "Hotspot pages show prices in the tenant's own currency, and a payment link when the provider needs one.",
       "A cookie notice appears the first time someone opens the site: Accept all or Essential only, remembered for a year, and changeable from Cookie settings in the footer.",
-      "Dashboard → Top commission earner: \"sales closed\" now counts the clients whose first payment earned the commission, instead of showing 0 when the lead was never marked won. Adding a client from a lead now marks that lead won."
+      "Dashboard → Top commission earner: \"sales closed\" now counts the clients whose first payment earned the commission, instead of showing 0 when the lead was never marked won. Adding a client from a lead now marks that lead won.",
+      "Leads: once a won lead's installation ticket is resolved, the Install ticket button becomes \"✓ Installed\" instead of staying as a call to raise it again."
     ]
   }
 ]
