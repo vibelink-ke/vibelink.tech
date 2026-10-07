@@ -341,18 +341,25 @@ export default function ClientDetail() {
   useEffect(() => {
     if (!siblings.length) { setThread(null); return; }
     setThread(null);
-    Promise.all(siblings.map((s) => api.messages(s.id).catch(() => [])))
-      .then((lists) => setThread(lists.flat().sort((a, b) => new Date(b.sent_at) - new Date(a.sent_at))));
+    Promise.all(siblings.map((s) => api.subscriberCommunications(s.id).catch(() => [])))
+      .then((lists) => {
+        // Lines on one account often share a phone, so the same message turns up once per line: keep one.
+        const seen = new Set();
+        setThread(lists.flat().filter((m) => { const k = `${m.channel}|${m.at}|${m.body}`; if (seen.has(k)) return false; seen.add(k); return true; })
+          .sort((a, b) => new Date(b.at) - new Date(a.at)));
+      });
   }, [siblings.map((s) => s.id).join(',')]);
 
   // Usage and activity are per-line (a customer's second connection has its
   // own traffic and its own history), fetched only once that tab is opened
   // rather than for every line up front.
-  const [usage, setUsage] = useState(null);
+  const [usage, setUsage] = useState(null);          // { days: [{ day, down, up, approx }], trackedSince }
+  const [openMonth, setOpenMonth] = useState(null);   // 'YYYY-MM' expanded on the Statistics tab
   useEffect(() => {
     if (tab !== 'statistics' || !client) return;
     setUsage(null);
-    api.subscriberUsage(client.id).then(setUsage).catch(() => setUsage([]));
+    setOpenMonth(null);
+    api.subscriberUsageHistory(client.id).then(setUsage).catch(() => setUsage({ days: [], trackedSince: null }));
   }, [tab, client?.id]);
 
   const [activity, setActivity] = useState(null);
@@ -1255,18 +1262,22 @@ export default function ClientDetail() {
 
       {tab === 'communication' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Messages sent to this customer</div>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 2px' }}>Messages this customer has received</div>
+          <div style={{ fontSize: 12, color: color.muted, paddingBottom: 8 }}>Every SMS and email the system sent them, automatic ones (receipts, reminders, expiry notices) included.</div>
           {thread === null ? (
             <span style={{ fontSize: 12.5, color: color.muted }}>Loading…</span>
-          ) : thread.filter((m) => m.direction === 'out').length === 0 ? (
-            <Empty>Nothing sent to this customer yet.</Empty>
+          ) : thread.length === 0 ? (
+            <Empty>Nothing has been sent to this customer yet.</Empty>
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
-              {thread.filter((m) => m.direction === 'out').map((m) => (
-                <div key={m.id} style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
+              {thread.map((m, i) => (
+                <div key={`${m.channel}-${m.at}-${i}`} style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: 12.5, paddingBottom: 8, borderBottom: `1px solid ${color.line}` }}>
                   <span style={{ whiteSpace: 'pre-wrap' }}>{m.body}</span>
-                  <span style={{ fontSize: 11, color: color.muted }}>
-                    {m.channel} · {new Date(m.sent_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                  <span style={{ fontSize: 11, color: color.muted, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.04em' }}>{m.channel === 'live_chat' ? 'chat' : m.channel}</span>
+                    {m.direction === 'in' && <span>from the customer</span>}
+                    {m.status && m.status !== 'sent' && <span style={{ color: color.rust, fontWeight: 600 }}>{m.status}</span>}
+                    <span>{new Date(m.at).toLocaleString('en-KE', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
                   </span>
                 </div>
               ))}
@@ -1277,21 +1288,86 @@ export default function ClientDetail() {
 
       {tab === 'statistics' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px' }}>
-          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Data used, last 30 days</div>
+          <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 2px' }}>Data used, last 12 months</div>
+          <div style={{ fontSize: 12, color: color.muted, paddingBottom: 10 }}>Click a month to see each day.</div>
           {usage === null ? (
             <span style={{ fontSize: 13, color: color.muted }}>Loading…</span>
-          ) : usage.length === 0 ? (
-            <Empty>No session data recorded for this line in the last 30 days.</Empty>
           ) : (() => {
-            const peak = Math.max(1, ...usage.map((d) => d.mb));
+            const now = new Date();
+            const keys = [];
+            for (let i = 0; i < 12; i += 1) {
+              const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+              keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+            }
+            const byMonth = new Map(keys.map((k) => [k, { down: 0, up: 0, days: new Map() }]));
+            for (const d of usage.days ?? []) {
+              const e = byMonth.get(String(d.day).slice(0, 7));
+              if (!e) continue;
+              e.down += Number(d.down) || 0;
+              e.up += Number(d.up) || 0;
+              e.days.set(String(d.day), d);
+            }
+            const peak = Math.max(1, ...[...byMonth.values()].map((e) => e.down + e.up));
+            const exact = (n) => (
+              <span title={`${Math.round(Number(n) || 0).toLocaleString('en-KE')} bytes`}>{fmtBytes(n)}</span>
+            );
+            const anyData = [...byMonth.values()].some((e) => e.down + e.up > 0);
+            if (!anyData) return <Empty>No data usage has been recorded for this line yet.</Empty>;
             return (
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 160, paddingTop: 10 }}>
-                {usage.map((d) => (
-                  <div key={d.day} title={`${new Date(d.day).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}: ${d.mb} MB`}
-                       style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: '100%', gap: 4 }}>
-                    <div style={{ height: `${Math.max(2, (d.mb / peak) * 100)}%`, background: color.green, borderRadius: '2px 2px 0 0' }} />
-                  </div>
-                ))}
+              <div style={{ display: 'grid', gap: 2 }}>
+                {keys.map((k) => {
+                  const e = byMonth.get(k);
+                  const [y, mo] = k.split('-').map(Number);
+                  const label = new Date(y, mo - 1, 1).toLocaleDateString('en-KE', { month: 'long', year: 'numeric' });
+                  const open = openMonth === k;
+                  return (
+                    <div key={k}>
+                      <div
+                        onClick={() => setOpenMonth(open ? null : k)}
+                        style={{ display: 'grid', gridTemplateColumns: '20px 150px 1fr 110px 110px 110px', gap: 10, alignItems: 'center', padding: '9px 0', borderTop: `1px solid ${color.line}`, cursor: 'pointer', fontSize: 13 }}
+                      >
+                        <span style={{ color: color.muted }}>{open ? '▾' : '▸'}</span>
+                        <span style={{ fontWeight: 600 }}>{label}</span>
+                        <span style={{ height: 8, background: color.tileBg, borderRadius: 4, overflow: 'hidden' }}>
+                          <span style={{ display: 'block', height: '100%', width: `${((e.down + e.up) / peak) * 100}%`, background: color.green }} />
+                        </span>
+                        <span style={{ textAlign: 'right', color: color.rust }}>↓ {exact(e.down)}</span>
+                        <span style={{ textAlign: 'right', color: color.mint }}>↑ {exact(e.up)}</span>
+                        <span style={{ textAlign: 'right', fontWeight: 700 }}>{exact(e.down + e.up)}</span>
+                      </div>
+                      {open && (() => {
+                        const total = new Date(y, mo, 0).getDate();
+                        const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                        const rows = [];
+                        for (let day = 1; day <= total; day += 1) {
+                          const dk = `${k}-${String(day).padStart(2, '0')}`;
+                          if (dk > todayKey) break;
+                          rows.push({ dk, day, d: e.days.get(dk) });
+                        }
+                        return (
+                          <div style={{ background: color.subtleBg ?? color.tileBg, borderRadius: 8, padding: '4px 12px', margin: '0 0 8px 30px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', gap: 10, fontSize: 11.5, color: color.muted, padding: '6px 0' }}>
+                              <span>Day</span><span style={{ textAlign: 'right' }}>Downloaded</span><span style={{ textAlign: 'right' }}>Uploaded</span><span style={{ textAlign: 'right' }}>Total</span>
+                            </div>
+                            {rows.map(({ dk, day, d }) => (
+                              <div key={dk} style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr 1fr', gap: 10, fontSize: 12.5, padding: '5px 0', borderTop: `1px solid ${color.line}`, color: d ? color.ink : color.muted }}>
+                                <span>{new Date(y, mo - 1, day).toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' })}{d?.approx ? ' *' : ''}</span>
+                                <span style={{ textAlign: 'right' }}>{d ? exact(d.down) : '—'}</span>
+                                <span style={{ textAlign: 'right' }}>{d ? exact(d.up) : '—'}</span>
+                                <span style={{ textAlign: 'right', fontWeight: d ? 600 : 400 }}>{d ? exact(Number(d.down) + Number(d.up)) : '—'}</span>
+                              </div>
+                            ))}
+                            {rows.some((r) => r.d?.approx) && (
+                              <div style={{ fontSize: 11.5, color: color.muted, padding: '6px 0' }}>
+                                * Before {usage.trackedSince ?? 'tracking began'} the figure is the whole connection counted on the day it started, so it can be off for connections that ran over several days.
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
               </div>
             );
           })()}

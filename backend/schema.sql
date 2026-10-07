@@ -159,6 +159,25 @@ create table if not exists line_health (
   primary key (tenant_id, pppoe_user)
 );
 
+-- Exact data used per PPPoE client per day (Nairobi days), built by the accumulateUsage job from RADIUS accounting
+-- deltas: each pass adds what every session moved since the last pass to today. usage_cursor remembers the last totals
+-- seen for each session so nothing is counted twice; its '__start__' row is when tracking began.
+create table if not exists usage_daily (
+  tenant_id     uuid not null references tenants on delete cascade,
+  subscriber_id uuid not null references subscribers on delete cascade,
+  day           date not null,
+  down_bytes    bigint not null default 0,
+  up_bytes      bigint not null default 0,
+  primary key (subscriber_id, day)
+);
+create index if not exists usage_daily_tenant_day on usage_daily (tenant_id, day);
+create table if not exists usage_cursor (
+  acctuniqueid text primary key,
+  in_bytes     bigint not null default 0,
+  out_bytes    bigint not null default 0,
+  updated_at   timestamptz not null default now()
+);
+
 -- When the device's reserved IP (its static DHCP lease) was given back, a week after its plan expired.
 alter table voucher_devices add column if not exists lease_released_at timestamptz;
 

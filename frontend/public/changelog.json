@@ -92,7 +92,9 @@
       "Online but no internet: every 10 minutes the system checks online PPPoE lines; one that is connected, moving nothing and not answering a ping is flagged \"Online · not answering\" in the clients list (and has its own filter).",
       "Client → Live data has a Diagnose button that checks the account, the router session, the router's own internet, the customer's device and the traffic, and says the likely cause in plain words.",
       "Fixed: the online time and data used for a PPPoE service now show on the Services tab and the Live data tab (they were not being displayed). They are read straight from the router.",
-      "A Troubleshoot button on each PPPoE service (client → Services) and in the clients table menu: asks the router what is wrong with a line that is online but has no internet and says the likely cause."
+      "A Troubleshoot button on each PPPoE service (client → Services) and in the clients table menu: asks the router what is wrong with a line that is online but has no internet and says the likely cause.",
+      "Client → Statistics shows the exact data used each day, grouped by month for the last 12 months; click a month to see every day of it. Counting starts from this update, earlier figures are approximate.",
+      "Client → Communication now lists every SMS and email the customer has received, including the automatic ones (receipts, reminders, expiry notices), not just messages typed on the Messaging screen."
     ]
   }
 ]

@@ -9893,6 +9893,74 @@ app.get('/api/subscribers/:id/credentials', requireRole('owner'), wrap(async (re
  * facing counterpart to /portal/usage above, scoped by tenant/session
  * rather than a customer's own portal cookie.
  */
+/**
+ * Data used by one PPPoE client, per day, for the last 12 months: exact figures from usage_daily (see accumulateUsage in
+ * jobs.js) from when tracking began, and before that the accounting totals counted on the day each connection started
+ * (flagged approx, since a connection that ran for days lands on one day). The screen groups it by month.
+ */
+app.get('/api/subscribers/:id/usage-history', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { rows: [s] } = await pool.query('select id, pppoe_user from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!s) return res.status(404).json({ error: 'No such subscriber' });
+  let tracked = [];
+  try {
+    ({ rows: tracked } = await pool.query(
+      `select to_char(day, 'YYYY-MM-DD') as day, down_bytes as down, up_bytes as up from usage_daily
+        where tenant_id=$1 and subscriber_id=$2 and day >= (now() at time zone 'Africa/Nairobi')::date - 366 order by day`,
+      [req.tenant.id, s.id]));
+  } catch (e) { if (e.code !== '42P01') throw e; }   // tracking table not created yet
+  const trackedSince = tracked[0]?.day ?? null;
+  let approx = [];
+  if (s.pppoe_user) {
+    ({ rows: approx } = await pool.query(
+      `select to_char((acctstarttime at time zone 'Africa/Nairobi')::date, 'YYYY-MM-DD') as day,
+              sum(coalesce(acctoutputoctets, 0)) as down, sum(coalesce(acctinputoctets, 0)) as up, true as approx
+         from radacct
+        where username=$1 and acctstarttime >= now() - interval '13 months'
+          and ($2::date is null or (acctstarttime at time zone 'Africa/Nairobi')::date < $2::date)
+        group by 1 order by 1`,
+      [s.pppoe_user, trackedSince]));
+  }
+  const days = [...approx, ...tracked.map((d) => ({ ...d, approx: false }))].map((d) => ({
+    day: d.day, down: Number(d.down), up: Number(d.up), approx: !!d.approx,
+  }));
+  res.json({ days, trackedSince });
+}));
+
+/**
+ * Everything this client has been sent, newest first: every SMS from the SMS log (receipts, reminders and the rest of
+ * the automatic ones, not only those typed on the Messaging screen), every email from the email log, and any chat or
+ * WhatsApp messages. SMS are matched to the client by phone number (either of theirs, last nine digits); a message
+ * typed on the Messaging screen is also in the SMS log, so it is only taken from messages when the log has no copy.
+ */
+app.get('/api/subscribers/:id/communications', requirePermission('messaging.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `with s as (
+       select regexp_replace(coalesce(phone,''), '\\D', '', 'g') as p1, regexp_replace(coalesce(phone_alt,''), '\\D', '', 'g') as p2, email
+         from subscribers where id=$2 and tenant_id=$1
+     )
+     select 'sms' as channel, 'out' as direction, l.body, l.status, l.at as at
+       from sms_log l, s
+      where l.tenant_id=$1 and l.status <> 'rejected'
+        and ((length(s.p1) >= 9 and right(regexp_replace(l.phone, '\\D', '', 'g'), 9) = right(s.p1, 9))
+          or (length(s.p2) >= 9 and right(regexp_replace(l.phone, '\\D', '', 'g'), 9) = right(s.p2, 9)))
+     union all
+     select 'email', 'out', coalesce(e.subject, '(no subject)'), e.status, e.created_at
+       from email_log e, s
+      where e.tenant_id=$1 and s.email is not null and lower(e.to_email) = lower(s.email)
+     union all
+     select m.channel, m.direction, m.body, 'sent', m.sent_at
+       from messages m, s
+      where m.tenant_id=$1 and m.subscriber_id=$2
+        and not (m.channel = 'sms' and m.direction = 'out' and exists (
+              select 1 from sms_log l2 where l2.tenant_id=$1 and l2.body = m.body
+                 and abs(extract(epoch from (l2.at - m.sent_at))) < 300
+                 and ((length(s.p1) >= 9 and right(regexp_replace(l2.phone, '\\D', '', 'g'), 9) = right(s.p1, 9))
+                   or (length(s.p2) >= 9 and right(regexp_replace(l2.phone, '\\D', '', 'g'), 9) = right(s.p2, 9)))))
+     order by at desc limit 500`,
+    [req.tenant.id, req.params.id]);
+  res.json(rows);
+}));
+
 app.get('/api/subscribers/:id/usage', requirePermission('clients.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `select date(started_at) as day,
@@ -14286,6 +14354,7 @@ const AUTOMATION_JOBS = [
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
   { job: 'syncOnlineCustomers', name: 'Sync online customers', cron: '*/30 * * * * *', detail: 'Every 30 seconds, reads who each router says is connected and records it, so a customer who was already online is shown with the right address without having to disconnect and reconnect' },
   { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
+  { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },
   { job: 'settleTenants', name: 'Platform settlement payout', cron: '* * * * *', detail: 'Pays a platform-collect tenant everything collected for them, in full, at their own payout time (Nairobi, midnight by default): daily, weekly on Mondays, or only when they request it' },

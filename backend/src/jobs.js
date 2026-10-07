@@ -74,6 +74,8 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every 10 minutes: which online PPPoE lines are connected but passing nothing and not answering (online, no internet).
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
+  // Every 5 minutes: add what each PPPoE session has moved since the last pass to the client's daily usage.
+  cron.schedule('*/5 * * * *', safely('accumulateUsage', accumulateUsage));
   // Every 30s, the routers' own lists of who is connected are written into the system, so nobody has to drop and redial to be seen.
   cron.schedule('*/30 * * * * *', safely('syncOnlineCustomers', syncOnlineCustomersJob));
   // TR-069: pull the ACS's device list, link newly-seen devices to whichever subscriber's serial matches, and
@@ -1991,6 +1993,54 @@ async function syncTr069DevicesJob() {
   } finally {
     tr069PassRunning = false;
   }
+}
+
+/**
+ * Daily data usage, exactly. RADIUS accounting keeps one running total per session, which cannot say how much of it
+ * was used on which day. Every 5 minutes this takes the difference between each session's total now and the total it
+ * had last time, and adds it to the client's row for today (Nairobi day). A session already running when tracking
+ * began is only counted from then on; one that starts afterwards is counted from its first byte. A counter that went
+ * backwards (a new session reusing an id) restarts from zero.
+ */
+async function accumulateUsage() {
+  await pool.query("insert into usage_cursor (acctuniqueid, in_bytes, out_bytes) values ('__start__', 0, 0) on conflict do nothing");
+  await pool.query(`
+    with changed as (
+      select distinct on (r.acctuniqueid)
+             r.acctuniqueid, s.id as sub_id, s.tenant_id,
+             coalesce(r.acctinputoctets, 0) as i, coalesce(r.acctoutputoctets, 0) as o,
+             c.in_bytes as ci, c.out_bytes as co, (c.acctuniqueid is null) as fresh,
+             r.acctstarttime >= (select updated_at from usage_cursor where acctuniqueid = '__start__') as after_start
+        from radacct r
+        join subscribers s on s.pppoe_user = r.username and s.service = 'pppoe'
+        left join usage_cursor c on c.acctuniqueid = r.acctuniqueid
+       where (r.acctstoptime is null or r.acctstoptime > now() - interval '1 day')
+         and (c.acctuniqueid is null
+              or c.in_bytes is distinct from coalesce(r.acctinputoctets, 0)
+              or c.out_bytes is distinct from coalesce(r.acctoutputoctets, 0))
+       order by r.acctuniqueid, s.created_at
+    ), deltas as (
+      select *,
+             case when fresh then (case when after_start then i else 0 end) when i >= ci then i - ci else i end as din,
+             case when fresh then (case when after_start then o else 0 end) when o >= co then o - co else o end as dout
+        from changed
+    ), add_usage as (
+      insert into usage_daily (tenant_id, subscriber_id, day, down_bytes, up_bytes)
+      select tenant_id, sub_id, (now() at time zone 'Africa/Nairobi')::date, sum(dout), sum(din)
+        from deltas where din > 0 or dout > 0 group by tenant_id, sub_id
+      on conflict (subscriber_id, day) do update
+        set down_bytes = usage_daily.down_bytes + excluded.down_bytes, up_bytes = usage_daily.up_bytes + excluded.up_bytes
+      returning 1
+    )
+    insert into usage_cursor (acctuniqueid, in_bytes, out_bytes, updated_at)
+    select acctuniqueid, i, o, now() from deltas
+    on conflict (acctuniqueid) do update set in_bytes = excluded.in_bytes, out_bytes = excluded.out_bytes, updated_at = now()`);
+  // Cursors for sessions that ended more than two days ago, or whose accounting rows are gone, are no longer needed.
+  await pool.query(`
+    delete from usage_cursor c
+     where c.acctuniqueid <> '__start__'
+       and (not exists (select 1 from radacct r where r.acctuniqueid = c.acctuniqueid)
+            or exists (select 1 from radacct r where r.acctuniqueid = c.acctuniqueid and r.acctstoptime < now() - interval '2 days'))`);
 }
 
 /**
