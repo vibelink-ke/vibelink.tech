@@ -4140,7 +4140,11 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
        -- the work of chasing it.
        select r.staff_id,
               coalesce(sum(rc.amount), 0) as earned_total,
-              coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month
+              coalesce(sum(rc.amount) filter (where rc.created_at >= date_trunc('month', now())), 0) as earned_this_month,
+              -- Clients whose first payment earned a commission this month: the sales actually closed, whether or not the
+              -- lead they came from was ever marked won (a client can also be added with a referrer and no lead at all).
+              count(rc.id) filter (where rc.created_at >= date_trunc('month', now())) as commissions_this_month,
+              count(rc.id) as commissions_total
          from referrers r
          left join referral_commissions rc on rc.referrer_id = r.id
         where r.tenant_id = $1 and r.staff_id is not null
@@ -4153,7 +4157,9 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
             coalesce(ls.brought_this_month, 0) as brought_this_month,
             coalesce(ls.brought_total, 0) as brought_total,
             coalesce(cs.earned_this_month, 0) as earned_this_month,
-            coalesce(cs.earned_total, 0) as earned_total
+            coalesce(cs.earned_total, 0) as earned_total,
+            coalesce(cs.commissions_this_month, 0) as commissions_this_month,
+            coalesce(cs.commissions_total, 0) as commissions_total
        from staff st
        left join lead_stats ls on ls.staff_id = st.id
        left join comm_stats cs on cs.staff_id = st.id
@@ -9503,7 +9509,10 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
   // Converting a won lead: its installation ticket (raised when it was won) gets this client attached.
   let installTicketId = null;
   if (leadId) {
-    await pool.query('update leads set subscriber_id=$2 where id=$1 and tenant_id=$3', [leadId, s.id, req.tenant.id]);
+    // Becoming a client is the win: the lead is marked won (once), so the sales figures count it.
+    await pool.query(
+      "update leads set subscriber_id=$2, status = case when status = 'won' then status else 'won' end, won_at = coalesce(won_at, now()) where id=$1 and tenant_id=$3",
+      [leadId, s.id, req.tenant.id]);
     await pool.query('update tickets set subscriber_id=$3 where tenant_id=$1 and lead_id=$2 and subscriber_id is null', [req.tenant.id, leadId, s.id]);
     const { rows: [tk] } = await pool.query('select id from tickets where tenant_id=$1 and lead_id=$2 limit 1', [req.tenant.id, leadId]);
     installTicketId = tk?.id ?? null;

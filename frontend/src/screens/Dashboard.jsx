@@ -603,7 +603,11 @@ export default function Dashboard() {
             </span>
             <span style={{ fontSize: 20, fontWeight: 700 }}>{topPerformer.name}</span>
             <span style={{ fontSize: 12.5, color: color.neutralInk }}>
-              {topPerformer.won_this_month} lead{topPerformer.won_this_month === 1 ? '' : 's'} closed
+              {(() => {
+                // Sales closed this month: leads marked won, or clients whose first payment earned this commission, whichever is more.
+                const closed = Math.max(Number(topPerformer.won_this_month) || 0, Number(topPerformer.commissions_this_month) || 0);
+                return `${closed} sale${closed === 1 ? '' : 's'} closed`;
+              })()}
               · {kes(topPerformer.earned_this_month)} earned this month
             </span>
           </div>
