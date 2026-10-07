@@ -19,6 +19,7 @@ import { passwordProblem, generatePassword } from './passwordPolicy.js';
 import { router as daraja } from './payments/daraja.js';
 import { router as kopokopo } from './payments/kopokopo.js';
 import { router as bank } from './payments/bankstk.js';
+import { router as africa, AFRICA_PROVIDERS, REQUIRED as AFRICA_REQUIRED, findGateway as findAfricaGateway, africaStk, webhookUrl as africaWebhookUrl, testCredentials as testAfricaCredentials } from './payments/africa.js';
 import { router as manual } from './payments/manual.js';
 import * as kk from './payments/kopokopo.js';
 import * as mpesa from './payments/daraja.js';
@@ -246,6 +247,7 @@ for (const method of ['use', 'get', 'post', 'put', 'patch', 'delete']) {
 app.use('/webhooks/daraja', daraja);
 app.use('/webhooks/kopokopo', kopokopo);
 app.use('/webhooks/bank', bank);
+app.use('/webhooks/africa', africa);
 app.use('/webhooks/forwarder', manual);
 
 /**
@@ -906,6 +908,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   } catch { /* keep the DNS-name fallback as the only option */ }
 
   res.type('html').send(loginPage({
+    currency: String(tenant.currency ?? 'KES').trim(),
     company: tenant.name ?? 'WiFi',
     plans,
     supportPhone: tenant.support_phone ?? null,
@@ -1116,6 +1119,7 @@ app.get('/hotspot/devices', wrap(async (req, res) => {
   const { devicesPage } = await import('./hotspot-portal.js');
   res.type('html').send(devicesPage({
     company: tenant?.name ?? 'WiFi',
+    currency: String(tenant?.currency ?? 'KES').trim(),
     apiBase: tenant?.subdomain ? `https://${tenant.subdomain}.${root}` : '',
     // Carried from the login page's own "Adding a TV or console?" link —
     // see /hotspot/tv-options for why this scopes the device list and the
@@ -1220,6 +1224,18 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   const { rows: [hs] } = await pool.query(
     'select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const method = hs?.payment_method ?? 'kopokopo';
+  if (AFRICA_PROVIDERS.includes(method)) {
+    const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
+    if (!gw) {
+      return res.status(503).json({ error: 'That payment method is not set up yet. Ask the operator to finish Settings → Payment gateways.' });
+    }
+    try {
+      const out = await africaStk(tenant.id, gw, { phone, amount: Number(plan.price), accountRef: 'hotspot', description: plan.title, purpose: { plan_id: plan.id, router_id: routerId } });
+      return res.json({ checkoutId: out.checkoutId, phone, amount: Number(plan.price), plan: plan.title, redirectUrl: out.redirectUrl, note: out.note });
+    } catch (e) {
+      return res.status(e.status ?? 502).json({ error: gatewayErrorMessage(e, 'hotspot/buy') });
+    }
+  }
 
   let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
@@ -1747,6 +1763,18 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   const { config } = await import('./db.js');
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const method = hs?.payment_method ?? 'kopokopo';
+  if (AFRICA_PROVIDERS.includes(method)) {
+    const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
+    if (!gw) {
+      return res.status(503).json({ error: 'That payment method is not set up yet. Ask the operator to finish Settings → Payment gateways.' });
+    }
+    try {
+      const out = await africaStk(tenant.id, gw, { phone, amount: Number(plan.price), accountRef: 'hotspot', description: plan.title, purpose: { plan_id: plan.id, mac, router_id: router.id, label } });
+      return res.json({ checkoutId: out.checkoutId, phone, amount: Number(plan.price), plan: plan.title, redirectUrl: out.redirectUrl, note: out.note });
+    } catch (e) {
+      return res.status(e.status ?? 502).json({ error: gatewayErrorMessage(e, 'hotspot/tv-buy') });
+    }
+  }
 
   let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
@@ -2823,6 +2851,12 @@ const viaPlatform = (mode, platformOn, hasOwnGateway) =>
   (mode === 'platform' ? !!platformOn : mode === 'own' ? false : (!hasOwnGateway && !!platformOn));
 
 async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose, routerId }) {
+  // A tenant outside Kenya (or one that chose it) takes payments through Flutterwave, Paystack, AzamPay or Yo! Payments.
+  const africaGw = await findAfricaGateway(tenantId, 'pppoe');
+  if (africaGw) {
+    const out = await africaStk(tenantId, africaGw, { phone, amount: Number(amount), accountRef: accountCode, description, purpose });
+    return { checkoutId: out.checkoutId, redirectUrl: out.redirectUrl, note: out.note };
+  }
   const { rows: [t] } = await pool.query(
     'select subdomain, platform_collect_enabled, settlement_commission_pct from tenants where id=$1', [tenantId]);
 
@@ -10963,6 +10997,7 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
     kopokopo: ['client_id', 'client_secret'],
     bankstk: ['bank', 'account', 'token'],
     manual_till: [],
+    ...AFRICA_REQUIRED,
   }[req.params.provider];
   if (!required) return res.status(400).json({ error: 'unknown channel' });
 
@@ -10970,7 +11005,7 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
     // A tenant can hold more than one gateway per provider now (e.g. an
     // ordinary Daraja paybill plus a dedicated platform-collect one) — this
     // tests the default, same as config() would pick for an ordinary charge.
-    'select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2 and scope = \'tenant\' order by is_default desc, id limit 1',
+    'select id, shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider=$2 and scope = \'tenant\' order by is_default desc, id limit 1',
     [req.tenant.id, req.params.provider]);
   if (!cfg) return res.status(404).json({ error: 'Not configured yet — save credentials first.' });
 
@@ -10998,7 +11033,23 @@ app.post('/api/payment-methods/:provider/test', requireRole('owner'), wrap(async
     });
   }
 
+  if (AFRICA_PROVIDERS.includes(req.params.provider)) {
+    const problem = await testAfricaCredentials(req.params.provider, cfg.id, creds);
+    return res.json({
+      ok: !problem, shortcode: cfg.shortcode, missing: [],
+      note: problem ? `The provider rejected these credentials: ${problem}` : 'Credentials accepted',
+    });
+  }
+
   res.json({ ok: true, shortcode: cfg.shortcode, missing: [], note: 'All required credentials present' });
+}));
+
+/** The confirmation URL a tenant pastes into Flutterwave / Paystack / AzamPay / Yo! so payments reach us. */
+app.get('/api/payment-gateways/:id/webhook-url', requirePermission('payment_gateways.edit'), wrap(async (req, res) => {
+  const { rows: [g] } = await pool.query(
+    'select id, provider, credentials from tenant_payment_config where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!g || !AFRICA_PROVIDERS.includes(g.provider)) return res.status(404).json({ error: 'not found' });
+  res.json({ url: await africaWebhookUrl(g), provider: g.provider });
 }));
 
 app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req, res) => {

@@ -29,7 +29,9 @@ export const MARKER = 'vibelink-hotspot-login';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-const money = (n) => `KES ${Number(n ?? 0).toLocaleString('en-KE')}`;
+// The page being rendered right now: the render is synchronous, so a module-level value is safe.
+let pageCurrency = 'KES';
+const money = (n) => `${pageCurrency} ${Number(n ?? 0).toLocaleString('en-KE')}`;
 
 /** Minutes to something a person reads: 60 -> "1 hour", 1440 -> "1 day". */
 function duration(min) {
@@ -119,8 +121,9 @@ export function loginPage({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
-  hotspotGateway = null, adText = null, adUrl = null,
+  hotspotGateway = null, adText = null, adUrl = null, currency = 'KES',
 }) {
+  pageCurrency = String(currency || 'KES').trim().slice(0, 3).toUpperCase() || 'KES';
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
   const btnInk = bestInkOn(t.accent);
   // bingwa fronts its longest-duration (monthly) plans; every other template
@@ -1011,8 +1014,20 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
             popup('notice', 'Could not start payment', msg, 4000);
             return;
           }
-          payNote.textContent = 'Check your phone and enter your M-Pesa PIN.';
-          popup('pending', 'Check your phone', 'Enter your M-Pesa PIN to finish paying.', 0);
+          if (res.d.redirectUrl) {
+            payNote.textContent = '';
+            var link = document.createElement('a');
+            link.href = res.d.redirectUrl; link.target = '_blank'; link.rel = 'noopener';
+            link.textContent = 'Tap here to approve the payment';
+            payNote.appendChild(link);
+            popup('pending', 'Approve the payment', 'Tap the link under the button to approve it.', 0);
+          } else if (res.d.note) {
+            payNote.textContent = res.d.note + '.';
+            popup('pending', 'Check your phone', res.d.note + '.', 0);
+          } else {
+            payNote.textContent = 'Check your phone and enter your M-Pesa PIN.';
+            popup('pending', 'Check your phone', 'Enter your M-Pesa PIN to finish paying.', 0);
+          }
           clearInterval(payPollTimer);
           payPollTimer = setInterval(function () { pollPayment(res.d.checkoutId); }, 3000);
         })
@@ -1284,7 +1299,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
  * and cached by the router the way the login page is, so none of RouterOS's
  * $(...) substitution applies here.
  */
-export function devicesPage({ company = 'WiFi', apiBase = '', routerId = null }) {
+export function devicesPage({ company = 'WiFi', apiBase = '', routerId = null, currency = 'KES' }) {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1505,7 +1520,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       el.innerHTML = plans.map(function (p, i) {
         return '<div class="plan" data-i="' + i + '"><div><div class="plan-name">' + esc(p.title) + '</div>' +
           '<div class="plan-meta">' + duration(p.duration_min) + ' · ' + (p.rate_down / 1000) + ' Mbps</div></div>' +
-          '<div class="plan-price">KES ' + Number(p.price) + '</div></div>';
+          '<div class="plan-price">${esc(String(currency || 'KES').trim().slice(0, 3))} ' + Number(p.price) + '</div></div>';
       }).join('');
       el.querySelectorAll('.plan').forEach(function (row) {
         row.addEventListener('click', function () {
@@ -1543,7 +1558,15 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           if (!res.ok) { btn.disabled = false; note.textContent = res.d.error || 'Could not start the payment.'; return; }
-          note.textContent = 'Check your phone and enter your M-Pesa PIN.';
+          if (res.d.redirectUrl) {
+            note.textContent = '';
+            var tvLink = document.createElement('a');
+            tvLink.href = res.d.redirectUrl; tvLink.target = '_blank'; tvLink.rel = 'noopener';
+            tvLink.textContent = 'Tap here to approve the payment';
+            note.appendChild(tvLink);
+          } else {
+            note.textContent = res.d.note ? res.d.note + '.' : 'Check your phone and enter your M-Pesa PIN.';
+          }
           poll(res.d.checkoutId);
         })
         .catch(function () { btn.disabled = false; note.textContent = 'Could not reach the billing system from here.'; });

@@ -56,6 +56,57 @@ export const CHANNELS = {
     ],
     services: { pppoe: true, hotspot: true },
   },
+  // Outside Kenya. Each tenant uses their own account with the provider; the "code" below is the country the gateway
+  // takes payments in (UG, TZ, RW, GH, NG, ZM, ZA...). After saving, use "Webhook URL" to see what to paste into the
+  // provider's dashboard so payments are confirmed.
+  flutterwave: {
+    name: 'Flutterwave',
+    blurb: "Mobile money and cards in Uganda, Tanzania, Rwanda, Ghana, Zambia, Cameroon, Côte d'Ivoire, Senegal and Kenya. Paid straight into your Flutterwave account.",
+    codeLabel: 'Country code (UG, TZ, RW, GH, ZM…)',
+    addLabel: 'gateway',
+    fields: [
+      { key: 'secret_key', label: 'Secret key', secret: true },
+      { key: 'default_network', label: 'Default network', hint: 'Only used when a number is not recognised (e.g. MTN or AIRTEL)', optional: true },
+    ],
+    services: { pppoe: true, hotspot: true },
+  },
+  paystack: {
+    name: 'Paystack',
+    blurb: 'Mobile money in Ghana and Kenya; card, bank transfer and USSD checkout in Nigeria, South Africa and elsewhere (the customer is sent a payment link).',
+    codeLabel: 'Country code (GH, NG, ZA, KE…)',
+    addLabel: 'gateway',
+    fields: [
+      { key: 'secret_key', label: 'Secret key', secret: true },
+      { key: 'default_network', label: 'Default network', hint: 'Ghana only: MTN, VODAFONE or TIGO, when a number is not recognised', optional: true },
+    ],
+    services: { pppoe: true, hotspot: true },
+  },
+  azampay: {
+    name: 'AzamPay (Tanzania)',
+    blurb: 'M-Pesa, Tigo Pesa, Airtel Money and Halopesa in Tanzania.',
+    codeLabel: 'Country code (TZ)',
+    addLabel: 'gateway',
+    fields: [
+      { key: 'app_name', label: 'App name', secret: false },
+      { key: 'client_id', label: 'Client ID', secret: true },
+      { key: 'client_secret', label: 'Client secret', secret: true },
+      { key: 'token_key', label: 'API key (X-API-Key)', secret: true },
+      { key: 'sandbox', label: 'Test mode', hint: 'Type yes to use AzamPay’s sandbox; leave blank for live', optional: true },
+    ],
+    services: { pppoe: true, hotspot: true },
+  },
+  yopayments: {
+    name: 'Yo! Payments (Uganda)',
+    blurb: 'MTN Mobile Money and Airtel Money in Uganda.',
+    codeLabel: 'Country code (UG)',
+    addLabel: 'gateway',
+    fields: [
+      { key: 'api_username', label: 'API username', secret: false },
+      { key: 'api_password', label: 'API password', secret: true },
+      { key: 'sandbox', label: 'Test mode', hint: 'Type yes to use Yo!’s sandbox; leave blank for live', optional: true },
+    ],
+    services: { pppoe: true, hotspot: true },
+  },
   manual_till: {
     name: 'Till / paybill without API',
     blurb: 'The companion Android app forwards M-Pesa SMS; we parse and apply them.',
@@ -308,10 +359,25 @@ export default function Gateways({ platform = false }) {
     }
   };
 
+  const WEBHOOK_HELP = {
+    flutterwave: 'Flutterwave dashboard → Settings → Webhooks: paste this as the URL.',
+    paystack: 'Paystack dashboard → Settings → API Keys & Webhooks: paste this as the webhook URL.',
+    azampay: 'AzamPay: paste this as the callback URL of your app.',
+    yopayments: 'Yo! needs nothing pasted: the address is sent with every payment. Shown here for reference.',
+  };
+  const showWebhook = async (g) => {
+    try {
+      const r = await api.gatewayWebhookUrl(g.id);
+      window.prompt(WEBHOOK_HELP[g.provider] ?? 'Paste this into the provider’s dashboard.', r.url);
+    } catch (e) {
+      store.toast(e.message);
+    }
+  };
+
   const test = async (g) => {
     try {
       const r = await api.testPaymentMethod(g.provider);
-      store.toast(r.ok ? `${CHANNELS[g.provider].name}: credentials complete` : `Missing ${r.missing.join(', ')}`);
+      store.toast(r.note ? `${CHANNELS[g.provider].name}: ${r.note}` : r.ok ? `${CHANNELS[g.provider].name}: credentials complete` : `Missing ${r.missing.join(', ')}`);
     } catch (e) {
       store.toast(e.message);
     }
@@ -533,7 +599,7 @@ export default function Gateways({ platform = false }) {
             subtitle={ch.blurb}
             actions={
               <Button size="sm" variant="primary" onClick={() => openNew(provider)}>
-                + Add {provider === 'kopokopo' ? 'till' : 'paybill'}
+                + Add {ch.addLabel ?? (provider === 'kopokopo' ? 'till' : 'paybill')}
               </Button>
             }
           >
@@ -597,6 +663,15 @@ export default function Gateways({ platform = false }) {
                           style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
                         >
                           Register URLs
+                        </span>
+                      )}
+                      {['flutterwave', 'paystack', 'azampay', 'yopayments'].includes(g.provider) && (
+                        <span
+                          onClick={() => showWebhook(g)}
+                          title="The address to paste into the provider's dashboard so payments are confirmed"
+                          style={{ color: '#4a524c', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 }}
+                        >
+                          Webhook URL
                         </span>
                       )}
                       {!platform && !g.is_default && (

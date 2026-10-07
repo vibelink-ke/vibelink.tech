@@ -178,6 +178,11 @@ create table if not exists usage_cursor (
   updated_at   timestamptz not null default now()
 );
 
+-- Hotspot payment methods outside Kenya: the aggregators added in payments/africa.js.
+alter table hotspot_settings drop constraint if exists payment_method_valid;
+alter table hotspot_settings add constraint payment_method_valid
+  check (payment_method in ('kopokopo','paybill','bankstk','till','piggyback','flutterwave','paystack','azampay','yopayments'));
+
 -- The country a tenant operates in: decides how customers' phone numbers are read (dialling code) and which
 -- payment methods and currency are offered. Kenya unless changed under Settings → Organisation.
 alter table tenants add column if not exists country char(2) not null default 'KE';

@@ -245,6 +245,7 @@ export default function Payments() {
   // KopoKopo activity never sees a KopoKopo button that would just show an empty table.
   const CHANNEL_LABELS = {
     daraja: 'M-Pesa Paybill', kopokopo: 'KopoKopo', bankstk: 'Bank STK', manual_till: 'Till (manual)',
+    flutterwave: 'Flutterwave', paystack: 'Paystack', azampay: 'AzamPay', yopayments: 'Yo! Payments',
     piggyback_till: 'Buy Goods (via platform)',
   };
   const channelsPresent = useMemo(

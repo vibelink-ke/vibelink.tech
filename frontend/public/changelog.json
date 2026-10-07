@@ -95,7 +95,9 @@
       "A Troubleshoot button on each PPPoE service (client → Services) and in the clients table menu: asks the router what is wrong with a line that is online but has no internet and says the likely cause.",
       "Client → Statistics shows the exact data used each day, grouped by month for the last 12 months; click a month to see every day of it. Counting starts from this update, earlier figures are approximate.",
       "Client → Communication now lists every SMS and email the customer has received, including the automatic ones (receipts, reminders, expiry notices), not just messages typed on the Messaging screen.",
-      "Settings → Organisation: choose the country (Kenya, Uganda, Tanzania, Rwanda, Ghana, Nigeria, Zambia, South Africa and more) and the currency. Customers' phone numbers are now read and texted in that country's format instead of always as Kenyan numbers."
+      "Settings → Organisation: choose the country (Kenya, Uganda, Tanzania, Rwanda, Ghana, Nigeria, Zambia, South Africa and more) and the currency. Customers' phone numbers are now read and texted in that country's format instead of always as Kenyan numbers.",
+      "New payment methods outside Kenya: Flutterwave (Uganda, Tanzania, Rwanda, Ghana, Zambia, Cameroon, Côte d'Ivoire, Senegal), Paystack (Ghana, Nigeria, South Africa), AzamPay (Tanzania) and Yo! Payments (Uganda). Add them under Settings → Payment gateways, pick one for the hotspot under Hotspot → Settings, and click Webhook URL to see what to paste into the provider's dashboard.",
+      "Hotspot pages show prices in the tenant's own currency, and a payment link when the provider needs one."
     ]
   }
 ]

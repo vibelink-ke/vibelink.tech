@@ -284,7 +284,7 @@ export function subscriberVars(s, org = {}) {
 // this same mapping) — the SMS {paybill} token for a hotspot customer must
 // name that same gateway's till/shortcode, not just whichever hotspot-enabled
 // row happens to be flagged default.
-const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till: 'manual_till', bankstk: 'bankstk' };
+const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till: 'manual_till', bankstk: 'bankstk', flutterwave: 'flutterwave', paystack: 'paystack', azampay: 'azampay', yopayments: 'yopayments' };
 
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
 export async function orgVars(tenantId, routerId = null) {

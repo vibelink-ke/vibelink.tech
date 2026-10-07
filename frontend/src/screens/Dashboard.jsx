@@ -12,6 +12,7 @@ const CHANNELS = [
   { label: 'KopoKopo STK — hotspot', swatch: '#4c8dff', providers: ['kopokopo'] },
   { label: 'Bank STK push', swatch: '#c9a227', providers: ['bankstk'] },
   { label: 'Till / paybill (no API)', swatch: '#c3ccc6', providers: ['manual_till'] },
+  { label: 'Mobile money and cards (Africa)', swatch: '#7a4cff', providers: ['flutterwave', 'paystack', 'azampay', 'yopayments'] },
 ];
 
 const card = {

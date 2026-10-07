@@ -11,6 +11,11 @@ const PAYMENT_METHODS = [
   { value: 'bankstk', label: 'Bank STK push' },
   { value: 'till', label: 'Till / paybill without API' },
   { value: 'piggyback', label: 'Buy Goods till (via platform, no API needed)' },
+  // Outside Kenya: pick the one you saved under Settings → Payment gateways.
+  { value: 'flutterwave', label: 'Flutterwave (mobile money and cards, Africa)' },
+  { value: 'paystack', label: 'Paystack (Ghana, Nigeria, South Africa, Kenya)' },
+  { value: 'azampay', label: 'AzamPay (Tanzania)' },
+  { value: 'yopayments', label: 'Yo! Payments (Uganda)' },
 ];
 const EXPIRY = [
   { value: 'login', label: 'Expire after first login' },

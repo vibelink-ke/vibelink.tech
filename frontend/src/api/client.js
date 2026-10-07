@@ -329,6 +329,7 @@ export const api = {
   getB2cFeeTiers: () => get('/api/platform/b2c-fee-tiers'),
   saveB2cFeeTiers: (tiers) => put('/api/platform/b2c-fee-tiers', { tiers }),
   gatewayCredentials: (id) => get(`/api/payment-gateways/${id}/credentials`),
+  gatewayWebhookUrl: (id) => get(`/api/payment-gateways/${id}/webhook-url`),
   registerGatewayUrls: (id) => post(`/api/payment-gateways/${id}/register-urls`, {}),
   deleteGateway: (id) => del(`/api/payment-gateways/${id}`),
   inventory: () => get('/api/inventory'),
