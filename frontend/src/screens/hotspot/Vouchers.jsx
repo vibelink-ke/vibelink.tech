@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { color, font, radius } from '../../theme/tokens';
+import { color, font, radius, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { exportTable } from '../../lib/export';
@@ -395,7 +395,7 @@ export default function Vouchers() {
                 onChange={(e) => setGen((g) => ({ ...g, planId: e.target.value }))}
                 options={[
                   { value: '', label: store.hsPlans?.length ? 'Select a bundle…' : 'No hotspot bundles yet' },
-                  ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
+                  ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${p.price}` })),
                 ]}
               />
             </Field>

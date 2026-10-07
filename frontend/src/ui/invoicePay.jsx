@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { color } from '../theme/tokens';
+import { color, cur } from '../theme/tokens';
 import { Button, Field, Input, Modal } from './primitives';
 
 /**
@@ -60,7 +60,7 @@ export function useInvoicePay(store) {
       {target && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div style={{ fontSize: 13.5, color: color.neutralInk }}>
-            We'll send an M-Pesa prompt for KES {owed.toLocaleString('en-KE')} to the number below.
+            We'll send an M-Pesa prompt for {cur()} {owed.toLocaleString('en-KE')} to the number below.
           </div>
           {state.kind !== 'done' && (
             <>

@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { color, font, radius, TOPBAR_H } from '../theme/tokens';
+import { color, font, radius, TOPBAR_H, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useMediaQuery } from './useMediaQuery';
 import { api } from '../api/client';
@@ -40,7 +40,7 @@ function useSearchResults(q, store) {
     }
     for (const p of store.unmatched) {
       if (hit(p.provider_ref) || hit(p.payer_phone) || hit(p.payer_name) || hit(p.raw_account))
-        out.push({ kind: 'Payment', title: p.provider_ref, detail: `KES ${p.amount} · ${p.payer_phone ?? ''}`, to: `/payments?open=${p.id}` });
+        out.push({ kind: 'Payment', title: p.provider_ref, detail: `${cur()} ${p.amount} · ${p.payer_phone ?? ''}`, to: `/payments?open=${p.id}` });
     }
     for (const t of store.tickets) {
       if (hit(t.subject) || hit(t.number))

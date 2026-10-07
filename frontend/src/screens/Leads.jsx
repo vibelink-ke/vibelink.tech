@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { color, font, radius } from '../theme/tokens';
+import { color, font, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { exportTable } from '../lib/export';
@@ -24,7 +24,7 @@ const stageTone = (s) =>
     ? { bg: color.amberBg, fg: color.amberInk }
     : { bg: color.tileBg, fg: color.neutralInk };
 
-const kes = (n) => `KES ${Number(n ?? 0).toLocaleString('en-KE')}`;
+const kes = (n) => `${cur()} ${Number(n ?? 0).toLocaleString('en-KE')}`;
 const commissionText = (r) => (r.commission_type === 'fixed' ? kes(r.commission_rate) : `${Number(r.commission_rate)}%`);
 const referrerType = (r) => (r.staff_id ? 'staff' : r.subscriber_id ? 'customer' : 'external');
 const referrerTypeTone = (t) =>

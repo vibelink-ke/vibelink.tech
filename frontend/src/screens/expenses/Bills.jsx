@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font } from '../../theme/tokens';
+import { color, font, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Select, Stat, Table, Textarea } from '../../ui/primitives';
@@ -81,7 +81,7 @@ export default function Bills({ categories, suppliers, canEdit }) {
   return (
     <>
       <Grid min={200} gap={14}>
-        <Stat label="Monthly bills" value={`KES ${monthly.toLocaleString('en-KE')}`} />
+        <Stat label="Monthly bills" value={`${cur()} ${monthly.toLocaleString('en-KE')}`} />
         <Stat label="Active bills" value={String(rows.filter((b) => b.active).length)} />
       </Grid>
 
@@ -109,7 +109,7 @@ export default function Bills({ categories, suppliers, canEdit }) {
             },
             {
               key: 'amount', label: 'Amount', align: 'right',
-              render: (b) => <span style={{ fontFamily: font.mono }}>KES {Number(b.amount).toLocaleString('en-KE')}</span>,
+              render: (b) => <span style={{ fontFamily: font.mono }}>{cur()} {Number(b.amount).toLocaleString('en-KE')}</span>,
             },
             {
               key: 'day', label: 'Due',
@@ -155,7 +155,7 @@ export default function Bills({ categories, suppliers, canEdit }) {
             <Field label="Category">
               <Select value={form.category} onChange={set('category')} options={categories} />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" min="0" value={form.amount} onChange={set('amount')} placeholder="0" />
             </Field>
             <Field label="Due day of month" hint="1 to 31. A 31st in a shorter month falls on its last day.">

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { color, font, radius, kes } from '../theme/tokens';
+import { color, font, radius, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Empty, Screen } from '../ui/primitives';
@@ -157,7 +157,7 @@ export default function PlatformMonitor() {
           ['Tenants', totals.tenants, needing ? `${needing} need attention` : 'all healthy'],
           ['Subscribers', totals.subscribers, `${totals.online} online now`],
           ['Routers down', totals.down, totals.down ? 'customers affected' : 'none'],
-          ['Collected this month', `KES ${kes(totals.collected)}`, 'across all tenants'],
+          ['Collected this month', `${cur()} ${kes(totals.collected)}`, 'across all tenants'],
         ].map(([label, value, note]) => (
           <Card key={label}>
             <div style={{ fontSize: 11, letterSpacing: '.07em', color: color.muted }}>{String(label).toUpperCase()}</div>

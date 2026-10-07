@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font, kes } from '../../theme/tokens';
+import { color, font, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Empty, Grid, Stat, Table } from '../../ui/primitives';
@@ -69,7 +69,7 @@ export default function HotspotDashboard() {
         <Stat label="Active codes" value={inUse.length} hint="paid & valid, online or not" />
         {/* Counted from the vouchers themselves rather than hardcoded. */}
         <Stat label="Sold today" value={soldToday} hint="vouchers issued" />
-        <Stat label="Revenue today" value={`KES ${kes(revenue)}`} hint="hotspot only" />
+        <Stat label="Revenue today" value={`${cur()} ${kes(revenue)}`} hint="hotspot only" />
         <Stat label="Unused codes" value={unused.length} hint={`${expired.length} expired`} />
       </Grid>
 
@@ -107,7 +107,7 @@ export default function HotspotDashboard() {
               {store.hsPlans.map((p) => (
                 <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
                   <span>{p.title}</span>
-                  <span style={{ fontFamily: font.mono, color: color.neutralInk }}>KES {kes(p.price)}</span>
+                  <span style={{ fontFamily: font.mono, color: color.neutralInk }}>{cur()} {kes(p.price)}</span>
                 </div>
               ))}
             </div>

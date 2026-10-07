@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { color, font, kes, radius } from '../theme/tokens';
+import { color, font, kes, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Table } from '../ui/primitives';
@@ -164,7 +164,7 @@ export default function Tariffs() {
         <Field label="Title" span={2}>
           <Input value={v.title} onChange={update('title')} placeholder="Home 10 Mbps" />
         </Field>
-        <Field label="Price (KES)">
+        <Field label={`Price (${cur()})`}>
           <Input value={v.price} onChange={update('price')} type="number" />
         </Field>
         <Field label="Billing period">
@@ -226,7 +226,7 @@ export default function Tariffs() {
             rows={tariffs}
             columns={[
               { key: 'title', label: 'Title', render: (p) => <span style={{ fontWeight: 600 }}>{p.title}</span> },
-              { key: 'price', label: 'Price', render: (p) => <span style={{ fontFamily: font.mono }}>KES {kes(p.price)}</span> },
+              { key: 'price', label: 'Price', render: (p) => <span style={{ fontFamily: font.mono }}>{cur()} {kes(p.price)}</span> },
               { key: 'period', label: 'Period', render: (p) => periodLabel(p.duration_min) },
               { key: 'speed', label: 'Speed', render: speed },
               { key: 'cap', label: 'Data cap', render: (p) => <span style={{ color: color.neutralInk }}>{capLabel(p)}</span> },
@@ -269,7 +269,7 @@ export default function Tariffs() {
       <Drawer open={!!viewing} title={viewing?.title} onClose={() => setViewing(null)}>
         {viewing && (
           <>
-            <KV k="Price" v={`KES ${kes(viewing.price)}`} />
+            <KV k="Price" v={`${cur()} ${kes(viewing.price)}`} />
             <KV k="Billing period" v={periodLabel(viewing.duration_min)} />
             <KV k="Download" v={viewing.rate_down ? `${mbps(viewing.rate_down)} Mbps` : '—'} />
             <KV k="Upload" v={viewing.rate_up ? `${mbps(viewing.rate_up)} Mbps` : '—'} />

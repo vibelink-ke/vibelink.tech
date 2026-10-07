@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { color, font } from '../../theme/tokens';
+import { color, font, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Select, Stat, Table, Textarea } from '../../ui/primitives';
@@ -8,7 +8,7 @@ const blank = () => ({
   name: '', category: '', contactName: '', phone: '', email: '', paybill: '', tillNumber: '', accountRef: '', kraPin: '', notes: '',
 });
 
-const kes = (n) => `KES ${Number(n ?? 0).toLocaleString('en-KE')}`;
+const kes = (n) => `${cur()} ${Number(n ?? 0).toLocaleString('en-KE')}`;
 const link = { fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10 };
 
 /**

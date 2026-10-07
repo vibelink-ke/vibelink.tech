@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, radius } from '../theme/tokens';
+import { color, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Screen, Stat, Toggle } from '../ui/primitives';
@@ -60,7 +60,7 @@ export default function Automation() {
   const saveEotmReward = async () => {
     try {
       await api.saveSettings({ eotmRewardAmount: Number(eotmReward) || 0 });
-      store.toast(Number(eotmReward) > 0 ? `Employee of the month gets KES ${Number(eotmReward).toLocaleString('en-KE')}` : 'No reward set — only the congratulations goes out');
+      store.toast(Number(eotmReward) > 0 ? `Employee of the month gets ${cur()} ${Number(eotmReward).toLocaleString('en-KE')}` : 'No reward set — only the congratulations goes out');
     } catch (e) {
       store.toast(`Could not save: ${e.message}`);
     }
@@ -146,7 +146,7 @@ export default function Automation() {
       <Card title="🏆 Employee of the month" subtitle="Automatically congratulated on the 1st of every month — ranked on jobs finished, not sales">
         <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
           <div style={{ minWidth: 220 }}>
-            <Field label="Appreciation amount (KES)" hint="0 sends only the congratulations SMS. Above 0 also raises a pending expense for the owner to approve and pay.">
+            <Field label={`Appreciation amount (${cur()})`} hint="0 sends only the congratulations SMS. Above 0 also raises a pending expense for the owner to approve and pay.">
               <Input
                 type="number" min="0" step="50"
                 value={eotmReward}

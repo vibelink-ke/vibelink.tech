@@ -1,10 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { color, font } from '../../theme/tokens';
+import { color, font, cur } from '../../theme/tokens';
 import { api } from '../../api/client';
 import { Card, Grid, Select, Stat, Table } from '../../ui/primitives';
 
 const GAIN = '#0f7a5f';
-const kes = (n) => `KES ${Math.round(Number(n ?? 0)).toLocaleString('en-KE')}`;
+const kes = (n) => `${cur()} ${Math.round(Number(n ?? 0)).toLocaleString('en-KE')}`;
 const monthLabel = (m) =>
   new Date(`${m}-01T00:00:00Z`).toLocaleDateString('en-KE', { month: 'short', year: 'numeric', timeZone: 'UTC' });
 const money = { fontFamily: font.mono, fontSize: 13 };

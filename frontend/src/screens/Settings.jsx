@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import QRCode from 'qrcode';
 import { passkeySupported, enablePasskey, forgetPasskeyFlag } from '../lib/passkey';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { color, font, radius } from '../theme/tokens';
+import { color, font, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import useLicence from '../app/useLicence';
@@ -13,7 +13,21 @@ import MpesaValidation from './settings/MpesaValidation';
 import Templates from './settings/Templates';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
 
-const CURRENCIES = ['KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS — Tanzanian shilling', 'USD — US dollar'];
+const CURRENCIES = [
+  'KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS — Tanzanian shilling', 'RWF — Rwandan franc', 'GHS — Ghanaian cedi',
+  'NGN — Nigerian naira', 'ZMW — Zambian kwacha', 'ZAR — South African rand', 'MWK — Malawian kwacha', 'ETB — Ethiopian birr',
+  'XAF — Central African CFA franc', 'XOF — West African CFA franc', 'USD — US dollar',
+];
+// Country decides how customers' phone numbers are read and which payment methods fit; its usual currency is suggested.
+const COUNTRY_OPTIONS = [
+  { code: 'KE', name: 'Kenya', currency: 'KES' }, { code: 'UG', name: 'Uganda', currency: 'UGX' },
+  { code: 'TZ', name: 'Tanzania', currency: 'TZS' }, { code: 'RW', name: 'Rwanda', currency: 'RWF' },
+  { code: 'GH', name: 'Ghana', currency: 'GHS' }, { code: 'NG', name: 'Nigeria', currency: 'NGN' },
+  { code: 'ZM', name: 'Zambia', currency: 'ZMW' }, { code: 'ZA', name: 'South Africa', currency: 'ZAR' },
+  { code: 'MW', name: 'Malawi', currency: 'MWK' }, { code: 'ET', name: 'Ethiopia', currency: 'ETB' },
+  { code: 'CM', name: 'Cameroon', currency: 'XAF' }, { code: 'CI', name: "Côte d'Ivoire", currency: 'XOF' },
+  { code: 'SN', name: 'Senegal', currency: 'XOF' },
+];
 const TIMEZONES = ['Africa/Nairobi (EAT)', 'Africa/Kampala (EAT)', 'Africa/Dar_es_Salaam (EAT)', 'UTC'];
 const SECURITY = ['TLS (587)', 'SSL (465)', 'None (25)'];
 
@@ -272,7 +286,7 @@ export default function Settings() {
   const [tab, setTab] = useState(params.get('tab') ?? 'general');
 
   const [faviconVersion, setFaviconVersion] = useState(0);
-  const [org, setOrg] = useState({ name: '', domain: '', currency: CURRENCIES[0], timezone: TIMEZONES[0], kraPin: '', whatsapp: '' });
+  const [org, setOrg] = useState({ name: '', domain: '', country: 'KE', currency: CURRENCIES[0], timezone: TIMEZONES[0], kraPin: '', whatsapp: '' });
   const [smtp, setSmtp] = useState({ host: '', port: '587', security: SECURITY[0], user: '', pass: '', from: '', fromName: '' });
   const [prefs, setPrefs] = useState({
     hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps',
@@ -290,6 +304,7 @@ export default function Settings() {
       domain: s.org.subdomain ?? cur.domain,
       kraPin: s.org.kra_pin ?? cur.kraPin,
       whatsapp: s.org.support_phone ?? cur.whatsapp,
+      country: s.org.country ?? cur.country,
       currency: CURRENCIES.find((c) => c.startsWith(s.org.currency)) ?? cur.currency,
       timezone: TIMEZONES.find((t) => t.startsWith(s.org.timezone)) ?? cur.timezone,
     }));
@@ -315,6 +330,7 @@ export default function Settings() {
       {
         org: {
           name: org.name,
+          country: org.country,
           currency: org.currency.slice(0, 3),
           timezone: org.timezone.split(' ')[0],
           kra_pin: org.kraPin,
@@ -673,7 +689,19 @@ export default function Settings() {
 
           <Card title="Locale">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <Field label="Currency">
+              <Field label="Country" hint="Decides how customers' phone numbers are read and which payment methods are offered.">
+                <Select
+                  value={org.country}
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    const c = COUNTRY_OPTIONS.find((x) => x.code === code);
+                    // Moving country also moves the currency to that country's own, which can still be changed after.
+                    setOrg((s) => ({ ...s, country: code, currency: CURRENCIES.find((x) => x.startsWith(c?.currency ?? '')) ?? s.currency }));
+                  }}
+                  options={COUNTRY_OPTIONS.map((c) => ({ value: c.code, label: c.name }))}
+                />
+              </Field>
+              <Field label="Currency" hint="Shown on prices, invoices, receipts and reports.">
                 <Select value={org.currency} onChange={setO('currency')} options={CURRENCIES} />
               </Field>
               <Field label="Timezone">
@@ -884,7 +912,7 @@ export default function Settings() {
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <Button onClick={() => setBuyOpen(false)} disabled={buyBusy}>Close</Button>
             <Button variant="primary" onClick={buyCredits} disabled={buyBusy}>
-              {buyBusy ? 'Working…' : `Pay KES ${buyCost}`}
+              {buyBusy ? 'Working…' : `Pay ${cur()} ${buyCost}`}
             </Button>
           </div>
         }
@@ -1037,7 +1065,7 @@ export default function Settings() {
           style={{ marginTop: 14 }}
         >
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
-            <Field label="Standard installation fee (KES)" hint="Leave blank or 0 to charge nothing by default. Separate from the package price — commission is worked out on the package only.">
+            <Field label={`Standard installation fee (${cur()})`} hint="Leave blank or 0 to charge nothing by default. Separate from the package price — commission is worked out on the package only.">
               <Input type="number" min="0" step="50" value={prefs.installationFee} onChange={setP('installationFee')} placeholder="e.g. 2000" />
             </Field>
           </div>

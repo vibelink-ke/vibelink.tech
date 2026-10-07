@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { color, font, radius, kes } from '../../theme/tokens';
+import { color, font, radius, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Field, Input, Screen } from '../../ui/primitives';
@@ -33,7 +33,7 @@ function PortalPreview({ t, plans, banner }) {
         <span style={{ fontSize: 10.5, color: t.muted }}>{p.sub ?? 'unlimited'}</span>
       </div>
       <span style={{ fontFamily: font.mono, fontSize: 12.5, color: t.accent, fontWeight: 600 }}>
-        KES {kes(p.price)}
+        {cur()} {kes(p.price)}
       </span>
     </div>
   );

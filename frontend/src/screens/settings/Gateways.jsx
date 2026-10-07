@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font, radius } from '../../theme/tokens';
+import { color, font, radius, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { useAction, ActionResult } from '../../ui/action';
 import { api } from '../../api/client';
@@ -108,7 +108,7 @@ function PlatformBalance() {
     setBusy(true);
     try { await api.refreshPlatformOrgBalance(); await load(); } catch (e) { store.toast(e.message); } finally { setBusy(false); }
   };
-  const kes = (n) => `KES ${Number(n).toLocaleString('en-KE')}`;
+  const kes = (n) => `${cur()} ${Number(n).toLocaleString('en-KE')}`;
   const bal = b?.balance;
   return (
     <Card
@@ -384,9 +384,9 @@ export default function Gateways({ platform = false }) {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr auto', gap: 8 }}>
                 {feeTiers.map((t, i) => (
                   <React.Fragment key={i}>
-                    <Input type="number" placeholder="Min (KES)" value={t.minAmount} onChange={setTierField(i, 'minAmount')} />
+                    <Input type="number" placeholder={`Min (${cur()})`} value={t.minAmount} onChange={setTierField(i, 'minAmount')} />
                     <Input type="number" placeholder="Max (blank = no limit)" value={t.maxAmount} onChange={setTierField(i, 'maxAmount')} />
-                    <Input type="number" placeholder="Fee (KES)" value={t.fee} onChange={setTierField(i, 'fee')} />
+                    <Input type="number" placeholder={`Fee (${cur()})`} value={t.fee} onChange={setTierField(i, 'fee')} />
                     <Button onClick={() => removeTier(i)}>Remove</Button>
                   </React.Fragment>
                 ))}

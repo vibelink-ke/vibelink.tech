@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { font } from '../theme/tokens';
+import { font, cur } from '../theme/tokens';
 import { downloadInvoice } from '../lib/export';
 
 /**
@@ -110,13 +110,13 @@ export default function InvoiceView() {
 
             <div style={{ borderTop: '1px solid #eef1ee', paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 18 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-                <span>Amount</span><span>KES {kes(data.amount)}</span>
+                <span>Amount</span><span>{cur()} {kes(data.amount)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13.5 }}>
-                <span>Paid</span><span>KES {kes(data.paid)}</span>
+                <span>Paid</span><span>{cur()} {kes(data.paid)}</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700 }}>
-                <span>Balance due</span><span>KES {kes(owed)}</span>
+                <span>Balance due</span><span>{cur()} {kes(owed)}</span>
               </div>
             </div>
 
@@ -141,7 +141,7 @@ export default function InvoiceView() {
                     onClick={() => setPay({ kind: 'phone' })}
                     style={{ height: 46, borderRadius: 8, border: 0, background: '#1c7a4d', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
                   >
-                    Click to pay KES {kes(owed)}
+                    Click to pay {cur()} {kes(owed)}
                   </button>
                 ) : pay.kind !== 'done' && (
                   <>
@@ -155,7 +155,7 @@ export default function InvoiceView() {
                       type="button" onClick={send} disabled={busy || !phone}
                       style={{ height: 42, borderRadius: 8, border: 0, background: '#1c7a4d', color: '#fff', fontSize: 14, fontWeight: 700, cursor: busy || !phone ? 'default' : 'pointer', opacity: busy || !phone ? 0.6 : 1 }}
                     >
-                      {pay.kind === 'sending' ? 'Sending…' : pay.kind === 'waiting' ? 'Check your phone…' : `Send prompt for KES ${kes(owed)}`}
+                      {pay.kind === 'sending' ? 'Sending…' : pay.kind === 'waiting' ? 'Check your phone…' : `Send prompt for ${cur()} ${kes(owed)}`}
                     </button>
                   </>
                 )}

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { color, font, kes } from '../../theme/tokens';
+import { color, font, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Modal } from '../../ui/primitives';
@@ -76,7 +76,7 @@ export default function ClientInvoices({ open, name, lines, onClose }) {
                     </div>
                   </div>
                   <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontWeight: 700, fontFamily: font.mono, fontSize: 13.5 }}>-KES {kes(owing)}</div>
+                    <div style={{ fontWeight: 700, fontFamily: font.mono, fontSize: 13.5 }}>-{cur()} {kes(owing)}</div>
                     {i.status === 'partial' && <Badge tone="default">partly paid</Badge>}
                   </div>
                   <div style={{ display: 'flex', gap: 12 }}>

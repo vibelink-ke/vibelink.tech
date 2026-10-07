@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { color, font } from '../../theme/tokens';
+import { color, font, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Card, Field, Input, Modal, Select, Table, Toggle } from '../../ui/primitives';
@@ -117,7 +117,7 @@ export default function Loyalty() {
             label="Give loyalty points"
             detail={rules.enabled ? 'On — every hotspot purchase earns points' : 'Off — nothing is earned until you turn it on'}
           />
-          <Field label="Shillings that earn 1 point" hint={`Now: KES ${rules.kesPerPoint} spent = 1 point (a KES ${Number(rules.kesPerPoint) * 5} purchase earns 5)`}>
+          <Field label="Shillings that earn 1 point" hint={`Now: ${cur()} ${rules.kesPerPoint} spent = 1 point (a ${cur()} ${Number(rules.kesPerPoint) * 5} purchase earns 5)`}>
             <Input type="number" min="1" value={rules.kesPerPoint} onChange={(e) => setRules((r) => ({ ...r, kesPerPoint: e.target.value }))} style={{ width: 160 }} />
           </Field>
           <Toggle
@@ -147,7 +147,7 @@ export default function Loyalty() {
               <Select
                 value={newReward.planId}
                 onChange={(e) => setNewReward((n) => ({ ...n, planId: e.target.value }))}
-                options={[{ value: '', label: plans.length ? 'Select a bundle…' : 'No hotspot bundles yet' }, ...plans.map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` }))]}
+                options={[{ value: '', label: plans.length ? 'Select a bundle…' : 'No hotspot bundles yet' }, ...plans.map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${p.price}` }))]}
               />
             </Field>
             <Field label="Points">

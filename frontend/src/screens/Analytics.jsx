@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font, kes } from '../theme/tokens';
+import { color, font, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Bar, Card, Grid, Screen, Select, Stat, Table } from '../ui/primitives';
@@ -68,8 +68,8 @@ export default function Analytics() {
         <Stat label="Active" value={byStatus.active ?? 0} tone={color.green} hint="paying and online" />
         <Stat
           label="MRR"
-          value={mrr ? `KES ${kes(mrr.mrr)}` : '—'}
-          hint={mrr ? `ARPU KES ${kes(mrr.arpu)} · ${mrr.activeCount} active` : 'loading…'}
+          value={mrr ? `${cur()} ${kes(mrr.mrr)}` : '—'}
+          hint={mrr ? `ARPU ${cur()} ${kes(mrr.arpu)} · ${mrr.activeCount} active` : 'loading…'}
         />
         <Stat
           label="Churn rate"
@@ -79,7 +79,7 @@ export default function Analytics() {
         />
         <Stat
           label="Revenue this month"
-          value={mrr ? `KES ${kes(mrr.revenueThisMonth)}` : '—'}
+          value={mrr ? `${cur()} ${kes(mrr.revenueThisMonth)}` : '—'}
           tone={color.green}
           hint="applied payments, month to date"
         />

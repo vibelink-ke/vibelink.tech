@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font } from '../theme/tokens';
+import { color, font, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Drawer, Empty, Field, Input, Screen, Select, Table, Tabs } from '../ui/primitives';
@@ -68,7 +68,7 @@ function StaffPay() {
           {
             key: 'salary', label: 'Base salary', align: 'right',
             render: (r) => r.base_salary > 0
-              ? <span style={{ fontFamily: font.mono }}>KES {Number(r.base_salary).toLocaleString('en-KE')} / {r.salary_frequency ?? 'monthly'}</span>
+              ? <span style={{ fontFamily: font.mono }}>{cur()} {Number(r.base_salary).toLocaleString('en-KE')} / {r.salary_frequency ?? 'monthly'}</span>
               : <span style={{ color: color.muted }}>Not set</span>,
           },
           {
@@ -104,7 +104,7 @@ function StaffPay() {
                 </Button>
               </div>
             </Field>
-            <Field label="Base salary (KES)">
+            <Field label={`Base salary (${cur()})`}>
               <Input type="number" min="0" value={editing.baseSalary} onChange={(e) => setEditing((s) => ({ ...s, baseSalary: e.target.value }))} />
             </Field>
             <Field label="Frequency">
@@ -279,7 +279,7 @@ function Payroll() {
           rows={runs}
           columns={[
             { key: 'period', label: 'Period', render: (r) => `${r.period_start} – ${r.period_end}` },
-            { key: 'total', label: 'Total', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>KES {Number(r.total).toLocaleString('en-KE')}</span> },
+            { key: 'total', label: 'Total', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{cur()} {Number(r.total).toLocaleString('en-KE')}</span> },
             { key: 'status', label: 'Status', render: (r) => <Badge tone={r.status === 'completed' ? 'active' : r.status === 'draft' ? 'default' : 'pending'}>{r.status}</Badge> },
             {
               key: 'act', label: '', align: 'right',
@@ -340,7 +340,7 @@ function Payroll() {
                 columns={[
                   { key: 'staff', label: 'Staff', render: (i) => i.staff_name },
                   { key: 'type', label: 'Type', render: (i) => <span style={{ textTransform: 'capitalize' }}>{i.type.replace('_', ' ')}</span> },
-                  { key: 'amount', label: 'Amount', align: 'right', render: (i) => <span style={{ fontFamily: font.mono }}>KES {Number(i.amount).toLocaleString('en-KE')}</span> },
+                  { key: 'amount', label: 'Amount', align: 'right', render: (i) => <span style={{ fontFamily: font.mono }}>{cur()} {Number(i.amount).toLocaleString('en-KE')}</span> },
                   { key: 'note', label: 'Note', render: (i) => <span style={{ color: color.muted, fontSize: 12 }}>{i.note ?? ''}</span> },
                   ...(viewing.status === 'draft' ? [{
                     key: 'act', label: '', align: 'right',
@@ -363,7 +363,7 @@ function Payroll() {
                   rows={viewing.payouts}
                   columns={[
                     { key: 'staff', label: 'Staff', render: (p) => p.staff_name },
-                    { key: 'amount', label: 'Amount', align: 'right', render: (p) => <span style={{ fontFamily: font.mono }}>KES {Number(p.amount).toLocaleString('en-KE')}</span> },
+                    { key: 'amount', label: 'Amount', align: 'right', render: (p) => <span style={{ fontFamily: font.mono }}>{cur()} {Number(p.amount).toLocaleString('en-KE')}</span> },
                     { key: 'method', label: 'Method', render: (p) => p.method },
                     {
                       key: 'status', label: 'Status',
@@ -399,7 +399,7 @@ function Payroll() {
                 options={[{ value: 'bonus', label: 'Bonus' }, { value: 'deduction', label: 'Deduction' }]}
               />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" min="0" value={adding.amount} onChange={(e) => setAdding((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
             <Field label="Note">
@@ -413,7 +413,7 @@ function Payroll() {
       <Drawer open={!!editingItem} title="Edit line item" onClose={() => setEditingItem(null)} width={360}>
         {editingItem && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" min="0" value={editingItem.amount} onChange={(e) => setEditingItem((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
             <Field label="Note">

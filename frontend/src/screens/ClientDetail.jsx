@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { color, font, radius, kes } from '../theme/tokens';
+import { color, font, radius, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Empty, Field, Input, KV, Modal, RowAction, RowActions, Screen, Select, Tabs } from '../ui/primitives';
@@ -253,7 +253,7 @@ export default function ClientDetail() {
       // wallet change — mirrors saveEdit's own refresh elsewhere in this file.
       store.setCollection('clients', (cs) => cs.map((c) => (
         c.account_code === client.account_code ? { ...c, wallet_balance } : c)));
-      store.toast(`Wallet set to KES ${balance.toLocaleString('en-KE')}`);
+      store.toast(`Wallet set to ${cur()} ${balance.toLocaleString('en-KE')}`);
       setWalletAdjust(null);
     } catch (e) {
       setWalletError(e.message || 'Could not adjust the wallet.');
@@ -581,7 +581,7 @@ export default function ClientDetail() {
     if (ask === null) return;
     try {
       const res = await api.stkPushSubscriber(c.id, ask.trim() ? Number(ask) : null);
-      store.toast(`Sent — KES ${res.amount} to ${res.phone}`);
+      store.toast(`Sent — ${cur()} ${res.amount} to ${res.phone}`);
     } catch (e) {
       store.toast(`Could not send: ${e.message}`);
     }
@@ -717,7 +717,7 @@ export default function ClientDetail() {
               Billing rather than the header. */}
           Wallet{' '}
           <span style={{ fontWeight: 700, color: color.ink }}>
-            KES {kes(client.wallet_balance)}
+            {cur()} {kes(client.wallet_balance)}
           </span>{' '}
           {(() => {
             // Unpaid invoices across the whole account make the balance negative.
@@ -725,7 +725,7 @@ export default function ClientDetail() {
             const wallet = Number(client.wallet_balance ?? 0);
             const owed = (lines.length ? lines : [client]).reduce((a, l) => a + (wallet - Number(l.net_balance ?? wallet)), 0);
             return owed - wallet > 0.5
-              ? <span style={{ color: color.rust, fontWeight: 700 }} title="Unpaid invoices outstanding">· Balance -KES {kes(owed - wallet)}</span>
+              ? <span style={{ color: color.rust, fontWeight: 700 }} title="Unpaid invoices outstanding">· Balance -{cur()} {kes(owed - wallet)}</span>
               : null;
           })()}{' '}
           <a
@@ -786,8 +786,8 @@ export default function ClientDetail() {
                     <span style={{ display: 'flex', gap: 16, alignItems: 'center', fontSize: 12.5, color: color.muted }}>
                       <span>{p?.title ?? 'No plan'}</span>
                       <span style={{ fontFamily: font.mono }}>{line.static_ip ?? line.current_ip ?? 'no IP'}</span>
-                      <span style={{ fontWeight: 600, color: color.ink }} title={line.custom_price != null ? `Custom price — the plan's own is KES ${kes(p?.price)}` : undefined}>
-                        KES {kes(line.custom_price ?? p?.price)}{line.custom_price != null && <span style={{ fontSize: 10.5, fontWeight: 600, color: color.amberInk, marginLeft: 4 }}>custom</span>}
+                      <span style={{ fontWeight: 600, color: color.ink }} title={line.custom_price != null ? `Custom price — the plan's own is ${cur()} ${kes(p?.price)}` : undefined}>
+                        {cur()} {kes(line.custom_price ?? p?.price)}{line.custom_price != null && <span style={{ fontSize: 10.5, fontWeight: 600, color: color.amberInk, marginLeft: 4 }}>custom</span>}
                       </span>
                       <span>{isOpen ? '−' : '+'}</span>
                     </span>
@@ -1145,7 +1145,7 @@ export default function ClientDetail() {
                             {code} · {lines.length} service{lines.length === 1 ? '' : 's'}
                           </span>
                         </span>
-                        <span style={{ fontSize: 12.5, color: color.muted }}>Wallet KES {kes(wallet)}</span>
+                        <span style={{ fontSize: 12.5, color: color.muted }}>Wallet {cur()} {kes(wallet)}</span>
                       </div>
                     );
                   })}
@@ -1175,7 +1175,7 @@ export default function ClientDetail() {
                         {p.provider} · {new Date(p.received_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </span>
-                    <span style={{ fontWeight: 600 }}>KES {kes(p.amount)}</span>
+                    <span style={{ fontWeight: 600 }}>{cur()} {kes(p.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -1216,9 +1216,9 @@ export default function ClientDetail() {
                       <span style={{ fontFamily: font.mono }}>{inv.number}</span>
                       <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
                       <span>
-                        KES {kes(inv.paid)} / {kes(inv.amount)}
+                        {cur()} {kes(inv.paid)} / {kes(inv.amount)}
                         {tax != null && (
-                          <span style={{ color: color.muted }}> ({inclusive ? 'incl.' : 'excl.'} KES {kes(tax)} tax)</span>
+                          <span style={{ color: color.muted }}> ({inclusive ? 'incl.' : 'excl.'} {cur()} {kes(tax)} tax)</span>
                         )}
                       </span>
                       <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
@@ -1634,11 +1634,11 @@ export default function ClientDetail() {
                 options={[
                   { value: '', label: 'No plan' },
                   ...(store.plans ?? []).filter((p) => p.service === switching.line.service)
-                    .map((p) => ({ value: p.id, label: `${p.title} · KES ${kes(p.price)}` })),
+                    .map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${kes(p.price)}` })),
                 ]}
               />
             </Field>
-            <Field label="Price (KES)" hint={`Blank charges the package's price (KES ${kes(planById[switching.planId]?.price)}). Applies from their next renewal or invoice.`}>
+            <Field label={`Price (${cur()})`} hint={`Blank charges the package's price (${cur()} ${kes(planById[switching.planId]?.price)}). Applies from their next renewal or invoice.`}>
               <Input
                 type="number" min="0"
                 value={switching.price}
@@ -1751,7 +1751,7 @@ export default function ClientDetail() {
                     style={{ fontFamily: font.mono }}
                   />
                 </Field>
-                <Field label="Price (KES)" hint={`Blank charges the plan's price (KES ${kes(planById[editing.plan_id]?.price)})`}>
+                <Field label={`Price (${cur()})`} hint={`Blank charges the plan's price (${cur()} ${kes(planById[editing.plan_id]?.price)})`}>
                   <Input
                     type="number" min="0"
                     value={editing.custom_price ?? ''}
@@ -1770,7 +1770,7 @@ export default function ClientDetail() {
                 })()}
               </>
             )}
-            <Field label="Wallet balance (KES)" hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
+            <Field label={`Wallet balance (${cur()})`} hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
               <Input type="number" value={editing.credit ?? 0} onChange={(e) => setEditing((s) => ({ ...s, credit: e.target.value }))} />
             </Field>
             <Field label="Expires" span={2} hint="When this line stops working without a payment">
@@ -1838,7 +1838,7 @@ export default function ClientDetail() {
       >
         {walletAdjust && (
           <div style={{ display: 'grid', gap: 12 }}>
-            <Field label="New wallet balance (KES)" hint="The wallet becomes exactly this — 0 clears it, 100 makes it 100. Negative means they owe. Shared across every line on this account">
+            <Field label={`New wallet balance (${cur()})`} hint="The wallet becomes exactly this — 0 clears it, 100 makes it 100. Negative means they owe. Shared across every line on this account">
               <Input
                 type="number"
                 value={walletAdjust.amount}

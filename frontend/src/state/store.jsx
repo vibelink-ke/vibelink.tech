@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import { isPlatformHost } from '../app/host';
+import { setCurrency } from '../theme/tokens';
 
 /**
  * The single app store. This is the React equivalent of the DCLogic `state`
@@ -275,7 +276,9 @@ export function StoreProvider({ children }) {
     setSmsGateways(val(2, { available: [], configured: [] }));
     setSmsCredits(val(3, null));
     setPaymentMethods(val(4, []));
-    setSettings(val(5, { org: {}, smtp: {}, prefs: {} }));
+    const loadedSettings = val(5, { org: {}, smtp: {}, prefs: {} });
+    setCurrency(loadedSettings?.org?.currency);   // before any screen renders with the new data
+    setSettings(loadedSettings);
     const updatesVal = val(6, { updates: [], unread: 0 });
     setUpdates({ items: updatesVal.updates ?? [], unread: updatesVal.unread ?? 0 });
     setErrors(errs);

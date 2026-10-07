@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font, kes } from '../theme/tokens';
+import { color, font, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
@@ -134,7 +134,7 @@ export default function Expenses() {
       body = { method: 'phone', phone: phone.trim() };
       target = phone.trim();
     }
-    if (!window.confirm(`Request a payment of KES ${kes(e.amount)} from your M-Pesa paybill to ${target}?\n\nNo money moves until another owner approves it.`)) return;
+    if (!window.confirm(`Request a payment of ${cur()} ${kes(e.amount)} from your M-Pesa paybill to ${target}?\n\nNo money moves until another owner approves it.`)) return;
     try {
       await api.payExpense(e.id, body);
       await reload();
@@ -146,7 +146,7 @@ export default function Expenses() {
   };
 
   const approvePay = async (e) => {
-    if (!window.confirm(`Approve sending KES ${kes(e.amount)} from your M-Pesa paybill?\n\nThis moves real money and cannot be undone here.`)) return;
+    if (!window.confirm(`Approve sending ${cur()} ${kes(e.amount)} from your M-Pesa paybill?\n\nThis moves real money and cannot be undone here.`)) return;
     try {
       await api.approveExpensePay(e.id);
       await reload();
@@ -231,9 +231,9 @@ export default function Expenses() {
 
       {tab === 'log' && (<>
       <Grid min={200} gap={14}>
-        <Stat label="Awaiting approval" value={`KES ${totalPending.toLocaleString('en-KE')}`} />
-        <Stat label="Approved, unpaid" value={`KES ${totalApproved.toLocaleString('en-KE')}`} />
-        <Stat label="Paid this month" value={`KES ${totalPaidThisMonth.toLocaleString('en-KE')}`} />
+        <Stat label="Awaiting approval" value={`${cur()} ${totalPending.toLocaleString('en-KE')}`} />
+        <Stat label="Approved, unpaid" value={`${cur()} ${totalApproved.toLocaleString('en-KE')}`} />
+        <Stat label="Paid this month" value={`${cur()} ${totalPaidThisMonth.toLocaleString('en-KE')}`} />
       </Grid>
 
       <Card
@@ -274,7 +274,7 @@ export default function Expenses() {
             },
             {
               key: 'amount', label: 'Amount', align: 'right',
-              render: (e) => <span style={{ fontFamily: font.mono }}>KES {Number(e.amount).toLocaleString('en-KE')}</span>,
+              render: (e) => <span style={{ fontFamily: font.mono }}>{cur()} {Number(e.amount).toLocaleString('en-KE')}</span>,
             },
             {
               key: 'due', label: 'Due',
@@ -352,7 +352,7 @@ export default function Expenses() {
             <Field label="Category">
               <Select value={form.category} onChange={set('category')} options={CATEGORIES} />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" min="0" value={form.amount} onChange={set('amount')} placeholder="0" />
             </Field>
             <Field label="Paid to" span={2} hint="Vendor or person's name">

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { color, font, radius, kes } from '../theme/tokens';
+import { color, font, radius, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
@@ -45,7 +45,7 @@ const Tile = ({ label, value, hint, dim, onClick }) => (
   </div>
 );
 
-const money = (n) => `KES ${kes(n)}`;
+const money = (n) => `${cur()} ${kes(n)}`;
 const when = (d) => (d ? new Date(d).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
 // Daraja can report a hashed/tokenized value in place of the real MSISDN on a C2B
 // confirmation (see payments/apply.js) — a real Kenyan number is at most 12 digits
@@ -189,7 +189,7 @@ export default function Payments() {
   // A payout Safaricom has not confirmed after a quarter of an hour can be taken back.
   const cancelPayout = async (row) => {
     if (!window.confirm(
-      `Cancel this payout of KES ${kes(row.amount)}?\n\nSafaricom accepted it but never confirmed it. Cancelling puts the money back to be paid again — `
+      `Cancel this payout of ${cur()} ${kes(row.amount)}?\n\nSafaricom accepted it but never confirmed it. Cancelling puts the money back to be paid again — `
       + 'so only do this if it has NOT reached your phone. If it already arrived, cancelling would let it be paid a second time.')) return;
     try {
       await api.cancelSettlement(row.id);
@@ -207,14 +207,14 @@ export default function Payments() {
   const requestPayout = async () => {
     const amount = payoutAmount.trim() ? Number(payoutAmount) : undefined;
     if (amount != null && (!(amount > 0) || amount > pendingRowAmount)) {
-      return store.toast(`Enter an amount up to the pending KES ${kes(pendingRowAmount)}`);
+      return store.toast(`Enter an amount up to the pending ${cur()} ${kes(pendingRowAmount)}`);
     }
     setPayoutBusy(true);
     try {
       const r = await api.requestSettlementPayout(amount);
       setPayoutAmount('');
       await store.reload();
-      store.toast(`Payout of KES ${kes(r.amount)} queued — it lands once M-Pesa confirms it`);
+      store.toast(`Payout of ${cur()} ${kes(r.amount)} queued — it lands once M-Pesa confirms it`);
     } catch (e) {
       store.toast(e.message);
     } finally {
@@ -372,7 +372,7 @@ export default function Payments() {
           paid: invoiceForm.paid,
         });
         store.setCollection('invoices', (xs) => [made, ...xs]);
-        store.toast(`${made.number} raised for KES ${kes(made.amount)}`);
+        store.toast(`${made.number} raised for ${cur()} ${kes(made.amount)}`);
       }
       setInvoiceForm(null);
       setTab('invoices');
@@ -825,7 +825,7 @@ export default function Payments() {
                     type="number"
                     value={payoutAmount}
                     onChange={(e) => setPayoutAmount(e.target.value)}
-                    placeholder={`Full amount (KES ${kes(pendingRowAmount)})`}
+                    placeholder={`Full amount (${cur()} ${kes(pendingRowAmount)})`}
                     style={{ width: 210 }}
                   />
                   <Button variant="primary" onClick={requestPayout} disabled={payoutBusy}>
@@ -935,7 +935,7 @@ export default function Payments() {
                 ]}
               />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" value={stkForm.amount} onChange={(e) => setStkForm((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
 
@@ -968,7 +968,7 @@ export default function Payments() {
                   onChange={(e) => setStkForm((s) => ({ ...s, planId: e.target.value }))}
                   options={[
                     { value: '', label: store.hsPlans?.length ? 'Select a bundle…' : 'No hotspot bundles yet' },
-                    ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
+                    ...(store.hsPlans ?? []).map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${p.price}` })),
                   ]}
                 />
               </Field>
@@ -1048,7 +1048,7 @@ export default function Payments() {
                 placeholder="e.g. Router relocation callout fee, or Equipment deposit"
               />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" value={invoiceForm.amount} onChange={(e) => setInvoiceForm((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
             <Field label="Due date" hint={invoiceForm.id ? undefined : 'Defaults to today'}>
@@ -1167,7 +1167,7 @@ export default function Payments() {
                 style={{ fontFamily: font.mono }}
               />
             </Field>
-            <Field label="Amount (KES)">
+            <Field label={`Amount (${cur()})`}>
               <Input type="number" value={recordForm.amount} onChange={(e) => setRecordForm((s) => ({ ...s, amount: e.target.value }))} />
             </Field>
             <Field label="Payer phone">

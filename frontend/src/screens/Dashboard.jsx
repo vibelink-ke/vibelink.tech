@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font, radius, kes } from '../theme/tokens';
+import { color, font, radius, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button } from '../ui/primitives';
@@ -275,7 +275,7 @@ export default function Dashboard() {
       .catch(() => setLastMonthMvp(null));
   }, []);
   const mvpAchievement = lastMonthMvp && (lastMonthMvp.metric === 'sales'
-    ? `KES ${Math.round(lastMonthMvp.value).toLocaleString('en-KE')} brought in`
+    ? `${cur()} ${Math.round(lastMonthMvp.value).toLocaleString('en-KE')} brought in`
     : `${lastMonthMvp.value} job${lastMonthMvp.value === 1 ? '' : 's'} finished`);
 
   const exportCsv = () => {
@@ -387,12 +387,12 @@ export default function Dashboard() {
           <>
             <Tile
               label="COLLECTED TODAY"
-              value={`KES ${kes(collected)}`}
+              value={`${cur()} ${kes(collected)}`}
               hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
             />
             <Tile
               label="PPPOE INCOME TODAY"
-              value={`KES ${kes(collectedPppoeToday)}`}
+              value={`${cur()} ${kes(collectedPppoeToday)}`}
               hint={collected ? `${Math.round((collectedPppoeToday / collected) * 100)}% of today's total` : 'no collections yet'}
             />
           </>
@@ -475,14 +475,14 @@ export default function Dashboard() {
           <div style={{ ...card, gap: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <span style={{ fontSize: 14.5, fontWeight: 600 }}>Collections by channel · last 7 days</span>
-              <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>KES {kes(collected7d)}</span>
+              <span style={{ fontFamily: font.mono, fontSize: 12, color: color.neutralInk }}>{cur()} {kes(collected7d)}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 14, height: 170 }}>
               {chartDays.map((day, i) => (
                 <div
                   key={i}
                   onClick={() => day.total > 0 && navigate(`/payments?tab=all&day=${day.iso}`)}
-                  title={day.total > 0 ? `KES ${kes(day.total)} — click to see these transactions` : undefined}
+                  title={day.total > 0 ? `${cur()} ${kes(day.total)} — click to see these transactions` : undefined}
                   style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, height: '100%', cursor: day.total > 0 ? 'pointer' : 'default' }}
                 >
                   {day.total > 0 ? (
@@ -569,7 +569,7 @@ export default function Dashboard() {
           <span style={{ fontSize: 14.5, fontWeight: 600 }}>Expiring next 72 hours</span>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontFamily: font.mono, fontSize: 30, fontWeight: 500 }}>{expiring.length}</span>
-            <span style={{ fontSize: 13, color: color.neutralInk }}>accounts{canSeeFinance ? ` · KES ${kes(atRisk)} at risk` : ''}</span>
+            <span style={{ fontSize: 13, color: color.neutralInk }}>accounts{canSeeFinance ? ` · ${cur()} ${kes(atRisk)} at risk` : ''}</span>
           </div>
           <div style={{ height: 8, borderRadius: radius.pill, background: '#eef0ec', overflow: 'hidden', display: 'flex' }}>
             {expiring.length > 0 && (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { color, font, kes } from '../../theme/tokens';
+import { color, font, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Field, Input, Modal, Select } from '../../ui/primitives';
@@ -83,7 +83,7 @@ export function useInvoiceEditor() {
     if (!items.length || items.some((it) => !it.desc.trim())) return store.toast('Give every line a description');
     if (items.some((it) => !(Number(it.price) > 0) || !(Number(it.qty) > 0))) return store.toast('Every line needs a quantity and a price');
     if (!f.dueDate) return store.toast('Pick a due date');
-    if (f.id && grand + 0.005 < f.paid) return store.toast(`Part of this invoice (KES ${kes(f.paid)}) is already paid — it cannot go below that.`);
+    if (f.id && grand + 0.005 < f.paid) return store.toast(`Part of this invoice (${cur()} ${kes(f.paid)}) is already paid — it cannot go below that.`);
     setBusy(true);
     try {
       if (f.id) {
@@ -93,7 +93,7 @@ export function useInvoiceEditor() {
       } else {
         const made = await api.createInvoice({ subscriberId: f.subscriberId, amount: grand, dueDate: f.dueDate, reason: reasonOf(items) });
         store.setCollection('invoices', (xs) => [made, ...xs]);
-        store.toast(`${made.number} raised for KES ${kes(made.amount)}`);
+        store.toast(`${made.number} raised for ${cur()} ${kes(made.amount)}`);
       }
       store.reload?.({ quiet: true });   // balances elsewhere move with it
       close();
@@ -118,7 +118,7 @@ export function useInvoiceEditor() {
       footer={
         <>
           <Button onClick={close}>Cancel</Button>
-          <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : f?.id ? 'Save changes' : `Raise invoice · KES ${kes(grand)}`}</Button>
+          <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : f?.id ? 'Save changes' : `Raise invoice · ${cur()} ${kes(grand)}`}</Button>
         </>
       }
     >
@@ -171,10 +171,10 @@ export function useInvoiceEditor() {
           <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 10, display: 'grid', gap: 4, fontSize: 13.5, justifyItems: 'end' }}>
             {taxRate > 0 && (
               <span style={{ color: color.muted, fontSize: 12.5 }}>
-                {inclusive ? `Includes ${taxRate}% tax of` : `Plus ${taxRate}% tax of`} KES {kes(tax)}
+                {inclusive ? `Includes ${taxRate}% tax of` : `Plus ${taxRate}% tax of`} {cur()} {kes(tax)}
               </span>
             )}
-            <span style={{ fontWeight: 700, fontFamily: font.mono }}>Total KES {kes(grand)}</span>
+            <span style={{ fontWeight: 700, fontFamily: font.mono }}>Total {cur()} {kes(grand)}</span>
           </div>
 
           {!f.id && (

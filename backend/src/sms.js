@@ -369,7 +369,12 @@ export async function orgVars(tenantId, routerId = null) {
  */
 export async function send(tenantId, phone, template, vars = {}) {
   if (!phone) return;
-  const to = String(phone).replace(/^\+?(?:254)?0?/, '254');
+  const { normaliseMsisdn, tenantCountry } = await import('./phone.js');
+  const country = await tenantCountry(tenantId);
+  // Kenya keeps its long-standing handling; elsewhere the number is read in the tenant's country, and a number that
+  // is already international is passed on as digits.
+  const to = normaliseMsisdn(phone, country)
+    ?? (country === 'KE' ? String(phone).replace(/^\+?(?:254)?0?/, '254') : String(phone).replace(/[^0-9]/g, ''));
 
   const [smsResult] = await Promise.all([
     sendSms(tenantId, to, template, vars),

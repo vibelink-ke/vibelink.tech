@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Footer from '../app/Footer';
-import { font } from '../theme/tokens';
+import { font, cur } from '../theme/tokens';
 import { downloadInvoice } from '../lib/export';
 
 /**
@@ -703,7 +703,7 @@ export default function CustomerPortal() {
           )}
           {me.plan && (
             <span style={{ fontSize: 13, opacity: 0.85, marginTop: 4 }}>
-              {me.plan.title}{me.plan.speed ? ` · ${me.plan.speed}` : ''} · KES {me.plan.price}/mo
+              {me.plan.title}{me.plan.speed ? ` · ${me.plan.speed}` : ''} · {cur()} {me.plan.price}/mo
             </span>
           )}
         </div>
@@ -712,7 +712,7 @@ export default function CustomerPortal() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Stat
             label="Wallet balance"
-            value={`KES ${me.balance}`}
+            value={`${cur()} ${me.balance}`}
             sub={me.balance < 0 ? 'You owe this much' : 'Credit on file'}
           />
           <Stat label="Data used" value={formatUsage(me.usageMb)} sub="This billing cycle" />
@@ -765,7 +765,7 @@ export default function CustomerPortal() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.title}</span>
                       <span style={{ fontSize: 12, color: pc.muted }}>
-                        {p.rate_down ? `${Math.round(p.rate_down / 1000)}/${Math.round(p.rate_up / 1000)} Mbps · ` : ''}KES {p.price}/mo
+                        {p.rate_down ? `${Math.round(p.rate_down / 1000)}/${Math.round(p.rate_up / 1000)} Mbps · ` : ''}{cur()} {p.price}/mo
                       </span>
                     </div>
                     {current ? (
@@ -797,8 +797,8 @@ export default function CustomerPortal() {
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                     <span style={{ fontSize: 13.5, fontWeight: 600 }}>{inv.number}</span>
                     <span style={{ fontSize: 12, color: pc.muted }}>
-                      Due {new Date(inv.due_date).toLocaleDateString('en-KE')} · KES {inv.amount}
-                      {Number(inv.paid) > 0 ? ` (KES ${inv.paid} paid)` : ''}
+                      Due {new Date(inv.due_date).toLocaleDateString('en-KE')} · {cur()} {inv.amount}
+                      {Number(inv.paid) > 0 ? ` (${cur()} ${inv.paid} paid)` : ''}
                     </span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -905,7 +905,7 @@ export default function CustomerPortal() {
                 disabled={payBusy}
               />
               <button style={button(true)} onClick={payNow} disabled={payBusy || !payPhone}>
-                {payBusy ? 'Waiting…' : `Send prompt for KES ${payAmount.trim() || (payTarget ? payTarget.owed : me.plan?.price) || ''}`}
+                {payBusy ? 'Waiting…' : `Send prompt for ${cur()} ${payAmount.trim() || (payTarget ? payTarget.owed : me.plan?.price) || ''}`}
               </button>
               {payMsg && <span style={{ fontSize: 13, color: pc.muted }}>{payMsg}</span>}
               <button style={button(false)} onClick={() => { setPayOpen(false); setPayTarget(null); }}>Cancel</button>
@@ -948,7 +948,7 @@ export default function CustomerPortal() {
               <Row
                 key={p.provider_ref ?? p.received_at}
                 k={new Date(p.received_at).toLocaleDateString('en-KE')}
-                v={`KES ${p.amount}`}
+                v={`${cur()} ${p.amount}`}
               />
             ))
           )}

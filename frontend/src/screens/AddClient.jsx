@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { color, font, radius } from '../theme/tokens';
+import { color, font, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Button, Card, Field, Input, Screen, Select } from '../ui/primitives';
@@ -358,9 +358,9 @@ export default function AddClient() {
               <Select value={f.billing} onChange={set('billing')} options={BILLING} />
             </Field>
             <Field
-              label="Installation fee (KES)"
+              label={`Installation fee (${cur()})`}
               hint={Number(store.settings?.prefs?.installationFee) > 0
-                ? `Standard is KES ${Number(store.settings.prefs.installationFee).toLocaleString('en-KE')} — leave blank to charge it, change it for this client, or enter 0 to waive it.`
+                ? `Standard is ${cur()} ${Number(store.settings.prefs.installationFee).toLocaleString('en-KE')} — leave blank to charge it, change it for this client, or enter 0 to waive it.`
                 : 'Leave blank for the standard fee (none is set), or enter what to charge for installing this client.'}
             >
               <Input type="number" min="0" value={f.installationFee} onChange={set('installationFee')} placeholder={String(Number(store.settings?.prefs?.installationFee) || 0)} />
@@ -410,7 +410,7 @@ export default function AddClient() {
                   onChange={set('planId')}
                   options={[
                     { value: '', label: pppoePlans.length ? 'Select a plan…' : `No ${f.service} plans created yet` },
-                    ...pppoePlans.map((p) => ({ value: p.id, label: `${p.title} · KES ${p.price}` })),
+                    ...pppoePlans.map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${p.price}` })),
                   ]}
                 />
               </Field>

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { color, font, radius, kes } from '../theme/tokens';
+import { color, font, radius, kes, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { useAction, ActionResult } from '../ui/action';
 import { api } from '../api/client';
@@ -655,8 +655,8 @@ export default function Clients() {
                         const owed = lines.reduce((a, l) => a + (Number(l.wallet_balance ?? 0) - Number(l.net_balance ?? l.wallet_balance ?? 0)), 0);
                         const net = wallet - owed;
                         return net < -0.5
-                          ? <span style={{ color: color.rust }} title="Has an unpaid invoice">-KES {kes(-net)}</span>
-                          : <>KES {kes(net)}</>;
+                          ? <span style={{ color: color.rust }} title="Has an unpaid invoice">-{cur()} {kes(-net)}</span>
+                          : <>{cur()} {kes(net)}</>;
                       })()}
                     </td>
                     <td style={{ ...td, fontSize: 12.5, color: color.muted }}>
@@ -918,7 +918,7 @@ export default function Clients() {
                 options={['active', 'grace', 'expired', 'suspended']}
               />
             </Field>
-            <Field label="Wallet balance (KES)" hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
+            <Field label={`Wallet balance (${cur()})`} hint="Shared across every line on this account, not just this one — positive credits it, negative is what they still owe">
               <Input
                 type="number"
                 value={editing.credit ?? 0}
@@ -967,7 +967,7 @@ export default function Clients() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontFamily: font.mono }}>{inv.number}</span>
                             <span style={{ color: color.muted }}>{inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-KE') : '—'}</span>
-                            <span>KES {kes(inv.paid)} / {kes(inv.amount)}</span>
+                            <span>{cur()} {kes(inv.paid)} / {kes(inv.amount)}</span>
                             <span style={{ fontWeight: 600, color: inv.status === 'paid' ? color.green : color.rust }}>{inv.status}</span>
                             <span style={{ display: 'flex', gap: 8 }}>
                               <span

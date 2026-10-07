@@ -92,6 +92,16 @@ export const statusTone = {
 export const toneFor = (s) =>
   statusTone[String(s ?? '').toLowerCase().replace(/\s+/g, '')] ?? statusTone.default;
 
-/** KES money formatting used across the money screens. */
+/** Number formatting used across the money screens (despite the name it formats any currency's amount). */
 export const kes = (n) =>
   Number(n ?? 0).toLocaleString('en-KE', { maximumFractionDigits: 0 });
+
+/**
+ * The tenant's currency code (Settings → Organisation), "KES" until their settings arrive. Module-level so a plain
+ * string like `${cur()} ${kes(x)}` follows it without every screen having to ask the store.
+ */
+let currentCurrency = 'KES';
+export const setCurrency = (c) => { currentCurrency = String(c ?? 'KES').trim().slice(0, 3).toUpperCase() || 'KES'; };
+export const cur = () => currentCurrency;
+/** "UGX 12,500" — an amount with the tenant's currency in front. */
+export const money = (n) => `${currentCurrency} ${kes(n)}`;

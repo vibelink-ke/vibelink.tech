@@ -178,6 +178,10 @@ create table if not exists usage_cursor (
   updated_at   timestamptz not null default now()
 );
 
+-- The country a tenant operates in: decides how customers' phone numbers are read (dialling code) and which
+-- payment methods and currency are offered. Kenya unless changed under Settings → Organisation.
+alter table tenants add column if not exists country char(2) not null default 'KE';
+
 -- When the device's reserved IP (its static DHCP lease) was given back, a week after its plan expired.
 alter table voucher_devices add column if not exists lease_released_at timestamptz;
 

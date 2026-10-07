@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { color, font, radius } from '../theme/tokens';
+import { color, font, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Card, Screen, Select } from '../ui/primitives';
@@ -9,7 +9,7 @@ import { Badge, Card, Screen, Select } from '../ui/primitives';
 function eotmAchievement(entry, span) {
   if (!entry) return '';
   return entry.metric === 'sales'
-    ? `KES ${Math.round(entry.value).toLocaleString('en-KE')} brought in ${span}`
+    ? `${cur()} ${Math.round(entry.value).toLocaleString('en-KE')} brought in ${span}`
     : `${entry.value} job${entry.value === 1 ? '' : 's'} finished ${span}`;
 }
 

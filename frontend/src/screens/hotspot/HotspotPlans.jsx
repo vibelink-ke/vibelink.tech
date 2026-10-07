@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { color, font, kes, radius } from '../../theme/tokens';
+import { color, font, kes, radius, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
@@ -150,7 +150,7 @@ export default function HotspotPlans() {
         <Field label="Title" span={2}>
           <Input value={v.title} onChange={update('title')} placeholder="3 hours unlimited" />
         </Field>
-        <Field label="Price (KES)">
+        <Field label={`Price (${cur()})`}>
           <Input value={v.price} onChange={update('price')} type="number" />
         </Field>
         <Field label="Devices">
@@ -210,7 +210,7 @@ export default function HotspotPlans() {
           rows={store.hsPlans ?? []}
           columns={[
             { key: 'title', label: 'Bundle', render: (p) => <span style={{ fontWeight: 600 }}>{p.title}</span> },
-            { key: 'price', label: 'Price', render: (p) => <span style={{ fontFamily: font.mono }}>KES {kes(p.price)}</span> },
+            { key: 'price', label: 'Price', render: (p) => <span style={{ fontFamily: font.mono }}>{cur()} {kes(p.price)}</span> },
             { key: 'duration_min', label: 'Duration', render: (p) => duration(p.duration_min) },
             { key: 'devices', label: 'Devices', align: 'right' },
             { key: 'rate_down', label: 'Speed', render: (p) => (p.rate_down ? `${Math.round(p.rate_down / 1000)} Mbps` : '—') },
@@ -262,7 +262,7 @@ export default function HotspotPlans() {
       <Drawer open={!!viewing} title={viewing?.title} onClose={() => setViewing(null)}>
         {viewing && (
           <>
-            <KV k="Price" v={`KES ${kes(viewing.price)}`} />
+            <KV k="Price" v={`${cur()} ${kes(viewing.price)}`} />
             <KV k="Duration" v={duration(viewing.duration_min)} />
             <KV k="Devices" v={viewing.devices ?? 1} />
             <KV k="Speed" v={viewing.rate_down ? `${Math.round(viewing.rate_down / 1000)} Mbps` : '—'} />

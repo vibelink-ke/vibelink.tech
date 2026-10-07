@@ -29,6 +29,7 @@ import { providerNames } from './sms.js';
 import * as auth from './auth.js';
 import { requirePermission, hasPermission, loadPermissions, savePermissions, PERMISSION_META, ROLES } from './permissions.js';
 import { registerField } from './field.js';
+import { msisdnFor, badNumberMessage, forgetTenantCountry, COUNTRIES } from './phone.js';
 import axios from 'axios';
 
 /**
@@ -1082,9 +1083,9 @@ app.post('/api/public/invoices/:id/pay', stkLimiter, wrap(async (req, res) => {
   }
 
   let phone = String(req.body?.phone ?? '').trim();
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  phone = await msisdnFor(inv.tenant_id, phone);
+  if (!phone) {
+    return res.status(400).json({ error: await badNumberMessage(inv.tenant_id) });
   }
 
   try {
@@ -1179,9 +1180,9 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
 
   // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  phone = await msisdnFor(tenant.id, phone);
+  if (!phone) {
+    return res.status(400).json({ error: await badNumberMessage(tenant.id) });
   }
 
   // Which physical router served this guest's login page — embedded in the
@@ -1706,9 +1707,9 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   if (!mac || !routerId) return res.status(400).json({ error: 'Pick a device from the list first.' });
   if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
 
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  phone = await msisdnFor(tenant.id, phone);
+  if (!phone) {
+    return res.status(400).json({ error: await badNumberMessage(tenant.id) });
   }
 
   const { rows: [plan] } = await pool.query(
@@ -2880,9 +2881,9 @@ app.post('/portal/pay', stkLimiter, wrap(async (req, res) => {
 
   // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
   let phone = String(req.body?.phone ?? sub.phone ?? '').trim();
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  phone = await msisdnFor(s.tenant_id, phone);
+  if (!phone) {
+    return res.status(400).json({ error: await badNumberMessage(s.tenant_id) });
   }
 
   // Defaults to the plan price, but a customer can name their own amount —
@@ -2937,9 +2938,9 @@ app.post('/portal/pay-invoice', stkLimiter, wrap(async (req, res) => {
   }
 
   let phone = String(req.body?.phone ?? s.phone ?? '').trim();
-  phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
-  if (!/^254[17]\d{8}$/.test(phone)) {
-    return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
+  phone = await msisdnFor(s.tenant_id, phone);
+  if (!phone) {
+    return res.status(400).json({ error: await badNumberMessage(s.tenant_id) });
   }
 
   try {
@@ -10823,7 +10824,7 @@ app.post('/api/payments/stk', requirePermission('payments.stk'), wrap(async (req
     subRouterId = s.router_id;
   }
   if (!msisdn) return res.status(400).json({ error: 'No phone number to push to' });
-  msisdn = String(msisdn).replace(/^\+?(?:254)?0?/, '254');
+  msisdn = (await msisdnFor(req.tenant.id, msisdn)) ?? String(msisdn).replace(/^\+?(?:254)?0?/, '254');
 
   const base = process.env.BASE_URL ?? '';
   const callbackReachable = /^https?:\/\//.test(base) && !/localhost|127\.0\.0\.1/.test(base);
@@ -14551,9 +14552,9 @@ app.post('/api/updates/seen', wrap(async (req, res) => {
 
 app.get('/api/settings', requirePermission('settings.view'), wrap(async (req, res) => {
   const { rows: [extra] } = await pool.query('select * from app_settings where tenant_id=$1', [req.tenant.id]);
-  const { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status } = req.tenant;
+  const { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status, country } = req.tenant;
   res.json({
-    org: { id, name, subdomain, currency, timezone, kra_pin, support_phone, licence_ends, status },
+    org: { id, name, subdomain, currency, country: country ?? 'KE', timezone, kra_pin, support_phone, licence_ends, status },
     smtp: extra?.smtp ?? {},
     prefs: extra?.prefs ?? {},
     alertPhone: extra?.alert_phone ?? null,
@@ -14600,6 +14601,13 @@ app.put('/api/settings', requirePermission('settings.edit'), wrap(async (req, re
        where id=$1`,
       [req.tenant.id, org.name ?? null, org.currency ?? null, org.timezone ?? null,
        org.kra_pin ?? null, org.support_phone ?? null]);
+    // The country decides how phone numbers are read and which payment methods fit, so it is validated against the
+    // countries we know rather than stored as typed.
+    if (org.country && COUNTRIES[String(org.country).toUpperCase()]) {
+      await pool.query('update tenants set country=$2 where id=$1', [req.tenant.id, String(org.country).toUpperCase()])
+        .catch(() => {});   // column not created yet on this server
+      forgetTenantCountry(req.tenant.id);
+    }
   }
   if (smtp || prefs) {
     await pool.query(

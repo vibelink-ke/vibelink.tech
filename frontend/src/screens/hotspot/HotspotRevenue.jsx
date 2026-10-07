@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { color, font, kes } from '../../theme/tokens';
+import { color, font, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Grid, Screen, Stat, Table } from '../../ui/primitives';
@@ -60,9 +60,9 @@ export default function HotspotRevenue() {
       }
     >
       <Grid min={200} gap={14}>
-        <Stat label="Hotspot revenue" value={loading ? '…' : `KES ${kes(total)}`} hint={period.label.toLowerCase()} />
+        <Stat label="Hotspot revenue" value={loading ? '…' : `${cur()} ${kes(total)}`} hint={period.label.toLowerCase()} />
         <Stat label="Vouchers sold" value={loading ? '…' : count} hint="paid sessions" />
-        <Stat label="Average sale" value={loading ? '…' : `KES ${kes(avg)}`} hint="per voucher" />
+        <Stat label="Average sale" value={loading ? '…' : `${cur()} ${kes(avg)}`} hint="per voucher" />
         <Stat label="Active bundles" value={(store.hsPlans ?? []).length} hint="on the portal" />
       </Grid>
 
@@ -73,13 +73,13 @@ export default function HotspotRevenue() {
           rows={byPlan.filter((r) => r.sold > 0)}
           columns={[
             { key: 'title', label: 'Bundle', render: (r) => <span style={{ fontWeight: 600 }}>{r.title}</span> },
-            { key: 'price', label: 'Price', render: (r) => <span style={{ fontFamily: font.mono }}>KES {kes(r.price)}</span> },
+            { key: 'price', label: 'Price', render: (r) => <span style={{ fontFamily: font.mono }}>{cur()} {kes(r.price)}</span> },
             { key: 'sold', label: 'Sold', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.sold}</span> },
             {
               key: 'revenue',
               label: 'Revenue',
               align: 'right',
-              render: (r) => <span style={{ fontFamily: font.mono, color: color.green }}>KES {kes(r.revenue)}</span>,
+              render: (r) => <span style={{ fontFamily: font.mono, color: color.green }}>{cur()} {kes(r.revenue)}</span>,
             },
           ]}
         />
