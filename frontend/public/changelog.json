@@ -101,7 +101,8 @@
       "A cookie notice appears the first time someone opens the site: Accept all or Essential only, remembered for a year, and changeable from Cookie settings in the footer.",
       "Dashboard → Top commission earner: \"sales closed\" now counts the clients whose first payment earned the commission, instead of showing 0 when the lead was never marked won. Adding a client from a lead now marks that lead won.",
       "Leads: once a won lead's installation ticket is resolved, the Install ticket button becomes \"✓ Installed\" instead of staying as a call to raise it again.",
-      "New: Schedule. Book installations and repairs for a date, time and technician on a weekly calendar (or from a ticket's Schedule a visit button). The customer is texted the booking and a reminder a few hours before, the technician is texted where to go, double-booking a technician is flagged, and booked jobs show their time in the field app."
+      "New: Schedule. Book installations and repairs for a date, time and technician on a weekly calendar (or from a ticket's Schedule a visit button). The customer is texted the booking and a reminder a few hours before, the technician is texted where to go, double-booking a technician is flagged, and booked jobs show their time in the field app.",
+      "Payments → By site: pick the dates (today, yesterday, 7 or 30 days, this or last month, or your own), see each day's takings split by site, and every applied payment is now counted once so the totals match All transactions. Payments with no site are under Unassigned."
     ]
   }
 ]

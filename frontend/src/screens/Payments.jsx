@@ -291,16 +291,32 @@ export default function Payments() {
   // cheap enough to just refetch each time the tab is opened.
   const [bySite, setBySite] = useState([]);
   const [siteLoading, setSiteLoading] = useState(false);
+  const [siteRange, setSiteRange] = useState('month');
+  const [siteFrom, setSiteFrom] = useState('');
+  const [siteTo, setSiteTo] = useState('');
+  // The dates the By site tab is showing, as local calendar days.
+  const siteSpan = useMemo(() => {
+    const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const now = new Date();
+    const day = (n) => new Date(now.getFullYear(), now.getMonth(), now.getDate() - n);
+    if (siteRange === 'today') return { from: ymd(now), to: ymd(now) };
+    if (siteRange === 'yesterday') return { from: ymd(day(1)), to: ymd(day(1)) };
+    if (siteRange === '7d') return { from: ymd(day(6)), to: ymd(now) };
+    if (siteRange === '30d') return { from: ymd(day(29)), to: ymd(now) };
+    if (siteRange === 'lastmonth') return { from: ymd(new Date(now.getFullYear(), now.getMonth() - 1, 1)), to: ymd(new Date(now.getFullYear(), now.getMonth(), 0)) };
+    if (siteRange === 'custom') return { from: siteFrom || ymd(now), to: siteTo || ymd(now) };
+    return { from: ymd(new Date(now.getFullYear(), now.getMonth(), 1)), to: ymd(now) };
+  }, [siteRange, siteFrom, siteTo]);
   useEffect(() => {
     if (tab !== 'sites') return;
     let cancelled = false;
     setSiteLoading(true);
-    api.paymentsBySite()
+    api.paymentsBySite(siteSpan.from, siteSpan.to)
       .then((rows) => { if (!cancelled) setBySite(rows); })
       .catch(() => { if (!cancelled) store.toast('Could not load payments by site'); })
       .finally(() => { if (!cancelled) setSiteLoading(false); });
     return () => { cancelled = true; };
-  }, [tab]);
+  }, [tab, siteSpan.from, siteSpan.to]);
 
   /**
    * Fire the prompt, then poll stk_requests until the callback lands. Without a
@@ -792,30 +808,108 @@ export default function Payments() {
           )}
 
           {tab === 'sites' && (
-            siteLoading ? (
-              <Empty>Loading…</Empty>
-            ) : bySite.length === 0 ? (
-              <Empty>No applied payments yet to attribute to a site.</Empty>
-            ) : (
-              <Table
-                rowKey={(r) => r.router_id ?? 'unassigned'}
-                rows={bySite}
-                columns={[
-                  {
-                    key: 'router_name', label: 'Site',
-                    render: (r) => r.router_name ?? <span style={{ color: color.muted }}>Unassigned</span>,
-                  },
-                  { key: 'pppoe_amount', label: 'PPPoE', align: 'right', render: (r) => money(r.pppoe_amount) },
-                  { key: 'pppoe_count', label: 'PPPoE #', align: 'right', render: (r) => r.pppoe_count },
-                  { key: 'hotspot_amount', label: 'Hotspot', align: 'right', render: (r) => money(r.hotspot_amount) },
-                  { key: 'hotspot_count', label: 'Hotspot #', align: 'right', render: (r) => r.hotspot_count },
-                  {
-                    key: 'total_amount', label: 'Total', align: 'right',
-                    render: (r) => <strong>{money(r.total_amount)}</strong>,
-                  },
-                ]}
-              />
-            )
+            <>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 12 }}>
+                {[['today', 'Today'], ['yesterday', 'Yesterday'], ['7d', 'Last 7 days'], ['30d', 'Last 30 days'], ['month', 'This month'], ['lastmonth', 'Last month'], ['custom', 'Pick dates']].map(([k, label]) => (
+                  <span
+                    key={k}
+                    onClick={() => setSiteRange(k)}
+                    style={{
+                      padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                      border: `1px solid ${siteRange === k ? color.green : color.line}`,
+                      background: siteRange === k ? color.green : '#fff', color: siteRange === k ? '#fff' : color.ink,
+                    }}
+                  >
+                    {label}
+                  </span>
+                ))}
+                {siteRange === 'custom' && (
+                  <>
+                    <Input type="date" value={siteFrom} onChange={(e) => setSiteFrom(e.target.value)} style={{ width: 150 }} />
+                    <span style={{ color: color.muted }}>to</span>
+                    <Input type="date" value={siteTo} onChange={(e) => setSiteTo(e.target.value)} style={{ width: 150 }} />
+                  </>
+                )}
+                <span style={{ marginLeft: 'auto', fontSize: 12.5, color: color.muted }}>{siteSpan.from} – {siteSpan.to}</span>
+              </div>
+              {siteLoading ? (
+                <Empty>Loading…</Empty>
+              ) : bySite.length === 0 ? (
+                <Empty>No applied payments in these dates.</Empty>
+              ) : (() => {
+                const siteName = (r) => r.router_name ?? 'Unassigned';
+                const sites = new Map();
+                const dayMap = new Map();
+                for (const r of bySite) {
+                  const k = r.router_id ?? 'unassigned';
+                  const s = sites.get(k) ?? { key: k, name: siteName(r), pppoe: 0, pppoeN: 0, hotspot: 0, hotspotN: 0 };
+                  s.pppoe += Number(r.pppoe_amount); s.pppoeN += r.pppoe_count; s.hotspot += Number(r.hotspot_amount); s.hotspotN += r.hotspot_count;
+                  sites.set(k, s);
+                  const d = dayMap.get(r.day) ?? { day: r.day, pppoe: 0, hotspot: 0, bySite: new Map() };
+                  d.pppoe += Number(r.pppoe_amount); d.hotspot += Number(r.hotspot_amount);
+                  d.bySite.set(k, (d.bySite.get(k) ?? 0) + Number(r.pppoe_amount) + Number(r.hotspot_amount));
+                  dayMap.set(r.day, d);
+                }
+                const siteList = [...sites.values()].sort((a, b) => (b.pppoe + b.hotspot) - (a.pppoe + a.hotspot));
+                const dayList = [...dayMap.values()].sort((a, b) => b.day.localeCompare(a.day));
+                const tot = siteList.reduce((a, s) => ({ pppoe: a.pppoe + s.pppoe, pppoeN: a.pppoeN + s.pppoeN, hotspot: a.hotspot + s.hotspot, hotspotN: a.hotspotN + s.hotspotN }), { pppoe: 0, pppoeN: 0, hotspot: 0, hotspotN: 0 });
+                const th = { padding: '8px 10px', fontSize: 11.5, color: color.muted, fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' };
+                const td = { padding: '8px 10px', fontSize: 13, textAlign: 'right', borderTop: `1px solid ${color.line}`, whiteSpace: 'nowrap' };
+                return (
+                  <div style={{ display: 'grid', gap: 22 }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>By site</div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr>
+                          <th style={{ ...th, textAlign: 'left' }}>SITE</th><th style={th}>PPPOE</th><th style={th}>PPPOE #</th>
+                          <th style={th}>HOTSPOT</th><th style={th}>HOTSPOT #</th><th style={th}>TOTAL</th>
+                        </tr></thead>
+                        <tbody>
+                          {siteList.map((s) => (
+                            <tr key={s.key}>
+                              <td style={{ ...td, textAlign: 'left', color: s.key === 'unassigned' ? color.muted : color.ink }}>{s.name}</td>
+                              <td style={td}>{money(s.pppoe)}</td><td style={td}>{s.pppoeN}</td>
+                              <td style={td}>{money(s.hotspot)}</td><td style={td}>{s.hotspotN}</td>
+                              <td style={{ ...td, fontWeight: 700 }}>{money(s.pppoe + s.hotspot)}</td>
+                            </tr>
+                          ))}
+                          <tr>
+                            <td style={{ ...td, textAlign: 'left', fontWeight: 700 }}>All sites</td>
+                            <td style={{ ...td, fontWeight: 700 }}>{money(tot.pppoe)}</td><td style={{ ...td, fontWeight: 700 }}>{tot.pppoeN}</td>
+                            <td style={{ ...td, fontWeight: 700 }}>{money(tot.hotspot)}</td><td style={{ ...td, fontWeight: 700 }}>{tot.hotspotN}</td>
+                            <td style={{ ...td, fontWeight: 700 }}>{money(tot.pppoe + tot.hotspot)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <div style={{ fontSize: 11.5, color: color.muted, paddingTop: 6 }}>
+                        Every applied payment in these dates is counted once. A payment with no site (no router on the client, or a voucher bought before routers were recorded) is under Unassigned.
+                      </div>
+                    </div>
+
+                    <div style={{ overflowX: 'auto' }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Day by day</div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead><tr>
+                          <th style={{ ...th, textAlign: 'left' }}>DAY</th>
+                          {siteList.map((s) => <th key={s.key} style={th}>{s.name.toUpperCase()}</th>)}
+                          <th style={th}>PPPOE</th><th style={th}>HOTSPOT</th><th style={th}>TOTAL</th>
+                        </tr></thead>
+                        <tbody>
+                          {dayList.map((d) => (
+                            <tr key={d.day}>
+                              <td style={{ ...td, textAlign: 'left' }}>{new Date(`${d.day}T12:00:00`).toLocaleDateString('en-KE', { weekday: 'short', day: 'numeric', month: 'short' })}</td>
+                              {siteList.map((s) => <td key={s.key} style={{ ...td, color: d.bySite.get(s.key) ? color.ink : color.muted }}>{d.bySite.get(s.key) ? kes(d.bySite.get(s.key)) : '—'}</td>)}
+                              <td style={td}>{kes(d.pppoe)}</td><td style={td}>{kes(d.hotspot)}</td>
+                              <td style={{ ...td, fontWeight: 700 }}>{money(d.pppoe + d.hotspot)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
           )}
 
           {tab === 'settlements' && (

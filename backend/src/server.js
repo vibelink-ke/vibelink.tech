@@ -10789,28 +10789,39 @@ app.get('/api/hotspot/today', requirePermission('hotspot.view'), wrap(async (req
  * through in the first place.
  */
 app.get('/api/payments/by-site', requirePermission('payments.view'), wrap(async (req, res) => {
+  /**
+   * Every applied payment in the period, counted once and attributed to a site where one can be told: a voucher's
+   * router for hotspot sales, the client's router for PPPoE. A payment that cannot be attributed (no voucher or client
+   * attached, or no router on them) lands in the Unassigned row instead of vanishing, so the rows always add up to what
+   * All transactions shows for the same dates. Days are the tenant's own calendar days. The platform's own SMS-credit
+   * sales are not site income and are left out.
+   */
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
+  const tz = String(req.tenant.timezone ?? 'Africa/Nairobi').split(' ')[0];
   const { rows } = await pool.query(`
-    select router_id, router_name,
-           sum(pppoe_amount) as pppoe_amount, sum(pppoe_count) as pppoe_count,
-           sum(hotspot_amount) as hotspot_amount, sum(hotspot_count) as hotspot_count,
-           sum(pppoe_amount) + sum(hotspot_amount) as total_amount
-      from (
-        select s.router_id, r.name as router_name,
-               pay.amount as pppoe_amount, 1 as pppoe_count, 0 as hotspot_amount, 0 as hotspot_count
-          from payments pay
-          join subscribers s on s.id = pay.subscriber_id
-          left join routers r on r.id = s.router_id
-         where pay.tenant_id=$1 and pay.status='applied'
-        union all
-        select v.router_id, r.name as router_name,
-               0 as pppoe_amount, 0 as pppoe_count, pay.amount as hotspot_amount, 1 as hotspot_count
-          from payments pay
-          join vouchers v on v.id = pay.voucher_id
-          left join routers r on r.id = v.router_id
-         where pay.tenant_id=$1 and pay.status='applied'
-      ) x
-     group by router_id, router_name
-     order by total_amount desc`, [req.tenant.id]);
+    with p as (
+      select pay.amount,
+             (pay.received_at at time zone $4)::date as day,
+             coalesce(s.router_id, v.router_id) as router_id,
+             case when pay.voucher_id is not null then 'hotspot'
+                  when pay.subscriber_id is not null then 'pppoe'
+                  else coalesce(pay.service, 'pppoe') end as kind
+        from payments pay
+        left join subscribers s on s.id = pay.subscriber_id
+        left join vouchers v on v.id = pay.voucher_id
+       where pay.tenant_id = $1 and pay.status = 'applied'
+         and coalesce(pay.payload->>'type', '') not in ('sms_credit', 'sms_credit_relay')
+         and (pay.received_at at time zone $4)::date between coalesce($2::date, date_trunc('month', now() at time zone $4)::date)
+                                                          and coalesce($3::date, (now() at time zone $4)::date)
+    )
+    select to_char(p.day, 'YYYY-MM-DD') as day, p.router_id, r.name as router_name,
+           coalesce(sum(p.amount) filter (where p.kind = 'pppoe'), 0) as pppoe_amount,
+           count(*) filter (where p.kind = 'pppoe')::int as pppoe_count,
+           coalesce(sum(p.amount) filter (where p.kind <> 'pppoe'), 0) as hotspot_amount,
+           count(*) filter (where p.kind <> 'pppoe')::int as hotspot_count
+      from p left join routers r on r.id = p.router_id
+     group by p.day, p.router_id, r.name
+     order by p.day`, [req.tenant.id, day(req.query.from), day(req.query.to), tz]);
   res.json(rows);
 }));
 
