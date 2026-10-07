@@ -60,6 +60,9 @@ export const DEFAULT_PERMISSIONS = {
   'tickets.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'tickets.edit':    { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   // The field technician app (/field): jobs, photos, customer look-up, shift. Money is never part of it.
+  // The technicians' calendar: seeing it (a technician sees their own visits), and booking, moving and cancelling visits.
+  'schedule.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
+  'schedule.manage': { owner: true, cashier: false, technician: false, support: true,  sales: false },
   'field.use':       { owner: true, cashier: false, technician: true,  support: false, sales: false },
   // Where the team is right now (only while they are on shift).
   'field.locations': { owner: true, cashier: false, technician: false, support: false, sales: false },
@@ -242,6 +245,8 @@ export const PERMISSION_META = [
   { key: 'tr069.manage', page: 'TR-069', action: 'Set WiFi/PPPoE, reboot, factory reset and link devices' },
   { key: 'tickets.view',   page: 'Tickets', action: 'View' },
   { key: 'tickets.edit',   page: 'Tickets', action: 'Edit / assign' },
+  { key: 'schedule.view',  page: 'Schedule', action: 'View the schedule (technicians see their own visits)' },
+  { key: 'schedule.manage', page: 'Schedule', action: 'Book, move and cancel visits' },
   { key: 'field.use',      page: 'Field app', action: 'Use the technician app' },
   { key: 'field.locations', page: 'Field app', action: 'See where technicians are' },
   { key: 'field.update_location', page: 'Field app', action: "Update a customer's location from the field" },

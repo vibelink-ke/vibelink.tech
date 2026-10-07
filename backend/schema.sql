@@ -187,6 +187,14 @@ alter table hotspot_settings add constraint payment_method_valid
 -- payment methods and currency are offered. Kenya unless changed under Settings → Organisation.
 alter table tenants add column if not exists country char(2) not null default 'KE';
 
+-- Booked technician visits: a ticket with a date, a start time and a length. The customer is texted when it is booked
+-- (visit_confirmed_at) and again a few hours before (visit_reminded_at).
+alter table tickets add column if not exists scheduled_at timestamptz;
+alter table tickets add column if not exists scheduled_minutes int not null default 60;
+alter table tickets add column if not exists visit_confirmed_at timestamptz;
+alter table tickets add column if not exists visit_reminded_at timestamptz;
+create index if not exists tickets_scheduled_idx on tickets (tenant_id, scheduled_at) where scheduled_at is not null;
+
 -- When the device's reserved IP (its static DHCP lease) was given back, a week after its plan expired.
 alter table voucher_devices add column if not exists lease_released_at timestamptz;
 

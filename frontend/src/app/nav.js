@@ -19,6 +19,7 @@ export const NAV_SECTIONS = [
       { to: '/inventory', label: 'Inventory', count: (s) => s.inventory.length },
       { to: '/map', label: 'Map' },
       { to: '/installations', label: 'Installations' },
+      { to: '/schedule', label: 'Schedule', perm: 'schedule.view' },
       { to: '/field', label: 'Field app', perm: 'field.use' },
       { to: '/field-team', label: 'Field team', perm: 'field.locations' },
       { to: '/analytics', label: 'Analytics', perm: 'analytics.view' },

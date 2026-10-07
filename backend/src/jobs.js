@@ -74,6 +74,8 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every 10 minutes: which online PPPoE lines are connected but passing nothing and not answering (online, no internet).
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
+  // Every 10 minutes: remind the customer and the technician about a booked visit in the next few hours.
+  cron.schedule('*/10 * * * *', safely('sendVisitReminders', sendVisitReminders));
   // Every 5 minutes: add what each PPPoE session has moved since the last pass to the client's daily usage.
   cron.schedule('*/5 * * * *', safely('accumulateUsage', accumulateUsage));
   // Every 30s, the routers' own lists of who is connected are written into the system, so nobody has to drop and redial to be seen.
@@ -1992,6 +1994,25 @@ async function syncTr069DevicesJob() {
     }
   } finally {
     tr069PassRunning = false;
+  }
+}
+
+/**
+ * Booked technician visits (tickets.scheduled_at): about three hours before, text the customer a reminder and the
+ * technician the address, once. Booking again (moving the visit) resets it.
+ */
+async function sendVisitReminders() {
+  const { textCustomer, textTechnician } = await import('./visits.js');
+  const { rows } = await pool.query(`
+    select t.id, t.tenant_id from tickets t
+     where t.scheduled_at is not null and t.visit_reminded_at is null and t.status <> 'resolved'
+       and t.scheduled_at > now() and t.scheduled_at <= now() + interval '3 hours'
+       and t.tenant_id in (${enabledTenants})`, ['sendVisitReminders']);
+  for (const t of rows) {
+    // Marked first: a visit is reminded once even if a text fails, rather than every ten minutes until it does not.
+    await pool.query('update tickets set visit_reminded_at = now() where id=$1', [t.id]);
+    await textCustomer(t.tenant_id, t.id, { reminder: true }).catch((e) => console.warn('visit reminder', e.message));
+    await textTechnician(t.tenant_id, t.id).catch((e) => console.warn('visit tech reminder', e.message));
   }
 }
 

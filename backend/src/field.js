@@ -157,7 +157,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   // ── jobs ───────────────────────────────────────────────────────────────
   const JOB_SELECT = `
     select t.id, t.number, t.subject, t.description, t.kind, t.priority, t.status, t.assigned_to,
-           t.created_at, t.due_at, t.resolved_at,
+           t.created_at, t.due_at, t.resolved_at, t.scheduled_at, t.scheduled_minutes,
            s.id as customer_id, s.name as customer_name, s.phone as customer_phone, s.phone_alt as customer_phone_alt,
            s.account_code, s.location as customer_location, s.lat as customer_lat, s.lng as customer_lng,
            p.title as plan_title, p.rate_down, p.rate_up,
@@ -176,6 +176,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
         where t.tenant_id=$1 and t.status <> 'resolved'
           and (t.assigned_to = $2 or t.assigned_to is null)
         order by (t.assigned_to = $2) desc nulls last,
+                 t.scheduled_at nulls last,
                  case t.priority when 'critical' then 0 when 'high' then 1 when 'medium' then 2 else 3 end,
                  t.created_at`,
       [req.tenant.id, me(req)]);

@@ -4,6 +4,7 @@ import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table, Tabs, Textarea } from '../ui/primitives';
+import BookVisit from './BookVisit';
 
 const PRIORITIES = ['low', 'medium', 'high', 'critical'];
 const STATUSES = ['open', 'in_progress', 'resolved'];
@@ -25,6 +26,7 @@ export default function Tickets() {
   const store = useStore();
   const [open, setOpen] = useState(false);
   const [f, setF] = useState({ subject: '', subscriberId: '', assignTo: '', priority: 'medium', kind: 'repair', description: '' });
+  const [booking, setBooking] = useState(null);   // the ticket whose visit is being booked
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState('open');
 
@@ -309,6 +311,13 @@ export default function Tickets() {
         />
       </Card>
 
+      <BookVisit
+        open={!!booking}
+        ticket={booking}
+        onClose={() => setBooking(null)}
+        onSaved={(out) => setDetail((d) => (d && d.id === out.id ? { ...d, ...out } : d))}
+      />
+
       {/* ── detail ── */}
       <Drawer open={!!detail} title={detail?.number} onClose={() => setDetail(null)} width={460}>
         {detail && (
@@ -327,6 +336,12 @@ export default function Tickets() {
             <KV k="Raised" v={when(detail.created_at)} />
             <KV k="Last touched" v={when(detail.updated_at)} />
             <KV k="Due" v={detail.due_at ? when(detail.due_at) : 'No due date'} />
+            <KV k="Visit" v={detail.scheduled_at ? `${when(detail.scheduled_at)} · ${detail.scheduled_minutes ?? 60} min` : 'Not booked'} />
+            {store.session?.perms?.['schedule.manage'] && detail.status !== 'resolved' && (
+              <Button size="sm" onClick={() => setBooking(detail)} style={{ alignSelf: 'flex-start' }}>
+                {detail.scheduled_at ? 'Move the visit' : 'Schedule a visit'}
+              </Button>
+            )}
             <KV k="SLA policy" v={detail.sla_policy_name ?? `No policy configured for "${detail.priority}"`} />
 
             {detail.requested_plan_id && (

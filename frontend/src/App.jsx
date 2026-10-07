@@ -27,6 +27,7 @@ import Networks from './screens/Networks';
 import Tariffs from './screens/Tariffs';
 import Routers from './screens/Routers';
 import Tickets from './screens/Tickets';
+import Schedule from './screens/Schedule';
 import Payments from './screens/Payments';
 import PaymentMethods from './screens/PaymentMethods';
 import Settings from './screens/Settings';
@@ -338,6 +339,7 @@ export default function App() {
             <Route path="/analytics" element={<Analytics />} />
 
             <Route path="/tickets" element={<Tickets />} />
+            <Route path="/schedule" element={<Schedule />} />
             <Route path="/work/*" element={<Work />} />
             {/* Old links (bookmarks, anything still pointing at the three separate pages) land on the right tab. */}
             <Route path="/leads" element={<Navigate to="/work" replace />} />

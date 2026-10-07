@@ -3899,6 +3899,80 @@ app.post('/api/sms/test', async (req, res) => {
 // ── tickets, leads, messaging, live support, tariffs, IP pools ──
 // All scoped by req.tenant.id — the tenant resolver above 404s unknown hosts and
 // every query below runs with RLS active (see withTenant in db.js for writes).
+/**
+ * The technicians' calendar. A booked visit is a ticket with scheduled_at set. Everyone who can see the schedule sees the
+ * whole team's visits except a technician without the "manage the schedule" permission, who sees only their own.
+ */
+app.get('/api/schedule', requirePermission('schedule.view'), wrap(async (req, res) => {
+  const day = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v ?? '')) ? String(v) : null);
+  const manage = !!req.session?.is_super_admin || await hasPermission(req.tenant.id, req.session?.role, 'schedule.manage');
+  if (!manage && !req.session?.staff_id) return res.json([]);
+  const { rows } = await pool.query(
+    `select t.id, t.number, t.subject, t.kind, t.status, t.priority, t.assigned_to, st.name as assignee_name,
+            t.scheduled_at, t.scheduled_minutes, t.subscriber_id,
+            sub.name as subscriber_name, sub.phone as subscriber_phone, sub.location as subscriber_location
+       from tickets t
+       left join staff st on st.id = t.assigned_to
+       left join subscribers sub on sub.id = t.subscriber_id and sub.tenant_id = t.tenant_id
+      where t.tenant_id=$1 and t.scheduled_at is not null
+        and t.scheduled_at >= coalesce($2::date, current_date - 7) and t.scheduled_at < coalesce($3::date, current_date + 30)
+        and ($4::uuid is null or t.assigned_to = $4)
+      order by t.scheduled_at`,
+    [req.tenant.id, day(req.query.from), day(req.query.to), manage ? null : req.session.staff_id]);
+  res.json(rows);
+}));
+
+/**
+ * Book (or move) a visit: a start time, how long, and who goes. If that technician already has a visit overlapping the
+ * slot the answer is 409 with what they have, and the caller repeats the request with force to double-book. The
+ * customer is texted the booking unless told not to (notify: false); a few hours before, jobs.js texts a reminder.
+ */
+app.post('/api/tickets/:id/schedule', requirePermission('schedule.manage'), wrap(async (req, res) => {
+  const at = new Date(req.body?.at);
+  const minutes = Math.round(Number(req.body?.minutes ?? 60));
+  if (Number.isNaN(at.getTime())) return res.status(400).json({ error: 'Pick a date and a time.' });
+  if (!(minutes >= 15 && minutes <= 720)) return res.status(400).json({ error: 'A visit lasts between 15 minutes and 12 hours.' });
+  const { rows: [t] } = await pool.query('select id, assigned_to, status from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!t) return res.status(404).json({ error: 'No such ticket' });
+  if (t.status === 'resolved') return res.status(409).json({ error: 'That job is already resolved.' });
+  let tech = t.assigned_to;
+  if (req.body?.assignedTo) {
+    const { rows: [s] } = await pool.query('select id from staff where tenant_id=$1 and id=$2', [req.tenant.id, req.body.assignedTo]);
+    if (!s) return res.status(400).json({ error: 'That technician was not found.' });
+    tech = s.id;
+  }
+  if (tech && !req.body?.force) {
+    const { rows: clash } = await pool.query(
+      `select number, scheduled_at from tickets
+        where tenant_id=$1 and id <> $2 and assigned_to = $3 and status <> 'resolved' and scheduled_at is not null
+          and scheduled_at < $4::timestamptz + make_interval(mins => $5::int)
+          and scheduled_at + make_interval(mins => scheduled_minutes) > $4::timestamptz`,
+      [req.tenant.id, t.id, tech, at.toISOString(), minutes]);
+    if (clash.length) return res.status(409).json({ error: 'That technician already has a visit then.', conflicts: clash });
+  }
+  const { rows: [row] } = await pool.query(
+    `update tickets set scheduled_at=$3, scheduled_minutes=$4, assigned_to=$5, visit_confirmed_at=null, visit_reminded_at=null
+      where tenant_id=$1 and id=$2 returning *`,
+    [req.tenant.id, t.id, at.toISOString(), minutes, tech]);
+  await pool.query(
+    'insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,$3,$4,true)',
+    [req.tenant.id, t.id, req.session?.name ?? 'staff', `Visit booked for ${at.toLocaleString('en-KE', { dateStyle: 'medium', timeStyle: 'short', timeZone: req.tenant.timezone ?? 'Africa/Nairobi' })}, ${minutes} minutes.`]).catch(() => {});
+  let notified = false;
+  if (req.body?.notify !== false) {
+    const visits = await import('./visits.js');
+    notified = await visits.textCustomer(req.tenant.id, t.id).catch((e) => { console.error('visit text', e.message); return false; });
+    if (notified) await pool.query('update tickets set visit_confirmed_at = now() where id=$1', [t.id]);
+  }
+  res.json({ ...row, notified });
+}));
+
+app.delete('/api/tickets/:id/schedule', requirePermission('schedule.manage'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    'update tickets set scheduled_at=null, visit_confirmed_at=null, visit_reminded_at=null where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'No such ticket' });
+  res.json({ ok: true });
+}));
+
 app.get('/api/tickets', requirePermission('tickets.view'), async (req, res) => {
   const { rows } = await pool.query(
     `select t.*, sp.name as sla_policy_name,
@@ -14415,6 +14489,7 @@ const AUTOMATION_JOBS = [
   { job: 'autoProvisionNewRouters', name: 'Router auto-provisioning', cron: '*/2 * * * *', detail: 'Pushes RADIUS and accounting the first time a newly onboarded router\'s tunnel comes up, before anyone presses Configure' },
   { job: 'syncOnlineCustomers', name: 'Sync online customers', cron: '*/30 * * * * *', detail: 'Every 30 seconds, reads who each router says is connected and records it, so a customer who was already online is shown with the right address without having to disconnect and reconnect' },
   { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
+  { job: 'sendVisitReminders', name: 'Visit reminders', cron: '*/10 * * * *', detail: 'A few hours before a booked technician visit, texts the customer a reminder and the technician where to go' },
   { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },

@@ -213,6 +213,11 @@ function Jobs() {
             <Dot on={j.customer_online} />{j.customer_name}{j.customer_location ? ` · ${j.customer_location}` : ''}
           </div>
         )}
+        {j.scheduled_at && (
+          <div style={{ fontSize: 13, fontWeight: 600, color: color.green }}>
+            Booked: {new Date(j.scheduled_at).toLocaleString('en-KE', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hour12: false })}
+          </div>
+        )}
         <div style={{ fontSize: 12, color: color.muted }}>{j.number} · {timeAgo(j.created_at)}</div>
       </div>
     );

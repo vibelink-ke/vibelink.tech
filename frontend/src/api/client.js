@@ -469,6 +469,9 @@ export const api = {
   updateSiteProfile: (id, p) => put(`/api/site-profiles/${id}`, p),
   deleteSiteProfile: (id) => del(`/api/site-profiles/${id}`),
   diagnoseLine: (id) => get(`/api/subscribers/${id}/diagnose`),
+  schedule: (from, to) => get(`/api/schedule?from=${from}&to=${to}`),
+  scheduleTicket: (id, body) => post(`/api/tickets/${id}/schedule`, body),
+  unscheduleTicket: (id) => del(`/api/tickets/${id}/schedule`),
   subscriberUsageHistory: (id) => get(`/api/subscribers/${id}/usage-history`),
   subscriberCommunications: (id) => get(`/api/subscribers/${id}/communications`),
 
