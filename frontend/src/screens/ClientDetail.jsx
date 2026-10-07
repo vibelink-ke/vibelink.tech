@@ -12,6 +12,7 @@ import { downloadInvoice } from '../lib/export';
 import { useInvoicePay } from '../ui/invoicePay';
 import { useInvoiceEditor } from './clients/invoiceEditor';
 import { useInvoiceActions } from './clients/ClientInvoices';
+import Troubleshoot from './clients/Troubleshoot';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -134,6 +135,7 @@ export default function ClientDetail() {
   const pay = useInvoicePay(store);
   const [openInvoiceEditor, invoiceEditor] = useInvoiceEditor();
   const invoiceActions = useInvoiceActions();
+  const [troubleshooting, setTroubleshooting] = useState(null);   // the service line being checked
   const [diag, setDiag] = useState(null);   // { busy } | { error } | the /diagnose result
   const canEditInvoices = !!store.session?.perms?.['clients.invoices'];
   const navigate = useNavigate();
@@ -901,6 +903,11 @@ export default function ClientDetail() {
                           </RowAction>
                         )}
                         <RowAction tone={color.green} onClick={() => openExtend(line)} title="Outage credit or a grace period">Extend</RowAction>
+                        {line.service === 'pppoe' && (
+                          <RowAction tone={color.amberInk} onClick={() => setTroubleshooting(line)} title="Online but no internet? Ask the router what is wrong with this line">
+                            Troubleshoot
+                          </RowAction>
+                        )}
                         {line.service === 'pppoe' && line.phone && (
                           <RowAction onClick={() => stkPush(line)} title="Send an M-Pesa STK prompt to their phone">Send STK</RowAction>
                         )}
@@ -1417,6 +1424,8 @@ export default function ClientDetail() {
           )}
         </div>
       )}
+
+      <Troubleshoot open={!!troubleshooting} line={troubleshooting} onClose={() => setTroubleshooting(null)} />
 
       <Modal
         open={!!extending}

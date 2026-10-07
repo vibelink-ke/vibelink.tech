@@ -11,6 +11,7 @@ import ExportMenu from '../ui/ExportMenu';
 import { Signal, StatusBadge } from './SmartOlt';
 import ExpiryCalendar from './clients/ExpiryCalendar';
 import ClientInvoices from './clients/ClientInvoices';
+import Troubleshoot from './clients/Troubleshoot';
 import { ActionMenu, Button, Empty, Field, Input, MenuItem, Modal, Screen, Select, useActionMenu } from '../ui/primitives';
 import { useTable, TableToolbar, TableFooter } from '../ui/paging';
 
@@ -194,6 +195,7 @@ export default function Clients() {
   const [view, setView] = useState('list');
   const [selected, setSelected] = useState(() => new Set());
   const [editing, setEditing] = useState(null);
+  const [troubleshooting, setTroubleshooting] = useState(null);   // the service line being checked for "online but no internet"
   const [invoicesFor, setInvoicesFor] = useState(null);   // { name, lines } of the account whose invoices are open
   const actionMenu = useActionMenu();
 
@@ -780,6 +782,7 @@ export default function Clients() {
                         <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}`); }}>View</MenuItem>
                         <MenuItem onClick={() => { actionMenu.close(); navigate(`/clients/${c.id}?tab=services`); }}>Services</MenuItem>
                         <MenuItem onClick={() => { actionMenu.close(); setInvoicesFor({ name: c.name, lines }); }}>Invoices</MenuItem>
+                        <MenuItem onClick={() => { actionMenu.close(); setTroubleshooting(lines.find((l) => l.service === 'pppoe') ?? c); }}>Troubleshoot</MenuItem>
                         <MenuItem onClick={() => { actionMenu.close(); setEditing({ ...c, credit: c.wallet_balance ?? 0 }); }}>
                           Edit client
                         </MenuItem>
@@ -799,6 +802,7 @@ export default function Clients() {
       </div>
       )}
 
+      <Troubleshoot open={!!troubleshooting} line={troubleshooting} onClose={() => setTroubleshooting(null)} />
       <ClientInvoices
         open={!!invoicesFor}
         name={invoicesFor?.name ?? ''}
