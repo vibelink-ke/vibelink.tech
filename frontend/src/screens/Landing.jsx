@@ -1,555 +1,299 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { color, font, radius } from '../theme/tokens';
+import React, { useEffect } from 'react';
 
 /**
- * The public face of the platform, shown on the root domain only.
+ * The public page of the platform, shown on the root domain only.
  *
- * The root domain belongs to no tenant, so there is nothing here to sign into:
- * an ISP registers, and every day after that they use their own subdomain.
- * Keeping the two apart is what stops an operator landing on vibelink.tech and
- * wondering why their customers are missing.
+ * The root domain belongs to no tenant, so there is nothing here to sign into: an ISP registers, and every day after
+ * that works on their own subdomain.
  *
- * Deliberately plain markup and inline styles, matching the rest of the app.
- * The audience is a network operator, not a consumer — the terminal-style
- * panel and monospace tags below are drawn from the product itself (this is
- * the same JetBrains Mono the real app uses for MAC addresses, routers and
- * money), not decoration borrowed from a generic SaaS template.
+ * Written to read like a company that runs an ISP and sells the tool it uses, not a SaaS template: warm paper instead of
+ * white-and-blue, one typeface family, hard rules instead of shadowed cards, no icons-on-tiles grid, no scroll
+ * animation, no gradients. Plain sentences about what happens, real screens, and a phone number. The palette is the one
+ * the vibelink.co.ke site uses (taken from the logo), so the two read as the same company.
  */
 
+const PHONE = '0112 009 226';
+const PHONE_LINK = 'tel:+254112009226';
+const WHATSAPP = 'https://wa.me/254112009226';
 const SALES_EMAIL = 'sales@vibelink.co.ke';
-const SUPPORT_EMAIL = 'support@vibelink.co.ke';
 
-/**
- * One accent per category, reused where there are more categories than
- * brand hues — a colour here means something (which group a card belongs
- * to), so repeating a hue on two categories is fine; inventing a fifth or
- * sixth off-brand colour just to keep every one distinct would not be.
- */
-const CATEGORY_COLOR = {
-  PAYMENTS: color.green,
-  NETWORK: color.mint,
-  HOTSPOT: color.amber,
-  OPERATIONS: color.rust,
-  SUPPORT: color.mint,
-  GROWTH: color.amber,
-  TEAM: color.green,
+const C = {
+  paper: '#FBF8F2', sand: '#F0EADF', ink: '#1A211C', stone: '#5D645C', rule: '#D9D2C3',
+  green: '#0D6E43', deep: '#093B27', tint: '#E3EFE8', red: '#D81E28',
 };
 
-/**
- * One small line-icon per category — hand-drawn inline rather than a new
- * dependency, since this is the one page in the app that isn't already
- * pulling in an icon set. Same currentColor trick as everything else here:
- * set the category colour once on the wrapper, the stroke follows it.
- */
-const CATEGORY_ICON = {
-  PAYMENTS: (
-    <>
-      <rect x="3" y="6" width="18" height="12" rx="2" />
-      <line x1="3" y1="10" x2="21" y2="10" />
-      <line x1="7" y1="14" x2="11" y2="14" />
-    </>
-  ),
-  NETWORK: (
-    <>
-      <rect x="4" y="11" width="16" height="6" rx="1.5" />
-      <line x1="8" y1="11" x2="8" y2="8" />
-      <line x1="16" y1="11" x2="16" y2="8" />
-      <circle cx="8" cy="14" r=".6" fill="currentColor" stroke="none" />
-      <circle cx="12" cy="14" r=".6" fill="currentColor" stroke="none" />
-    </>
-  ),
-  HOTSPOT: (
-    <>
-      <path d="M5 9a11 11 0 0 1 14 0" />
-      <path d="M8 12.5a7 7 0 0 1 8 0" />
-      <path d="M11 16a3 3 0 0 1 2 0" />
-      <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
-    </>
-  ),
-  OPERATIONS: (
-    <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L4 17l3 3 5.3-5.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2-2z" />
-  ),
-  SUPPORT: (
-    <>
-      <path d="M4 13a8 8 0 0 1 16 0" />
-      <rect x="3" y="13" width="4" height="6" rx="1.5" />
-      <rect x="17" y="13" width="4" height="6" rx="1.5" />
-      <path d="M20 19v1a3 3 0 0 1-3 3h-2" />
-    </>
-  ),
-  GROWTH: (
-    <>
-      <polyline points="3 17 9 11 13 15 21 7" />
-      <polyline points="15 7 21 7 21 13" />
-    </>
-  ),
-  TEAM: (
-    <>
-      <circle cx="9" cy="8" r="3" />
-      <path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6" />
-      <circle cx="17" cy="9" r="2.4" />
-      <path d="M15.5 14.3c2.6.4 4.5 2.6 4.5 5.7" />
-    </>
-  ),
-};
-
-const FEATURES = [
-  ['PAYMENTS', 'M-Pesa that reconciles itself',
-   'Paybill, till and STK push. Payments match to the account number the customer typed, and the ones that do not are put in front of you rather than lost.'],
-  ['PAYMENTS', 'No paybill yet? We collect for you',
-   'Turn on collection and your customers pay into our paybill from day one, PPPoE or hotspot — we pay it out to you in full, daily or weekly, straight to your own M-Pesa number. Nothing is taken from your payouts.'],
-  ['PAYMENTS', 'A message that matches what happened',
-   'Full payment, partial, a voucher, a top-up — each gets the SMS that actually describes it, balance owed included, not one generic "payment received" for every case.'],
-  ['NETWORK', 'MikroTik without the console',
-   'Point a router at us over a tunnel — no public IP, no port forwarding. RADIUS, PPPoE, hotspot, DHCP and the firewall rules are pushed for you.'],
-  ['NETWORK', 'Speed changes that land now',
-   'Change a plan and the session changes with it. No waiting for the customer to reconnect, no ringing them to ask.'],
-  ['NETWORK', 'Fair use that enforces itself',
-   'Set the cap and the throttle. It applies quietly and lifts when the window rolls over.'],
-  ['HOTSPOT', 'A captive portal that sells',
-   'A captive portal with your name on it. Guests buy a bundle with M-Pesa and get a code by SMS, without an account and without leaving the page.'],
-  ['OPERATIONS', 'Every router accounted for',
-   'Track gadgets by MAC and serial, issue one to a technician and it comes off the shelf automatically, mark a faulty unit and swap it in one step, and know at a glance whether the customer paid for it or it is still yours.'],
-  ['OPERATIONS', 'Answers when something breaks',
-   'Which tower is down, who is online, what each port is carrying, and where every customer lives on a map.'],
-  ['OPERATIONS', 'A team, not a shared password',
-   'Invite cashiers, technicians and support staff by phone or email — they pick their own username and password. Roles are enforced, not just labelled, and only an owner can ever remove another owner.'],
-  ['SUPPORT', 'Support that stays out of your DMs',
-   'Tickets, a live chat widget on your own portal, and SLA timers that flag a job before it breaches — not a WhatsApp thread nobody can search later.'],
-  ['SUPPORT', 'Everyone, on one map',
-   'Every site, router and customer plotted where they actually are. Send a technician to a job knowing exactly what is already there.'],
-  ['GROWTH', 'Grow the list, not just serve it',
-   'Leads, SMS and email campaigns, and the routine follow-ups running themselves — so selling the next customer is not a second full-time job.'],
-  ['GROWTH', 'Commission that finds the right person',
-   'A signed-up customer credits whoever actually brought them in — the rep who closed it, not just whoever the account happens to be assigned to by the time anyone checks.'],
-  ['TEAM', 'Payroll that runs itself',
-   'Salaries and staff commissions computed every cycle and paid by M-Pesa or marked paid by hand — one run at month end, not a spreadsheet.'],
-  ['TEAM', 'Every shilling spent, on record',
-   'Expenses logged with a receipt, approved before anyone pays it, and pulled straight into payroll when it turns out to be a staff reimbursement.'],
+const WHAT_IT_DOES = [
+  ['Money', [
+    ['M-Pesa lands on the right account.',
+     'Paybill, till and STK push. A payment is matched to the account number the customer typed. The ones that do not match are put in front of you instead of being lost.'],
+    ['No paybill yet? We collect for you.',
+     'Customers pay into our paybill from day one, PPPoE or hotspot. We pay you out in full, daily or weekly, to your own M-Pesa number. Nothing is taken from the payout.'],
+    ['The SMS says what actually happened.',
+     'Full payment, part payment, a voucher or a top-up each get their own message, with the balance owed on it.'],
+  ]],
+  ['Routers', [
+    ['MikroTik without the console.',
+     'Point a router at us over a tunnel. No public IP and no port forwarding. RADIUS, PPPoE, hotspot, DHCP and the firewall rules are pushed for you.'],
+    ['Plan changes and cut-offs happen at once.',
+     'Change a plan and the live session changes with it. An expired line is cut without anyone ringing the customer.'],
+    ['Fair use that applies itself.',
+     'Set the cap and the throttle. It lifts on its own when the window rolls over.'],
+  ]],
+  ['Customers', [
+    ['A portal with your name on it.',
+     'Guests buy a bundle with M-Pesa and get a code by SMS without making an account. Customers see their own balance and invoices.'],
+    ['Tickets, chat and installs.',
+     'Support tickets with timers, a chat window on your portal, and a calendar to book technicians for installations and repairs.'],
+    ['Leads that credit the right person.',
+     'A new customer credits whoever brought them in, and the commission is worked out on the package they chose.'],
+  ]],
+  ['Your team', [
+    ['A login for everyone, not a shared password.',
+     'Cashiers, technicians and support staff each have their own login. What they can see and do is enforced, not just labelled.'],
+    ['Technicians on the phone.',
+     'A field app for jobs, photos, equipment and customer look-up, with the location recorded only while they are on shift.'],
+    ['Payroll and expenses.',
+     'Salaries and commissions worked out each cycle. Expenses logged with a receipt and approved before anyone is paid.'],
+  ]],
 ];
 
-/**
- * What Vibelink sells besides the software.
- *
- * An ISP evaluating a billing system is also deciding who to buy capacity
- * from, and they are the same conversation. Kept separate from the software
- * features so neither reads as filler for the other.
- */
 const SERVICES = [
-  ['FTTH — homes',
-   'Fibre to the home for estates and residential clusters. We build the '
-   + 'distribution, you sell the packages and keep the customer.'],
-  ['FTTB — buildings and business',
-   'Fibre to apartment blocks, offices and business parks, with the capacity '
-   + 'and the SLA a paying tenant expects.'],
-  ['Bulk internet for ISPs',
-   'Wholesale bandwidth and IP transit by the megabit, on your own capacity '
-   + 'plan. Burst when your evening peak needs it rather than paying for peak '
-   + 'all month.'],
+  ['Fibre to the home',
+   'For estates and residential clusters. We build the distribution; you sell the packages and keep the customer.'],
+  ['Fibre to buildings and business',
+   'Apartment blocks, offices and business parks, with the capacity and the service level a paying tenant expects.'],
+  ['Bulk bandwidth for ISPs',
+   'Wholesale bandwidth and IP transit by the megabit. Burst when your evening peak needs it instead of paying for the peak all month.'],
 ];
 
-/** Captured from the real app against fabricated data — no customer's details. */
-const SCREENSHOTS = [
-  ['/screens/dashboard.png', 'Dashboard', 'today\'s collections, who is online, and the last seven days by payment channel.'],
-  ['/screens/clients.png', 'Clients', 'every PPPoE customer, their status and when they last connected.'],
-  ['/screens/routers.png', 'Routers', 'each MikroTik, whether it is up, and one click to reconfigure it.'],
+/** Captured from the real app against made-up customers. */
+const SCREENS = [
+  ['/screens/dashboard.png', 'Dashboard', "Today's collections, who is online, and the last seven days by payment channel."],
+  ['/screens/clients.png', 'Clients', 'Every PPPoE customer, whether they are paid up, and when they last connected.'],
+  ['/screens/routers.png', 'Routers', 'Each MikroTik, whether it is up, and one click to set it up again.'],
 ];
 
 const STEPS = [
-  ['Register', 'Pick your name and your subdomain. Takes a minute.'],
-  ['Add a router', 'Paste one line into your MikroTik. It dials in on its own.'],
+  ['Register', 'Choose a name and a subdomain. It takes a minute.'],
+  ['Add a router', 'Paste one line into your MikroTik. It connects on its own.'],
   ['Add customers', 'Or import the PPPoE accounts already on the router.'],
-  ['Get paid', 'Connect M-Pesa and let the reconciliation run.'],
+  ['Get paid', 'Connect M-Pesa and let the matching run.'],
 ];
-
-/** The terminal panel's script, typed once, no loop — a demo, not a toy. */
-const CONSOLE_LINES = [
-  { p: '$', t: 'mikrotik/system  script add source=vibelink-connect' },
-  { p: '>', t: 'tunnel up — RB750Gr3 dialed in, no port forward needed', d: true },
-  { p: '>', t: '412 PPPoE, 86 hotspot online', d: true },
-  { p: '>', t: 'KES 41,200 collected today, 3 unmatched → review', d: true },
-];
-
-const Section = ({ children, style }) => (
-  <section style={{ maxWidth: 1320, margin: '0 auto', padding: '0 32px', ...style }}>
-    {children}
-  </section>
-);
-
-/**
- * Fades a block up into place the first time it scrolls into view, once,
- * never again — a feature grid a visitor has already scrolled past has
- * nothing left to announce by re-animating on every re-render. Plain
- * IntersectionObserver rather than a library: this is the one page in the
- * app with no build-step budget for one, and the effect itself is three
- * CSS properties.
- */
-function Reveal({ children, delay = 0, style }) {
-  const ref = useRef(null);
-  const [shown, setShown] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { setShown(true); io.disconnect(); } },
-      { threshold: 0.15 }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  return (
-    <div
-      ref={ref}
-      className={`vl-reveal${shown ? ' vl-in' : ''}`}
-      style={{ transitionDelay: `${delay}ms`, ...style }}
-    >
-      {children}
-    </div>
-  );
-}
 
 export default function Landing({ onRegister }) {
-  // Set here rather than in index.html: that file is served to every tenant's
-  // sign-in page too, and a canonical pointing them at the marketing page
-  // would tell Google those pages are duplicates of it.
+  // Set here rather than in index.html: that file is also served to every tenant's sign-in page, and a canonical
+  // pointing them at this page would tell Google those pages are duplicates of it.
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'canonical';
     link.href = `https://${window.location.hostname.replace(/^www\./, '')}/`;
     document.head.appendChild(link);
-    return () => link.remove();
+    const font = document.createElement('link');
+    font.rel = 'stylesheet';
+    font.href = 'https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap';
+    document.head.appendChild(font);
+    return () => { link.remove(); font.remove(); };
   }, []);
 
+  const wrap = { maxWidth: 1180, margin: '0 auto', padding: '0 24px' };
+  const display = { fontFamily: "'Barlow Condensed', 'Arial Narrow', sans-serif", fontWeight: 700, letterSpacing: '.005em', lineHeight: 1.04 };
+  const btn = {
+    display: 'inline-block', border: 0, borderRadius: 3, padding: '13px 22px', fontSize: 16, fontWeight: 600,
+    fontFamily: 'inherit', cursor: 'pointer', textDecoration: 'none',
+  };
+
   return (
-    <div style={{
-      minHeight: '100vh', background: color.pageBg, color: color.ink,
-      fontFamily: font.sans, fontSize: 15, lineHeight: 1.55,
-    }}>
-      {/* Scoped to this page. Restrained on purpose: a border-colour change on
-          hover, nothing that moves on its own or asks to be noticed. */}
+    <div style={{ minHeight: '100vh', background: C.paper, color: C.ink, fontFamily: "'Barlow', system-ui, sans-serif", fontSize: 17, lineHeight: 1.6 }}>
       <style>{`
-        .vl-card {
-          transition: background .15s ease, transform .25s ease, box-shadow .25s ease, border-top-color .25s ease;
-        }
-        .vl-card:hover {
-          background: ${color.subtleBg};
-          transform: translateY(-3px);
-          box-shadow: 0 10px 24px -14px rgba(20, 30, 25, .28);
-        }
-        .vl-card:hover .vl-feature-icon { transform: scale(1.08) rotate(-4deg); }
-        .vl-feature-icon { transition: transform .25s ease; }
-        .vl-btn { transition: background .15s ease, border-color .15s ease, opacity .15s ease, transform .15s ease; }
-        .vl-solid:hover { background: ${color.greenDark}; transform: translateY(-1px); }
-        .vl-ghost:hover { border-color: ${color.green}; color: ${color.green}; }
-        .vl-cta-btn:hover { background: #eef2ef; }
-        .vl-reveal {
-          opacity: 0;
-          transform: translateY(22px);
-          transition: opacity .6s cubic-bezier(.2,.7,.3,1), transform .6s cubic-bezier(.2,.7,.3,1);
-        }
-        .vl-reveal.vl-in { opacity: 1; transform: none; }
-        @media (prefers-reduced-motion: reduce) {
-          .vl-reveal { opacity: 1; transform: none; transition: none; }
-          .vl-card:hover { transform: none; }
-          .vl-card:hover .vl-feature-icon { transform: none; }
+        .vl-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 56px; align-items: start; }
+        .vl-quad { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
+        .vl-tri { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; }
+        .vl-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 32px; }
+        .vl-nav-phone { display: inline; }
+        a.vl-link { color: ${C.green}; }
+        a.vl-link:hover { color: ${C.deep}; }
+        .vl-btn-solid:hover { background: ${C.deep} !important; }
+        .vl-btn-line:hover { background: ${C.sand} !important; }
+        @media (max-width: 880px) {
+          .vl-two, .vl-quad, .vl-tri, .vl-steps { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+          .vl-nav-phone { display: none; }
+          .vl-h1 { font-size: 44px !important; }
         }
       `}</style>
 
-      <header style={{ borderBottom: `1px solid ${color.line}`, background: color.cardBg }}>
-        <Section style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          height: 62, padding: '0 22px',
-        }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 9, fontWeight: 700, fontSize: 18, letterSpacing: '-.01em' }}>
-            <span style={{
-              width: 24, height: 24, borderRadius: radius.sm, display: 'grid', placeItems: 'center',
-              background: color.green, color: '#fff', fontSize: 13, fontFamily: font.mono,
-            }}>V</span>
-            Vibelink
+      {/* top bar */}
+      <header style={{ background: C.paper, borderBottom: `1px solid ${C.rule}` }}>
+        <div style={{ ...wrap, display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 64 }}>
+          <span style={{ ...display, fontSize: 28, color: C.green }}>Vibelink</span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
+            <a href={PHONE_LINK} className="vl-nav-phone" style={{ color: C.ink, textDecoration: 'none', fontWeight: 600 }}>Call {PHONE}</a>
+            <button type="button" onClick={onRegister} className="vl-btn-solid" style={{ ...btn, background: C.green, color: '#fff', padding: '9px 18px', fontSize: 15 }}>
+              Register your ISP
+            </button>
           </span>
-          {/* No sign-in here. This domain is the website, not the product:
-              nobody's customers live on it, and every ISP works on their own
-              subdomain. A sign-in button invites people to try signing in
-              somewhere that cannot authenticate them. */}
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-            <a href={`mailto:${SALES_EMAIL}`} className="vl-btn vl-ghost" style={{ ...ghost, textDecoration: 'none' }}>
-              Talk to sales
-            </a>
-            <button type="button" onClick={onRegister} className="vl-btn vl-solid" style={solid}>Register</button>
-          </div>
-        </Section>
+        </div>
       </header>
 
-      <div style={{
-        position: 'relative',
-        backgroundImage: `radial-gradient(${color.line} 1.1px, transparent 1.1px)`,
-        backgroundSize: '22px 22px',
-        backgroundPosition: '-11px -11px',
-      }}>
-        {/* Fades the dot texture out toward the bottom of the hero so it reads
-            as ground beneath the content, not a tiled pattern stopping at a
-            hard edge. */}
-        <div aria-hidden style={{
-          position: 'absolute', inset: 0,
-          background: `linear-gradient(180deg, ${color.pageBg}00 0%, ${color.pageBg} 92%)`,
-        }} />
-      <Section style={{ position: 'relative', padding: '58px 22px 50px' }}>
-        <div style={{
-          display: 'grid', gridTemplateColumns: 'minmax(0,1.1fr) minmax(0,.9fr)',
-          gap: 48, alignItems: 'center',
-        }}>
+      {/* opening */}
+      <section style={{ ...wrap, padding: '64px 24px 56px' }}>
+        <div className="vl-two" style={{ alignItems: 'center' }}>
           <div>
-            <div style={{
-              fontFamily: font.mono, fontSize: 12.5, color: color.green, fontWeight: 600,
-              letterSpacing: '.02em', marginBottom: 16,
-            }}>
-              // for Kenyan ISPs
+            <div style={{ fontWeight: 600, color: C.red, marginBottom: 12, letterSpacing: '.04em', textTransform: 'uppercase', fontSize: 14 }}>
+              Billing for ISPs in Kenya
             </div>
-            <h1 style={{ fontSize: 42, lineHeight: 1.14, margin: '0 0 16px', letterSpacing: '-.02em' }}>
-              Billing, fibre and bandwidth,<br />run like infrastructure.
+            <h1 className="vl-h1" style={{ ...display, fontSize: 64, margin: '0 0 20px' }}>
+              Stop chasing M-Pesa receipts.<br />Run your ISP from one screen.
             </h1>
-            <p style={{ fontSize: 16.5, color: color.inkSoft, maxWidth: 480, margin: '0 0 26px' }}>
-              Run PPPoE and hotspot customers on your MikroTik, take M-Pesa, and stop
-              reconciling payments by hand — and buy your FTTH, FTTB and bulk capacity
-              from the same people. Your own portal on your own subdomain.
+            <p style={{ color: C.stone, fontSize: 19, margin: '0 0 28px', maxWidth: 520 }}>
+              Vibelink bills your PPPoE and hotspot customers, matches every M-Pesa payment to the right account, and
+              talks to your MikroTik routers so speeds and cut-offs happen by themselves. We built it to run our own
+              network in Baringo, and now other ISPs use it too.
             </p>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <button type="button" onClick={onRegister} className="vl-btn vl-solid" style={{ ...solid, padding: '12px 22px', fontSize: 15 }}>
-                Start free
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <button type="button" onClick={onRegister} className="vl-btn-solid" style={{ ...btn, background: C.green, color: '#fff' }}>
+                Register your ISP
               </button>
-              <a href={`mailto:${SALES_EMAIL}`}
-                 className="vl-btn vl-ghost"
-                 style={{ ...ghost, padding: '12px 22px', fontSize: 15, textDecoration: 'none' }}>
-                Talk to sales
+              <a href={PHONE_LINK} className="vl-btn-line" style={{ ...btn, background: 'transparent', color: C.ink, border: `1.5px solid ${C.ink}` }}>
+                Call {PHONE}
               </a>
             </div>
-            <p style={{ fontSize: 13, color: color.muted, marginTop: 14 }}>
-              No card. Your subdomain is live as soon as you register.
+            <p style={{ fontSize: 15, color: C.stone, margin: '16px 0 0' }}>
+              No card needed. Your own address, like <b>yourname.vibelink.tech</b>, works as soon as you register.
             </p>
           </div>
+          <figure style={{ margin: 0 }}>
+            <img src="/screens/dashboard.png" alt="The Vibelink dashboard" width="1440" height="900"
+                 style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${C.rule}`, borderRadius: 3 }} />
+            <figcaption style={{ fontSize: 14, color: C.stone, marginTop: 8 }}>
+              The dashboard, with made-up customers. Collections, who is online, and takings by channel.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
 
-          {/* A real shape of what "add a router" actually produces, not a stock
-              screenshot or an abstract graphic — the same MikroTik-tunnel and
-              reconciliation language the rest of the page uses, just shown
-              rather than told. */}
-          <div style={{
-            background: color.ink, borderRadius: radius.md, padding: '18px 20px',
-            fontFamily: font.mono, fontSize: 12.8, lineHeight: 1.9,
-            boxShadow: '0 1px 0 rgba(0,0,0,.03)',
-          }}>
-            <div style={{ display: 'flex', gap: 7, marginBottom: 10 }}>
-              {['#e6675a', '#e0b64a', '#5cb377'].map((c) => (
-                <span key={c} style={{ width: 9, height: 9, borderRadius: '50%', background: c }} />
-              ))}
-            </div>
-            {CONSOLE_LINES.map((l, i) => (
-              <div key={i} style={{ color: l.d ? '#8fd6b4' : '#fff', opacity: l.d ? .9 : 1 }}>
-                <span style={{ color: color.mint, marginRight: 8 }}>{l.p}</span>{l.t}
+      {/* what it does */}
+      <section style={{ background: C.sand, borderTop: `1px solid ${C.rule}`, borderBottom: `1px solid ${C.rule}` }}>
+        <div style={{ ...wrap, padding: '56px 24px 40px' }}>
+          <h2 style={{ ...display, fontSize: 40, margin: '0 0 8px' }}>What it does for you</h2>
+          <p style={{ color: C.stone, margin: '0 0 36px', maxWidth: 620 }}>
+            The jobs that eat an ISP's week, in the order they usually hurt.
+          </p>
+          <div className="vl-quad">
+            {WHAT_IT_DOES.map(([group, items]) => (
+              <div key={group} style={{ marginBottom: 36 }}>
+                <div style={{ ...display, fontSize: 24, color: C.green, borderBottom: `2px solid ${C.green}`, paddingBottom: 6, marginBottom: 6 }}>{group}</div>
+                {items.map(([lead, text]) => (
+                  <div key={lead} style={{ padding: '14px 0', borderBottom: `1px solid ${C.rule}` }}>
+                    <div style={{ fontWeight: 700 }}>{lead}</div>
+                    <div style={{ color: C.stone, fontSize: 16 }}>{text}</div>
+                  </div>
+                ))}
               </div>
             ))}
-            <div style={{ color: color.mint, marginTop: 2 }}>
-              <span style={{ marginRight: 8 }}>$</span>
-              <span style={{ borderRight: '2px solid currentColor', paddingRight: 2 }}>&nbsp;</span>
-            </div>
           </div>
         </div>
-      </Section>
-      </div>
+      </section>
 
-      {/* A real login into a real, fully-populated tenant — not a video, not
-          a set of screenshots. Resets itself every hour (jobs.js's
-          resetDemoTenant), so whatever the last visitor clicked or "bought"
-          is never still sitting there. */}
-      <div style={{ borderBottom: `1px solid ${color.line}` }}>
-        <Section style={{ padding: '28px 22px' }}>
-          <div style={{
-            border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.cardBg,
-            padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            flexWrap: 'wrap', gap: 16,
-          }}>
+      {/* try it */}
+      <section style={{ ...wrap, padding: '44px 24px' }}>
+        <div className="vl-two" style={{ alignItems: 'center', border: `1.5px solid ${C.ink}`, padding: '26px 30px', borderRadius: 3, background: '#fff' }}>
+          <div>
+            <h3 style={{ ...display, fontSize: 30, margin: '0 0 6px' }}>Try it before you register</h3>
+            <p style={{ margin: 0, color: C.stone, fontSize: 16 }}>
+              A demo ISP full of made-up routers, customers and leads. It resets itself every hour, so click anything.
+            </p>
+          </div>
+          <div style={{ fontSize: 16 }}>
+            <div><b>Address:</b> <a className="vl-link" href="https://demo.vibelink.tech" target="_blank" rel="noreferrer">demo.vibelink.tech</a></div>
+            <div><b>Email:</b> demo@vibelink.tech</div>
+            <div><b>Password:</b> demo@123</div>
+          </div>
+        </div>
+      </section>
+
+      {/* screens */}
+      <section style={{ ...wrap, padding: '20px 24px 56px' }}>
+        <h2 style={{ ...display, fontSize: 40, margin: '0 0 8px' }}>What you will be looking at</h2>
+        <p style={{ color: C.stone, margin: '0 0 32px' }}>Real screens from the app. The customers are made up.</p>
+        <div style={{ display: 'grid', gap: 44 }}>
+          {SCREENS.slice(1).map(([src, title, caption]) => (
+            <figure key={src} style={{ margin: 0 }}>
+              <img src={src} alt={`${title} screen`} loading="lazy" width="1440" height="900"
+                   style={{ display: 'block', width: '100%', height: 'auto', border: `1px solid ${C.rule}`, borderRadius: 3 }} />
+              <figcaption style={{ marginTop: 10, color: C.stone, fontSize: 16 }}>
+                <b style={{ color: C.ink }}>{title}.</b> {caption}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </section>
+
+      {/* capacity */}
+      <section style={{ background: C.deep, color: '#fff' }}>
+        <div style={{ ...wrap, padding: '56px 24px' }}>
+          <h2 style={{ ...display, fontSize: 40, margin: '0 0 8px' }}>We sell the bandwidth too</h2>
+          <p style={{ color: 'rgba(255,255,255,.75)', margin: '0 0 32px', maxWidth: 620 }}>
+            We run a network, so the billing and the capacity can come from the same people.
+          </p>
+          <div className="vl-tri">
+            {SERVICES.map(([title, text]) => (
+              <div key={title} style={{ borderTop: '2px solid rgba(255,255,255,.5)', paddingTop: 14 }}>
+                <div style={{ ...display, fontSize: 26, marginBottom: 6 }}>{title}</div>
+                <div style={{ color: 'rgba(255,255,255,.78)', fontSize: 16 }}>{text}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ marginTop: 30, color: 'rgba(255,255,255,.8)' }}>
+            Coverage and prices: <a href={`mailto:${SALES_EMAIL}`} style={{ color: '#fff', fontWeight: 600 }}>{SALES_EMAIL}</a>
+          </p>
+        </div>
+      </section>
+
+      {/* steps */}
+      <section style={{ ...wrap, padding: '56px 24px' }}>
+        <h2 style={{ ...display, fontSize: 40, margin: '0 0 28px' }}>Getting started</h2>
+        <div className="vl-steps">
+          {STEPS.map(([title, text], i) => (
+            <div key={title} style={{ borderTop: `2px solid ${C.ink}`, paddingTop: 12 }}>
+              <div style={{ ...display, fontSize: 44, color: C.red }}>{i + 1}</div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>{title}</div>
+              <div style={{ color: C.stone, fontSize: 16 }}>{text}</div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* a person to ring */}
+      <section style={{ background: C.sand, borderTop: `1px solid ${C.rule}` }}>
+        <div style={{ ...wrap, padding: '44px 24px' }}>
+          <div className="vl-two" style={{ alignItems: 'center' }}>
             <div>
-              <h3 style={{ margin: '0 0 4px', fontSize: 16 }}>See it running before you register</h3>
-              <p style={{ margin: 0, fontSize: 13.5, color: color.inkSoft }}>
-                A live, fully populated demo tenant — routers, customers, leads, payroll, all of it.
-                Resets itself every hour, so go ahead and click anything.
+              <h2 style={{ ...display, fontSize: 36, margin: '0 0 8px' }}>Questions? Ring us.</h2>
+              <p style={{ margin: 0, color: C.stone }}>
+                We are an ISP in Kabarnet, Baringo County. If something in the app does not make sense, ask the people who use it every day.
               </p>
             </div>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-              fontFamily: font.mono, fontSize: 13,
-            }}>
-              <a href="https://demo.vibelink.tech" target="_blank" rel="noreferrer"
-                 className="vl-btn vl-solid" style={{ ...solid, textDecoration: 'none', padding: '9px 16px' }}>
-                demo.vibelink.tech
-              </a>
-              <span style={{ color: color.inkSoft }}>demo@vibelink.tech</span>
-              <span style={{ color: color.inkSoft }}>demo@123</span>
+            <div style={{ fontSize: 18 }}>
+              <div><a className="vl-link" href={PHONE_LINK} style={{ fontWeight: 700 }}>{PHONE}</a> <span style={{ color: C.stone }}>(call or WhatsApp)</span></div>
+              <div><a className="vl-link" href={WHATSAPP} target="_blank" rel="noreferrer">Message us on WhatsApp</a></div>
+              <div><a className="vl-link" href={`mailto:${SALES_EMAIL}`}>{SALES_EMAIL}</a></div>
             </div>
           </div>
-        </Section>
-      </div>
-
-      <Section style={{ padding: '52px 22px 20px' }}>
-        <h2 style={{ fontSize: 22, margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 2, background: color.green, display: 'inline-block' }} />
-          The product, as it looks
-        </h2>
-        <p style={{ color: color.inkSoft, maxWidth: 620, margin: '0 0 24px', fontSize: 15 }}>
-          Real screens from the app, shown with sample data.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 18 }}>
-          {SCREENSHOTS.map(([src, title, caption], i) => (
-            <Reveal key={src} delay={i * 80} style={i === 0 ? { gridColumn: '1 / -1' } : undefined}>
-              <figure style={{ margin: 0 }}>
-                <img
-                  src={src} alt={`${title} screen`} loading="lazy" width="1440" height="900"
-                  style={{
-                    display: 'block', width: '100%', height: 'auto',
-                    border: `1px solid ${color.line}`, borderRadius: radius.md,
-                    boxShadow: '0 14px 30px -18px rgba(20, 30, 25, .35)',
-                  }}
-                />
-                <figcaption style={{ marginTop: 10, fontSize: 13.5, color: color.inkSoft }}>
-                  <strong style={{ color: color.ink }}>{title}</strong> — {caption}
-                </figcaption>
-              </figure>
-            </Reveal>
-          ))}
         </div>
-      </Section>
+      </section>
 
-      <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}` }}>
-        <Section style={{ padding: '40px 22px' }}>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(270px, 1fr))', gap: 1,
-            background: color.line,
-          }}>
-            {FEATURES.map(([tag, title, body], i) => (
-              <Reveal key={title} delay={(i % 4) * 70} style={{ display: 'flex' }}>
-                <div className="vl-card" style={{
-                  background: color.cardBg, borderTop: `2.5px solid ${CATEGORY_COLOR[tag]}`,
-                  padding: '20px 20px 22px', width: '100%',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <span
-                      className="vl-feature-icon"
-                      style={{
-                        display: 'grid', placeItems: 'center', width: 26, height: 26, borderRadius: radius.sm,
-                        background: `${CATEGORY_COLOR[tag]}1a`, color: CATEGORY_COLOR[tag], flexShrink: 0,
-                      }}
-                    >
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        {CATEGORY_ICON[tag]}
-                      </svg>
-                    </span>
-                    <span style={{
-                      fontFamily: font.mono, fontSize: 11, fontWeight: 700, color: CATEGORY_COLOR[tag],
-                      letterSpacing: '.06em',
-                    }}>
-                      {tag}
-                    </span>
-                  </div>
-                  <h3 style={{ margin: '0 0 6px', fontSize: 15.5 }}>{title}</h3>
-                  <p style={{ margin: 0, fontSize: 14, color: color.inkSoft }}>{body}</p>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </Section>
-      </div>
-
-      <Section style={{ padding: '52px 22px' }}>
-        <h2 style={{ fontSize: 22, margin: '0 0 6px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ width: 8, height: 8, borderRadius: 2, background: color.amber, display: 'inline-block' }} />
-          Capacity, not just software
-        </h2>
-        <p style={{ color: color.inkSoft, maxWidth: 620, margin: '0 0 24px', fontSize: 15 }}>
-          We build and sell the connectivity too, so the billing and the bandwidth
-          come from one place.
-        </p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 14 }}>
-          {SERVICES.map(([title, body]) => (
-            <div key={title} className="vl-card" style={{
-              border: `1px solid ${color.line}`, borderRadius: radius.md,
-              padding: '18px 18px 20px', background: color.cardBg,
-            }}>
-              <h3 style={{ margin: '0 0 6px', fontSize: 15.5 }}>{title}</h3>
-              <p style={{ margin: 0, fontSize: 14, color: color.inkSoft }}>{body}</p>
-            </div>
-          ))}
-        </div>
-        <p style={{ marginTop: 18, fontSize: 13.5, color: color.muted }}>
-          Talk to us about coverage and pricing: <a href={`mailto:${SALES_EMAIL}`} style={{ color: color.green }}>{SALES_EMAIL}</a>
-        </p>
-      </Section>
-
-      <div style={{ borderTop: `1px solid ${color.line}`, borderBottom: `1px solid ${color.line}`, background: color.subtleBg }}>
-        <Section style={{ padding: '48px 22px' }}>
-          <h2 style={{ fontSize: 22, margin: '0 0 24px', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: color.green, display: 'inline-block' }} />
-            Getting started
-          </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
-            {STEPS.map(([title, body], i) => (
-              <div key={title}>
-                <div style={{
-                  fontFamily: font.mono, fontSize: 12.5, color: color.green, fontWeight: 700, marginBottom: 8,
-                }}>
-                  {String(i + 1).padStart(2, '0')}
-                </div>
-                <h3 style={{ margin: '0 0 4px', fontSize: 15 }}>{title}</h3>
-                <p style={{ margin: 0, fontSize: 13.5, color: color.inkSoft }}>{body}</p>
-              </div>
-            ))}
-          </div>
-        </Section>
-      </div>
-
-      <Section style={{ padding: '54px 22px 64px' }}>
-        <div style={{
-          background: color.greenDark, borderRadius: radius.md, padding: '38px 34px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 18,
-          backgroundImage: `radial-gradient(rgba(255,255,255,.05) 1.1px, transparent 1.1px)`,
-          backgroundSize: '18px 18px',
-        }}>
-          <div>
-            <h2 style={{ fontSize: 23, margin: '0 0 6px', color: '#fff' }}>Ready when you are</h2>
-            <p style={{ color: 'rgba(255,255,255,.78)', margin: 0, maxWidth: 420 }}>
-              Register, add one router, and see your own customers on your own portal.
-            </p>
-          </div>
-          <button
-            type="button" onClick={onRegister} className="vl-btn vl-cta-btn"
-            style={{ background: '#fff', color: color.greenDark, border: 0, borderRadius: radius.sm,
-                     padding: '12px 24px', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-          >
-            Create your account
-          </button>
-        </div>
-      </Section>
-
-      <footer style={{ borderTop: `1px solid ${color.line}`, background: color.cardBg }}>
-        <Section style={{
-          padding: '20px 22px', display: 'flex', justifyContent: 'space-between',
-          flexWrap: 'wrap', gap: 10, fontSize: 13, color: color.muted,
-        }}>
+      <footer style={{ borderTop: `1px solid ${C.rule}` }}>
+        <div style={{ ...wrap, padding: '20px 24px', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10, fontSize: 14, color: C.stone }}>
           <span>
-            © {new Date().getFullYear()} Vibelink ·{' '}
-            <a href="#cookies" onClick={(e) => { e.preventDefault(); window.dispatchEvent(new Event('vibelink:cookie-settings')); }}
-               style={{ color: 'inherit', textDecoration: 'underline' }}>Cookie settings</a>
+            © {new Date().getFullYear()} Vibelink Telecommunications Ltd ·{' '}
+            <a href="#cookies" style={{ color: 'inherit' }}
+               onClick={(e) => { e.preventDefault(); window.dispatchEvent(new Event('vibelink:cookie-settings')); }}>
+              Cookie settings
+            </a>
           </span>
-          <span>Nairobi, Kenya · {SUPPORT_EMAIL}</span>
-        </Section>
+          <span>Kabarnet, Baringo County, Kenya · <a href="mailto:support@vibelink.co.ke" style={{ color: 'inherit' }}>support@vibelink.co.ke</a></span>
+        </div>
       </footer>
     </div>
   );
 }
-
-const solid = {
-  background: color.green, color: '#fff', border: 0, borderRadius: radius.sm,
-  padding: '9px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-};
-const ghost = {
-  background: 'transparent', color: color.ink, border: `1px solid ${color.line}`,
-  borderRadius: radius.sm, padding: '9px 16px', fontSize: 14, fontWeight: 600, cursor: 'pointer',
-};
