@@ -107,7 +107,8 @@
       "vibelink.tech home page: added what it costs (pay by use or flat tier) with a calculator, the countries and payment methods supported, and common questions.",
       "vibelink.tech home page redesigned in a bright blue style with feature cards, pricing and a cost calculator, supported countries, questions and a closing call to action.",
       "Map: a tower can hold several PMP sector radios (each with a direction, beam width and reach drawn as a coverage slice), an unmanaged switch and a router, fanned out around it and linked with ethernet cables.",
-      "Map: customers are shown as a square (fibre), circle (PMP) or diamond (P2P); filter by connection type, and set a customer's connection and serving radio on their client page."
+      "Map: customers are shown as a square (fibre), circle (PMP) or diamond (P2P); filter by connection type, and set a customer's connection and serving radio on their client page.",
+      "Direct settlement: an ISP with no Safaricom app of its own can have customers prompted under the platform name while the money goes straight to its own till, paybill or bank account (pick the bank, enter the account). Works for hotspot and PPPoE; nothing passes through the platform."
     ]
   }
 ]

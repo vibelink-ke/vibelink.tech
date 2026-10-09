@@ -1242,7 +1242,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
   else if (method === 'piggyback') {
     const { rows: [pb] } = await pool.query(
-      "select shortcode from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
+      "select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
       [tenant.id]);
     piggyback = pb ?? null;
   } else {
@@ -1262,13 +1262,13 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
    */
   if (method === 'piggyback' && process.env.PIGGYBACK_TILL_ENABLED !== 'true') {
     return res.status(503).json({
-      error: 'Buy Goods till (via platform) is not live yet — pending Safaricom aggregator approval. '
+      error: 'Direct settlement is not switched on yet — the platform owner enables it once Safaricom has approved the platform shortcode. '
         + 'Pick another payment method in Hotspot → Settings for now.',
     });
   }
   if (method === 'piggyback' && !piggyback) {
     return res.status(503).json({
-      error: 'Hotspot is set to take payments via your own till, but no till number has been registered yet. '
+      error: 'Hotspot is set to settle directly to your till, paybill or bank, but none has been registered yet. '
         + 'Add it under Hotspot → Settings → Payment gateways.',
     });
   }
@@ -1300,7 +1300,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
       const r = await gw.stkPush(owner.tenant_id, {
         phone, amount: Number(plan.price),
         accountRef: 'HOTSPOT', description: plan.title,
-        till: piggyback.shortcode,
+        dest: piggybackDest(piggyback),
       });
       checkoutId = r.CheckoutRequestID;
       if (!checkoutId) {
@@ -1781,7 +1781,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
   else if (method === 'piggyback') {
     const { rows: [pb] } = await pool.query(
-      "select shortcode from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
+      "select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
       [tenant.id]);
     piggyback = pb ?? null;
   } else {
@@ -1801,13 +1801,13 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
    */
   if (method === 'piggyback' && process.env.PIGGYBACK_TILL_ENABLED !== 'true') {
     return res.status(503).json({
-      error: 'Buy Goods till (via platform) is not live yet — pending Safaricom aggregator approval. '
+      error: 'Direct settlement is not switched on yet — the platform owner enables it once Safaricom has approved the platform shortcode. '
         + 'Pick another payment method in Hotspot → Settings for now.',
     });
   }
   if (method === 'piggyback' && !piggyback) {
     return res.status(503).json({
-      error: 'Hotspot is set to take payments via your own till, but no till number has been registered yet. '
+      error: 'Hotspot is set to settle directly to your till, paybill or bank, but none has been registered yet. '
         + 'Add it under Hotspot → Settings → Payment gateways.',
     });
   }
@@ -1835,7 +1835,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
       const r = await gw.stkPush(owner.tenant_id, {
         phone, amount: Number(plan.price),
         accountRef: 'HOTSPOT', description: plan.title,
-        till: piggyback.shortcode,
+        dest: piggybackDest(piggyback),
       });
       checkoutId = r.CheckoutRequestID;
       if (!checkoutId) {
@@ -2850,6 +2850,27 @@ async function routerCollection(tenantId, routerId) {
 const viaPlatform = (mode, platformOn, hasOwnGateway) =>
   (mode === 'platform' ? !!platformOn : mode === 'own' ? false : (!hasOwnGateway && !!platformOn));
 
+/**
+ * Direct settlement ("piggyback"): the platform's own Daraja app sends the STK push, so the customer sees the platform's
+ * name, but PartyB is the ISP's own till, paybill or bank account — the money settles there and never touches the
+ * platform. Needs Safaricom to have allowed the platform shortcode to push to other numbers, so it stays off until
+ * PIGGYBACK_TILL_ENABLED=true. `service` is 'pppoe' or 'hotspot' (hotspot is chosen by Hotspot → Settings instead).
+ */
+async function piggybackFor(tenantId, service) {
+  if (process.env.PIGGYBACK_TILL_ENABLED !== 'true') return null;
+  const { rows: [pb] } = await pool.query(
+    "select shortcode, credentials, enabled_pppoe from tenant_payment_config where tenant_id=$1 and provider='piggyback_till' and scope='tenant' order by is_default desc, id limit 1",
+    [tenantId]);
+  if (!pb) return null;
+  if (service === 'pppoe' && !pb.enabled_pppoe) return null;
+  return pb;
+}
+const piggybackDest = (pb) => {
+  const c = pb.credentials ?? {};
+  const type = ['till', 'paybill', 'bank'].includes(c.dest_type) ? c.dest_type : 'till';
+  return { type, number: String(pb.shortcode).trim(), account: type === 'till' ? null : (String(c.account ?? '').trim() || null) };
+};
+
 async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, description, purpose, routerId }) {
   // A tenant outside Kenya (or one that chose it) takes payments through Flutterwave, Paystack, AzamPay or Yo! Payments.
   const africaGw = await findAfricaGateway(tenantId, 'pppoe');
@@ -2870,7 +2891,8 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
   const { config } = await import('./db.js');
   const ownDaraja = await config(tenantId, 'daraja');
 
-  if (viaPlatform(await routerCollection(tenantId, routerId), t?.platform_collect_enabled, !!ownDaraja)) {
+  const pb = await piggybackFor(tenantId, 'pppoe');
+  if (viaPlatform(await routerCollection(tenantId, routerId), t?.platform_collect_enabled, !!(ownDaraja || pb))) {
     const { rows: [owner] } = await pool.query(
       "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
     if (!owner) throw Object.assign(new Error('Platform collection is not set up yet — ask the platform owner.'), { status: 503 });
@@ -2889,6 +2911,22 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
          { type: 'platform_collect', tenant_id: tenantId, commissionPct: Number(t.settlement_commission_pct ?? 5), ...purpose }]);
     }
     return { checkoutId };
+  }
+
+  if (pb && !ownDaraja) {
+    const { rows: [owner] } = await pool.query(
+      "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
+    if (!owner) throw Object.assign(new Error('The platform Daraja app is not set up yet — ask the platform owner.'), { status: 503 });
+    const r = await mpesa.stkPush(owner.tenant_id, { phone, amount, accountRef: accountCode, description, dest: piggybackDest(pb) });
+    const id = r?.CheckoutRequestID ?? null;
+    if (!id) throw Object.assign(new Error(r?.errorMessage ?? r?.ResponseDescription ?? 'The payment gateway did not respond'), { status: 502 });
+    // Recorded under the real tenant: the money never reaches the platform, so there is no settlement or commission.
+    await pool.query(
+      `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
+       values ($1,'daraja',$2,$3,$4,$5)
+       on conflict (tenant_id, provider, checkout_id) do nothing`,
+      [tenantId, id, phone, amount, purpose]);
+    return { checkoutId: id };
   }
 
   const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description, routerId });
@@ -14191,6 +14229,8 @@ app.get('/api/payment-gateways', requirePermission('payment_gateways.view'), wra
   // Report which secrets are set without ever sending them back to the browser.
   res.json(rows.map(({ credentials, ...g }) => ({
     ...g,
+    // Where a direct-settlement gateway pays out is not a secret, and the form needs it to show what is saved.
+    ...(g.provider === 'piggyback_till' ? { dest: { dest_type: credentials?.dest_type ?? 'till', bank: credentials?.bank ?? '', account: credentials?.account ?? '' } } : {}),
     credentialKeys: Object.entries(credentials ?? {})
       .filter(([, v]) => String(v ?? '').trim())
       .map(([k]) => k),

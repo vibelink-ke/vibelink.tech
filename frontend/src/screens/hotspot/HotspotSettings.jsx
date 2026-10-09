@@ -10,7 +10,7 @@ const PAYMENT_METHODS = [
   { value: 'paybill', label: 'M-Pesa Paybill' },
   { value: 'bankstk', label: 'Bank STK push' },
   { value: 'till', label: 'Till / paybill without API' },
-  { value: 'piggyback', label: 'Buy Goods till (via platform, no API needed)' },
+  { value: 'piggyback', label: 'Direct settlement to my till, paybill or bank (via platform, no API needed)' },
   // Outside Kenya: pick the one you saved under Settings → Payment gateways.
   { value: 'flutterwave', label: 'Flutterwave (mobile money and cards, Africa)' },
   { value: 'paystack', label: 'Paystack (Ghana, Nigeria, South Africa, Kenya)' },
@@ -214,9 +214,9 @@ export default function HotspotSettings() {
 
       {f.payment_method === 'piggyback' && (
         <div style={{ fontSize: 12.5, color: color.rust, background: '#fdf1ec', border: '1px solid #f0d8ce', borderRadius: 8, padding: '10px 13px' }}>
-          Not live yet — this is pending the platform's Safaricom aggregator approval, without which
-          Safaricom rejects the STK push outright. You can register your till under Payment gateways now
-          so it's ready, but purchases will fail with a clear error until the platform owner turns this on.
+          Register your till, paybill or bank account under Payment gateways → Direct settlement. The platform
+          sends the STK push and the money lands straight in your account. It only works once the platform
+          owner has switched direct settlement on; until then purchases fail with a clear message.
         </div>
       )}
     </Screen>

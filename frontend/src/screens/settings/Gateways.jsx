@@ -115,13 +115,25 @@ export const CHANNELS = {
     services: { pppoe: true, hotspot: true },
   },
   piggyback_till: {
-    name: 'Buy Goods till (via platform)',
-    blurb: 'Not live yet, pending the platform’s Safaricom aggregator approval. Once enabled: no Safaricom API app of your own needed — the platform’s own app dispatches the STK push, but the money settles directly on your till, never through the platform.',
+    name: 'Direct settlement (via platform)',
+    blurb: 'No Safaricom API app of your own needed. The platform sends the STK push, so customers see the platform’s name, and the money settles straight into your till, paybill or bank account — it never goes through the platform.',
     codeLabel: 'Till number',
     fields: [],
-    services: { pppoe: false, hotspot: true },
-    comingSoon: true,
+    services: { pppoe: true, hotspot: true },
   },
+};
+
+/** Banks that take M-Pesa paybill payments. The paybill is filled in when one is picked and can still be corrected. */
+const BANK_PAYBILLS = [
+  ['Equity', '247247'], ['KCB', '522522'], ['Co-operative', '400200'], ['Absa', '303030'], ['Standard Chartered', '329329'],
+  ['NCBA', '880100'], ['Stanbic', '600100'], ['HF', '100400'], ['DTB', '516600'], ['NIC', '488488'], ['Family', '222111'],
+  ['Credit', '972700'], ['Guardian', '344500'], ['Prime', '982800'], ['Jamii Bora', '529901'], ['I&M', '542542'],
+  ['Bank of Africa', '972900'], ['Chase', '552800'], ['National', '547700'], ['Consolidated', '508400'],
+];
+const destCodeLabel = (form) => {
+  if (form.provider !== 'piggyback_till') return CHANNELS[form.provider].codeLabel;
+  const t = form.credentials?.dest_type ?? 'till';
+  return t === 'paybill' ? 'Paybill number' : t === 'bank' ? 'The bank’s paybill number' : 'Till number';
 };
 
 // For the dropdown label only — the paybill number itself is always typed in
@@ -245,7 +257,7 @@ export default function Gateways({ platform = false }) {
       provider: g.provider,
       label: g.label ?? '',
       shortcode: g.shortcode ?? '',
-      credentials: {},                 // blank = keep what is stored
+      credentials: g.dest ? { ...g.dest } : {},    // blank = keep what is stored (a direct-settlement destination is not secret, so it is shown)
       credentialKeys: g.credentialKeys ?? [],
       enabledPppoe: g.enabled_pppoe,
       enabledHotspot: g.enabled_hotspot,
@@ -299,7 +311,12 @@ export default function Gateways({ platform = false }) {
 
   const save = async () => {
     const ch = CHANNELS[form.provider];
-    if (!form.shortcode.trim()) return store.toast(`${ch.codeLabel} is required`);
+    if (!form.shortcode.trim()) return store.toast(`${destCodeLabel(form)} is required`);
+    if (form.provider === 'piggyback_till') {
+      const t = form.credentials?.dest_type ?? 'till';
+      if (t !== 'till' && !String(form.credentials?.account ?? '').trim()) return store.toast('Enter the account number the money should be credited to');
+      if (String(form.credentials?.account ?? '').trim().length > 20) return store.toast('That account number is too long');
+    }
     if (!form.id) {
       const missing = ch.fields
         .filter((f) => !f.optional)
@@ -716,7 +733,31 @@ export default function Gateways({ platform = false }) {
               <Input value={form.label} onChange={(e) => setForm((s) => ({ ...s, label: e.target.value }))} placeholder="Main paybill" />
             </Field>
 
-            <Field label={CHANNELS[form.provider].codeLabel} span={2}>
+            {form.provider === 'piggyback_till' && (
+              <>
+                <Field label="Where the money goes" span={2}>
+                  <Select
+                    value={form.credentials.dest_type ?? 'till'}
+                    onChange={(e) => setForm((s) => ({ ...s, credentials: { ...s.credentials, dest_type: e.target.value } }))}
+                    options={[{ value: 'till', label: 'Buy Goods till' }, { value: 'paybill', label: 'Paybill number' }, { value: 'bank', label: 'Bank account' }]}
+                  />
+                </Field>
+                {(form.credentials.dest_type ?? 'till') === 'bank' && (
+                  <Field label="Bank" span={2}>
+                    <Select
+                      value={form.credentials.bank ?? ''}
+                      onChange={(e) => {
+                        const hit = BANK_PAYBILLS.find(([n]) => n === e.target.value);
+                        setForm((s) => ({ ...s, credentials: { ...s.credentials, bank: e.target.value }, shortcode: hit ? hit[1] : s.shortcode }));
+                      }}
+                      options={[{ value: '', label: 'Choose a bank…' }, ...BANK_PAYBILLS.map(([n]) => ({ value: n, label: n }))]}
+                    />
+                  </Field>
+                )}
+              </>
+            )}
+
+            <Field label={destCodeLabel(form)} span={2}>
               <Input
                 value={form.shortcode}
                 onChange={(e) => setForm((s) => ({ ...s, shortcode: e.target.value }))}
@@ -724,6 +765,16 @@ export default function Gateways({ platform = false }) {
                 style={{ fontFamily: font.mono }}
               />
             </Field>
+
+            {form.provider === 'piggyback_till' && (form.credentials.dest_type ?? 'till') !== 'till' && (
+              <Field
+                label={form.credentials.dest_type === 'bank' ? 'Your account number at the bank' : 'Account number the paybill expects'}
+                span={2}
+                hint="Every customer payment is credited to this account. Check it carefully — a wrong number sends the money elsewhere."
+              >
+                <Input value={form.credentials.account ?? ''} onChange={setCred('account')} style={{ fontFamily: font.mono }} />
+              </Field>
+            )}
 
             {CHANNELS[form.provider].fields.map((fld) => {
               const stored = form.credentialKeys?.includes(fld.key);

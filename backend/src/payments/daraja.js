@@ -99,16 +99,20 @@ async function resolveConfig(tenantId, provider, platformCollect, routerId) {
  * tenant that has actually registered their own till, never as a general
  * "send money elsewhere" primitive.
  */
-export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false, till = null, routerId = null }) {
+export async function stkPush(tenantId, { phone, amount, accountRef, description, platformCollect = false, till = null, dest = null, routerId = null }) {
   const cfg = await resolveConfig(tenantId, 'daraja', platformCollect, routerId);
   if (!cfg) throw new Error('No M-Pesa gateway is configured for this account.');
   const ts = stamp();
   const password = Buffer.from(cfg.shortcode + cfg.credentials.passkey + ts).toString('base64');
-  const partyB = till || cfg.shortcode;
+  // Where the money settles when it is not on the pushing shortcode itself: a till, a paybill (with the account the
+  // business expects) or a bank's paybill (with the customer's account at that bank). `till` is the older spelling.
+  const d = dest ?? (till ? { type: 'till', number: till } : null);
+  if (d && d.type !== 'till' && !String(d.account ?? '').trim()) throw new Error('The settlement account number is missing.');
+  const partyB = d?.number || cfg.shortcode;
   const { data } = await axios.post(`${BASE}/mpesa/stkpush/v1/processrequest`, {
     BusinessShortCode: cfg.shortcode,
     Password: password, Timestamp: ts,
-    TransactionType: till ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline',
+    TransactionType: d?.type === 'till' ? 'CustomerBuyGoodsOnline' : 'CustomerPayBillOnline',
     Amount: Math.round(amount),
     PartyA: phone, PartyB: partyB, PhoneNumber: phone,
     CallBackURL: withSecret(`${process.env.BASE_URL}/webhooks/daraja/stk`),
@@ -119,7 +123,8 @@ export async function stkPush(tenantId, { phone, amount, accountRef, description
     // with a caller-side .slice(0, 20) that looked like a guard but was
     // simply capping at the wrong number. Enforced here instead of at every
     // call site, so no future caller can reintroduce the same off-by-a-few.
-    AccountReference: String(accountRef ?? '').slice(0, 12),
+    // A settlement account is never cut short: a clipped bank account number would pay a different account.
+    AccountReference: d && d.type !== 'till' ? String(d.account).trim().slice(0, 20) : String(accountRef ?? '').slice(0, 12),
     TransactionDesc: String(description ?? 'Internet').slice(0, 13),
   }, { headers: { Authorization: `Bearer ${await token(cfg)}` } });
   return data;   // CheckoutRequestID -> store in stk_requests
