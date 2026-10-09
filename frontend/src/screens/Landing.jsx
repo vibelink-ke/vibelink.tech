@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 
 /**
  * The public page of the platform, shown on the root domain only.
@@ -73,6 +73,33 @@ const SCREENS = [
   ['/screens/routers.png', 'Routers', 'Each MikroTik, whether it is up, and one click to set it up again.'],
 ];
 
+/** Where payments already work, and how customers pay there. Kenya is long-established; the rest are newer. */
+const COUNTRIES = [
+  ['Kenya', 'KES', 'M-Pesa paybill and till, STK push, KopoKopo, bank STK push'],
+  ['Uganda', 'UGX', 'MTN and Airtel mobile money through Flutterwave or Yo! Payments'],
+  ['Tanzania', 'TZS', 'M-Pesa, Tigo Pesa, Airtel Money and Halopesa through AzamPay or Flutterwave'],
+  ['Rwanda', 'RWF', 'Mobile money through Flutterwave'],
+  ['Ghana', 'GHS', 'MTN, Vodafone and AirtelTigo mobile money through Flutterwave or Paystack'],
+  ['Nigeria', 'NGN', 'Card, bank transfer and USSD through Paystack'],
+  ['Zambia', 'ZMW', 'Mobile money through Flutterwave'],
+  ['South Africa', 'ZAR', 'Card and bank payments through Paystack'],
+];
+
+const FAQ = [
+  ['Do I need a public IP address for my routers?',
+   'No. The router connects out to us over a tunnel, so there is no port forwarding and nothing to open on your side. You paste one line into a MikroTik and it dials in.'],
+  ['Which routers does it work with?',
+   'MikroTik. We set up RADIUS, PPPoE, hotspot, DHCP and the firewall rules for you.'],
+  ['Can customers pay a way you do not support?',
+   'Yes. Cash, a till with no API or a bank deposit can be recorded by hand against the customer, and it goes through the same matching as an automatic payment.'],
+  ['Whose customers are they?',
+   'Yours. Your customers, their numbers and their payments sit in your own account on your own address. We do not contact them.'],
+  ['What does it cost to start?',
+   'Nothing up front. Register and use it free until the 5th of the month after you sign up; from then you are billed each month as shown above. There is no card to enter.'],
+  ['Is there somebody to ring if it goes wrong?',
+   'Yes. We run an ISP ourselves and use this every day. Call or WhatsApp ' + PHONE + '.'],
+];
+
 const STEPS = [
   ['Register', 'Choose a name and a subdomain. It takes a minute.'],
   ['Add a router', 'Paste one line into your MikroTik. It connects on its own.'],
@@ -80,7 +107,23 @@ const STEPS = [
   ['Get paid', 'Connect M-Pesa and let the matching run.'],
 ];
 
+/** What the platform charges in each billing mode, worked out for a given ISP. */
+function platformFee({ pppoe, avgFee, hotspot }) {
+  const usage = Math.round(hotspot * 0.035 + pppoe * 20);
+  const takings = pppoe * avgFee + hotspot;
+  const tier = takings < 10000 ? 1000 : takings <= 20000 ? 2000 : 3000;
+  return { usage, tier, takings };
+}
+
 export default function Landing({ onRegister }) {
+  const [mode, setMode] = useState('usage');
+  const [calc, setCalc] = useState({ pppoe: '120', avgFee: '2000', hotspot: '30000' });
+  const num = (v) => Math.max(0, Number(v) || 0);
+  const fee = platformFee({ pppoe: num(calc.pppoe), avgFee: num(calc.avgFee), hotspot: num(calc.hotspot) });
+  const cheaper = fee.usage <= fee.tier ? 'usage' : 'tier';
+  const best = Math.min(fee.usage, fee.tier);
+  const kes = (n) => 'KES ' + Math.round(n).toLocaleString('en-KE');
+
   // Set here rather than in index.html: that file is also served to every tenant's sign-in page, and a canonical
   // pointing them at this page would tell Google those pages are duplicates of it.
   useEffect(() => {
@@ -142,7 +185,7 @@ export default function Landing({ onRegister }) {
               Billing for ISPs in Kenya
             </div>
             <h1 className="vl-h1" style={{ ...display, fontSize: 64, margin: '0 0 20px' }}>
-              Stop chasing M-Pesa receipts.<br />Run your ISP from one screen.
+              Stop chasing <span style={{ whiteSpace: 'nowrap' }}>M-Pesa</span> receipts.<br />Run your ISP from one screen.
             </h1>
             <p style={{ color: C.stone, fontSize: 19, margin: '0 0 28px', maxWidth: 520 }}>
               Vibelink bills your PPPoE and hotspot customers, matches every M-Pesa payment to the right account, and
@@ -225,6 +268,117 @@ export default function Landing({ onRegister }) {
               </figcaption>
             </figure>
           ))}
+        </div>
+      </section>
+
+      {/* pricing */}
+      <section style={{ ...wrap, padding: '20px 24px 56px' }}>
+        <h2 style={{ ...display, fontSize: 40, margin: '0 0 8px' }}>What it costs</h2>
+        <p style={{ color: C.stone, margin: '0 0 22px', maxWidth: 640 }}>
+          You choose how you are billed, and can ask us to change it. Nothing is charged until the 5th of the month after you register.
+        </p>
+        <div style={{ display: 'flex', gap: 0, marginBottom: 22 }}>
+          {[['usage', 'Pay by use'], ['tier', 'Flat tier']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setMode(k)}
+                    style={{ ...btn, padding: '9px 20px', fontSize: 15, borderRadius: 0, border: `1.5px solid ${C.ink}`,
+                             background: mode === k ? C.ink : 'transparent', color: mode === k ? '#fff' : C.ink }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {mode === 'usage' ? (
+          <div className="vl-tri">
+            <div style={{ borderTop: `2px solid ${C.green}`, paddingTop: 12 }}>
+              <div style={{ ...display, fontSize: 40 }}>KES 20</div>
+              <div style={{ fontWeight: 700 }}>per active PPPoE customer, each month</div>
+              <div style={{ color: C.stone, fontSize: 16 }}>Only customers who are active that month count. Someone you have suspended does not.</div>
+            </div>
+            <div style={{ borderTop: `2px solid ${C.green}`, paddingTop: 12 }}>
+              <div style={{ ...display, fontSize: 40 }}>3.5%</div>
+              <div style={{ fontWeight: 700 }}>of your hotspot sales</div>
+              <div style={{ color: C.stone, fontSize: 16 }}>Taken from the hotspot vouchers you sell that month. Nothing on a month with no sales.</div>
+            </div>
+            <div style={{ borderTop: `2px solid ${C.green}`, paddingTop: 12 }}>
+              <div style={{ ...display, fontSize: 40 }}>KES 0</div>
+              <div style={{ fontWeight: 700 }}>to set up</div>
+              <div style={{ color: C.stone, fontSize: 16 }}>No setup fee, no contract, no card. Leave whenever you like.</div>
+            </div>
+          </div>
+        ) : (
+          <div className="vl-tri">
+            {[['KES 1,000', 'Under KES 10,000 collected a month'], ['KES 2,000', 'KES 10,000 to 20,000 collected a month'], ['KES 3,000', 'Over KES 20,000 collected a month']].map(([price, when]) => (
+              <div key={price} style={{ borderTop: `2px solid ${C.green}`, paddingTop: 12 }}>
+                <div style={{ ...display, fontSize: 40 }}>{price}</div>
+                <div style={{ fontWeight: 700 }}>a month</div>
+                <div style={{ color: C.stone, fontSize: 16 }}>{when}, hotspot and PPPoE together. It stops at KES 3,000 however much you grow.</div>
+              </div>
+            ))}
+          </div>
+        )}
+        <p style={{ color: C.stone, fontSize: 14.5, marginTop: 14 }}>
+          These are the standard rates. If your business does not fit either, ask us for a flat monthly fee.
+        </p>
+
+        {/* calculator */}
+        <div style={{ marginTop: 34, border: `1.5px solid ${C.ink}`, background: '#fff', padding: '24px 28px', borderRadius: 3 }}>
+          <h3 style={{ ...display, fontSize: 28, margin: '0 0 4px' }}>Work out what it would cost you</h3>
+          <p style={{ margin: '0 0 18px', color: C.stone, fontSize: 16 }}>Type in your own numbers. Nothing is saved.</p>
+          <div className="vl-tri" style={{ gap: 20, marginBottom: 20 }}>
+            {[['pppoe', 'Active PPPoE customers'], ['avgFee', 'Average monthly fee (KES)'], ['hotspot', 'Hotspot sales a month (KES)']].map(([k, label]) => (
+              <label key={k} style={{ display: 'grid', gap: 4, fontSize: 15, fontWeight: 600 }}>
+                {label}
+                <input type="number" min="0" value={calc[k]} onChange={(e) => setCalc((c) => ({ ...c, [k]: e.target.value }))}
+                       style={{ font: 'inherit', fontWeight: 500, padding: '10px 12px', border: `1.5px solid ${C.rule}`, borderRadius: 3, background: C.paper }} />
+              </label>
+            ))}
+          </div>
+          <div className="vl-two" style={{ gap: 20 }}>
+            {[['usage', 'Pay by use', fee.usage], ['tier', 'Flat tier', fee.tier]].map(([k, label, amount]) => (
+              <div key={k} style={{ padding: '14px 16px', background: cheaper === k ? C.tint : C.sand, borderRadius: 3, border: cheaper === k ? `1.5px solid ${C.green}` : '1.5px solid transparent' }}>
+                <div style={{ fontSize: 14, color: C.stone }}>{label}{cheaper === k ? ' · the lower of the two' : ''}</div>
+                <div style={{ ...display, fontSize: 34 }}>{kes(amount)} <span style={{ fontSize: 17, fontFamily: 'Barlow, sans-serif', fontWeight: 500, color: C.stone }}>a month</span></div>
+              </div>
+            ))}
+          </div>
+          <p style={{ margin: '14px 0 0', color: C.stone, fontSize: 15 }}>
+            On about {kes(fee.takings)} collected a month, that is roughly {fee.takings ? (best / fee.takings * 100).toFixed(1) : '0'}% of what you take in.
+          </p>
+        </div>
+      </section>
+
+      {/* countries */}
+      <section style={{ background: C.sand, borderTop: `1px solid ${C.rule}`, borderBottom: `1px solid ${C.rule}` }}>
+        <div style={{ ...wrap, padding: '52px 24px' }}>
+          <h2 style={{ ...display, fontSize: 40, margin: '0 0 8px' }}>Not only Kenya</h2>
+          <p style={{ color: C.stone, margin: '0 0 28px', maxWidth: 640 }}>
+            Each ISP picks its country, so phone numbers, prices and payment methods follow it. Kenya has been running for a long time.
+            The countries below are newer, so tell us when you register and we will help you switch your payments on and test them.
+          </p>
+          <div className="vl-quad" style={{ gap: '0 56px' }}>
+            {COUNTRIES.map(([name, currency, how]) => (
+              <div key={name} style={{ padding: '12px 0', borderBottom: `1px solid ${C.rule}`, display: 'grid', gridTemplateColumns: '130px 1fr', gap: 12 }}>
+                <div><b>{name}</b> <span style={{ color: C.stone, fontSize: 14 }}>{currency}</span></div>
+                <div style={{ color: C.stone, fontSize: 16 }}>{how}</div>
+              </div>
+            ))}
+          </div>
+          <p style={{ marginTop: 22 }}>
+            Somewhere else in Africa? <a className="vl-link" href={`mailto:${SALES_EMAIL}?subject=Vibelink%20in%20my%20country`}>Tell us the country</a> and which payment methods your customers use.
+          </p>
+        </div>
+      </section>
+
+      {/* questions */}
+      <section style={{ ...wrap, padding: '52px 24px 20px' }}>
+        <h2 style={{ ...display, fontSize: 40, margin: '0 0 22px' }}>Questions people ask first</h2>
+        <div style={{ maxWidth: 820 }}>
+          {FAQ.map(([q, a]) => (
+            <details key={q} style={{ borderTop: `1px solid ${C.rule}`, padding: '14px 0' }}>
+              <summary style={{ fontWeight: 700, cursor: 'pointer', fontSize: 18 }}>{q}</summary>
+              <p style={{ margin: '8px 0 0', color: C.stone }}>{a}</p>
+            </details>
+          ))}
+          <div style={{ borderTop: `1px solid ${C.rule}` }} />
         </div>
       </section>
 
