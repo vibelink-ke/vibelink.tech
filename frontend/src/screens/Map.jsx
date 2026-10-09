@@ -61,18 +61,62 @@ const KINDS = {
   // there is for it (see watchRadios, jobs.js). Leave ip set instead when the
   // device does have one; a node with an IP is watched by pinging it, faster
   // and more direct than a bridge-table read.
-  ap:       { label: 'Access point',    group: 'wireless', letter: 'A', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ssid', 'SSID'], ['ip', 'IP address'], ['mac', 'MAC address (only if it has no IP)']] },
+  ap:       { label: 'Access point',    group: 'wireless', letter: 'A', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ssid', 'SSID'], ['ip', 'IP address'], ['mac', 'MAC address (only if it has no IP)'], ['azimuth', 'Points towards (° from north, 0–359)'], ['beamwidth', 'Beam width (°, e.g. 90 or 120)'], ['range', 'Reach (km)']] },
   ptp:      { label: 'Backhaul radio',  group: 'wireless', letter: 'P', fill: WIRELESS, fields: [['model', 'Model'], ['frequency', 'Frequency (GHz)'], ['ip', 'IP address']] },
   station:  { label: 'Station / CPE',   group: 'wireless', letter: 'R', fill: WIRELESS, fields: [['model', 'Model'], ['ip', 'IP address'], ['customer', 'Customer']] },
   tower:    { label: 'Tower / mast',    group: 'site',     letter: 'T', fill: SITE,     fields: [['height', 'Height (m)'], ['note', 'Note']] },
   pole:     { label: 'Pole',            group: 'site',     letter: 'L', fill: SITE,     fields: [['note', 'Note']] },
   cabinet:  { label: 'Cabinet / NAP',   group: 'site',     letter: 'N', fill: SITE,     fields: [['note', 'Note']] },
   power:    { label: 'Power / generator', group: 'site',   letter: 'G', fill: SITE,     fields: [['note', 'Note']] },
+  switch:   { label: 'Switch (unmanaged)', group: 'site',  letter: 'W', fill: SITE,     fields: [['model', 'Model'], ['ports', 'Ports']] },
 };
 const LINK_FIELDS = {
   fibre: [['cores', 'Cores']],
   wireless: [['frequency', 'Frequency (GHz)'], ['signal', 'Signal (dBm)'], ['los', 'Line-of-sight issue right now', 'checkbox']],
+  ethernet: [['ports', 'Ports (e.g. radio 1 → switch port 3)'], ['note', 'Note']],
 };
+const LINK_STYLE = {
+  fibre:    { colour: FIBRE,     label: 'Fibre cable' },
+  wireless: { colour: WIRELESS,  label: 'Wireless link', dash: '8 8' },
+  ethernet: { colour: '#4b5563', label: 'Ethernet cable', dash: '2 5' },
+};
+
+/** How a customer is reached. Fibre is a square, a shared (PMP) radio a circle, a dedicated (P2P) radio a diamond. */
+const CONN = {
+  fibre: { label: 'Fibre',               colour: FIBRE },
+  pmp:   { label: 'PMP (shared radio)',  colour: WIRELESS },
+  ptp:   { label: 'P2P (dedicated)',     colour: '#0f9aa8' },
+};
+const clientIcon = (fill, ring, type) => {
+  const t = CONN[type];
+  if (!t) return dot(fill, ring);
+  const edge = ring === '#fff' ? t.colour : ring;
+  const shape = type === 'fibre' ? 'border-radius:3px;width:12px;height:12px;' : type === 'ptp' ? 'transform:rotate(45deg);width:11px;height:11px;' : 'border-radius:50%;width:13px;height:13px;';
+  return L.divIcon({
+    className: '',
+    html: `<span style="display:block;${shape}background:${fill};border:2.5px solid ${edge};box-shadow:0 0 0 1px rgba(0,0,0,.15)"></span>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+};
+
+/** The point `m` metres from `[lat, lng]` on a compass bearing. */
+const dest = ([lat, lng], bearing, m) => {
+  const R = 6371000; const d = m / R; const b = (bearing * Math.PI) / 180;
+  const p1 = (lat * Math.PI) / 180; const l1 = (lng * Math.PI) / 180;
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return [(p2 * 180) / Math.PI, (l2 * 180) / Math.PI];
+};
+/** The pie slice one sector radio covers. */
+const wedge = (origin, azimuth, width, km) => {
+  const pts = [origin];
+  const steps = 14;
+  for (let i = 0; i <= steps; i++) pts.push(dest(origin, azimuth - width / 2 + (width * i) / steps, km * 1000));
+  return pts;
+};
+/** Devices within this many metres of a tower or pole count as installed on it. */
+const MOUNT_M = 15;
 
 /** "OLT" and "ONU / drop" keep their capitals mid-sentence; "Splitter" does not. */
 const lc = (s) => (/^[A-Z]{2,}/.test(s) ? s : s.toLowerCase());
@@ -204,6 +248,8 @@ export default function MapScreen() {
   const onusDown = onus.filter((o) => o.status !== 'online');
 
   const [show, setShow] = useState({ clients: true, routers: true, network: true, onus: true });
+  const [ctype, setCtype] = useState('all');             // which customers: all | fibre | pmp | ptp | unset
+  const [zoom, setZoom] = useState(6);
   const [editMode, setEditMode] = useState(false);
   // What a click on the map does next: place a node, or build a link ({ from, path }).
   const [tool, setTool] = useState(null);
@@ -234,6 +280,50 @@ export default function MapScreen() {
   const offline = routers.filter((r) => r.status === 'down');
   const offlineRadios = net.nodes.filter((n) => n.status === 'down');
 
+  /**
+   * What is installed on which tower or pole. A node says so itself (details.tower); a router, or a node that does
+   * not, counts as installed on the tower it was placed within MOUNT_M metres of. Everything on one tower is fanned
+   * out around it (see fanPos) so several sector radios, a switch and a router are each visible and linkable.
+   */
+  const layout = useMemo(() => {
+    const hosts = net.nodes.filter((n) => (n.kind === 'tower' || n.kind === 'pole') && hasCoords(Number(n.lat), Number(n.lng)));
+    const hostById = new Map(hosts.map((h) => [h.id, h]));
+    const on = {};
+    const members = {};
+    const put = (ref, id) => { on[ref] = id; (members[id] ||= []).push(ref); };
+    const nearest = (la, ln) => {
+      let best = null; let bd = MOUNT_M;
+      for (const h of hosts) {
+        const d = L.latLng(la, ln).distanceTo([Number(h.lat), Number(h.lng)]);
+        if (d <= bd) { bd = d; best = h.id; }
+      }
+      return best;
+    };
+    for (const n of net.nodes) {
+      if (n.kind === 'tower' || n.kind === 'pole' || !hasCoords(Number(n.lat), Number(n.lng))) continue;
+      const id = hostById.has(n.details?.tower) ? n.details.tower : nearest(Number(n.lat), Number(n.lng));
+      if (id) put(`n:${n.id}`, id);
+    }
+    for (const r of placedRouters) {
+      const id = nearest(r._lat, r._lng);
+      if (id) put(`r:${r.id}`, id);
+    }
+    return { hosts, hostById, on, members };
+  }, [net.nodes, placedRouters]);
+
+  const fanPos = useCallback((ref, base) => {
+    const hid = layout.on[ref];
+    if (!hid || !map.current) return base;
+    const h = layout.hostById.get(hid);
+    const list = layout.members[hid];
+    const hp = map.current.latLngToLayerPoint([Number(h.lat), Number(h.lng)]);
+    const ang = (list.indexOf(ref) / list.length) * 2 * Math.PI - Math.PI / 2;
+    const rad = 26 + Math.max(0, list.length - 6) * 3;
+    const ll = map.current.layerPointToLatLng(L.point(hp.x + Math.cos(ang) * rad, hp.y + Math.sin(ang) * rad));
+    return [ll.lat, ll.lng];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layout, zoom]);
+
   /** [lat, lng] for a link end: 'n:<id>' is a drawn node, 'r:<id>' a router, 'c:<id>' a customer. */
   const posOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
@@ -244,15 +334,15 @@ export default function MapScreen() {
     }
     if (kind === 'n') {
       const n = net.nodes.find((x) => x.id === id);
-      return n ? [Number(n.lat), Number(n.lng)] : null;
+      return n ? fanPos(ref, [Number(n.lat), Number(n.lng)]) : null;
     }
     if (kind === 'c') {
       const c = placed.find((x) => x.id === id);
       return c ? [c._lat, c._lng] : null;
     }
     const r = placedRouters.find((x) => x.id === id);
-    return r ? [r._lat, r._lng] : null;
-  }, [net.nodes, placed, placedRouters]);
+    return r ? fanPos(ref, [r._lat, r._lng]) : null;
+  }, [net.nodes, placed, placedRouters, fanPos]);
 
   const nameOf = useCallback((ref) => {
     const [kind, id] = String(ref).split(':');
@@ -290,6 +380,7 @@ export default function MapScreen() {
     }).setView([-1.2921, 36.8219], 6);   // Kenya, until there is anything to fit
 
     layer.current = L.layerGroup().addTo(map.current);
+    map.current.on('zoomend', () => setZoom(map.current.getZoom()));
 
     // A click on empty map: place a node, or add a waypoint to the cable being drawn.
     map.current.on('click', (e) => {
@@ -435,6 +526,23 @@ export default function MapScreen() {
     layer.current.clearLayers();
 
     if (show.network) {
+      // Sector radios: the slice of ground each one covers, from where it hangs on the tower.
+      for (const n of net.nodes) {
+        const az = num(n.details?.azimuth);
+        if (n.kind !== 'ap' || az === null || !hasCoords(Number(n.lat), Number(n.lng))) continue;
+        const host = layout.hostById.get(layout.on[`n:${n.id}`]);
+        const origin = host ? [Number(host.lat), Number(host.lng)] : [Number(n.lat), Number(n.lng)];
+        const bw = Math.min(360, Math.max(10, num(n.details?.beamwidth) ?? 90));
+        const km = Math.min(50, Math.max(0.2, num(n.details?.range) ?? 3));
+        const served = clients.filter((c) => c.ap_node_id === n.id).length;
+        const w = L.polygon(wedge(origin, az, bw, km), {
+          color: n.status === 'down' ? color.rust : WIRELESS, weight: selected?.type === 'node' && selected.id === n.id ? 2.5 : 1,
+          fillColor: n.status === 'down' ? color.rust : WIRELESS, fillOpacity: 0.1,
+        }).addTo(layer.current);
+        w.bindTooltip(`${esc(n.name)} · ${Math.round(az)}° · ${bw}° wide${served ? ` · ${served} customer${served === 1 ? '' : 's'}` : ''}`, { sticky: true });
+        w.on('click', (e) => { L.DomEvent.stopPropagation(e); if (!toolRef.current) setSelected({ type: 'node', id: n.id }); });
+      }
+
       // Cables first, so the pins sit on top of them.
       for (const l of net.links) {
         const a = posOf(l.from_ref);
@@ -451,14 +559,14 @@ export default function MapScreen() {
         const flowing = !broken && !losIssue && !clientDown;
         const fibre = l.kind === 'fibre';
         const line = L.polyline(pts, {
-          color: broken ? color.rust : (fibre ? FIBRE : WIRELESS),
+          color: broken ? color.rust : (LINK_STYLE[l.kind]?.colour ?? WIRELESS),
           weight: selected?.type === 'link' && selected.id === l.id ? 6 : 3,
-          dashArray: fibre ? undefined : '8 8',
+          dashArray: LINK_STYLE[l.kind]?.dash,
           opacity: flowing ? 0.9 : 0.5,
           className: flowing ? 'vl-flow' : '',
         }).addTo(layer.current);
         line.bindTooltip(
-          `${fibre ? 'Fibre' : 'Wireless'}${l.label ? ` · ${esc(l.label)}` : ''}${fibre ? ` · ${fmtLen(lengthM(pts))}` : ''}`
+          `${LINK_STYLE[l.kind]?.label ?? 'Link'}${l.label ? ` · ${esc(l.label)}` : ''}${fibre ? ` · ${fmtLen(lengthM(pts))}` : ''}`
           + `${broken ? ' · a device on it is offline' : losIssue ? ' · line-of-sight issue' : clientDown ? ' · customer offline' : ''}`,
           { sticky: true });
         line.on('click', (e) => {
@@ -522,12 +630,14 @@ export default function MapScreen() {
         const k = KINDS[n.kind] ?? KINDS.closure;
         const ref = `n:${n.id}`;
         const down = n.status === 'down';
-        const m = L.marker([Number(n.lat), Number(n.lng)], {
+        const mountedOn = layout.hostById.get(layout.on[ref]);
+        const onTower = mountedOn && n.details?.tower === mountedOn.id;   // set from the form: moves only with the tower
+        const m = L.marker(posOf(ref) ?? [Number(n.lat), Number(n.lng)], {
           icon: badge(k.letter, down ? color.rust : k.fill, tool?.from === ref ? '#e08a00' : '#fff', down ? 'vl-pulse' : ''),
-          draggable: editMode && !tool,
+          draggable: editMode && !tool && !onTower,
           zIndexOffset: down ? 1500 : 800,
         }).addTo(layer.current);
-        m.bindTooltip(`${esc(n.name)} · ${k.label}${down ? ` · OFFLINE since ${esc(ago(n.offline_since))}` : n.status === 'up' ? ' · online' : ''}`);
+        m.bindTooltip(`${esc(n.name)} · ${k.label}${mountedOn ? ` · on ${esc(mountedOn.name)}` : ''}${layout.members[n.id]?.length ? ` · ${layout.members[n.id].length} device${layout.members[n.id].length === 1 ? '' : 's'} installed` : ''}${down ? ` · OFFLINE since ${esc(ago(n.offline_since))}` : n.status === 'up' ? ' · online' : ''}`);
         m.on('click', (e) => {
           L.DomEvent.stopPropagation(e);
           if (!endpointClick(ref) && !toolRef.current) setSelected({ type: 'node', id: n.id });
@@ -535,7 +645,21 @@ export default function MapScreen() {
         m.on('dragend', async () => {
           const p = m.getLatLng();
           try {
+            // Whatever was installed on a tower by position goes with it.
+            const dLat = p.lat - Number(n.lat); const dLng = p.lng - Number(n.lng);
+            for (const mref of (layout.members[n.id] ?? [])) {
+              const [mk, mid] = mref.split(':');
+              if (mk === 'n') {
+                const mn = net.nodes.find((x) => x.id === mid);
+                if (mn && mn.details?.tower !== n.id) await api.updateNetNode(mid, { lat: Number(mn.lat) + dLat, lng: Number(mn.lng) + dLng });
+              } else {
+                const mr = placedRouters.find((x) => x.id === mid);
+                if (mr) await api.updateRouterLocation(mid, { lat: mr._lat + dLat, lng: mr._lng + dLng });
+              }
+            }
+            if (layout.members[n.id]?.length) api.routers().then((rs) => store.setCollection('routers', rs)).catch(() => {});
             await api.updateNetNode(n.id, { lat: p.lat, lng: p.lng });
+            if (layout.members[n.id]?.length) { await loadNet(); return; }
             setNet((cur) => ({ ...cur, nodes: cur.nodes.map((x) => (x.id === n.id ? { ...x, lat: p.lat, lng: p.lng } : x)) }));
           } catch (err) {
             store.toast(`Could not move it: ${err.message}`);
@@ -549,7 +673,7 @@ export default function MapScreen() {
       for (const r of placedRouters) {
         const down = r.status === 'down';
         const ref = `r:${r.id}`;
-        const m = L.marker([r._lat, r._lng], {
+        const m = L.marker(posOf(ref) ?? [r._lat, r._lng], {
           icon: down
             ? dot(color.rust, '#fff', 'vl-pulse')
             : r.status === 'up'
@@ -559,7 +683,7 @@ export default function MapScreen() {
           zIndexOffset: down ? 1000 : 0,
         }).addTo(layer.current);
         m.bindPopup(
-          `<strong>${esc(r.name)}</strong><br>${r.role === 'hotspot' ? 'Hotspot' : r.role === 'pppoe' ? 'PPPoE' : 'Hotspot + PPPoE'} router<br>`
+          `<strong>${esc(r.name)}</strong>${layout.hostById.get(layout.on[ref]) ? ` · on ${esc(layout.hostById.get(layout.on[ref]).name)}` : ''}<br>${r.role === 'hotspot' ? 'Hotspot' : r.role === 'pppoe' ? 'PPPoE' : 'Hotspot + PPPoE'} router<br>`
           + (down ? `<b style="color:${color.rust}">Offline</b> — since ${esc(ago(r.offline_since ?? r.last_seen))}`
             : r.status === 'up' ? 'Online' : 'Status not known yet'));
         m.on('click', () => { if (endpointClick(`r:${r.id}`)) m.closePopup(); });
@@ -590,13 +714,16 @@ export default function MapScreen() {
 
     if (show.clients) {
       for (const c of placed) {
+        if (ctype !== 'all' && (c.connection_type ?? 'unset') !== ctype) continue;
         // In live view the question is who is connected, not who has paid.
         const fill = live
           ? (c.online ? color.green : '#9aa39c')
           : (STATUS_COLOUR[c.status] ?? color.muted);
         const ref = `c:${c.id}`;
+        const apPos = c.ap_node_id && show.network ? posOf(`n:${c.ap_node_id}`) : null;
+        if (apPos) L.polyline([apPos, [c._lat, c._lng]], { color: WIRELESS, weight: 1, opacity: 0.35, dashArray: '2 4', interactive: false }).addTo(layer.current);
         const m = L.marker([c._lat, c._lng], {
-          icon: dot(fill, tool?.from === ref ? '#e08a00' : '#fff'),
+          icon: clientIcon(fill, tool?.from === ref ? '#e08a00' : '#fff', c.connection_type),
           // A pin dropped in the wrong spot (a bad address, a guess that missed) is dragged
           // straight rather than re-typed — same edit-mode gate as network nodes, so it can't
           // happen by an accidental bump while just browsing the map. Left interactive even mid-tool
@@ -607,7 +734,9 @@ export default function MapScreen() {
         })
           .bindPopup(
             `<strong>${esc(c.name)}</strong><br>${esc(c.account_code)}<br>`
-            + `${esc(c.location)}<br>${esc(c.status)}`)
+            + `${esc(c.location)}<br>${esc(c.status)}`
+            + `${CONN[c.connection_type] ? `<br>${CONN[c.connection_type].label}` : ''}`
+            + `${c.ap_node_id ? `<br>Radio: ${esc(net.nodes.find((x) => x.id === c.ap_node_id)?.name ?? 'removed')}` : ''}`)
           .addTo(layer.current);
         m.on('click', () => { if (endpointClick(ref)) m.closePopup(); });
         m.on('dragend', async () => {
@@ -639,7 +768,7 @@ export default function MapScreen() {
       // the Kenya view the map already opened with, rather than sitting at whatever zoom was last set.
       else framed.current = true;
     }
-  }, [placed, placedRouters, live, net, show, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, insertLinkPoint, loadNet, store, onus, hasSmartOlt]);
+  }, [placed, placedRouters, live, net, show, ctype, layout, clients, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, insertLinkPoint, loadNet, store, onus, hasSmartOlt]);
 
   // ── editing ──
   const saveNode = async () => {
@@ -731,6 +860,16 @@ export default function MapScreen() {
   const statusOf = (n) => (n.status === 'down' ? `offline since ${ago(n.offline_since)}`
     : n.status === 'up' ? `online (last answered ${ago(n.last_seen)})`
       : n.watch_router_id ? 'waiting for the first check' : 'not watched');
+
+  const mountSelect = (kind, details, setDetails) => !['tower', 'pole'].includes(kind) && layout.hosts.length > 0 && (
+    <Field label="Installed on" hint="Pick the tower or pole it hangs on. Several radios, a switch and a router on one tower are fanned out around it so each can be linked.">
+      <Select
+        value={details.tower ?? ''}
+        onChange={(e) => setDetails({ ...details, tower: e.target.value })}
+        options={[{ value: '', label: 'Free-standing' }, ...layout.hosts.map((h) => ({ value: h.id, label: h.name }))]}
+      />
+    </Field>
+  );
 
   const fieldsFor = (list, values, setValues) => list.map(([key, label, type]) => (
     type === 'checkbox' ? (
@@ -835,12 +974,15 @@ export default function MapScreen() {
                     + {k.label}
                   </Button>
                 ))}
-                {group !== 'site' && (
-                  <Button size="sm" variant={tool?.type === 'link' && tool.kind === group ? 'primary' : undefined}
-                    onClick={() => setTool(tool?.type === 'link' && tool.kind === group ? null : { type: 'link', kind: group, from: null, path: [] })}>
-                    {group === 'fibre' ? 'Draw cable' : 'Link radios'}
+                {(() => {
+                  const lk = group === 'site' ? 'ethernet' : group;
+                  return (
+                  <Button size="sm" variant={tool?.type === 'link' && tool.kind === lk ? 'primary' : undefined}
+                    onClick={() => setTool(tool?.type === 'link' && tool.kind === lk ? null : { type: 'link', kind: lk, from: null, path: [] })}>
+                    {group === 'fibre' ? 'Draw cable' : group === 'wireless' ? 'Link radios' : 'Connect devices'}
                   </Button>
-                )}
+                  );
+                })()}
               </div>
             ))}
             {toolHint && (
@@ -889,7 +1031,18 @@ export default function MapScreen() {
           <span><b style={{ color: color.rust }}>◉</b> router offline</span>
           <span><b style={{ color: FIBRE }}>━</b> fibre</span>
           <span><b style={{ color: WIRELESS }}>┅</b> wireless</span>
+          <span><b style={{ color: '#4b5563' }}>┈</b> ethernet</span>
+          <span><b style={{ color: FIBRE }}>■</b> fibre customer</span>
+          <span><b style={{ color: WIRELESS }}>●</b> PMP customer</span>
+          <span><b style={{ color: '#0f9aa8' }}>◆</b> P2P customer</span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 12, alignItems: 'center' }}>
+            <select value={ctype} onChange={(e) => setCtype(e.target.value)} style={{ fontSize: 12.5 }} title="Show only customers connected this way">
+              <option value="all">All customers</option>
+              <option value="fibre">Fibre ({placed.filter((c) => c.connection_type === 'fibre').length})</option>
+              <option value="pmp">PMP ({placed.filter((c) => c.connection_type === 'pmp').length})</option>
+              <option value="ptp">P2P ({placed.filter((c) => c.connection_type === 'ptp').length})</option>
+              <option value="unset">Not set ({placed.filter((c) => !c.connection_type).length})</option>
+            </select>
             {[['clients', 'Customers'], ['routers', 'Routers'], ['network', 'Network'], ...(hasSmartOlt ? [['onus', 'ONUs']] : [])].map(([key, label]) => (
               <label key={key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}>
                 <input type="checkbox" checked={show[key]} onChange={(e) => setShow((s) => ({ ...s, [key]: e.target.checked }))} />
@@ -903,7 +1056,7 @@ export default function MapScreen() {
 
       {sel && edit && (
         <Card
-          title={selected.type === 'node' ? `${KINDS[sel.kind]?.label ?? 'Node'} — ${sel.name}` : `${sel.kind === 'fibre' ? 'Fibre cable' : 'Wireless link'}: ${nameOf(sel.from_ref)} → ${nameOf(sel.to_ref)}`}
+          title={selected.type === 'node' ? `${KINDS[sel.kind]?.label ?? 'Node'} — ${sel.name}` : `${LINK_STYLE[sel.kind]?.label ?? 'Link'}: ${nameOf(sel.from_ref)} → ${nameOf(sel.to_ref)}`}
           subtitle={selected.type === 'link' && posOf(sel.from_ref) && posOf(sel.to_ref)
             ? `${fmtLen(lengthM([posOf(sel.from_ref), ...(sel.path ?? []), posOf(sel.to_ref)]))} along the route`
             : undefined}
@@ -914,6 +1067,19 @@ export default function MapScreen() {
               <>
                 <Field label="Name"><Input value={edit.name} disabled={!canEdit} onChange={(e) => setEdit({ ...edit, name: e.target.value })} /></Field>
                 {fieldsFor(KINDS[sel.kind]?.fields ?? [], edit.details, (d) => setEdit({ ...edit, details: d }))}
+                {mountSelect(sel.kind, edit.details, (d) => setEdit({ ...edit, details: d }))}
+                {sel.kind === 'ap' && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: 13, color: color.muted }}>
+                    Customers on this radio: <b>{clients.filter((c) => c.ap_node_id === sel.id).length}</b>
+                    {clients.filter((c) => c.ap_node_id === sel.id).slice(0, 12).map((c) => " · " + c.name).join('')}
+                    <div>Set a customer's radio on their client page (Info tab, “Connection”).</div>
+                  </div>
+                )}
+                {(sel.kind === 'tower' || sel.kind === 'pole') && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: 13, color: color.muted }}>
+                    Installed here: {(layout.members[sel.id] ?? []).length ? (layout.members[sel.id]).map((r) => nameOf(r)).join(', ') : 'nothing yet — add a radio, switch or router and pick this as “Installed on”, or drop a router within 15 m'}
+                  </div>
+                )}
                 {watchSelect(sel.kind, edit.watchRouterId, (v) => setEdit({ ...edit, watchRouterId: v }))}
                 {isWatchable(sel.kind) && (
                   <div style={{ fontSize: 13, color: sel.status === 'down' ? color.rust : color.muted, alignSelf: 'end', paddingBottom: 10 }}>
@@ -1013,6 +1179,7 @@ export default function MapScreen() {
           <div style={{ display: 'grid', gap: 12 }}>
             <Field label="Name"><Input value={nodeForm.name} autoFocus onChange={(e) => setNodeForm({ ...nodeForm, name: e.target.value })} placeholder="e.g. Kilimani OLT, Mast 3, Pole 14" /></Field>
             {fieldsFor(KINDS[nodeForm.kind].fields, nodeForm.details, (d) => setNodeForm({ ...nodeForm, details: d }))}
+            {mountSelect(nodeForm.kind, nodeForm.details, (d) => setNodeForm({ ...nodeForm, details: d }))}
             {watchSelect(nodeForm.kind, nodeForm.watchRouterId, (v) => setNodeForm({ ...nodeForm, watchRouterId: v }))}
           </div>
         )}
@@ -1020,7 +1187,7 @@ export default function MapScreen() {
 
       <Modal
         open={!!linkForm}
-        title={linkForm ? `${linkForm.kind === 'fibre' ? 'Fibre cable' : 'Wireless link'}: ${nameOf(linkForm.from)} → ${nameOf(linkForm.to)}` : ''}
+        title={linkForm ? `${LINK_STYLE[linkForm.kind]?.label ?? 'Link'}: ${nameOf(linkForm.from)} → ${nameOf(linkForm.to)}` : ''}
         onClose={() => !busy && setLinkForm(null)}
         footer={
           <>

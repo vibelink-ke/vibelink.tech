@@ -207,6 +207,9 @@ export default function ClientDetail() {
   // location/coordinates, which the map below can also set by dragging.
   const [infoForm, setInfoForm] = useState(null);
   const [infoBusy, setInfoBusy] = useState(false);
+  // Access points drawn on the map, for choosing which radio serves this customer (needs map access; silent without).
+  const [aps, setAps] = useState([]);
+  useEffect(() => { api.network().then((n) => setAps((n.nodes ?? []).filter((x) => x.kind === 'ap'))).catch(() => {}); }, []);
   const [tagDraft, setTagDraft] = useState('');
   const [portalPassword, setPortalPassword] = useState(undefined);   // undefined = not fetched yet
 
@@ -274,6 +277,7 @@ export default function ClientDetail() {
       category: client.category ?? '', identification: client.identification ?? '',
       billingType: client.billing_type ?? '', tags: client.tags ?? [],
       customerRef: client.customer_ref ?? '',
+      connectionType: client.connection_type ?? '', apNodeId: client.ap_node_id ?? '',
     });
     // A different line's password must not inherit the last one's revealed value.
     setPortalPassword(undefined);
@@ -296,6 +300,9 @@ export default function ClientDetail() {
         billing_type: infoForm.billingType || null,
         tags: infoForm.tags,
         customer_ref: infoForm.customerRef.trim() || null,
+        // Sent only when changed, so saving an unrelated edit never depends on the map columns existing.
+        ...((infoForm.connectionType || null) !== (client.connection_type ?? null) ? { connection_type: infoForm.connectionType || null } : {}),
+        ...((infoForm.apNodeId || null) !== (client.ap_node_id ?? null) ? { ap_node_id: infoForm.apNodeId || null } : {}),
       });
       store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
       store.toast('Client info saved');
@@ -1027,6 +1034,24 @@ export default function ClientDetail() {
                     options={['', 'Monthly (prepaid)', 'Monthly (postpaid)', 'Weekly', 'Daily']}
                   />
                 </Field>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+                <Field label="Connection" hint="How this customer is reached. Shows as a different shape on the map.">
+                  <Select
+                    value={infoForm.connectionType}
+                    onChange={(e) => setInfoForm((s) => ({ ...s, connectionType: e.target.value }))}
+                    options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'PMP (shared radio / sector)' }, { value: 'ptp', label: 'P2P (dedicated radio)' }]}
+                  />
+                </Field>
+                {(infoForm.connectionType === 'pmp' || infoForm.connectionType === 'ptp') && aps.length > 0 && (
+                  <Field label="Served by radio" hint="The access point or sector on the map this customer connects to.">
+                    <Select
+                      value={infoForm.apNodeId}
+                      onChange={(e) => setInfoForm((s) => ({ ...s, apNodeId: e.target.value }))}
+                      options={[{ value: '', label: 'Not set' }, ...aps.map((a) => ({ value: a.id, label: a.name }))]}
+                    />
+                  </Field>
+                )}
               </div>
               <Field
                 label="Linked-accounts reference"

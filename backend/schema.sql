@@ -3319,3 +3319,9 @@ create table if not exists job_equipment (
   created_at    timestamptz not null default now()
 );
 create index if not exists job_equipment_ticket_idx on job_equipment (ticket_id, created_at);
+
+-- Network map: PMP towers, switches, ethernet links, and how each customer is connected.
+alter table subscribers add column if not exists connection_type text check (connection_type in ('fibre','pmp','ptp'));
+alter table subscribers add column if not exists ap_node_id uuid references network_nodes on delete set null;
+alter table network_links drop constraint if exists network_links_kind_check;
+alter table network_links add constraint network_links_kind_check check (kind in ('fibre','wireless','ethernet'));

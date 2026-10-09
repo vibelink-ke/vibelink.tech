@@ -8182,7 +8182,7 @@ app.delete('/api/routers/wg-peers/:id', requireRole('owner'), wrap(async (req, r
  * — the last one lets a wireless link (or a fibre drop) end straight on the
  * customer it actually serves, instead of only on drawn equipment.
  */
-const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station', 'tower', 'pole', 'cabinet', 'power'];
+const NET_KINDS = ['olt', 'splitter', 'closure', 'onu', 'ap', 'ptp', 'station', 'tower', 'pole', 'cabinet', 'power', 'switch'];
 // 'n:<node id>', 'r:<router id>', 'c:<subscriber id>', or 'p:<lat>,<lng>' — open ground where a cable starts or stops.
 const NET_REF = /^(?:[nrc]:[0-9a-fA-F-]{36}|p:-?\d{1,3}(?:\.\d+)?,-?\d{1,3}(?:\.\d+)?)$/;
 const netDetails = (d) => {
@@ -8304,7 +8304,7 @@ app.delete('/api/network/nodes/:id', requirePermission('network.edit'), wrap(asy
 
 app.post('/api/network/links', requirePermission('network.edit'), wrap(async (req, res) => {
   const { kind, from, to } = req.body ?? {};
-  if (!['fibre', 'wireless'].includes(kind)) return res.status(400).json({ error: 'A link is fibre or wireless.' });
+  if (!['fibre', 'wireless', 'ethernet'].includes(kind)) return res.status(400).json({ error: 'A link is fibre, wireless or ethernet.' });
   if (!NET_REF.test(String(from)) || !NET_REF.test(String(to)) || from === to) {
     return res.status(400).json({ error: 'A link needs two different ends.' });
   }
@@ -9776,7 +9776,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -9833,6 +9833,22 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
   // 03:00 there, which is how expiries kept ending up three hours past midnight.
   if (typeof req.body.expires_at === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(req.body.expires_at)) {
     req.body.expires_at = new Date(`${req.body.expires_at}T00:00:00+03:00`).toISOString();
+  }
+
+  // How this customer is reached (fibre, point-to-multipoint or a dedicated point-to-point radio) and which access
+  // point serves them. Empty clears either.
+  if ('connection_type' in req.body) {
+    const v = req.body.connection_type || null;
+    if (v !== null && !['fibre', 'pmp', 'ptp'].includes(v)) return res.status(400).json({ error: 'Connection type is fibre, pmp or ptp.' });
+    req.body.connection_type = v;
+  }
+  if ('ap_node_id' in req.body) {
+    const v = req.body.ap_node_id || null;
+    if (v !== null) {
+      const { rowCount } = await pool.query('select 1 from network_nodes where id=$1 and tenant_id=$2', [v, req.tenant.id]).catch(() => ({ rowCount: 0 }));
+      if (!rowCount) return res.status(400).json({ error: 'That access point is not on your map.' });
+    }
+    req.body.ap_node_id = v;
   }
 
   // A price agreed for this customer alone. Empty clears it, back to the plan's own price.
