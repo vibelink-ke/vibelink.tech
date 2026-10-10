@@ -6705,13 +6705,15 @@ function phoneFromComment(comment) {
 }
 
 function categorizeHotspotUsers(users, knownCodes) {
-  const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [] };
+  const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [], all: [] };
   const seen = new Set();
   for (const u of users) {
     if (u.dynamic || u.name === 'default-trial' || seen.has(u.name)) continue;
     seen.add(u.name);
     if (u.disabled) { out.disabled.push(u.name); continue; }
     if (knownCodes.has(u.name)) { out.already.push(u.name); continue; }
+    // Whatever its time, every new enabled user can come across as a permanent access code.
+    out.all.push({ name: u.name, password: u.password, comment: u.comment, profile: u.profile, phone: phoneFromComment(u.comment) });
     // The time it is allowed: its own limit, else its profile's, else a time named in the profile ("2 HOUR …").
     const allowed = u.limitUptimeSec || u.profileLimitSec || durationFromName(u.profile);
     if (!allowed) { out.noLimit.push(u); continue; }                   // nothing says how long: sized by a plan the operator picks
@@ -6783,7 +6785,8 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     const { rows: plans } = await pool.query(
       "select id, title, duration_min, service from plans where tenant_id=$1 and active", [req.tenant.id]);
 
-    const { rows: knownVouchers } = await pool.query('select code from vouchers where tenant_id=$1', [req.tenant.id]);
+    const { rows: knownVouchers } = await pool.query(
+      'select code from vouchers where tenant_id=$1 union select username from hotspot_access_codes where tenant_id=$1', [req.tenant.id]);
     const knownCodes = new Set([...knownVouchers.map((x) => x.code), ...knownPppoe]);
     const hsSorted = categorizeHotspotUsers(hsUsers, knownCodes);
     const hsPlanFor = (u) => closestHotspotPlan(plans, u.remainingMinutes);
@@ -6814,6 +6817,12 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
           already: hsSorted.already.length, usedUp: hsSorted.usedUp.length, disabled: hsSorted.disabled.length,
           noLimit: hsSorted.noLimit.map((u) => u.name),
           total: hsUsers.length, error: hsRead.error,
+          // Everything new that can come across as a permanent access code, with why one cannot (a login must be 2-12 letters or digits).
+          access: hsSorted.all.map((u) => ({
+            name: u.name, label: (u.comment || '').trim() || u.name, profile: u.profile ?? null, phone: u.phone,
+            problem: !/^[A-Za-z0-9]{2,12}$/.test(u.name) ? 'name must be 2-12 letters or digits'
+              : u.password && !/^[A-Za-z0-9]{2,12}$/.test(u.password) ? 'password must be 2-12 letters or digits' : null,
+          })),
           // For users saved by hand with no time limit of their own: the plans an operator can put them on.
           plans: plans.filter((p) => p.service === 'hotspot').sort((a, b) => a.duration_min - b.duration_min)
             .map((p) => ({ id: p.id, title: p.title, durationMin: p.duration_min })),
@@ -6910,7 +6919,35 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // The router's own hotspot users: each keeps its own name and password as the voucher, with the time it has left
     // (or, never used, its whole allowance from first login), on the closest plan that covers it. Best effort per user.
     const hotspotUsersCreated = [];
-    for (const u of hsSorted.importable) {
+    const accessCodesCreated = [];
+    const asAccess = req.body?.hotspotAs !== 'voucher';
+    if (asAccess) {
+      // Permanent access codes (Hotspot → Access codes): the router user's own name and password, no end time, one device,
+      // the speed of the closest bundle when its profile names a time, else the default access speed.
+      const pick = new Set(Array.isArray(req.body?.pick) ? req.body.pick : []);
+      const { withTenant } = await import('./db.js');
+      for (const u of hsSorted.all) {
+        if (!pick.has(u.name)) continue;
+        try {
+          const password = u.password || u.name;
+          if (!/^[A-Za-z0-9]{2,12}$/.test(u.name) || !/^[A-Za-z0-9]{2,12}$/.test(password)) throw new Error('name and password must be 2-12 letters or digits');
+          const { rows: [taken] } = await pool.query('select 1 from radcheck where tenant_id=$1 and username=$2 limit 1', [req.tenant.id, u.name]);
+          if (taken) throw new Error('already used by another login');
+          const allowed = durationFromName(u.profile);
+          const plan = allowed ? closestHotspotPlan(plans, Math.ceil(allowed / 60)) : null;
+          const { rows: [row] } = await pool.query(
+            `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id)
+             values ($1,$2,$3,$4,1,$5) returning id`,
+            [req.tenant.id, ((u.comment || '').trim() || u.name).slice(0, 80), u.name, password, plan?.id ?? null]);
+          await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
+          accessCodesCreated.push(u.name);
+        } catch (e) {
+          failed.push({ name: u.name, error: e.message });
+        }
+      }
+      if (accessCodesCreated.length) repushHotspotConfigToAllRouters(req.tenant.id);
+    }
+    for (const u of asAccess ? [] : hsSorted.importable) {
       try {
         const plan = hsPlanFor(u);
         if (!plan) throw new Error('No active hotspot plan long enough for the time this user has left.');
@@ -6928,7 +6965,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // Users with no time limit of their own (typical of ones typed in by hand): onto the plan the operator chose, with the
     // name and password they already have. The plan's own time runs from their first login.
     const noLimitPlan = plans.find((p) => p.service === 'hotspot' && p.id === req.body?.noLimitPlanId);
-    if (noLimitPlan) {
+    if (noLimitPlan && !asAccess) {
       for (const u of hsSorted.noLimit) {
         try {
           const v = await radius.issueVoucherAccess(pool, req.tenant.id, noLimitPlan.id, phoneFromComment(u.comment), null, {
@@ -6947,8 +6984,8 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // and an import that looks complete but silently breaks matching is
     // worse than one that admits what it left undone.
     res.json({
-      imported: created.length + hotspotCreated.length + hotspotUsersCreated.length,
-      created, hotspotCreated, hotspotUsersCreated, already, noPassword, failed,
+      imported: created.length + hotspotCreated.length + hotspotUsersCreated.length + accessCodesCreated.length,
+      created, hotspotCreated, hotspotUsersCreated, accessCodesCreated, already, noPassword, failed,
       needPhone: created.length,
     });
   } catch (e) {

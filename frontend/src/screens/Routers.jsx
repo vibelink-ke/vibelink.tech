@@ -758,6 +758,15 @@ export default function Routers() {
    */
   const [importing, setImporting] = useState(null);   // { router, preview, result, busy }
 
+  // The hotspot users that will become access codes: every valid one that has not been unticked.
+  const accessPicked = (i) => (i?.preview?.hotspotUsers?.access ?? []).filter((u) => !u.problem && !(i.unticked ?? []).includes(u.name)).map((u) => u.name);
+  const importCount = (i) => {
+    const p = i.preview;
+    const base = p.importable.length + p.importableActive.length + p.hotspotImportable.length;
+    if (i.hotspotAs === 'voucher') return base + (p.hotspotUsers?.importable.length ?? 0) + (i.noLimitPlanId ? (p.hotspotUsers?.noLimit.length ?? 0) : 0);
+    return base + accessPicked(i).length;
+  };
+
   const previewImport = async (r) => {
     setImporting({ router: r, busy: true });
     try {
@@ -771,7 +780,11 @@ export default function Routers() {
   const applyImport = async () => {
     setImporting((i) => ({ ...i, busy: true }));
     try {
-      const result = await api.importSecrets(importing.router.id, { noLimitPlanId: importing.noLimitPlanId || undefined });
+      const result = await api.importSecrets(importing.router.id, {
+        noLimitPlanId: importing.noLimitPlanId || undefined,
+        hotspotAs: importing.hotspotAs === 'voucher' ? 'voucher' : 'access',
+        pick: accessPicked(importing),
+      });
       setImporting((i) => ({ ...i, result, busy: false }));
       store.setCollection('clients', await api.subscribers());
       store.toast(`Imported ${result.imported} client(s)`);
@@ -1991,12 +2004,12 @@ Revoke anyway?`
                 onClick={applyImport}
                 disabled={
                   importing.busy ||
-                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0) + (importing.noLimitPlanId ? (importing.preview.hotspotUsers?.noLimit.length ?? 0) : 0))
+                  !importCount(importing)
                 }
               >
                 {importing.busy
                   ? 'Importing…'
-                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0) + (importing.noLimitPlanId ? (importing.preview.hotspotUsers?.noLimit.length ?? 0) : 0)}`}
+                  : `Import ${importCount(importing)}`}
               </Button>
             )}
           </>
@@ -2061,7 +2074,7 @@ Revoke anyway?`
                 </div>
               </>
             )}
-            {!!importing.preview.hotspotUsers?.importable.length && (
+            {importing.hotspotAs === 'voucher' && !!importing.preview.hotspotUsers?.importable.length && (
               <>
                 <span style={{ color: color.green }}>
                   <strong>{importing.preview.hotspotUsers.importable.length}</strong> hotspot user(s) from the router's
@@ -2080,6 +2093,52 @@ Revoke anyway?`
                 </div>
               </>
             )}
+            {!!importing.preview.hotspotUsers?.access.length && (
+              <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}>
+                <span>
+                  <strong>{importing.preview.hotspotUsers.access.length}</strong> hotspot user(s) are saved on the router. Bring them in as:
+                </span>
+                <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                  <label style={{ cursor: 'pointer' }}>
+                    <input type="radio" checked={importing.hotspotAs !== 'voucher'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'access' }))} />{' '}
+                    Access codes — permanent, no time limit
+                  </label>
+                  <label style={{ cursor: 'pointer' }}>
+                    <input type="radio" checked={importing.hotspotAs === 'voucher'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'voucher' }))} />{' '}
+                    Vouchers — keep the time each has left
+                  </label>
+                </div>
+                {importing.hotspotAs !== 'voucher' && (
+                  <>
+                    <span style={{ color: color.amberInk }}>
+                      An access code works every time it is used and never runs out, so a user that was only meant to
+                      last a couple of hours would keep working. Untick any you do not want.
+                    </span>
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <span onClick={() => setImporting((i) => ({ ...i, unticked: [] }))} style={{ cursor: 'pointer', color: color.green, fontWeight: 600 }}>Select all</span>
+                      <span onClick={() => setImporting((i) => ({ ...i, unticked: importing.preview.hotspotUsers.access.map((u) => u.name) }))} style={{ cursor: 'pointer', color: color.green, fontWeight: 600 }}>Select none</span>
+                      <span style={{ color: color.muted }}>{accessPicked(importing).length} selected</span>
+                    </div>
+                    <div style={{ maxHeight: 220, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
+                      {importing.preview.hotspotUsers.access.map((u) => (
+                        <label key={u.name} style={{ display: 'block', cursor: u.problem ? 'default' : 'pointer', color: u.problem ? color.muted : undefined }}>
+                          <input
+                            type="checkbox"
+                            disabled={!!u.problem}
+                            checked={!u.problem && !(importing.unticked ?? []).includes(u.name)}
+                            onChange={(e) => setImporting((i) => ({
+                              ...i,
+                              unticked: e.target.checked ? (i.unticked ?? []).filter((n) => n !== u.name) : [...(i.unticked ?? []), u.name],
+                            }))}
+                          />{' '}
+                          {u.name}{u.profile ? ` · ${u.profile}` : ''}{u.label !== u.name ? ` · ${u.label}` : ''}{u.problem ? ` — can't be imported: ${u.problem}` : ''}
+                        </label>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
             {!!importing.preview.hotspotUsers?.error && (
               <span style={{ color: color.rust }}>
                 The router would not list its hotspot users: {importing.preview.hotspotUsers.error}
@@ -2088,7 +2147,7 @@ Revoke anyway?`
             {!!importing.preview.hotspotUsers && !importing.preview.hotspotUsers.error && importing.preview.hotspotUsers.total === 0 && (
               <span style={{ color: color.muted }}>The router has no hotspot users in its list (IP → Hotspot → Users).</span>
             )}
-            {!!importing.preview.hotspotUsers?.noLimit.length && (
+            {importing.hotspotAs === 'voucher' && !!importing.preview.hotspotUsers?.noLimit.length && (
               <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}>
                 <span>
                   <strong>{importing.preview.hotspotUsers.noLimit.length}</strong> hotspot user(s) have no time limit of
@@ -2143,6 +2202,12 @@ Revoke anyway?`
               <span style={{ color: color.green }}>
                 {importing.result.hotspotCreated.length} hotspot guest(s) issued a voucher with
                 their remaining time carried over — see Hotspot → Vouchers.
+              </span>
+            )}
+            {!!importing.result.accessCodesCreated?.length && (
+              <span style={{ color: color.green }}>
+                {importing.result.accessCodesCreated.length} hotspot user(s) came across as permanent access codes with their own
+                name and password — see Hotspot → Access codes.
               </span>
             )}
             {!!importing.result.hotspotUsersCreated?.length && (
