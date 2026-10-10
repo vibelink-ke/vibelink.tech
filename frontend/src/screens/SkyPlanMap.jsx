@@ -92,6 +92,7 @@ export default function SkyPlanMap() {
       <iframe
         ref={frame}
         title="SkyPlan"
+        className="no-invert"
         src="/skyplan/index.html?embed=billing"
         style={{ width: '100%', height: 'calc(100vh - 190px)', minHeight: 520, border: `1px solid ${color.line}`, borderRadius: 10, background: '#0b1220' }}
       />
