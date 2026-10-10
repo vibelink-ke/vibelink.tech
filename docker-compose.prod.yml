@@ -121,6 +121,8 @@ services:
       # Same role again for Equity/Co-op/KCB's bank STK callbacks — none of
       # them sign their webhooks either.
       BANKSTK_WEBHOOK_SECRET: ${BANKSTK_WEBHOOK_SECRET:-}
+      # Direct settlement (STK under the platform name, money to the ISP's own till/paybill/bank). Off unless set to true.
+      PIGGYBACK_TILL_ENABLED: ${PIGGYBACK_TILL_ENABLED:-}
       # Nightly pg_dump destination (backend/src/backup.js). Unset = the job
       # logs a warning and skips rather than failing.
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
