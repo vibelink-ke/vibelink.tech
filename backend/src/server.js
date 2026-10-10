@@ -6679,6 +6679,31 @@ function categorizeImport(found, sessions, knownPppoe, knownMac) {
 }
 
 /**
+ * The router's own hotspot users (IP → Hotspot → Users), sorted. Pure, like categorizeImport above.
+ * These are voucher-style logins: a name (and a password), usually with a limit on total time. One that has time left is
+ * worth bringing across; one that is used up, switched off or already here is not.
+ */
+function categorizeHotspotUsers(users, knownCodes) {
+  const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [] };
+  const seen = new Set();
+  for (const u of users) {
+    if (u.dynamic || u.name === 'default-trial' || seen.has(u.name)) continue;
+    seen.add(u.name);
+    if (u.disabled) { out.disabled.push(u.name); continue; }
+    if (knownCodes.has(u.name)) { out.already.push(u.name); continue; }
+    if (!u.limitUptimeSec) { out.noLimit.push(u.name); continue; }      // no time limit: nothing to size a plan from
+    const left = u.limitUptimeSec - u.uptimeSec;
+    if (left <= 0) { out.usedUp.push(u.name); continue; }
+    out.importable.push({
+      name: u.name, password: u.password, mac: u.mac, comment: u.comment,
+      fresh: u.uptimeSec === 0,                                         // never used: the clock starts at first login
+      remainingMinutes: Math.ceil(left / 60), remainingSeconds: left,
+    });
+  }
+  return out;
+}
+
+/**
  * The active hotspot plan whose duration comes closest to covering
  * `remainingMinutes` without falling short of it — rounding up to the next
  * real plan rather than shortchanging a migrated guest a single minute of
@@ -6719,6 +6744,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // import below imports with no remaining time carried over rather than
     // failing the whole run over it.
     const remaining = await step('read hotspot session time', () => ros.hotspotSessionRemaining(conn), 15000);
+    const hsUsers = await step('read hotspot users', () => ros.hotspotUsers(conn), 20000);
     ros.close(conn);
     conn = null;
 
@@ -6732,6 +6758,11 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
 
     const { rows: plans } = await pool.query(
       "select id, title, duration_min, service from plans where tenant_id=$1 and active", [req.tenant.id]);
+
+    const { rows: knownVouchers } = await pool.query('select code from vouchers where tenant_id=$1', [req.tenant.id]);
+    const knownCodes = new Set([...knownVouchers.map((x) => x.code), ...knownPppoe]);
+    const hsSorted = categorizeHotspotUsers(hsUsers, knownCodes);
+    const hsPlanFor = (u) => closestHotspotPlan(plans, u.remainingMinutes);
 
     if (!apply) {
       return res.json({
@@ -6748,6 +6779,17 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
         // handed a voucher for on apply — shown up front so an operator sees
         // exactly what each import will grant before committing to it, not
         // just after.
+        hotspotUsers: {
+          importable: hsSorted.importable.map((u) => {
+            const plan = hsPlanFor(u);
+            return {
+              name: u.name, fresh: u.fresh, remainingMinutes: u.remainingMinutes,
+              suggestedPlan: plan ? { id: plan.id, title: plan.title, durationMin: plan.duration_min } : null,
+            };
+          }),
+          already: hsSorted.already.length, usedUp: hsSorted.usedUp.length, disabled: hsSorted.disabled.length,
+          noLimit: hsSorted.noLimit,
+        },
         hotspotImportable: hotspotImportable.map((s) => {
           const remainingMinutes = remaining.get(s.mac) ?? null;
           const plan = remainingMinutes != null ? closestHotspotPlan(plans, remainingMinutes) : null;
@@ -6837,13 +6879,31 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
       }
     }
 
+    // The router's own hotspot users: each keeps its own name and password as the voucher, with the time it has left
+    // (or, never used, its whole allowance from first login), on the closest plan that covers it. Best effort per user.
+    const hotspotUsersCreated = [];
+    for (const u of hsSorted.importable) {
+      try {
+        const plan = hsPlanFor(u);
+        if (!plan) throw new Error('No active hotspot plan long enough for the time this user has left.');
+        const v = await radius.issueVoucherAccess(pool, req.tenant.id, plan.id, null, null, {
+          startOnLogin: u.fresh, code: u.name, password: u.password || u.name,
+          ...(u.fresh ? { sessionSeconds: u.remainingSeconds } : { expiresInSeconds: u.remainingSeconds, sessionSeconds: u.remainingSeconds }),
+        });
+        await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);
+        hotspotUsersCreated.push(u.name);
+      } catch (e) {
+        failed.push({ name: u.name, error: e.message });
+      }
+    }
+
     // Every imported PPPoE client has an empty phone — /ppp/secret holds
     // none. Said plainly, because payments are matched on the phone number
     // and an import that looks complete but silently breaks matching is
     // worse than one that admits what it left undone.
     res.json({
-      imported: created.length + hotspotCreated.length,
-      created, hotspotCreated, already, noPassword, failed,
+      imported: created.length + hotspotCreated.length + hotspotUsersCreated.length,
+      created, hotspotCreated, hotspotUsersCreated, already, noPassword, failed,
       needPhone: created.length,
     });
   } catch (e) {

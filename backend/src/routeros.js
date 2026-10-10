@@ -2847,6 +2847,26 @@ function parseRouterOSDuration(s) {
   return null;
 }
 
+/** The router's own hotspot users (IP → Hotspot → Users), as the import reads them. */
+export async function hotspotUsers(conn) {
+  try {
+    const rows = await conn.write('/ip/hotspot/user/print', []);
+    return rows.map((r) => ({
+      name: String(r.name ?? '').trim(),
+      password: String(r.password ?? ''),
+      profile: r.profile ?? null,
+      limitUptimeSec: parseRouterOSDuration(r['limit-uptime']),
+      uptimeSec: parseRouterOSDuration(r.uptime) ?? 0,
+      mac: String(r['mac-address'] ?? '').trim().toUpperCase() || null,
+      comment: String(r.comment ?? ''),
+      disabled: String(r.disabled) === 'true',
+      dynamic: String(r.dynamic) === 'true',
+    })).filter((u) => u.name);
+  } catch {
+    return [];   // a router with no hotspot has nothing here; the PPPoE import is not held up by it
+  }
+}
+
 /**
  * How much session time each currently-active hotspot guest has left,
  * against the hotspot server's own profile session-timeout — the shape this

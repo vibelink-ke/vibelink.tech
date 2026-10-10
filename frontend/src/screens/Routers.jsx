@@ -1991,12 +1991,12 @@ Revoke anyway?`
                 onClick={applyImport}
                 disabled={
                   importing.busy ||
-                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length)
+                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0))
                 }
               >
                 {importing.busy
                   ? 'Importing…'
-                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length}`}
+                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0)}`}
               </Button>
             )}
           </>
@@ -2006,7 +2006,7 @@ Revoke anyway?`
           <div style={{ fontSize: 13, color: color.rust }}>{importing.error}</div>
         )}
         {importing?.busy && !importing?.preview && (
-          <div style={{ fontSize: 13, color: color.muted }}>Reading /ppp/secret and active sessions…</div>
+          <div style={{ fontSize: 13, color: color.muted }}>Reading PPPoE accounts, hotspot users and active sessions…</div>
         )}
 
         {importing?.preview && !importing?.result && (
@@ -2061,6 +2061,36 @@ Revoke anyway?`
                 </div>
               </>
             )}
+            {!!importing.preview.hotspotUsers?.importable.length && (
+              <>
+                <span style={{ color: color.green }}>
+                  <strong>{importing.preview.hotspotUsers.importable.length}</strong> hotspot user(s) from the router's
+                  user list will come across as vouchers on Hotspot → Vouchers, with the same name and password and the
+                  time each has left, on the closest plan that covers it.
+                </span>
+                <div style={{ maxHeight: 160, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
+                  {importing.preview.hotspotUsers.importable.slice(0, 100).map((h) => (
+                    <div key={h.name}>
+                      {h.name}{' — '}
+                      {h.suggestedPlan
+                        ? `${h.fresh ? 'unused' : 'in use'}, ${h.remainingMinutes}m ${h.fresh ? 'allowed' : 'left'} → ${h.suggestedPlan.title}`
+                        : `${h.remainingMinutes}m left — no plan long enough, will be skipped`}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            {!!importing.preview.hotspotUsers && (importing.preview.hotspotUsers.already > 0 || importing.preview.hotspotUsers.usedUp > 0 || importing.preview.hotspotUsers.disabled > 0 || importing.preview.hotspotUsers.noLimit.length > 0) && (
+              <span style={{ color: color.muted }}>
+                Hotspot users left alone:{' '}
+                {[
+                  importing.preview.hotspotUsers.already ? `${importing.preview.hotspotUsers.already} already here` : null,
+                  importing.preview.hotspotUsers.usedUp ? `${importing.preview.hotspotUsers.usedUp} with no time left` : null,
+                  importing.preview.hotspotUsers.disabled ? `${importing.preview.hotspotUsers.disabled} switched off` : null,
+                  importing.preview.hotspotUsers.noLimit.length ? `${importing.preview.hotspotUsers.noLimit.length} with no time limit (nothing to size a plan from): ${importing.preview.hotspotUsers.noLimit.slice(0, 5).join(', ')}${importing.preview.hotspotUsers.noLimit.length > 5 ? '…' : ''}` : null,
+                ].filter(Boolean).join(' · ')}
+              </span>
+            )}
             {!!importing.preview.importable.length && (
               <div style={{ maxHeight: 180, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
                 {importing.preview.importable.slice(0, 100).map((x) => (
@@ -2085,6 +2115,12 @@ Revoke anyway?`
               <span style={{ color: color.green }}>
                 {importing.result.hotspotCreated.length} hotspot guest(s) issued a voucher with
                 their remaining time carried over — see Hotspot → Vouchers.
+              </span>
+            )}
+            {!!importing.result.hotspotUsersCreated?.length && (
+              <span style={{ color: color.green }}>
+                {importing.result.hotspotUsersCreated.length} hotspot user(s) came across as vouchers with their own name and
+                password — see Hotspot → Vouchers.
               </span>
             )}
             {!!importing.result.failed?.length && (

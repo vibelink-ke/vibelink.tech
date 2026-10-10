@@ -841,7 +841,7 @@ export async function walledGarden(c, tenantId, subId, { heal = false } = {}) {
  * visitor first signs in, whatever the tenant's Voucher expiry setting says. Started at creation, a code shared
  * hours or days after it was made had already run down, showed as "Used" and was refused.
  */
-export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { startOnLogin = false } = {}) {
+export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { startOnLogin = false, code: givenCode = null, password = null, expiresInSeconds = null, sessionSeconds = null } = {}) {
   // Scoped defensively — every call site today already passes a planId that
   // was itself looked up under this tenant, so this has never been reachable
   // with a foreign plan, but a future caller only needs to trust the wrong
@@ -852,7 +852,8 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { star
   const { rows: [plan] } = await c.query('select * from plans where id=$1 and tenant_id=$2', [planId, tenantId]);
   const { rows: [cfg] } = await c.query('select * from hotspot_settings where tenant_id=$1', [tenantId]);
   const prefs = cfg ?? { code_type: 'numeric', code_length: 6, voucher_expiry: 'login' };
-  const code = await uniqueCode(c, tenantId, prefs);
+  // A code that already exists on a router being imported is kept as it is, so the guests who hold it keep working.
+  const code = givenCode ?? await uniqueCode(c, tenantId, prefs);
 
   /**
    * "creation" starts the clock now; "login" leaves expires_at null until
@@ -869,8 +870,8 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { star
    * always starts on creation regardless of the tenant's own preference,
    * because binding it right now already is the moment it starts using it.
    */
-  const fromCreation = !startOnLogin && (prefs.voucher_expiry === 'creation' || !!mac);
-  const expires = fromCreation ? new Date(Date.now() + plan.duration_min * 60000) : null;
+  const fromCreation = !startOnLogin && (prefs.voucher_expiry === 'creation' || !!mac || expiresInSeconds != null);
+  const expires = fromCreation ? new Date(Date.now() + (expiresInSeconds != null ? expiresInSeconds * 1000 : plan.duration_min * 60000)) : null;
   const { rows: [v] } = await c.query(
     `insert into vouchers (tenant_id, code, plan_id, phone, mac, status, starts_at, expires_at)
      values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
@@ -892,9 +893,9 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { star
    */
   await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value) values
-       ($2,$1,'Cleartext-Password',':=',$1)
+       ($2,$1,'Cleartext-Password',':=',$3)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [code, tenantId]);
+    [code, tenantId, password ?? code]);
   if (expires) await c.query(
     `insert into radcheck (tenant_id, username, attribute, op, value)
      values ($3,$1,'Expiration',':=',$2)
@@ -906,7 +907,7 @@ export async function issueVoucherAccess(c, tenantId, planId, phone, mac, { star
        ($4,$1,'Session-Timeout',':=',$3),
        ($4,$1,'Mikrotik-Group',':=',$5)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [code, `${plan.rate_up}k/${plan.rate_down}k`, plan.duration_min * 60, tenantId,
+    [code, `${plan.rate_up}k/${plan.rate_down}k`, sessionSeconds ?? (expiresInSeconds != null ? expiresInSeconds : plan.duration_min * 60), tenantId,
      hotspotCookieProfile(plan.duration_min, plan.devices)]);
   return v;
 }
