@@ -75,7 +75,7 @@ export default function Networks() {
   const create = async () => {
     if (!f.name.trim() || !f.cidr.trim()) return store.toast('Name and CIDR are required');
     if (!cidrHosts(f.cidr)) return store.toast('That does not look like a valid CIDR block');
-    if (f.purpose === 'radio' && !f.routerId) return store.toast('Pick the router the radios are reached through');
+    if (f.purpose === 'mgmt' && !f.routerId) return store.toast('Pick the router the devices are reached through');
     setBusy(true);
     try {
       const created = await api.createIpPool({
@@ -131,8 +131,8 @@ export default function Networks() {
             {
               key: 'service',
               label: 'Used for',
-              render: (p) => (p.purpose === 'radio'
-                ? <span style={{ color: '#8a4fd0', fontWeight: 600 }}>Radio management · no internet</span>
+              render: (p) => (p.purpose === 'mgmt'
+                ? <span style={{ color: '#8a4fd0', fontWeight: 600 }}>Device management · no internet</span>
                 : p.connection_type === 'wireless' ? 'Internet · wireless'
                   : p.connection_type === 'fibre' ? 'Internet · fibre' : 'Internet · everyone'),
             },
@@ -244,8 +244,8 @@ export default function Networks() {
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
               />
             </Field>
-            {editing.purpose === 'radio' ? (
-              <Field label="Port the radios are on" hint="Optional. If set, the router gets the first address of the range on this port so the radios can be reached.">
+            {editing.purpose === 'mgmt' ? (
+              <Field label="Port the devices are on" hint="Optional. If set, the router gets the first address of the range on this port so the devices can be reached.">
                 <Input value={editing.iface ?? ''} onChange={(e) => setEditing((s) => ({ ...s, iface: e.target.value }))} placeholder="bridge-radios" />
               </Field>
             ) : (
@@ -295,11 +295,11 @@ export default function Networks() {
             <Select
               value={f.purpose}
               onChange={set('purpose')}
-              options={[{ value: 'normal', label: 'Internet pool' }, { value: 'radio', label: 'Radio management (reachable, no internet)' }]}
+              options={[{ value: 'normal', label: 'Internet pool' }, { value: 'mgmt', label: 'Device management (radios and ONUs · reachable, no internet)' }]}
             />
           </Field>
-          {f.purpose === 'radio' ? (
-            <Field label="Port the radios are on" hint="Optional: the router takes the first address of the range on this port">
+          {f.purpose === 'mgmt' ? (
+            <Field label="Port the devices are on" hint="Optional: the router takes the first address of the range on this port">
               <Input value={f.iface} onChange={set('iface')} placeholder="bridge-radios" />
             </Field>
           ) : (
@@ -311,7 +311,7 @@ export default function Networks() {
               />
             </Field>
           )}
-          <Field label="Router" span={2} hint={f.purpose === 'radio' ? 'Required: the router the radios connect through' : undefined}>
+          <Field label="Router" span={2} hint={f.purpose === 'mgmt' ? 'Required: the router the devices connect through' : undefined}>
             <Select
               value={f.routerId}
               onChange={set('routerId')}

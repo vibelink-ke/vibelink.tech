@@ -3335,6 +3335,6 @@ alter table site_profiles add column if not exists connection_type text check (c
 alter table ip_pools add column if not exists connection_type text check (connection_type in ('fibre','wireless'));
 alter table ip_pools add column if not exists iface text;
 alter table ip_pools drop constraint if exists ip_pools_purpose_check;
-alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal','expired','radio'));
-alter table subscribers add column if not exists radio_ip inet;
-create unique index if not exists subscribers_radio_ip_uniq on subscribers (tenant_id, host(radio_ip)) where radio_ip is not null;
+alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal','expired','mgmt'));
+alter table subscribers add column if not exists mgmt_ip inet;
+create unique index if not exists subscribers_mgmt_ip_uniq on subscribers (tenant_id, host(mgmt_ip)) where mgmt_ip is not null;

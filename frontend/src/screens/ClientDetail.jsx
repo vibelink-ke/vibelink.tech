@@ -663,7 +663,7 @@ export default function ClientDetail() {
       const orig = clients.find((c) => c.id === editing.id) ?? {};
       if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
       if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
-      if ((editing.radio_ip ? String(editing.radio_ip).split('/')[0] : null) !== (orig.radio_ip ? String(orig.radio_ip).split('/')[0] : null)) patch.radio_ip = editing.radio_ip ? String(editing.radio_ip).split('/')[0] : null;
+      if ((editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null) !== (orig.mgmt_ip ? String(orig.mgmt_ip).split('/')[0] : null)) patch.mgmt_ip = editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null;
     }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -1114,7 +1114,7 @@ export default function ClientDetail() {
           <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px', gridColumn: '1 / -1' }}>
             <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Other</div>
             <KV k="Auto-pay" v={client.autopay ?? 'Off'} />
-            {client.radio_ip && <KV k="Radio address" v={String(client.radio_ip).split('/')[0]} />}
+            {client.mgmt_ip && <KV k="Radio address" v={String(client.mgmt_ip).split('/')[0]} />}
             {client.service === 'pppoe' && (
               <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
             )}
@@ -1717,20 +1717,20 @@ export default function ClientDetail() {
                 />
               </Field>
             )}
-            {(editing.connection_type === 'pmp' || editing.connection_type === 'ptp') && (
-              <Field label="Radio address" hint="Management address of the radio at the customer's home. It is reachable from the system but has no internet.">
+            {editing.connection_type && (
+              <Field label={editing.connection_type === 'fibre' ? 'ONU address' : 'Radio address'} hint="Management address of the customer's radio or ONU. It is reachable from the system but has no internet.">
                 {(() => {
-                  const rp = (store.ipPools ?? []).filter((p) => p.purpose === 'radio' && p.router_id === editing.router_id);
-                  const heldBy = new Set(clients.filter((c) => c.id !== editing.id && c.radio_ip).map((c) => String(c.radio_ip).split('/')[0]));
+                  const rp = (store.ipPools ?? []).filter((p) => p.purpose === 'mgmt' && p.router_id === editing.router_id);
+                  const heldBy = new Set(clients.filter((c) => c.id !== editing.id && c.mgmt_ip).map((c) => String(c.mgmt_ip).split('/')[0]));
                   const free = rp.flatMap((p) => hostsInCidr(p.cidr, 254)).filter((ip) => !heldBy.has(ip));
                   if (!rp.length) {
-                    return <span style={{ fontSize: 12.5, color: '#8a6d1d' }}>No radio-management pool on this router yet. Add one under Networks (type: Radio management).</span>;
+                    return <span style={{ fontSize: 12.5, color: '#8a6d1d' }}>No device-management pool on this router yet. Add one under Networks (type: Device management).</span>;
                   }
-                  const cur = editing.radio_ip ? String(editing.radio_ip).split('/')[0] : '';
+                  const cur = editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : '';
                   return (
                     <Select
                       value={cur}
-                      onChange={(e) => setEditing((s) => ({ ...s, radio_ip: e.target.value }))}
+                      onChange={(e) => setEditing((s) => ({ ...s, mgmt_ip: e.target.value }))}
                       options={[
                         { value: '', label: 'Not assigned' },
                         ...(cur && !free.includes(cur) ? [{ value: cur, label: `${cur} (current)` }] : []),

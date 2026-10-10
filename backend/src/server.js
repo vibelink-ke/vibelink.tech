@@ -7130,7 +7130,7 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
     {
       // Radio-management ranges for this router: reachable, but with no way out.
       const { rows: radioPools } = await pool.query(
-        "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='radio'", [req.tenant.id, r.id]);
+        "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='mgmt'", [req.tenant.id, r.id]);
       for (const rp of radioPools) {
         const x = await tryStep(`radio management pool ${rp.cidr}`, () => ros.applyRadioPool(conn, { cidr: rp.cidr, iface: rp.iface }), 20000);
         done.push(x.done?.length ? `radio pool ${rp.cidr}: ${x.done.join('; ')}` : `radio pool ${rp.cidr} already set up (reachable, no internet)`);
@@ -9001,7 +9001,7 @@ app.post('/api/routers/:id/test-coa', requirePermission('routers.configure'), wr
  */
 app.put('/api/ip-pools/:id', wrap(async (req, res) => {
   const { name, cidr, routerId, service, purpose } = req.body ?? {};
-  if (purpose !== undefined && !['normal', 'radio'].includes(purpose)) {
+  if (purpose !== undefined && !['normal', 'mgmt'].includes(purpose)) {
     return res.status(400).json({ error: 'purpose must be normal or radio' });
   }
 
@@ -9033,7 +9033,7 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
 
   // Either end of a changed assignment needs the router it now applies (or
   // no longer applies) to told, not just the pool's own new router_id.
-  if (p.purpose === 'radio' && p.router_id) {
+  if (p.purpose === 'mgmt' && p.router_id) {
     pushRadioPools(req.tenant.id, p.router_id);
   } else if (existing.service === 'pppoe' || p.service === 'pppoe') {
     const targets = new Set();
@@ -9068,7 +9068,7 @@ app.delete('/api/ip-pools/:id', wrap(async (req, res) => {
     });
   }
 
-  const holdCol = p.purpose === 'radio' ? 'radio_ip' : 'static_ip';
+  const holdCol = p.purpose === 'mgmt' ? 'mgmt_ip' : 'static_ip';
   const { rows: [{ count }] } = await pool.query(
     `select count(*)::int from subscribers
       where tenant_id=$1 and ${holdCol} is not null and ${holdCol} << $2::cidr`,
@@ -9090,7 +9090,7 @@ app.get('/api/ip-pools/:id/usage', wrap(async (req, res) => {
     'select * from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!p) return res.status(404).json({ error: 'No such pool' });
 
-  const useCol = p.purpose === 'radio' ? 'radio_ip' : 'static_ip';
+  const useCol = p.purpose === 'mgmt' ? 'mgmt_ip' : 'static_ip';
   const { rows: taken } = await pool.query(
     `select host(${useCol}) as ip, name, account_code, status
        from subscribers
@@ -9120,7 +9120,7 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
          and (router_id = $2 or router_id is null)
          and service = 'pppoe'
          and purpose = $4
-         and ($4 = 'radio'
+         and ($4 = 'mgmt'
               or ($5::text is null and connection_type is null)
               or ($5::text is not null and (connection_type = $5 or (connection_type is null and not exists (
                     select 1 from ip_pools w where w.tenant_id = $1 and w.purpose = 'normal' and w.service = 'pppoe'
@@ -9137,9 +9137,9 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
        -- so a stored 10.44.0.1/32 never matches a generated 10.44.0.1/22 and
        -- every taken address was being offered again.
        select 1 from subscribers s
-        where s.tenant_id = $1 and host(case when $4 = 'radio' then s.radio_ip else s.static_ip end) = host(network(p.cidr) + i))
+        where s.tenant_id = $1 and host(case when $4 = 'mgmt' then s.mgmt_ip else s.static_ip end) = host(network(p.cidr) + i))
      order by 1
-     limit $3`, [req.tenant.id, req.params.id, limit, req.query.kind === 'radio' ? 'radio' : 'normal',
+     limit $3`, [req.tenant.id, req.params.id, limit, req.query.kind === 'mgmt' ? 'mgmt' : 'normal',
        ['fibre', 'wireless'].includes(req.query.conn) ? req.query.conn : null]);
 
   res.json({ addresses: rows.map((r) => r.ip), pools: [...new Set(rows.map((r) => r.pool))] });
@@ -9154,8 +9154,8 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name,
-       case when p.purpose = 'radio'
-            then (select count(*) from subscribers s where s.tenant_id=p.tenant_id and s.radio_ip is not null and s.radio_ip <<= p.cidr)
+       case when p.purpose = 'mgmt'
+            then (select count(*) from subscribers s where s.tenant_id=p.tenant_id and s.mgmt_ip is not null and s.mgmt_ip <<= p.cidr)
             else (select count(*) from subscribers s where s.router_id=p.router_id) end used
      from ip_pools p left join routers r on r.id=p.router_id
      where p.tenant_id=$1 and p.purpose != 'expired'`, [req.tenant.id]);
@@ -9250,7 +9250,7 @@ async function pushRadioPools(tenantId, routerId) {
   const ros = await import('./routeros.js');
   try {
     const { rows: pools } = await pool.query(
-      "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='radio'", [tenantId, routerId]);
+      "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='mgmt'", [tenantId, routerId]);
     if (!pools.length) return;
     const { rows: [r] } = await pool.query(
       'select id, host, api_port, service_user, service_password_enc from routers where id=$1 and tenant_id=$2 and service_user is not null',
@@ -9369,10 +9369,10 @@ async function repushPppoePoolToFallbackRouters(tenantId) {
 app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe', purpose = 'normal' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
-  if (!['normal', 'radio'].includes(purpose)) return res.status(400).json({ error: 'purpose must be normal or radio' });
-  if (purpose === 'radio' && !routerId) return res.status(400).json({ error: 'A radio-management pool belongs to one router: pick it.' });
+  if (!['normal', 'mgmt'].includes(purpose)) return res.status(400).json({ error: 'purpose must be normal or radio' });
+  if (purpose === 'mgmt' && !routerId) return res.status(400).json({ error: 'A device-management pool belongs to one router: pick it.' });
   const connectionType = purpose === 'normal' && ['fibre', 'wireless'].includes(req.body.connectionType) ? req.body.connectionType : null;
-  const iface = purpose === 'radio' ? (String(req.body.iface ?? '').trim().slice(0, 40) || null) : null;
+  const iface = purpose === 'mgmt' ? (String(req.body.iface ?? '').trim().slice(0, 40) || null) : null;
 
   const { rows: existing } = await pool.query(
     'select name, cidr, service from ip_pools where tenant_id=$1', [req.tenant.id]);
@@ -9411,7 +9411,7 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
     'insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, connection_type, iface) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *',
     [req.tenant.id, name, cidr, routerId ?? null, service, purpose, connectionType, iface]);
 
-  if (purpose === 'radio') {
+  if (purpose === 'mgmt') {
     pushRadioPools(req.tenant.id, routerId);
   } else if (service === 'pppoe') {
     if (routerId) repushPppoePool(req.tenant.id, routerId);
@@ -9901,7 +9901,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'radio_ip'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'mgmt_ip'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -9967,19 +9967,19 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     if (v !== null && !['fibre', 'pmp', 'ptp'].includes(v)) return res.status(400).json({ error: 'Connection type is fibre, pmp or ptp.' });
     req.body.connection_type = v;
   }
-  // The management address of the radio at the customer's home: from a radio pool, and held by one service only.
-  if ('radio_ip' in req.body) {
-    const v = String(req.body.radio_ip ?? '').trim() || null;
+  // The management address of the customer's radio or ONU: from a device-management pool, and held by one service only.
+  if ('mgmt_ip' in req.body) {
+    const v = String(req.body.mgmt_ip ?? '').trim() || null;
     if (v !== null) {
       if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return res.status(400).json({ error: 'That is not an IP address.' });
       const { rowCount: inPool } = await pool.query(
-        "select 1 from ip_pools where tenant_id=$1 and purpose='radio' and $2::inet <<= cidr", [req.tenant.id, v]);
-      if (!inPool) return res.status(400).json({ error: 'That address is not in a radio-management pool. Add the range under Networks first.' });
+        "select 1 from ip_pools where tenant_id=$1 and purpose='mgmt' and $2::inet <<= cidr", [req.tenant.id, v]);
+      if (!inPool) return res.status(400).json({ error: 'That address is not in a device-management pool. Add the range under Networks first.' });
       const { rows: [held] } = await pool.query(
-        'select name, line_label from subscribers where tenant_id=$1 and host(radio_ip)=$2 and id<>$3', [req.tenant.id, v, req.params.id]);
+        'select name, line_label from subscribers where tenant_id=$1 and host(mgmt_ip)=$2 and id<>$3', [req.tenant.id, v, req.params.id]);
       if (held) return res.status(409).json({ error: `${v} is already the radio of ${held.line_label || held.name}.` });
     }
-    req.body.radio_ip = v;
+    req.body.mgmt_ip = v;
   }
   if ('ap_node_id' in req.body) {
     const v = req.body.ap_node_id || null;
