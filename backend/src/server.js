@@ -13660,6 +13660,14 @@ app.post('/api/tenants/bulk-rate', superAdminOnly, wrap(async (req, res) => {
   res.json({ ok: true, updated: rowCount, pppoeClientRate: pppoe, hotspotCommissionPct: hotspot, alsoNew: !!req.body?.alsoNew });
 }));
 
+/**
+ * A licence date the platform owner sets or extends by hand stands until it passes: the unpaid-statement lock (jobs.js
+ * expireTenantLicences) used to put it straight back to yesterday on its next run, which is why manual extensions kept
+ * "expiring". Best effort — without the column (schema not applied yet) the extension itself still happens.
+ */
+const holdLicenceDate = (tenantId) => pool.query(
+  'update tenants set lock_exempt_until = licence_ends where id = $1 and licence_ends >= current_date', [tenantId]).catch(() => {});
+
 app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
   const allowed = ['status', 'plan_type', 'plan_amount', 'revshare_pct', 'licence_ends', 'support_phone',
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
@@ -13702,6 +13710,7 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
     `update tenants set ${sets.map((k, i) => `${k}=$${i + 2}`).join(', ')} where id=$1 returning *`,
     [req.params.id, ...sets.map((k) => req.body[k])]);
   if (!t) return res.status(404).json({ error: 'not found' });
+  if (sets.includes('licence_ends')) await holdLicenceDate(t.id);
   res.json(t);
 }));
 
@@ -13727,6 +13736,7 @@ app.post('/api/tenants/:id/activate', superAdminOnly, wrap(async (req, res) => {
       where id = $1 returning id, name, status, licence_ends, converted_at`,
     [req.params.id, Math.round(days)]);
   if (!t) return res.status(404).json({ error: 'not found' });
+  await holdLicenceDate(t.id);
   res.json(t);
 }));
 
@@ -13757,6 +13767,7 @@ app.post('/api/tenants/:id/licence', superAdminOnly, wrap(async (req, res) => {
     await pool.query(
       "update tenants set status='active' where id=$1 and status in ('readonly','suspended')",
       [t.id]);
+    await holdLicenceDate(t.id);
   }
   res.json(t);
 }));

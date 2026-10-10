@@ -3341,3 +3341,7 @@ create unique index if not exists subscribers_mgmt_ip_uniq on subscribers (tenan
 
 -- SkyPlan (the network planner) as the Map: switched on per tenant by the platform owner.
 alter table tenants add column if not exists skyplan_enabled boolean not null default false;
+
+-- A licence date the platform owner set by hand is respected by the unpaid-statement lock: until this date the lock job
+-- leaves the tenant alone, instead of putting the licence back to yesterday on its next run.
+alter table tenants add column if not exists lock_exempt_until date;

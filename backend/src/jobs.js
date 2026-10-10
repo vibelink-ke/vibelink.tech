@@ -1893,6 +1893,9 @@ export async function expireTenantLicences() {
     update tenants t set licence_ends = current_date - 1
      where t.status = 'active' and t.converted_at is not null and t.subdomain <> 'demo'
        and t.licence_ends is not null and t.licence_ends >= current_date
+       -- A date the platform owner set by hand holds until it passes. Read through to_jsonb so a database that does not
+       -- have the column yet keeps working exactly as before.
+       and coalesce((to_jsonb(t)->>'lock_exempt_until')::date, date '1970-01-01') < current_date
        and exists (select 1 from tenant_charges c
                     where c.tenant_id = t.id and c.status in ('open', 'invoiced')
                       and ((c.month + interval '1 month' + interval '4 days 10 hours') at time zone 'Africa/Nairobi') < now())`);

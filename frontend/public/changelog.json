@@ -118,7 +118,8 @@
       "Wireless gets its own internet pool per router. Device-management pools hold the management addresses of customers' radios and fibre ONUs: reachable from the system, with no internet. Each service can be given a device address (radio or ONU); the router rule that blocks internet for the range is applied on Configure.",
       "Menu tidied: Payments, Site payment profiles and Expenses are now tabs of one Payments page; Field app and Field team are one Field entry (the team page opens the app); Schedule moved under Support.",
       "Map ↔ SkyPlan: \"Export to SkyPlan\" saves your towers, the radios/switches on them, fibre nodes and cables and customers (with their device address to monitor) as a SkyPlan project file; \"Import from SkyPlan\" brings a SkyPlan design's sites, equipment and fibre onto the map, updating what is already there instead of duplicating it.",
-      "Map: SkyPlan is no longer inside the Map page; it is hosted on its own (skyplan address) and the Map is the classic map again. Export to / Import from SkyPlan on the Map still move the network between them."
+      "Map: SkyPlan is no longer inside the Map page; it is hosted on its own (skyplan address) and the Map is the classic map again. Export to / Import from SkyPlan on the Map still move the network between them.",
+      "Licences: a licence date you set or extend by hand now holds until that date. The unpaid-statement lock used to put it back to yesterday on its next run, which is why manual extensions kept expiring."
     ]
   }
 ]
