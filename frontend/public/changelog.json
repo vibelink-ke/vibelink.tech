@@ -121,7 +121,8 @@
       "Map: SkyPlan is no longer inside the Map page; it is hosted on its own (skyplan address) and the Map is the classic map again. Export to / Import from SkyPlan on the Map still move the network between them.",
       "Licences: a licence date you set or extend by hand now holds until that date. The unpaid-statement lock used to put it back to yesterday on its next run, which is why manual extensions kept expiring.",
       "Import from a router now also reads its saved hotspot users (not only who is online). By default each comes across as a voucher on the bundle named like its profile, with the time of that profile (or the user's own limit) less what it has used, the same name and password, and the phone number written in its comment. Permanent access codes are an option, with a tick-list. For PPPoE clients being brought in, three options (on by default): a new address from the billing pool (online ones are dropped to reconnect on it), a MAC lock to the device each is on, and its package from its profile.",
-      "Fixed PPPoE clients logging in and being dropped (\"0.0.0.0\") when their address pool was set to fibre or wireless only and they had no connection type: a pool made for another type is now used as a fallback instead of giving them no address."
+      "Fixed PPPoE clients logging in and being dropped (\"0.0.0.0\") when their address pool was set to fibre or wireless only and they had no connection type: a pool made for another type is now used as a fallback instead of giving them no address.",
+      "Fixed imported hotspot users being refused at login: an imported voucher now takes its own code as its password (the login page sends only the code), not the password the router had."
     ]
   }
 ]

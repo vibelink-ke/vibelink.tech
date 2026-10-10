@@ -7009,7 +7009,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
         const plan = hsPlanFor(u);
         if (!plan) throw new Error('No active hotspot plan long enough for the time this user has left.');
         const v = await radius.issueVoucherAccess(pool, req.tenant.id, plan.id, u.phone ?? null, null, {
-          startOnLogin: u.fresh, code: u.name, password: u.password || u.name,
+          startOnLogin: u.fresh, code: u.name,   // password stays the code: the login page sends only the code
           ...(u.fresh ? { sessionSeconds: u.remainingSeconds } : { expiresInSeconds: u.remainingSeconds, sessionSeconds: u.remainingSeconds }),
         });
         await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);
@@ -7026,7 +7026,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
       for (const u of hsSorted.noLimit) {
         try {
           const v = await radius.issueVoucherAccess(pool, req.tenant.id, noLimitPlan.id, phoneFromComment(u.comment), null, {
-            startOnLogin: true, code: u.name, password: u.password || u.name,
+            startOnLogin: true, code: u.name,   // password stays the code: the login page sends only the code
           });
           await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);
           hotspotUsersCreated.push(u.name);
