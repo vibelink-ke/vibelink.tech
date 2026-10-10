@@ -6249,6 +6249,7 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
     const dnsProxy = await tryStep('DNS proxy', () => ros.applyDnsProxy(conn, {
       hotspotSubnet: opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24',
     }), 40000);
+    if (dnsProxy.repaired?.length) done.push(...dnsProxy.repaired);
     done.push(dnsProxy.protected
       ? `DNS proxy open to guests, blocked from ${dnsProxy.wan}, guest DNS rate-limited against tunneling`
       : dnsProxy.enabled

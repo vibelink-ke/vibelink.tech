@@ -752,6 +752,7 @@ export async function wanInterface(conn, ifaceNames = null) {
  * already makes when it cannot name an interface.
  */
 export async function applyDnsProxy(conn, { hotspotSubnet = null } = {}) {
+  const done = [];   // what was repaired on this run (the order of the guest DNS rules), reported back to the caller
   const [dns] = await conn.write('/ip/dns/print', []);
   const already = dns?.['allow-remote-requests'] === 'true' || dns?.['allow-remote-requests'] === 'yes';
 
@@ -895,7 +896,7 @@ export async function applyDnsProxy(conn, { hotspotSubnet = null } = {}) {
     }
   }
 
-  return { enabled: true, protected: true, wan };
+  return { enabled: true, protected: true, wan, repaired: done };
 }
 
 /**
