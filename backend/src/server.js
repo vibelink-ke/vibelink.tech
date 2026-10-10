@@ -6683,6 +6683,27 @@ function categorizeImport(found, sessions, knownPppoe, knownMac) {
  * These are voucher-style logins: a name (and a password), usually with a limit on total time. One that has time left is
  * worth bringing across; one that is used up, switched off or already here is not.
  */
+/** "2 HOUR UNLIMITED" → 7200, "1 HOUR" → 3600, "6 HOURS" → 21600, "30 MIN" → 1800, "1 DAY" → 86400. Null when no time is named. */
+function durationFromName(name) {
+  const m = /(\d+)\s*(MINUTES?|MINS?|M|HOURS?|HRS?|H|DAYS?|D|WEEKS?|W)\b/i.exec(String(name ?? ''));
+  if (!m) return null;
+  const n = Number(m[1]);
+  const u = m[2].toUpperCase();
+  const per = u.startsWith('M') ? 60 : u.startsWith('H') ? 3600 : u.startsWith('D') ? 86400 : 604800;
+  return n > 0 ? n * per : null;
+}
+
+/** A phone number written in a hotspot user's comment ("254721407772 |", "0721 407 772") → 2547… , or null. */
+function phoneFromComment(comment) {
+  // Spaces and dashes inside a number are closed up first ("0721 407 772"), then the first number-like word is used.
+  const closed = String(comment ?? '').replace(/(\d)[ -]+(?=\d)/g, '$1');
+  const digits = closed.replace(/[^\d+]/g, ' ').trim().split(/\s+/)[0]?.replace(/^\+/, '') ?? '';
+  if (/^254\d{9}$/.test(digits)) return digits;
+  if (/^0\d{9}$/.test(digits)) return '254' + digits.slice(1);
+  if (/^[17]\d{8}$/.test(digits)) return '254' + digits;
+  return null;
+}
+
 function categorizeHotspotUsers(users, knownCodes) {
   const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [] };
   const seen = new Set();
@@ -6691,11 +6712,13 @@ function categorizeHotspotUsers(users, knownCodes) {
     seen.add(u.name);
     if (u.disabled) { out.disabled.push(u.name); continue; }
     if (knownCodes.has(u.name)) { out.already.push(u.name); continue; }
-    if (!u.limitUptimeSec) { out.noLimit.push(u); continue; }          // no time limit of its own: sized by a plan the operator picks
-    const left = u.limitUptimeSec - u.uptimeSec;
+    // The time it is allowed: its own limit, else its profile's, else a time named in the profile ("2 HOUR …").
+    const allowed = u.limitUptimeSec || u.profileLimitSec || durationFromName(u.profile);
+    if (!allowed) { out.noLimit.push(u); continue; }                   // nothing says how long: sized by a plan the operator picks
+    const left = allowed - u.uptimeSec;
     if (left <= 0) { out.usedUp.push(u.name); continue; }
     out.importable.push({
-      name: u.name, password: u.password, mac: u.mac, comment: u.comment,
+      name: u.name, password: u.password, mac: u.mac, comment: u.comment, phone: phoneFromComment(u.comment), profile: u.profile,
       fresh: u.uptimeSec === 0,                                         // never used: the clock starts at first login
       remainingMinutes: Math.ceil(left / 60), remainingSeconds: left,
     });
@@ -6784,7 +6807,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
           importable: hsSorted.importable.map((u) => {
             const plan = hsPlanFor(u);
             return {
-              name: u.name, fresh: u.fresh, remainingMinutes: u.remainingMinutes,
+              name: u.name, fresh: u.fresh, remainingMinutes: u.remainingMinutes, phone: u.phone, profile: u.profile ?? null,
               suggestedPlan: plan ? { id: plan.id, title: plan.title, durationMin: plan.duration_min } : null,
             };
           }),
@@ -6891,7 +6914,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
       try {
         const plan = hsPlanFor(u);
         if (!plan) throw new Error('No active hotspot plan long enough for the time this user has left.');
-        const v = await radius.issueVoucherAccess(pool, req.tenant.id, plan.id, null, null, {
+        const v = await radius.issueVoucherAccess(pool, req.tenant.id, plan.id, u.phone ?? null, null, {
           startOnLogin: u.fresh, code: u.name, password: u.password || u.name,
           ...(u.fresh ? { sessionSeconds: u.remainingSeconds } : { expiresInSeconds: u.remainingSeconds, sessionSeconds: u.remainingSeconds }),
         });
@@ -6908,7 +6931,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     if (noLimitPlan) {
       for (const u of hsSorted.noLimit) {
         try {
-          const v = await radius.issueVoucherAccess(pool, req.tenant.id, noLimitPlan.id, null, null, {
+          const v = await radius.issueVoucherAccess(pool, req.tenant.id, noLimitPlan.id, phoneFromComment(u.comment), null, {
             startOnLogin: true, code: u.name, password: u.password || u.name,
           });
           await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);

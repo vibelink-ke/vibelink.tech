@@ -2851,10 +2851,14 @@ function parseRouterOSDuration(s) {
 export async function hotspotUsers(conn) {
   try {
     const rows = await conn.write('/ip/hotspot/user/print', []);
+    // The time a user is allowed often lives on its profile ("2 HOUR", "1 HOUR" …), not on the user itself.
+    const profiles = new Map((await conn.write('/ip/hotspot/user/profile/print', []).catch(() => []))
+      .map((p) => [p.name, parseRouterOSDuration(p['session-timeout'])]));
     const users = rows.map((r) => ({
       name: String(r.name ?? '').trim(),
       password: String(r.password ?? ''),
       profile: r.profile ?? null,
+      profileLimitSec: profiles.get(r.profile) ?? null,
       limitUptimeSec: parseRouterOSDuration(r['limit-uptime']),
       uptimeSec: parseRouterOSDuration(r.uptime) ?? 0,
       mac: String(r['mac-address'] ?? '').trim().toUpperCase() || null,
