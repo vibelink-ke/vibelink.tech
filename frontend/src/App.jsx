@@ -49,7 +49,7 @@ const Landing = lazy(() => import('./screens/Landing'));
 const Licence = lazy(() => import('./screens/Licence'));
 const Hotspot = lazy(() => import('./screens/Hotspot'));
 const Fup = lazy(() => import('./screens/Fup'));
-const MapScreen = lazy(() => import('./screens/MapHub'));
+const MapScreen = lazy(() => import('./screens/Map'));
 const Installations = lazy(() => import('./screens/Installations'));
 const SmartOlt = lazy(() => import('./screens/SmartOlt'));
 const Tr069 = lazy(() => import('./screens/Tr069'));
