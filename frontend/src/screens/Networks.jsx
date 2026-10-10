@@ -245,8 +245,8 @@ export default function Networks() {
               />
             </Field>
             {editing.purpose === 'mgmt' ? (
-              <Field label="Port the devices are on" hint="Optional. If set, the router gets the first address of the range on this port so the devices can be reached.">
-                <Input value={editing.iface ?? ''} onChange={(e) => setEditing((s) => ({ ...s, iface: e.target.value }))} placeholder="bridge-radios" />
+              <Field label="Port the devices are on" hint="Leave blank to use the same port as your customers (the PPPoE port). The router takes the first address of the range on it.">
+                <Input value={editing.iface ?? ''} onChange={(e) => setEditing((s) => ({ ...s, iface: e.target.value }))} placeholder="same as customers" />
               </Field>
             ) : (
               <Field label="For">
@@ -299,8 +299,8 @@ export default function Networks() {
             />
           </Field>
           {f.purpose === 'mgmt' ? (
-            <Field label="Port the devices are on" hint="Optional: the router takes the first address of the range on this port">
-              <Input value={f.iface} onChange={set('iface')} placeholder="bridge-radios" />
+            <Field label="Port the devices are on" hint="Leave blank to use the same port as your customers (the PPPoE port). The router takes the first address of the range on it.">
+              <Input value={f.iface} onChange={set('iface')} placeholder="same as customers" />
             </Field>
           ) : (
             <Field label="For">

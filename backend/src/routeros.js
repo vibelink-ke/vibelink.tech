@@ -2289,6 +2289,11 @@ export async function applyRadioPool(conn, { cidr, iface = null } = {}) {
 
   // The router's own address in the range, on the port the radios are reached through: that is what makes the
   // radios reachable (from this system and from the router). Only when told which port; never guessed.
+  // No port given: the same port the customers' PPPoE server runs on, so the devices sit with everyone else.
+  if (!iface) {
+    const srv = (await conn.write('/interface/pppoe-server/server/print', []))[0];
+    iface = srv?.interface || null;
+  }
   if (iface) {
     const net = ((o[0] << 24) >>> 0) + (o[1] << 16) + (o[2] << 8) + o[3];
     const gw = net + 1;

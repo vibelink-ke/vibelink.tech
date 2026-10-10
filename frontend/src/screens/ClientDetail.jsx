@@ -1114,7 +1114,7 @@ export default function ClientDetail() {
           <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 16px', gridColumn: '1 / -1' }}>
             <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 10px' }}>Other</div>
             <KV k="Auto-pay" v={client.autopay ?? 'Off'} />
-            {client.mgmt_ip && <KV k="Radio address" v={String(client.mgmt_ip).split('/')[0]} />}
+            {client.mgmt_ip && <KV k="Device address" v={String(client.mgmt_ip).split('/')[0]} />}
             {client.service === 'pppoe' && (
               <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
             )}
