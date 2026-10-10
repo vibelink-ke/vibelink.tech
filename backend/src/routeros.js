@@ -1920,8 +1920,19 @@ export async function pppSecrets(conn) {
     // Framed-IP-Address once the customer is billed from here.
     remoteAddress: r['remote-address'] ?? null,
     comment: r.comment ?? null,
+    callerId: String(r['caller-id'] ?? '').trim().toUpperCase() || null,   // a MAC the secret is already pinned to
     disabled: r.disabled === 'true',
   })).filter((r) => r.name);
+}
+
+/** PPP profiles by name, with their rate-limit ("rx/tx"), so a secret's package can be told from its profile. */
+export async function pppProfiles(conn) {
+  try {
+    const rows = await conn.write('/ppp/profile/print', []);
+    return new Map(rows.map((p) => [p.name, { rateLimit: String(p['rate-limit'] ?? '').trim() || null }]));
+  } catch {
+    return new Map();
+  }
 }
 
 /** Bridges already on the box, so we can offer to reuse one. */

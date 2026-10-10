@@ -6723,6 +6723,27 @@ function rateFromProfile(limit) {
   return up && down ? { upKbps: up, downKbps: down } : null;
 }
 
+/**
+ * The PPPoE package a router's PPP secret belongs to, from its profile: a package named like the profile, then one
+ * whose RADIUS profile is that name, then one with the same speed as the profile's rate-limit. Null when none fit.
+ */
+function planForPpp(profileName, rateLimit, plans) {
+  const pppoe = plans.filter((p) => p.service === 'pppoe');
+  const norm = (x) => String(x ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+  if (profileName) {
+    const byTitle = pppoe.find((p) => norm(p.title) === norm(profileName));
+    if (byTitle) return byTitle;
+    const byProfile = pppoe.find((p) => p.radius_profile && norm(p.radius_profile) === norm(profileName));
+    if (byProfile) return byProfile;
+  }
+  const rate = rateFromProfile(rateLimit);
+  if (rate) {
+    const bySpeed = pppoe.find((p) => p.rate_up === rate.upKbps && p.rate_down === rate.downKbps);
+    if (bySpeed) return bySpeed;
+  }
+  return null;
+}
+
 function categorizeHotspotUsers(users, knownCodes) {
   const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [], all: [] };
   const seen = new Set();
@@ -6784,6 +6805,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     conn = await step('connect', () =>
       ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
     const found = await step('read /ppp/secret', () => ros.pppSecrets(conn), 30000);
+    const pppProf = await step('read ppp profiles', () => ros.pppProfiles(conn), 15000);
     const sessions = await step('read active sessions', () => ros.activeSessions(conn), 30000);
     // Best-effort and only ever consulted for hotspot guests — a router with
     // no hotspot server, or one whose profile has no session-timeout set at
@@ -6805,19 +6827,27 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
       categorizeImport(found, sessions, knownPppoe, knownMac);
 
     const { rows: plans } = await pool.query(
-      "select id, title, duration_min, service from plans where tenant_id=$1 and active", [req.tenant.id]);
+      "select id, title, duration_min, service, rate_up, rate_down, radius_profile from plans where tenant_id=$1 and active", [req.tenant.id]);
 
     const { rows: knownVouchers } = await pool.query(
       'select code from vouchers where tenant_id=$1 union select username from hotspot_access_codes where tenant_id=$1', [req.tenant.id]);
     const knownCodes = new Set([...knownVouchers.map((x) => x.code), ...knownPppoe]);
     const hsSorted = categorizeHotspotUsers(hsUsers, knownCodes);
-    const hsPlanFor = (u) => closestHotspotPlan(plans, u.remainingMinutes);
+    // A hotspot user goes on the bundle named like its profile; failing that, the closest one for the time it has left.
+    const hsPlanFor = (u) => plans.find((p) => p.service === 'hotspot' && u.profile && p.title.trim().toLowerCase() === String(u.profile).trim().toLowerCase())
+      ?? closestHotspotPlan(plans, u.remainingMinutes);
+
+    // What the PPPoE clients being brought in get: new addresses from the billing pool, a MAC lock to the device they are on,
+    // and the package their profile names. All on unless switched off in the dialog.
+    const opts = { newIp: req.body?.newIp !== false, lockMac: req.body?.lockMac !== false, autoPlan: req.body?.autoPlan !== false };
+    const planOf = (f) => (opts.autoPlan ? planForPpp(f.profile, pppProf.get(f.profile)?.rateLimit, plans) : null);
+    const macOf = (f) => (opts.lockMac ? (activeByUser.get(f.name)?.mac ?? f.callerId ?? null) : null);
 
     if (!apply) {
       return res.json({
         preview: true,
         total: found.length,
-        importable: importable.map((f) => ({ name: f.name, remoteAddress: f.remoteAddress })),
+        importable: importable.map((f) => ({ name: f.name, remoteAddress: f.remoteAddress, profile: f.profile ?? null, plan: planOf(f)?.title ?? null, mac: macOf(f), online: activeByUser.has(f.name) })),
         already,
         noPassword,
         importableActive: [
@@ -6867,42 +6897,41 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     const hotspotCreated = [];
     const failed = [];
 
-    // Real-password PPPoE secrets — the router's own password comes across as-is.
-    for (const f of importable) {
+    // PPPoE clients, from their secrets (real password kept) and from sessions that are live with no usable secret (a fresh
+    // password is minted: RADIUS is what authenticates them from here). Each one:
+    //   - gets its package from its profile (planForPpp) so it is billed and speed-limited from the first day,
+    //   - is locked to the device (MAC) it is dialling in from,
+    //   - and, unless switched off, is given a new address from the billing pool instead of keeping the router's own, then
+    //     dropped so it reconnects on it.
+    const pppFresh = [
+      ...noPasswordActive.map((f) => ({ name: f.name, password: null, comment: f.comment, profile: f.profile, callerId: f.callerId, remoteAddress: null, address: activeByUser.get(f.name)?.address ?? null })),
+      ...orphanActive.map((s) => ({ name: s.username, password: null, comment: null, profile: null, callerId: null, remoteAddress: null, address: s.address })),
+    ];
+    const reconnect = [];
+    for (const f of [...importable.map((x) => ({ ...x, address: activeByUser.get(x.name)?.address ?? null })), ...pppFresh]) {
       try {
-        // Per row rather than one transaction: one malformed secret should not
-        // undo an import of several hundred that worked.
+        const password = f.password || genPass();
+        const plan = planOf(f);
+        const mac = macOf(f);
+        // Keeping the router's own address only when asked to: otherwise the allocator hands out one from the pool.
+        const keepIp = opts.newIp ? null : (f.remoteAddress || f.address || null);
         const { rows: [sub] } = await pool.query(
           `insert into subscribers (tenant_id, account_code, name, phone, service,
-             pppoe_user, pppoe_pass, router_id, static_ip)
-           values ($1,$2,$3,$4,'pppoe',$5,$6,$7,$8) returning id`,
-          [req.tenant.id, f.name, f.comment?.trim() || f.name, '', f.name, f.password, r.id,
-           f.remoteAddress || null]);
+             pppoe_user, pppoe_pass, router_id, static_ip, plan_id, locked_mac)
+           values ($1,$2,$3,$4,'pppoe',$5,$6,$7,$8,$9,$10) returning id`,
+          [req.tenant.id, f.name, (f.comment || '').trim() || f.name, '', f.name, password, r.id, keepIp, plan?.id ?? null, mac]);
         await radius.syncSubscriberCredentials(pool, req.tenant.id, sub.id);
         created.push(f.name);
+        if (opts.newIp && f.address) {
+          const { rows: [now] } = await pool.query('select host(static_ip) as ip from subscribers where id=$1', [sub.id]);
+          if (now?.ip && now.ip !== String(f.address).split('/')[0]) reconnect.push(f.name);   // on a different address now: redial
+        }
       } catch (e) {
         failed.push({ name: f.name, error: e.message });
       }
     }
-
-    // Confirmed-live PPPoE accounts with no usable router-side password —
-    // minted fresh, since RADIUS is what actually authenticates them from here.
-    for (const f of [
-      ...noPasswordActive.map((f) => ({ name: f.name, address: activeByUser.get(f.name)?.address ?? null })),
-      ...orphanActive.map((s) => ({ name: s.username, address: s.address })),
-    ]) {
-      try {
-        const password = genPass();
-        const { rows: [sub] } = await pool.query(
-          `insert into subscribers (tenant_id, account_code, name, phone, service,
-             pppoe_user, pppoe_pass, router_id, static_ip)
-           values ($1,$2,$3,$4,'pppoe',$5,$6,$7,$8) returning id`,
-          [req.tenant.id, f.name, f.name, '', f.name, password, r.id, f.address || null]);
-        await radius.syncSubscriberCredentials(pool, req.tenant.id, sub.id);
-        created.push(f.name);
-      } catch (e) {
-        failed.push({ name: f.name, error: e.message });
-      }
+    for (const name of reconnect) {
+      try { await radius.disconnectSubscriberSession(pool, r.host, r.secret, name); } catch { /* it picks the new address up on its next dial */ }
     }
 
     // Active hotspot sessions, matched by device MAC rather than a username
@@ -6943,7 +6972,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // (or, never used, its whole allowance from first login), on the closest plan that covers it. Best effort per user.
     const hotspotUsersCreated = [];
     const accessCodesCreated = [];
-    const asAccess = req.body?.hotspotAs !== 'voucher';
+    const asAccess = req.body?.hotspotAs === 'access';
     if (asAccess) {
       // Permanent access codes (Hotspot → Access codes): the router user's own name and password, no end time, one device,
       // the speed of the closest bundle when its profile names a time, else the default access speed.
@@ -7014,6 +7043,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     res.json({
       imported: created.length + hotspotCreated.length + hotspotUsersCreated.length + accessCodesCreated.length,
       created, hotspotCreated, hotspotUsersCreated, accessCodesCreated, already, noPassword, failed,
+      pppReconnected: reconnect.length,
       needPhone: created.length,
     });
   } catch (e) {

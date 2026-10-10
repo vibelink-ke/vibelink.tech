@@ -763,7 +763,7 @@ export default function Routers() {
   const importCount = (i) => {
     const p = i.preview;
     const base = p.importable.length + p.importableActive.length + p.hotspotImportable.length;
-    if (i.hotspotAs === 'voucher') return base + (p.hotspotUsers?.importable.length ?? 0) + (i.noLimitPlanId ? (p.hotspotUsers?.noLimit.length ?? 0) : 0);
+    if (i.hotspotAs !== 'access') return base + (p.hotspotUsers?.importable.length ?? 0) + (i.noLimitPlanId ? (p.hotspotUsers?.noLimit.length ?? 0) : 0);
     return base + accessPicked(i).length;
   };
 
@@ -782,7 +782,10 @@ export default function Routers() {
     try {
       const result = await api.importSecrets(importing.router.id, {
         noLimitPlanId: importing.noLimitPlanId || undefined,
-        hotspotAs: importing.hotspotAs === 'voucher' ? 'voucher' : 'access',
+        hotspotAs: importing.hotspotAs === 'access' ? 'access' : 'voucher',
+        newIp: !importing.keepIp,
+        lockMac: !importing.noLock,
+        autoPlan: !importing.noAutoPlan,
         pick: accessPicked(importing),
       });
       setImporting((i) => ({ ...i, result, busy: false }));
@@ -2028,6 +2031,28 @@ Revoke anyway?`
               <strong>{importing.preview.importable.length}</strong> new of{' '}
               {importing.preview.total} PPPoE account(s) on the router.
             </span>
+            {!!(importing.preview.importable.length + importing.preview.importableActive.length) && (
+              <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 6 }}>
+                <span><strong>For the PPPoE clients being brought in:</strong></span>
+                <label style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!importing.keepIp} onChange={(e) => setImporting((i) => ({ ...i, keepIp: !e.target.checked }))} />{' '}
+                  Give each a new address from the billing pool (online ones are dropped so they reconnect on it)
+                </label>
+                <label style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!importing.noLock} onChange={(e) => setImporting((i) => ({ ...i, noLock: !e.target.checked }))} />{' '}
+                  Lock each to the device (MAC) it is connecting from
+                </label>
+                <label style={{ cursor: 'pointer' }}>
+                  <input type="checkbox" checked={!importing.noAutoPlan} onChange={(e) => setImporting((i) => ({ ...i, noAutoPlan: !e.target.checked }))} />{' '}
+                  Assign each its package from its profile
+                  {importing.preview.importable.length > 0 && !importing.noAutoPlan && (
+                    <span style={{ color: color.muted }}>
+                      {' '}— {importing.preview.importable.filter((x) => x.plan).length} of {importing.preview.importable.length} match a package
+                    </span>
+                  )}
+                </label>
+              </div>
+            )}
             {!!importing.preview.already.length && (
               <span style={{ color: color.muted }}>
                 {importing.preview.already.length} already exist here and are left alone — the
@@ -2074,7 +2099,7 @@ Revoke anyway?`
                 </div>
               </>
             )}
-            {importing.hotspotAs === 'voucher' && !!importing.preview.hotspotUsers?.importable.length && (
+            {importing.hotspotAs !== 'access' && !!importing.preview.hotspotUsers?.importable.length && (
               <>
                 <span style={{ color: color.green }}>
                   <strong>{importing.preview.hotspotUsers.importable.length}</strong> hotspot user(s) from the router's
@@ -2100,15 +2125,15 @@ Revoke anyway?`
                 </span>
                 <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
                   <label style={{ cursor: 'pointer' }}>
-                    <input type="radio" checked={importing.hotspotAs !== 'voucher'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'access' }))} />{' '}
+                    <input type="radio" checked={importing.hotspotAs === 'access'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'access' }))} />{' '}
                     Access codes — permanent, no time limit
                   </label>
                   <label style={{ cursor: 'pointer' }}>
-                    <input type="radio" checked={importing.hotspotAs === 'voucher'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'voucher' }))} />{' '}
-                    Vouchers — keep the time each has left
+                    <input type="radio" checked={importing.hotspotAs !== 'access'} onChange={() => setImporting((i) => ({ ...i, hotspotAs: 'voucher' }))} />{' '}
+                    Vouchers — the time of each one's profile, less what it has used
                   </label>
                 </div>
-                {importing.hotspotAs !== 'voucher' && (
+                {importing.hotspotAs === 'access' && (
                   <>
                     <span style={{ color: color.amberInk }}>
                       Each takes its speed and device limit from its own profile (the Profile column on the router). An access
@@ -2148,7 +2173,7 @@ Revoke anyway?`
             {!!importing.preview.hotspotUsers && !importing.preview.hotspotUsers.error && importing.preview.hotspotUsers.total === 0 && (
               <span style={{ color: color.muted }}>The router has no hotspot users in its list (IP → Hotspot → Users).</span>
             )}
-            {importing.hotspotAs === 'voucher' && !!importing.preview.hotspotUsers?.noLimit.length && (
+            {importing.hotspotAs !== 'access' && !!importing.preview.hotspotUsers?.noLimit.length && (
               <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}>
                 <span>
                   <strong>{importing.preview.hotspotUsers.noLimit.length}</strong> hotspot user(s) have no time limit of
@@ -2182,7 +2207,10 @@ Revoke anyway?`
             {!!importing.preview.importable.length && (
               <div style={{ maxHeight: 180, overflow: 'auto', fontFamily: font.mono, fontSize: 12.5 }}>
                 {importing.preview.importable.slice(0, 100).map((x) => (
-                  <div key={x.name}>{x.name}{x.remoteAddress ? ` · ${x.remoteAddress}` : ''}</div>
+                  <div key={x.name}>
+                    {x.name}{x.profile ? ` · ${x.profile}` : ''}{!importing.noAutoPlan ? (x.plan ? ` → ${x.plan}` : ' → no matching package') : ''}
+                    {x.remoteAddress ? ` · ${x.remoteAddress}` : ''}{x.online ? ' · online' : ''}
+                  </div>
                 ))}
               </div>
             )}
@@ -2203,6 +2231,11 @@ Revoke anyway?`
               <span style={{ color: color.green }}>
                 {importing.result.hotspotCreated.length} hotspot guest(s) issued a voucher with
                 their remaining time carried over — see Hotspot → Vouchers.
+              </span>
+            )}
+            {!!importing.result.pppReconnected && (
+              <span style={{ color: color.green }}>
+                {importing.result.pppReconnected} online client(s) were dropped so they reconnect on their new address.
               </span>
             )}
             {!!importing.result.accessCodesCreated?.length && (
