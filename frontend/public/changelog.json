@@ -111,7 +111,8 @@
       "Direct settlement: an ISP with no Safaricom app of its own can have customers prompted under the platform name while the money goes straight to its own till, paybill or bank account (pick the bank, enter the account). Works for hotspot and PPPoE; nothing passes through the platform.",
       "Payment gateways tidied: M-Pesa Paybill, Direct settlement, Flutterwave, Paystack, AzamPay and Yo! now sit in one \"Payment method\" dropdown (KopoKopo keeps its own card); Bank STK push and Till/paybill without API are no longer offered.",
       "Site payment profiles can point a site at a Direct settlement gateway, so that site's hotspot and PPPoE payments go to its own till, paybill or bank account.",
-      "Payment gateways: \"Direct settlement\" is now called \"Till / Bank\", and KopoKopo moved into the same payment-method dropdown."
+      "Payment gateways: \"Direct settlement\" is now called \"Till / Bank\", and KopoKopo moved into the same payment-method dropdown.",
+      "Customers: new Fibre, Wireless and Type not set tabs, and a bulk \"Set connection…\" for ticked clients (fibre, wireless PMP or P2P)."
     ]
   }
 ]

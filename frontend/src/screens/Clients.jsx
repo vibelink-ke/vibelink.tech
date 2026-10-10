@@ -70,6 +70,10 @@ const FILTERS = [
   // otherwise a paused client appears nowhere but All.
   { key: 'paused', label: 'Paused', match: (c) => c.status === 'paused' },
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
+  // How the customer is reached: fibre, or wireless (a shared PMP radio or a dedicated P2P link). Set on the client page or in bulk.
+  { key: 'fibre', label: 'Fibre', match: (c) => c.connection_type === 'fibre' },
+  { key: 'wireless', label: 'Wireless', match: (c) => c.connection_type === 'pmp' || c.connection_type === 'ptp' },
+  { key: 'notype', label: 'Type not set', match: (c) => !c.connection_type },
   // Blocked for 3+ months; deleted automatically past 5. See jobs.js's dormantSweep.
   { key: 'dormant', label: 'Dormant', match: (c) => !!c.dormant_at },
 ];
@@ -576,6 +580,27 @@ export default function Clients() {
           <Button size="sm" onClick={bulkPause}>Pause / resume</Button>
           <Button size="sm" onClick={bulkSms}>Send SMS</Button>
           <Button size="sm" onClick={bulkCompensate}>Compensate</Button>
+          <select
+            value=""
+            title="Set how the ticked clients are connected"
+            style={{ fontSize: 12.5, padding: '5px 8px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: '#fff' }}
+            onChange={async (e) => {
+              const type = e.target.value;
+              if (!type) return;
+              const connection_type = type === 'none' ? null : type;
+              const ids = [...selected];
+              const results = await Promise.allSettled(ids.map((id) => api.updateSubscriber(id, { connection_type })));
+              const ok = ids.filter((_, i) => results[i].status === 'fulfilled');
+              store.setCollection('clients', (cs) => cs.map((c) => (ok.includes(c.id) ? { ...c, connection_type } : c)));
+              store.toast(ok.length === ids.length ? `Set ${ok.length} client${ok.length === 1 ? '' : 's'}` : `Set ${ok.length}, ${ids.length - ok.length} failed`);
+            }}
+          >
+            <option value="">Set connection…</option>
+            <option value="fibre">Fibre</option>
+            <option value="pmp">Wireless · PMP</option>
+            <option value="ptp">Wireless · P2P</option>
+            <option value="none">Not set</option>
+          </select>
           <Button
             size="sm"
             style={{ background: color.rust, borderColor: color.rust, color: '#fff', fontWeight: 600 }}
