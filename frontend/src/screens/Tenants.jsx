@@ -1103,7 +1103,7 @@ export default function Tenants() {
             <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
               Changes apply to this month and after; statements already drawn keep the amounts they were drawn at.
             </p>
-            <Field label="SkyPlan map" span={2} hint="Gives this ISP the SkyPlan network planner as its Map (with the classic map still one tab away). Off by default.">
+            <Field label="SkyPlan map" span={2} hint="Included free for every paying ISP automatically. Use this to also give it to an ISP that is not paying yet (a trial, a gift).">
               <Select
                 value={editing.skyplan_enabled ? 'yes' : 'no'}
                 onChange={(e) => setEditing((s) => ({ ...s, skyplan_enabled: e.target.value === 'yes' }))}

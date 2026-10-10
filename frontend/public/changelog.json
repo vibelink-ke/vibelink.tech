@@ -118,7 +118,7 @@
       "Wireless gets its own internet pool per router. Device-management pools hold the management addresses of customers' radios and fibre ONUs: reachable from the system, with no internet. Each service can be given a device address (radio or ONU); the router rule that blocks internet for the range is applied on Configure.",
       "Menu tidied: Payments, Site payment profiles and Expenses are now tabs of one Payments page; Field app and Field team are one Field entry (the team page opens the app); Schedule moved under Support.",
       "Map ↔ SkyPlan: \"Export to SkyPlan\" saves your towers, the radios/switches on them, fibre nodes and cables and customers (with their device address to monitor) as a SkyPlan project file; \"Import from SkyPlan\" brings a SkyPlan design's sites, equipment and fibre onto the map, updating what is already there instead of duplicating it.",
-      "SkyPlan as the Map: for ISPs it is switched on for (platform owner: ISP tenants → Edit → SkyPlan map), the Map page opens the SkyPlan network planner loaded with the live towers, equipment, fibre and customers, and saves edits back; the classic map stays one tab away for live status."
+      "SkyPlan as the Map: included free with the licence for every paying ISP (and switchable by hand for others in ISP tenants → Edit → SkyPlan map). The Map page opens the SkyPlan network planner loaded with the live towers, equipment, fibre and customers, and saves edits back; the classic map stays one tab away for live status."
     ]
   }
 ]

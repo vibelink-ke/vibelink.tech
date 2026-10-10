@@ -206,9 +206,13 @@ const smartoltEnabled = async (tenantId) => {
   } catch { return false; }   // before the migration has run
 };
 
-/** SkyPlan as the Map: on for the platform owner, and for any tenant it has been switched on for. */
+/**
+ * SkyPlan as the Map: included with the licence. On for the platform owner, for every paying ISP (active status, licence
+ * not lapsed), and for any other ISP it has been switched on for by hand (a trial being shown it, a gift).
+ */
 const skyplanEnabled = async (s) => {
   if (s.is_super_admin) return true;
+  if (s.tenant_status === 'active' && !s.licence_lapsed) return true;
   try {
     const { rows: [r] } = await pool.query('select skyplan_enabled from tenants where id=$1', [s.tenant_id]);
     return !!r?.skyplan_enabled;
