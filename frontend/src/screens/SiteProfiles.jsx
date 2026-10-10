@@ -8,8 +8,7 @@ const BLANK = { collect: 'own', site: '', router: '', provider: 'daraja', shortc
 const PROVIDERS = [
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
   { value: 'kopokopo', label: 'KopoKopo till (hotspot)' },
-  { value: 'bankstk', label: 'Bank STK' },
-  { value: 'manual_till', label: 'Till without API' },
+  { value: 'piggyback_till', label: 'Direct settlement (via platform)' },
 ];
 
 /**
@@ -258,7 +257,7 @@ export default function SiteProfiles() {
             />
           </Field>
           <Field label="Channel">
-            <Select value={f.provider} onChange={setProvider} options={PROVIDERS} />
+            <Select value={f.provider} onChange={setProvider} options={PROVIDERS.some((p) => p.value === f.provider) ? PROVIDERS : [...PROVIDERS, { value: f.provider, label: `${f.provider} (no longer offered)` }]} />
           </Field>
           <Field
             label="Paybill"

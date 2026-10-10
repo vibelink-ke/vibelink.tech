@@ -1223,7 +1223,8 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
    */
   const { rows: [hs] } = await pool.query(
     'select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
-  const method = hs?.payment_method ?? 'kopokopo';
+  const sitePb = await sitePiggyback(tenant.id, routerId);
+  const method = sitePb ? 'piggyback' : (hs?.payment_method ?? 'kopokopo');
   if (AFRICA_PROVIDERS.includes(method)) {
     const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
     if (!gw) {
@@ -1240,6 +1241,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
+  else if (method === 'piggyback' && sitePb) piggyback = sitePb;
   else if (method === 'piggyback') {
     const { rows: [pb] } = await pool.query(
       "select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
@@ -1762,7 +1764,8 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
 
   const { config } = await import('./db.js');
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
-  const method = hs?.payment_method ?? 'kopokopo';
+  const sitePb = await sitePiggyback(tenant.id, routerId);
+  const method = sitePb ? 'piggyback' : (hs?.payment_method ?? 'kopokopo');
   if (AFRICA_PROVIDERS.includes(method)) {
     const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
     if (!gw) {
@@ -1779,6 +1782,7 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   let kk = null, daraja = null, piggyback = null;
   if (method === 'kopokopo') kk = await config(tenant.id, 'kopokopo');
   else if (method === 'paybill') daraja = await config(tenant.id, 'daraja');
+  else if (method === 'piggyback' && sitePb) piggyback = sitePb;
   else if (method === 'piggyback') {
     const { rows: [pb] } = await pool.query(
       "select shortcode, credentials from tenant_payment_config where tenant_id=$1 and provider='piggyback_till'",
@@ -2856,8 +2860,20 @@ const viaPlatform = (mode, platformOn, hasOwnGateway) =>
  * platform. Needs Safaricom to have allowed the platform shortcode to push to other numbers, so it stays off until
  * PIGGYBACK_TILL_ENABLED=true. `service` is 'pppoe' or 'hotspot' (hotspot is chosen by Hotspot → Settings instead).
  */
-async function piggybackFor(tenantId, service) {
+/** The direct-settlement gateway a router's site payment profile points at, if any. */
+async function sitePiggyback(tenantId, routerId) {
+  if (!routerId || process.env.PIGGYBACK_TILL_ENABLED !== 'true') return null;
+  const { rows: [pb] } = await pool.query(
+    `select tpc.shortcode, tpc.credentials, tpc.enabled_pppoe
+       from site_profiles sp join tenant_payment_config tpc on tpc.id = sp.payment_config_id
+      where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider='piggyback_till'`, [routerId, tenantId]);
+  return pb ?? null;
+}
+async function piggybackFor(tenantId, service, routerId = null) {
   if (process.env.PIGGYBACK_TILL_ENABLED !== 'true') return null;
+  // A site payment profile that points a router at a direct-settlement gateway wins over the tenant's default one.
+  const site = await sitePiggyback(tenantId, routerId);
+  if (site) return site;
   const { rows: [pb] } = await pool.query(
     "select shortcode, credentials, enabled_pppoe from tenant_payment_config where tenant_id=$1 and provider='piggyback_till' and scope='tenant' order by is_default desc, id limit 1",
     [tenantId]);
@@ -2891,7 +2907,7 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
   const { config } = await import('./db.js');
   const ownDaraja = await config(tenantId, 'daraja');
 
-  const pb = await piggybackFor(tenantId, 'pppoe');
+  const pb = await piggybackFor(tenantId, 'pppoe', routerId);
   if (viaPlatform(await routerCollection(tenantId, routerId), t?.platform_collect_enabled, !!(ownDaraja || pb))) {
     const { rows: [owner] } = await pool.query(
       "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");

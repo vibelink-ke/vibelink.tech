@@ -17,6 +17,10 @@ import { Badge, Button, Card, Empty, Field, Input, Modal, Screen, Select, Table,
  * whatever is already stored.
  */
 
+/** Kept in CHANNELS for anything already saved, but no longer offered: the platform's own direct settlement replaces them. */
+const RETIRED = ['bankstk', 'manual_till'];
+const METHOD_ORDER = ['daraja', 'piggyback_till', 'flutterwave', 'paystack', 'azampay', 'yopayments'];
+
 export const CHANNELS = {
   daraja: {
     name: 'M-Pesa Paybill (Daraja)',
@@ -120,6 +124,7 @@ export const CHANNELS = {
     codeLabel: 'Till number',
     fields: [],
     services: { pppoe: true, hotspot: true },
+    addLabel: 'destination',
   },
 };
 
@@ -200,6 +205,8 @@ export default function Gateways({ platform = false }) {
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
+  // One dropdown holds every payment method except KopoKopo, which keeps its own card.
+  const [method, setMethod] = useState('daraja');
   const [busy, setBusy] = useState(false);
 
   /**
@@ -600,8 +607,9 @@ export default function Gateways({ platform = false }) {
         </Card>
       )}
 
-      {Object.entries(CHANNELS).filter(([p]) => !platform || p === 'daraja').map(([provider, ch]) => {
+      {(platform ? ['daraja'] : [METHOD_ORDER.includes(method) ? method : 'daraja', 'kopokopo']).map((provider) => [provider, CHANNELS[provider]]).map(([provider, ch]) => {
         const rows = gateways.filter((g) => g.provider === provider);
+        const grouped = !platform && provider !== 'kopokopo';
         return (
           <Card
             key={provider}
@@ -611,13 +619,25 @@ export default function Gateways({ platform = false }) {
                   {ch.name}
                   <Badge tone="pending">coming soon</Badge>
                 </span>
-              ) : ch.name
+              ) : grouped ? 'Payment method' : ch.name
             }
-            subtitle={ch.blurb}
+            subtitle={grouped ? 'Pick how this ISP is paid. Each method lists what is set up for it below.' : ch.blurb}
             actions={
-              <Button size="sm" variant="primary" onClick={() => openNew(provider)}>
-                + Add {ch.addLabel ?? (provider === 'kopokopo' ? 'till' : 'paybill')}
-              </Button>
+              <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+                {grouped && (
+                  <Select
+                    value={provider}
+                    onChange={(e) => setMethod(e.target.value)}
+                    options={METHOD_ORDER.map((p) => ({
+                      value: p,
+                      label: `${CHANNELS[p].name}${gateways.some((g) => g.provider === p) ? ' ✓' : ''}`,
+                    }))}
+                  />
+                )}
+                <Button size="sm" variant="primary" onClick={() => openNew(provider)}>
+                  + Add {ch.addLabel ?? (provider === 'kopokopo' ? 'till' : 'paybill')}
+                </Button>
+              </span>
             }
           >
             <Table
@@ -704,6 +724,7 @@ export default function Gateways({ platform = false }) {
                 },
               ]}
             />
+            {grouped && <div style={{ fontSize: 12.5, color: color.muted, marginTop: 10 }}>{ch.blurb}</div>}
           </Card>
         );
       })}
