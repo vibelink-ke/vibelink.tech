@@ -2111,8 +2111,9 @@ Revoke anyway?`
                 {importing.hotspotAs !== 'voucher' && (
                   <>
                     <span style={{ color: color.amberInk }}>
-                      An access code works every time it is used and never runs out, so a user that was only meant to
-                      last a couple of hours would keep working. Untick any you do not want.
+                      Each takes its speed and device limit from its own profile (the Profile column on the router). An access
+                      code works every time it is used and never runs out, so a user that was only meant to last a couple of
+                      hours would keep working. Untick any you do not want.
                     </span>
                     <div style={{ display: 'flex', gap: 10 }}>
                       <span onClick={() => setImporting((i) => ({ ...i, unticked: [] }))} style={{ cursor: 'pointer', color: color.green, fontWeight: 600 }}>Select all</span>
@@ -2131,7 +2132,7 @@ Revoke anyway?`
                               unticked: e.target.checked ? (i.unticked ?? []).filter((n) => n !== u.name) : [...(i.unticked ?? []), u.name],
                             }))}
                           />{' '}
-                          {u.name}{u.profile ? ` · ${u.profile}` : ''}{u.label !== u.name ? ` · ${u.label}` : ''}{u.problem ? ` — can't be imported: ${u.problem}` : ''}
+                          {u.name}{u.profile ? ` · ${u.profile}` : ''}{u.speed ? ` · ${u.speed}` : ''}{u.devices > 1 ? ` · ${u.devices} devices` : ''}{u.label !== u.name && u.label !== u.profile ? ` · ${u.label}` : ''}{u.problem ? ` — can't be imported: ${u.problem}` : ''}
                         </label>
                       ))}
                     </div>

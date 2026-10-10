@@ -6704,6 +6704,25 @@ function phoneFromComment(comment) {
   return null;
 }
 
+/**
+ * A MikroTik rate-limit ("rx/tx", optionally followed by burst values) → kbps. rx is what the router receives from the
+ * client (their upload), tx what it sends (their download); a single value applies to both. Null when unreadable.
+ */
+function rateFromProfile(limit) {
+  if (!limit) return null;
+  const one = (t) => {
+    const m = /^(\d+(?:\.\d+)?)([kKmMgG]?)$/.exec(String(t ?? '').trim());
+    if (!m) return null;
+    const n = Number(m[1]);
+    const kbps = m[2] === '' ? n / 1000 : /k/i.test(m[2]) ? n : /m/i.test(m[2]) ? n * 1000 : n * 1000000;
+    return Math.round(kbps);
+  };
+  const [first, second] = String(limit).split(/\s+/)[0].split('/');
+  const up = one(first);
+  const down = second != null ? one(second) : up;
+  return up && down ? { upKbps: up, downKbps: down } : null;
+}
+
 function categorizeHotspotUsers(users, knownCodes) {
   const out = { importable: [], already: [], usedUp: [], noLimit: [], disabled: [], all: [] };
   const seen = new Set();
@@ -6713,7 +6732,10 @@ function categorizeHotspotUsers(users, knownCodes) {
     if (u.disabled) { out.disabled.push(u.name); continue; }
     if (knownCodes.has(u.name)) { out.already.push(u.name); continue; }
     // Whatever its time, every new enabled user can come across as a permanent access code.
-    out.all.push({ name: u.name, password: u.password, comment: u.comment, profile: u.profile, phone: phoneFromComment(u.comment) });
+    out.all.push({
+      name: u.name, password: u.password, comment: u.comment, profile: u.profile, phone: phoneFromComment(u.comment),
+      rate: rateFromProfile(u.profileRateLimit), devices: u.profileSharedUsers,
+    });
     // The time it is allowed: its own limit, else its profile's, else a time named in the profile ("2 HOUR …").
     const allowed = u.limitUptimeSec || u.profileLimitSec || durationFromName(u.profile);
     if (!allowed) { out.noLimit.push(u); continue; }                   // nothing says how long: sized by a plan the operator picks
@@ -6820,6 +6842,7 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
           // Everything new that can come across as a permanent access code, with why one cannot (a login must be 2-12 letters or digits).
           access: hsSorted.all.map((u) => ({
             name: u.name, label: (u.comment || '').trim() || u.name, profile: u.profile ?? null, phone: u.phone,
+            speed: u.rate ? `${u.rate.downKbps / 1000}/${u.rate.upKbps / 1000} Mbps` : null, devices: u.devices ?? 1,
             problem: !/^[A-Za-z0-9]{2,12}$/.test(u.name) ? 'name must be 2-12 letters or digits'
               : u.password && !/^[A-Za-z0-9]{2,12}$/.test(u.password) ? 'password must be 2-12 letters or digits' : null,
           })),
@@ -6933,12 +6956,17 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
           if (!/^[A-Za-z0-9]{2,12}$/.test(u.name) || !/^[A-Za-z0-9]{2,12}$/.test(password)) throw new Error('name and password must be 2-12 letters or digits');
           const { rows: [taken] } = await pool.query('select 1 from radcheck where tenant_id=$1 and username=$2 limit 1', [req.tenant.id, u.name]);
           if (taken) throw new Error('already used by another login');
+          // Taken from the user's own profile (the Profile column): its speed and its shared-users limit. A profile with
+          // no rate-limit falls back to the bundle of the same name, then to the closest bundle for a time in its name.
+          const byName = plans.find((p) => p.service === 'hotspot' && u.profile && p.title.trim().toLowerCase() === String(u.profile).trim().toLowerCase());
           const allowed = durationFromName(u.profile);
-          const plan = allowed ? closestHotspotPlan(plans, Math.ceil(allowed / 60)) : null;
+          const plan = u.rate ? null : (byName ?? (allowed ? closestHotspotPlan(plans, Math.ceil(allowed / 60)) : null));
+          const devices = Math.min(50, Math.max(1, Math.round(u.devices || 1)));
+          const label = [u.profile, (u.comment || '').trim() || null].filter(Boolean).join(' · ') || u.name;
           const { rows: [row] } = await pool.query(
-            `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id)
-             values ($1,$2,$3,$4,1,$5) returning id`,
-            [req.tenant.id, ((u.comment || '').trim() || u.name).slice(0, 80), u.name, password, plan?.id ?? null]);
+            `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id, rate_down_kbps, rate_up_kbps)
+             values ($1,$2,$3,$4,$5,$6,$7,$8) returning id`,
+            [req.tenant.id, label.slice(0, 80), u.name, password, devices, plan?.id ?? null, u.rate?.downKbps ?? null, u.rate?.upKbps ?? null]);
           await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
           accessCodesCreated.push(u.name);
         } catch (e) {

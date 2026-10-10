@@ -2853,12 +2853,18 @@ export async function hotspotUsers(conn) {
     const rows = await conn.write('/ip/hotspot/user/print', []);
     // The time a user is allowed often lives on its profile ("2 HOUR", "1 HOUR" …), not on the user itself.
     const profiles = new Map((await conn.write('/ip/hotspot/user/profile/print', []).catch(() => []))
-      .map((p) => [p.name, parseRouterOSDuration(p['session-timeout'])]));
+      .map((p) => [p.name, {
+        timeoutSec: parseRouterOSDuration(p['session-timeout']),
+        rateLimit: String(p['rate-limit'] ?? '').trim() || null,          // "rx/tx", e.g. 2M/4M
+        sharedUsers: Number(p['shared-users']) > 0 ? Number(p['shared-users']) : null,
+      }]));
     const users = rows.map((r) => ({
       name: String(r.name ?? '').trim(),
       password: String(r.password ?? ''),
       profile: r.profile ?? null,
-      profileLimitSec: profiles.get(r.profile) ?? null,
+      profileLimitSec: profiles.get(r.profile)?.timeoutSec ?? null,
+      profileRateLimit: profiles.get(r.profile)?.rateLimit ?? null,
+      profileSharedUsers: profiles.get(r.profile)?.sharedUsers ?? null,
       limitUptimeSec: parseRouterOSDuration(r['limit-uptime']),
       uptimeSec: parseRouterOSDuration(r.uptime) ?? 0,
       mac: String(r['mac-address'] ?? '').trim().toUpperCase() || null,
