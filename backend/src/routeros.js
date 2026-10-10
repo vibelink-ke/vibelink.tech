@@ -2851,7 +2851,7 @@ function parseRouterOSDuration(s) {
 export async function hotspotUsers(conn) {
   try {
     const rows = await conn.write('/ip/hotspot/user/print', []);
-    return rows.map((r) => ({
+    const users = rows.map((r) => ({
       name: String(r.name ?? '').trim(),
       password: String(r.password ?? ''),
       profile: r.profile ?? null,
@@ -2862,8 +2862,10 @@ export async function hotspotUsers(conn) {
       disabled: String(r.disabled) === 'true',
       dynamic: String(r.dynamic) === 'true',
     })).filter((u) => u.name);
-  } catch {
-    return [];   // a router with no hotspot has nothing here; the PPPoE import is not held up by it
+    return { users, error: null };
+  } catch (e) {
+    // Not fatal to the PPPoE import, but said out loud: an empty list and a failed read must not look the same.
+    return { users: [], error: String(e?.message ?? e).slice(0, 200) };
   }
 }
 

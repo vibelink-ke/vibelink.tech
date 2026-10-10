@@ -6691,7 +6691,7 @@ function categorizeHotspotUsers(users, knownCodes) {
     seen.add(u.name);
     if (u.disabled) { out.disabled.push(u.name); continue; }
     if (knownCodes.has(u.name)) { out.already.push(u.name); continue; }
-    if (!u.limitUptimeSec) { out.noLimit.push(u.name); continue; }      // no time limit: nothing to size a plan from
+    if (!u.limitUptimeSec) { out.noLimit.push(u); continue; }          // no time limit of its own: sized by a plan the operator picks
     const left = u.limitUptimeSec - u.uptimeSec;
     if (left <= 0) { out.usedUp.push(u.name); continue; }
     out.importable.push({
@@ -6744,7 +6744,8 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
     // import below imports with no remaining time carried over rather than
     // failing the whole run over it.
     const remaining = await step('read hotspot session time', () => ros.hotspotSessionRemaining(conn), 15000);
-    const hsUsers = await step('read hotspot users', () => ros.hotspotUsers(conn), 20000);
+    const hsRead = await step('read hotspot users', () => ros.hotspotUsers(conn), 20000);
+    const hsUsers = hsRead.users;
     ros.close(conn);
     conn = null;
 
@@ -6788,7 +6789,11 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
             };
           }),
           already: hsSorted.already.length, usedUp: hsSorted.usedUp.length, disabled: hsSorted.disabled.length,
-          noLimit: hsSorted.noLimit,
+          noLimit: hsSorted.noLimit.map((u) => u.name),
+          total: hsUsers.length, error: hsRead.error,
+          // For users saved by hand with no time limit of their own: the plans an operator can put them on.
+          plans: plans.filter((p) => p.service === 'hotspot').sort((a, b) => a.duration_min - b.duration_min)
+            .map((p) => ({ id: p.id, title: p.title, durationMin: p.duration_min })),
         },
         hotspotImportable: hotspotImportable.map((s) => {
           const remainingMinutes = remaining.get(s.mac) ?? null;
@@ -6894,6 +6899,23 @@ app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure
         hotspotUsersCreated.push(u.name);
       } catch (e) {
         failed.push({ name: u.name, error: e.message });
+      }
+    }
+
+    // Users with no time limit of their own (typical of ones typed in by hand): onto the plan the operator chose, with the
+    // name and password they already have. The plan's own time runs from their first login.
+    const noLimitPlan = plans.find((p) => p.service === 'hotspot' && p.id === req.body?.noLimitPlanId);
+    if (noLimitPlan) {
+      for (const u of hsSorted.noLimit) {
+        try {
+          const v = await radius.issueVoucherAccess(pool, req.tenant.id, noLimitPlan.id, null, null, {
+            startOnLogin: true, code: u.name, password: u.password || u.name,
+          });
+          await pool.query('update vouchers set router_id=$2 where id=$1', [v.id, r.id]);
+          hotspotUsersCreated.push(u.name);
+        } catch (e) {
+          failed.push({ name: u.name, error: e.message });
+        }
       }
     }
 

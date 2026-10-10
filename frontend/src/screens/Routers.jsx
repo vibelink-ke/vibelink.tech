@@ -771,7 +771,7 @@ export default function Routers() {
   const applyImport = async () => {
     setImporting((i) => ({ ...i, busy: true }));
     try {
-      const result = await api.importSecrets(importing.router.id);
+      const result = await api.importSecrets(importing.router.id, { noLimitPlanId: importing.noLimitPlanId || undefined });
       setImporting((i) => ({ ...i, result, busy: false }));
       store.setCollection('clients', await api.subscribers());
       store.toast(`Imported ${result.imported} client(s)`);
@@ -1991,12 +1991,12 @@ Revoke anyway?`
                 onClick={applyImport}
                 disabled={
                   importing.busy ||
-                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0))
+                  !(importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0) + (importing.noLimitPlanId ? (importing.preview.hotspotUsers?.noLimit.length ?? 0) : 0))
                 }
               >
                 {importing.busy
                   ? 'Importing…'
-                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0)}`}
+                  : `Import ${importing.preview.importable.length + importing.preview.importableActive.length + importing.preview.hotspotImportable.length + (importing.preview.hotspotUsers?.importable.length ?? 0) + (importing.noLimitPlanId ? (importing.preview.hotspotUsers?.noLimit.length ?? 0) : 0)}`}
               </Button>
             )}
           </>
@@ -2080,14 +2080,42 @@ Revoke anyway?`
                 </div>
               </>
             )}
-            {!!importing.preview.hotspotUsers && (importing.preview.hotspotUsers.already > 0 || importing.preview.hotspotUsers.usedUp > 0 || importing.preview.hotspotUsers.disabled > 0 || importing.preview.hotspotUsers.noLimit.length > 0) && (
+            {!!importing.preview.hotspotUsers?.error && (
+              <span style={{ color: color.rust }}>
+                The router would not list its hotspot users: {importing.preview.hotspotUsers.error}
+              </span>
+            )}
+            {!!importing.preview.hotspotUsers && !importing.preview.hotspotUsers.error && importing.preview.hotspotUsers.total === 0 && (
+              <span style={{ color: color.muted }}>The router has no hotspot users in its list (IP → Hotspot → Users).</span>
+            )}
+            {!!importing.preview.hotspotUsers?.noLimit.length && (
+              <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}>
+                <span>
+                  <strong>{importing.preview.hotspotUsers.noLimit.length}</strong> hotspot user(s) have no time limit of
+                  their own (common for users added by hand):{' '}
+                  {importing.preview.hotspotUsers.noLimit.slice(0, 6).join(', ')}
+                  {importing.preview.hotspotUsers.noLimit.length > 6 ? '…' : ''}. Put them on a plan to bring them across
+                  with their own name and password; the plan's time starts when each one first logs in.
+                </span>
+                <select
+                  value={importing.noLimitPlanId ?? ''}
+                  onChange={(e) => setImporting((i) => ({ ...i, noLimitPlanId: e.target.value }))}
+                  style={{ padding: 8, borderRadius: 8, border: `1px solid ${color.line}`, fontSize: 13 }}
+                >
+                  <option value="">Leave them out</option>
+                  {importing.preview.hotspotUsers.plans.map((p) => (
+                    <option key={p.id} value={p.id}>{p.title} ({p.durationMin} min)</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {!!importing.preview.hotspotUsers && (importing.preview.hotspotUsers.already > 0 || importing.preview.hotspotUsers.usedUp > 0 || importing.preview.hotspotUsers.disabled > 0) && (
               <span style={{ color: color.muted }}>
                 Hotspot users left alone:{' '}
                 {[
                   importing.preview.hotspotUsers.already ? `${importing.preview.hotspotUsers.already} already here` : null,
                   importing.preview.hotspotUsers.usedUp ? `${importing.preview.hotspotUsers.usedUp} with no time left` : null,
                   importing.preview.hotspotUsers.disabled ? `${importing.preview.hotspotUsers.disabled} switched off` : null,
-                  importing.preview.hotspotUsers.noLimit.length ? `${importing.preview.hotspotUsers.noLimit.length} with no time limit (nothing to size a plan from): ${importing.preview.hotspotUsers.noLimit.slice(0, 5).join(', ')}${importing.preview.hotspotUsers.noLimit.length > 5 ? '…' : ''}` : null,
                 ].filter(Boolean).join(' · ')}
               </span>
             )}

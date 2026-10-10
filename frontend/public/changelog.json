@@ -120,7 +120,7 @@
       "Map ↔ SkyPlan: \"Export to SkyPlan\" saves your towers, the radios/switches on them, fibre nodes and cables and customers (with their device address to monitor) as a SkyPlan project file; \"Import from SkyPlan\" brings a SkyPlan design's sites, equipment and fibre onto the map, updating what is already there instead of duplicating it.",
       "Map: SkyPlan is no longer inside the Map page; it is hosted on its own (skyplan address) and the Map is the classic map again. Export to / Import from SkyPlan on the Map still move the network between them.",
       "Licences: a licence date you set or extend by hand now holds until that date. The unpaid-statement lock used to put it back to yesterday on its next run, which is why manual extensions kept expiring.",
-      "Import from a router now also reads its hotspot users (the user list, not only who is online): each one with time left comes across as a voucher with the same name and password and the time it has left, on the closest plan that covers it. Used-up, switched-off and unlimited users are left alone and listed."
+      "Import from a router now also reads its hotspot users (the user list, not only who is online): each one with time left comes across as a voucher with the same name and password and the time it has left, on the closest plan that covers it. Users with no time limit of their own (typical of ones added by hand) can be put on a plan you choose in the import dialog. A router that will not list its hotspot users is now reported instead of silently ignored."
     ]
   }
 ]

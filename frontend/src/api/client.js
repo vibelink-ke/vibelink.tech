@@ -438,7 +438,7 @@ export const api = {
   lockRouterDevice: (id, body) => post(`/api/routers/${id}/devices/lock`, body),
   unlockRouterDevice: (id, mac) => post(`/api/routers/${id}/devices/unlock`, { mac }),
   previewSecrets: (id) => post(`/api/routers/${id}/import-secrets`, {}),
-  importSecrets: (id) => post(`/api/routers/${id}/import-secrets`, { apply: true }),
+  importSecrets: (id, extra = {}) => post(`/api/routers/${id}/import-secrets`, { apply: true, ...extra }),
   revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
   deleteRouter: (id, force = false) => del(`/api/routers/${id}${force ? '?force=1' : ''}`),
   testCoa: (id) => post(`/api/routers/${id}/test-coa`, {}),
