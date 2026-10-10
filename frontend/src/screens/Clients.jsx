@@ -915,7 +915,7 @@ export default function Clients() {
                 // their static IP.
                 const pools = (store.ipPools ?? []).filter((p) => p.router_id === editing.router_id && p.service !== 'hotspot' && p.purpose === 'normal');
                 const grp = editing.connection_type === 'pmp' || editing.connection_type === 'ptp' ? 'wireless' : editing.connection_type === 'fibre' ? 'fibre' : null;
-                const pool = (grp && pools.find((p) => p.connection_type === grp)) || pools.find((p) => !p.connection_type);
+                const pool = (grp && pools.find((p) => p.connection_type === grp)) || pools.find((p) => !p.connection_type) || pools[0];
                 const taken = new Set(
                   clients.filter((c) => c.id !== editing.id && c.static_ip).map((c) => c.static_ip)
                 );

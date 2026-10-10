@@ -9321,7 +9321,9 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
          and service = 'pppoe'
          and purpose = $4
          and ($4 = 'mgmt'
-              or ($5::text is null and connection_type is null)
+              or ($5::text is null and (connection_type is null or not exists (
+                    select 1 from ip_pools w where w.tenant_id = $1 and w.purpose = 'normal' and w.service = 'pppoe'
+                       and w.connection_type is null and (w.router_id = $2 or w.router_id is null))))
               or ($5::text is not null and (connection_type = $5 or (connection_type is null and not exists (
                     select 1 from ip_pools w where w.tenant_id = $1 and w.purpose = 'normal' and w.service = 'pppoe'
                        and w.connection_type = $5 and (w.router_id = $2 or w.router_id is null))))))

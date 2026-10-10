@@ -502,7 +502,15 @@ async function framedAddress(c, tenantId, subId, s) {
           and (connection_type is null or connection_type = $4)
         order by (connection_type is not null) desc, (router_id = $3) desc nulls last
         limit 1`, [tenantId, p, s.router_id, group]);
-    return row;
+    if (row) return row;
+    // Nothing for this customer's own type: a pool made for another type still beats no address at all. Without one the
+    // router is told no address, logs "0.0.0.0" and drops the session the moment it authenticates.
+    const { rows: [any] } = await c.query(
+      `select cidr from ip_pools
+        where tenant_id=$1 and service='pppoe' and purpose=$2 and (router_id = $3 or router_id is null)
+        order by (router_id = $3) desc nulls last
+        limit 1`, [tenantId, p, s.router_id]);
+    return any;
   };
 
   // A tenant whose expired pool has not been (re)created yet — Configure
