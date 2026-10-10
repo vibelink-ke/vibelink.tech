@@ -2298,12 +2298,22 @@ export async function applyRadioPool(conn, { cidr, iface = null } = {}) {
     const net = ((o[0] << 24) >>> 0) + (o[1] << 16) + (o[2] << 8) + o[3];
     const gw = net + 1;
     const gwIp = [(gw >>> 24) & 255, (gw >>> 16) & 255, (gw >>> 8) & 255, gw & 255].join('.');
+    // The port has to exist, or the address is created invalid ("unknown" interface) and nothing is reachable.
+    const ports = await conn.write('/interface/print', [`?name=${iface}`]);
+    if (!ports.length) throw new Error(`The port "${iface}" does not exist on this router. Edit the pool and leave the port blank to use the customers' port, or type the exact name.`);
     const have = await conn.write('/ip/address/print', []);
-    const exists = have.some((a) => String(a.address).startsWith(`${gwIp}/`));
-    if (!exists) {
-      await cmd(conn, 'radio management address', '/ip/address/add',
-        [`=address=${gwIp}/${bits}`, `=interface=${iface}`, `=comment=${managed('radio management gateway')}`]);
-      done.push(`address ${gwIp}/${bits} on ${iface}`);
+    const same = have.filter((a) => String(a.address).startsWith(`${gwIp}/`));
+    const good = same.find((a) => a.interface === iface && String(a.invalid) !== 'true');
+    if (!good) {
+      // Ours, but on a port that is wrong or gone: replaced. Someone else's address is left alone.
+      for (const bad of same.filter((a) => isManaged(a))) {
+        await cmd(conn, 'remove the old radio management address', '/ip/address/remove', [`=.id=${idOf(bad)}`]);
+      }
+      if (!same.some((a) => !isManaged(a))) {
+        await cmd(conn, 'radio management address', '/ip/address/add',
+          [`=address=${gwIp}/${bits}`, `=interface=${iface}`, `=comment=${managed('radio management gateway')}`]);
+        done.push(`address ${gwIp}/${bits} on ${iface}`);
+      }
     }
   }
 
