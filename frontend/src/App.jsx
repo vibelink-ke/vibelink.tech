@@ -28,7 +28,7 @@ import Tariffs from './screens/Tariffs';
 import Routers from './screens/Routers';
 import Tickets from './screens/Tickets';
 import Schedule from './screens/Schedule';
-import Payments from './screens/Payments';
+import PaymentsHub from './screens/PaymentsHub';
 import PaymentMethods from './screens/PaymentMethods';
 import Settings from './screens/Settings';
 import ErrorBoundary from './ui/boundary';
@@ -64,14 +64,12 @@ const LiveSupport = lazy(() => import('./screens/LiveSupport'));
 const Outages = lazy(() => import('./screens/Outages'));
 const Sla = lazy(() => import('./screens/Sla'));
 const KnowledgeBase = lazy(() => import('./screens/KnowledgeBase'));
-const SiteProfiles = lazy(() => import('./screens/SiteProfiles'));
 const Inventory = lazy(() => import('./screens/Inventory'));
 const Automation = lazy(() => import('./screens/Automation'));
 const Tenants = lazy(() => import('./screens/Tenants'));
 const AdminConsole = lazy(() => import('./screens/AdminConsole'));
 const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
-const Expenses = lazy(() => import('./screens/Expenses'));
 const Hr = lazy(() => import('./screens/Hr'));
 const FieldApp = lazy(() => import('./screens/field/FieldApp'));
 const FieldTeam = lazy(() => import('./screens/FieldTeam'));
@@ -351,11 +349,11 @@ export default function App() {
             <Route path="/sla" element={<Sla />} />
             <Route path="/knowledge-base" element={<KnowledgeBase />} />
 
-            <Route path="/payments" element={<Payments />} />
+            <Route path="/payments/*" element={<PaymentsHub />} />
             <Route path="/payment-methods" element={<PaymentMethods />} />
-            <Route path="/site-profiles" element={<SiteProfiles />} />
+            <Route path="/site-profiles" element={<Navigate to="/payments/sites" replace />} />
             <Route path="/automation" element={<Automation />} />
-            <Route path="/expenses" element={<Expenses />} />
+            <Route path="/expenses" element={<Navigate to="/payments/expenses" replace />} />
             <Route path="/hr" element={<Hr />} />
 
             <Route path="/tenants" element={<Tenants />} />

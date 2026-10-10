@@ -1,9 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { useNavigate } from 'react-router-dom';
 import { color, radius } from '../theme/tokens';
 import { api } from '../api/client';
-import { Badge, Card, Empty, Screen } from '../ui/primitives';
+import { useStore } from '../state/store';
+import { Badge, Button, Card, Empty, Screen } from '../ui/primitives';
 
 const ago = (iso) => {
   const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
@@ -18,6 +20,8 @@ const ago = (iso) => {
  * drawn from the list.
  */
 export default function FieldTeam() {
+  const navigate = useNavigate();
+  const store = useStore();
   const [team, setTeam] = useState(null);
   const [error, setError] = useState('');
   const [trailFor, setTrailFor] = useState(null);
@@ -67,7 +71,11 @@ export default function FieldTeam() {
   }, [trailFor]);
 
   return (
-    <Screen title="Field team" subtitle="Technicians on shift, from their phones. Ending a shift removes them.">
+    <Screen
+      title="Field"
+      subtitle="Technicians on shift, from their phones. Ending a shift removes them."
+      actions={store.session?.perms?.['field.use'] ? <Button onClick={() => navigate('/field')}>Open the field app</Button> : null}
+    >
       {error && <Card><span style={{ color: color.rust }}>{error}</span></Card>}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 14 }}>
         <div ref={holder} style={{ height: 420, borderRadius: radius.lg, overflow: 'hidden', border: `1px solid ${color.line}` }} />

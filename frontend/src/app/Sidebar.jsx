@@ -25,7 +25,8 @@ const heading = {
  */
 function Group({ item, store }) {
   const location = useLocation();
-  const startsOpen = item.children.some((c) => location.pathname === c.to);
+  const kids = item.children.filter((c) => !c.perm || store.session?.perms?.[c.perm]);
+  const startsOpen = kids.some((c) => location.pathname === c.to);
   const [open, setOpen] = useState(startsOpen);
   return (
     <div>
@@ -44,7 +45,7 @@ function Group({ item, store }) {
       </div>
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingLeft: 12 }}>
-          {item.children.map((child) => (
+          {kids.map((child) => (
             <Row key={child.to} item={child} store={store} />
           ))}
         </div>
@@ -205,6 +206,7 @@ export default function Sidebar() {
             <div style={{ ...heading, paddingTop: si === 0 ? 10 : 16 }}>{section.heading}</div>
             {section.items
               .filter((item) => !item.perm || store.session?.perms?.[item.perm])
+              .filter((item) => !item.hideIfPerm || !store.session?.perms?.[item.hideIfPerm])
               .filter((item) => !item.feature || store.session?.features?.[item.feature] || (item.setupPerm && store.session?.perms?.[item.setupPerm]))
               .map((item) => (
                 item.children

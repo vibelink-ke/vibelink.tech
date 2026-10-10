@@ -115,7 +115,8 @@
       "Customers: new Fibre, Wireless and Type not set tabs, and a bulk \"Set connection…\" for ticked clients (fibre, wireless PMP or P2P).",
       "Site payment profiles can now be set for fibre or wireless customers only, so fibre income and wireless income go to different paybills (per site). Each profile has its own account prefix: reminders, the customer portal and the client page show it, and payments typed with it are matched automatically.",
       "Fibre / PMP / P2P is now set per service (in a service's Edit, or when adding a service), not per customer, so one account can have a fibre line and a wireless one.",
-      "Wireless gets its own internet pool per router. Device-management pools hold the management addresses of customers' radios and fibre ONUs: reachable from the system, with no internet. Each service can be given a device address (radio or ONU); the router rule that blocks internet for the range is applied on Configure."
+      "Wireless gets its own internet pool per router. Device-management pools hold the management addresses of customers' radios and fibre ONUs: reachable from the system, with no internet. Each service can be given a device address (radio or ONU); the router rule that blocks internet for the range is applied on Configure.",
+      "Menu tidied: Payments, Site payment profiles and Expenses are now tabs of one Payments page; Field app and Field team are one Field entry (the team page opens the app); Schedule moved under Support."
     ]
   }
 ]

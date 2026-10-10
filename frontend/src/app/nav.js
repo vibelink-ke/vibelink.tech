@@ -19,9 +19,10 @@ export const NAV_SECTIONS = [
       { to: '/inventory', label: 'Inventory', count: (s) => s.inventory.length },
       { to: '/map', label: 'Map' },
       { to: '/installations', label: 'Installations' },
-      { to: '/schedule', label: 'Schedule', perm: 'schedule.view' },
-      { to: '/field', label: 'Field app', perm: 'field.use' },
-      { to: '/field-team', label: 'Field team', perm: 'field.locations' },
+      // Field team (live positions) and the technician app are one entry: the team page opens the app. Someone with
+      // only the app still gets its own line.
+      { to: '/field-team', label: 'Field', perm: 'field.locations' },
+      { to: '/field', label: 'Field app', perm: 'field.use', hideIfPerm: 'field.locations' },
       { to: '/analytics', label: 'Analytics', perm: 'analytics.view' },
     ],
   },
@@ -36,6 +37,7 @@ export const NAV_SECTIONS = [
         label: 'Support',
         children: [
           { to: '/tickets', label: 'Tickets', count: (s) => s.tickets.length },
+          { to: '/schedule', label: 'Schedule', perm: 'schedule.view' },
           { to: '/live-support', label: 'Live support', dot: true },
           { to: '/outages', label: 'Service outages', count: (s) => s.outages.length },
           { to: '/sla', label: 'SLA management', count: (s) => s.slaPolicies.length },
@@ -55,9 +57,8 @@ export const NAV_SECTIONS = [
   {
     heading: 'MONEY',
     items: [
+      // Payments, Site payment profiles and Expenses are tabs of one page (PaymentsHub.jsx).
       { to: '/payments', label: 'Payments', badge: (s) => s.unmatched.length },
-      { to: '/site-profiles', label: 'Site payment profiles', count: (s) => s.siteProfiles.length, perm: 'site_profiles.view' },
-      { to: '/expenses', label: 'Expenses', count: (s) => s.expenses.filter((e) => e.status === 'pending').length },
     ],
   },
   {
