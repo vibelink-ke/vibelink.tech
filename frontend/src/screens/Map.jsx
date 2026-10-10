@@ -4,6 +4,7 @@ import 'leaflet/dist/leaflet.css';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import { buildSkyPlanProject, importSkyPlanProject, downloadFile } from '../lib/skyplan';
 import { Button, Card, Empty, Field, Input, Modal, Screen, Select } from '../ui/primitives';
 
 /**
@@ -770,6 +771,36 @@ export default function MapScreen() {
     }
   }, [placed, placedRouters, live, net, show, ctype, layout, clients, selected, tool, editMode, posOf, isDown, clientOffline, endpointClick, insertLinkPoint, loadNet, store, onus, hasSmartOlt]);
 
+  // ── SkyPlan (the network planner): the same sites, equipment, fibre and customers, through its project file ──
+  const skyFile = useRef(null);
+  const exportSky = () => {
+    const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers });
+    downloadFile('billing-network.skyplan.json', JSON.stringify(project, null, 2));
+    store.toast(`SkyPlan file saved: ${report.sites} sites, ${report.devices} devices, ${report.fibreNodes} fibre nodes, ${report.cables} cables, ${report.customers} customers${report.skippedCables ? ` (${report.skippedCables} cables skipped: they do not end on a fibre node or a tower)` : ''}. Open it in SkyPlan with Open.`);
+  };
+  const importSky = async (file) => {
+    if (!file) return;
+    let project;
+    try { project = JSON.parse(await file.text()); } catch { return store.toast('That is not a SkyPlan project file.'); }
+    if (project?.format !== 'skyplan-rf') return store.toast('That is not a SkyPlan project file.');
+    const nSites = (project.sites ?? []).length; const nFibre = (project.fiberNodes ?? []).length; const nCables = (project.fiberCables ?? []).length;
+    const intro = `Bring ${nSites} sites (with their equipment), ${nFibre} fibre nodes and ${nCables} cables from "${project.projectName ?? 'this project'}" onto the map?`;
+    if (!window.confirm(`${intro}\n\nNothing is deleted, and anything already on the map is kept where it is.`)) return;
+    const includePlanned = window.confirm('Also bring in the planned and proposed designs?\n\nOK = yes, include them\nCancel = only what is installed (active)');
+    setBusy(true);
+    try {
+      const r = await importSkyPlanProject(project, net, api, { includePlanned, onProgress: (d, t) => { if (d === t || d % 25 === 0) store.toast(`Importing from SkyPlan… ${d} of ${t}`); } });
+      await loadNet();
+      store.toast(`From SkyPlan: ${r.created} added, ${r.updated} updated, ${r.skipped} left out`);
+    } catch (e) {
+      await loadNet();
+      store.toast(`Import stopped: ${e.message}`);
+    } finally {
+      setBusy(false);
+      if (skyFile.current) skyFile.current.value = '';
+    }
+  };
+
   // ── editing ──
   const saveNode = async () => {
     if (!nodeForm.name.trim()) return store.toast('Give it a name');
@@ -917,6 +948,13 @@ export default function MapScreen() {
             >
               {editMode ? 'Editing network' : 'Edit network'}
             </Button>
+          )}
+          <Button onClick={exportSky} title="Save the towers, equipment, fibre and customers as a SkyPlan project file">Export to SkyPlan</Button>
+          {canEdit && (
+            <>
+              <Button onClick={() => skyFile.current?.click()} disabled={busy} title="Bring a SkyPlan design's sites, equipment and fibre onto the map">Import from SkyPlan</Button>
+              <input ref={skyFile} type="file" accept=".json,application/json" style={{ display: 'none' }} onChange={(e) => importSky(e.target.files?.[0])} />
+            </>
           )}
           <Button
             variant={live ? 'primary' : undefined}
