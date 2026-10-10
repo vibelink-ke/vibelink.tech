@@ -8,7 +8,7 @@ const BLANK = { collect: 'own', site: '', router: '', provider: 'daraja', shortc
 const PROVIDERS = [
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
   { value: 'kopokopo', label: 'KopoKopo till (hotspot)' },
-  { value: 'piggyback_till', label: 'Direct settlement (via platform)' },
+  { value: 'piggyback_till', label: 'Till / Bank (via platform)' },
 ];
 
 /**

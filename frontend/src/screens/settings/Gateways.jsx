@@ -19,7 +19,7 @@ import { Badge, Button, Card, Empty, Field, Input, Modal, Screen, Select, Table,
 
 /** Kept in CHANNELS for anything already saved, but no longer offered: the platform's own direct settlement replaces them. */
 const RETIRED = ['bankstk', 'manual_till'];
-const METHOD_ORDER = ['daraja', 'piggyback_till', 'flutterwave', 'paystack', 'azampay', 'yopayments'];
+const METHOD_ORDER = ['daraja', 'piggyback_till', 'kopokopo', 'flutterwave', 'paystack', 'azampay', 'yopayments'];
 
 export const CHANNELS = {
   daraja: {
@@ -119,7 +119,7 @@ export const CHANNELS = {
     services: { pppoe: true, hotspot: true },
   },
   piggyback_till: {
-    name: 'Direct settlement (via platform)',
+    name: 'Till / Bank',
     blurb: 'No Safaricom API app of your own needed. The platform sends the STK push, so customers see the platform’s name, and the money settles straight into your till, paybill or bank account — it never goes through the platform.',
     codeLabel: 'Till number',
     fields: [],
@@ -205,7 +205,7 @@ export default function Gateways({ platform = false }) {
   const [gateways, setGateways] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(null);
-  // One dropdown holds every payment method except KopoKopo, which keeps its own card.
+  // One dropdown holds every payment method.
   const [method, setMethod] = useState('daraja');
   const [busy, setBusy] = useState(false);
 
@@ -607,9 +607,9 @@ export default function Gateways({ platform = false }) {
         </Card>
       )}
 
-      {(platform ? ['daraja'] : [METHOD_ORDER.includes(method) ? method : 'daraja', 'kopokopo']).map((provider) => [provider, CHANNELS[provider]]).map(([provider, ch]) => {
+      {(platform ? ['daraja'] : [METHOD_ORDER.includes(method) ? method : 'daraja']).map((provider) => [provider, CHANNELS[provider]]).map(([provider, ch]) => {
         const rows = gateways.filter((g) => g.provider === provider);
-        const grouped = !platform && provider !== 'kopokopo';
+        const grouped = !platform;
         return (
           <Card
             key={provider}
