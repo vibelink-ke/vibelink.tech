@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { pool } from './db.js';
+import { pool, siteProfileFor } from './db.js';
 import { fmtNairobiDate } from './nairobi-time.js';
 
 /**
@@ -254,7 +254,7 @@ export function subscriberVars(s, org = {}) {
   return {
     name: s.name ?? '',
     first_name: (s.name ?? '').trim().split(/\s+/)[0] ?? '',
-    account: s.account_code ?? '',
+    account: `${org.accountPrefix ?? ''}${s.account_code ?? ''}`,
     phone: s.phone ?? '',
     plan: s.plan_title ?? '',
     // Comma-separated, same as every other money figure in a template — plain String(Number(...))
@@ -287,7 +287,7 @@ export function subscriberVars(s, org = {}) {
 const HOTSPOT_METHOD_PROVIDER = { kopokopo: 'kopokopo', paybill: 'daraja', till: 'manual_till', bankstk: 'bankstk', flutterwave: 'flutterwave', paystack: 'paystack', azampay: 'azampay', yopayments: 'yopayments' };
 
 /** The tenant-wide half of the token map. One query, reused for a whole bulk run. */
-export async function orgVars(tenantId, routerId = null) {
+export async function orgVars(tenantId, routerId = null, connectionType = null) {
   const { rows: [t] } = await pool.query(
     'select name, support_phone, subdomain, platform_collect_enabled from tenants where id=$1', [tenantId]);
   // A router can say where its own customers pay (routers.collection_mode); only matters when one is given.
@@ -303,6 +303,8 @@ export async function orgVars(tenantId, routerId = null) {
     'select payment_method from hotspot_settings where tenant_id=$1', [tenantId]).catch(() => ({ rows: [] }));
   const hotspotProvider = HOTSPOT_METHOD_PROVIDER[hs?.payment_method] ?? null;
 
+  // A site payment profile (for this connection type, or for everyone at the site) names its own paybill and account prefix.
+  const sp = routerId ? await siteProfileFor(tenantId, routerId, connectionType) : null;
   let paybillPppoe = gws.find((g) => g.enabled_pppoe)?.shortcode ?? '';
   let paybillHotspot = (
     gws.find((g) => g.provider === hotspotProvider)?.shortcode
@@ -338,6 +340,9 @@ export async function orgVars(tenantId, routerId = null) {
     }
   }
 
+  // The site profile has the last word on which paybill a customer there is told to pay.
+  if (sp?.shortcode) { paybillPppoe = sp.shortcode; paybillHotspot = sp.shortcode; }
+
   // app_settings is one row per tenant with jsonb blobs, not key/value pairs.
   const { rows: [cfg] } = await pool.query(
     "select prefs->>'supportEmail' as email, smtp->>'from' as smtp_from from app_settings where tenant_id=$1",
@@ -351,6 +356,7 @@ export async function orgVars(tenantId, routerId = null) {
     supportEmail: cfg?.email ?? cfg?.smtp_from ?? '',
     paybillPppoe,
     paybillHotspot,
+    accountPrefix: sp?.account_prefix ?? '',
     // {portal} in a welcome message or reminder — a link a new customer can
     // tap straight to sign-in, instead of typing the subdomain from memory.
     portal: t?.subdomain ? `https://${t.subdomain}.${root}/customer` : '',

@@ -81,17 +81,37 @@ export async function config(tenantId, provider) {
  * operator has deliberately picked a specific paybill for a specific site
  * under Site payment profiles.
  */
-export async function configForRouter(tenantId, provider, routerId) {
+export async function configForRouter(tenantId, provider, routerId, connectionType = null) {
   if (routerId) {
     const { rows: [viaSite] } = await pool.query(
       `select tpc.* from site_profiles sp
          join tenant_payment_config tpc on tpc.id = sp.payment_config_id
-        where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider=$3`,
-      [routerId, tenantId, provider]
+        where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider=$3
+          and (sp.connection_type is null or sp.connection_type = $4)
+        order by (sp.connection_type is not null) desc, sp.site limit 1`,
+      [routerId, tenantId, provider, connGroup(connectionType)]
     );
     if (viaSite) return viaSite;
   }
   return config(tenantId, provider);
+}
+
+/** fibre | wireless | null — a PMP or P2P customer is wireless. */
+export const connGroup = (t) => (t === 'pmp' || t === 'ptp' ? 'wireless' : t === 'fibre' ? 'fibre' : null);
+
+/**
+ * The site payment profile that applies to a customer on this router: one made for their connection type wins over
+ * one for every customer at the site.
+ */
+export async function siteProfileFor(tenantId, routerId, connectionType = null) {
+  if (!routerId) return null;
+  const { rows: [sp] } = await pool.query(
+    `select * from site_profiles where tenant_id=$1 and router_id=$2
+        and (connection_type is null or connection_type = $3)
+      order by (connection_type is not null) desc, site limit 1`,
+    [tenantId, routerId, connGroup(connectionType)]
+  ).catch(() => ({ rows: [] }));
+  return sp ?? null;
 }
 
 /**

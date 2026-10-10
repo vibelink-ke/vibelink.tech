@@ -3325,3 +3325,7 @@ alter table subscribers add column if not exists connection_type text check (con
 alter table subscribers add column if not exists ap_node_id uuid references network_nodes on delete set null;
 alter table network_links drop constraint if exists network_links_kind_check;
 alter table network_links add constraint network_links_kind_check check (kind in ('fibre','wireless','ethernet'));
+
+-- Site payment profiles by how the customer is connected: a site can have one profile for fibre and another for
+-- wireless (PMP/P2P), each with its own paybill and account prefix. Null = every customer at the site.
+alter table site_profiles add column if not exists connection_type text check (connection_type in ('fibre','wireless'));

@@ -112,7 +112,8 @@
       "Payment gateways tidied: M-Pesa Paybill, Direct settlement, Flutterwave, Paystack, AzamPay and Yo! now sit in one \"Payment method\" dropdown (KopoKopo keeps its own card); Bank STK push and Till/paybill without API are no longer offered.",
       "Site payment profiles can point a site at a Direct settlement gateway, so that site's hotspot and PPPoE payments go to its own till, paybill or bank account.",
       "Payment gateways: \"Direct settlement\" is now called \"Till / Bank\", and KopoKopo moved into the same payment-method dropdown.",
-      "Customers: new Fibre, Wireless and Type not set tabs, and a bulk \"Set connection…\" for ticked clients (fibre, wireless PMP or P2P)."
+      "Customers: new Fibre, Wireless and Type not set tabs, and a bulk \"Set connection…\" for ticked clients (fibre, wireless PMP or P2P).",
+      "Site payment profiles can now be set for fibre or wireless customers only, so fibre income and wireless income go to different paybills (per site). Each profile has its own account prefix: reminders, the customer portal and the client page show it, and payments typed with it are matched automatically."
     ]
   }
 ]

@@ -798,7 +798,7 @@ async function autoCharge() {
 
 async function remind() {
   const { rows } = await pool.query(`
-    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service, s.router_id
+    select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service, s.router_id, s.connection_type
     from subscribers s
     where s.status='active' and s.expires_at between now() and now() + interval '3 days'
       and s.tenant_id in (${enabledTenants})`, ['remind']);
@@ -807,12 +807,12 @@ async function remind() {
   // its gateways once per subscriber.
   const orgCache = new Map();
   for (const s of rows) {
-    const orgKey = `${s.tenant_id}:${s.router_id ?? ''}`;
-    if (!orgCache.has(orgKey)) orgCache.set(orgKey, await orgVars(s.tenant_id, s.router_id ?? null));
+    const orgKey = `${s.tenant_id}:${s.router_id ?? ''}:${s.connection_type ?? ''}`;
+    if (!orgCache.has(orgKey)) orgCache.set(orgKey, await orgVars(s.tenant_id, s.router_id ?? null, s.connection_type ?? null));
     const org = orgCache.get(orgKey);
     const paybill = s.service === 'hotspot' ? org.paybillHotspot : org.paybillPppoe;
     await send(s.tenant_id, s.phone, 'reminder',
-      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: s.account_code,
+      { name: s.name.split(' ')[0], expires: fmtNairobi(s.expires_at), account: `${org.accountPrefix ?? ''}${s.account_code}`,
         paybill: paybill ?? '', company: org.company ?? '' });
   }
 }

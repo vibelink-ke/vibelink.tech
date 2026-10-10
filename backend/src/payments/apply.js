@@ -559,6 +559,20 @@ async function match(c, tenantId, tx) {
           order by expires_at asc nulls first limit 1`,
         [tenantId, plain]);
       if (exact[0]) return { type: 'subscriber', id: exact[0].id };
+      // The account may have been typed with a site profile's prefix in front (F-12345 for a fibre customer).
+      const { rows: prefixes } = await c.query(
+        "select distinct upper(regexp_replace(account_prefix, '[^A-Za-z0-9]', '', 'g')) as p from site_profiles where tenant_id=$1 and coalesce(account_prefix,'') <> ''",
+        [tenantId]).catch(() => ({ rows: [] }));
+      for (const { p } of prefixes) {
+        if (p && plain.startsWith(p) && plain.length > p.length) {
+          const { rows: viaPrefix } = await c.query(
+            `select id from subscribers
+              where tenant_id=$1 and upper(regexp_replace(account_code, '[^A-Za-z0-9]', '', 'g')) = $2
+              order by expires_at asc nulls first limit 1`,
+            [tenantId, plain.slice(p.length)]);
+          if (viaPrefix[0]) return { type: 'subscriber', id: viaPrefix[0].id };
+        }
+      }
     }
     /**
      * One account number can now carry several lines — a house and a shop, or

@@ -5,7 +5,7 @@ import util from 'node:util';
 import dns from 'node:dns';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
-import { pool, tenantByHost, withTenant, config, platformCollectConfig } from './db.js';
+import { pool, tenantByHost, withTenant, config, platformCollectConfig, connGroup } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
 import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
@@ -2705,7 +2705,8 @@ app.get('/portal/me', wrap(async (req, res) => {
   // to gateways this subscriber's service can actually use.
   const { rows: [gw] } = await pool.query(
     `select case when rt.collection_mode = 'platform' and plat.shortcode is not null then plat.shortcode
-                 else coalesce(sp.shortcode, tpc.shortcode) end as shortcode
+                 else coalesce(sp.shortcode, tpc.shortcode) end as shortcode,
+            sp.account_prefix
        from subscribers sub
        left join routers rt on rt.id = sub.router_id
        left join lateral (
@@ -2714,7 +2715,11 @@ app.get('/portal/me', wrap(async (req, res) => {
           where pc.scope = 'platform' and pc.shortcode is not null
           order by (pc.provider = 'daraja') desc limit 1
        ) plat on true
-       left join site_profiles sp on sp.router_id = sub.router_id and sp.tenant_id = sub.tenant_id
+       left join lateral (
+         select * from site_profiles x where x.router_id = sub.router_id and x.tenant_id = sub.tenant_id
+            and (x.connection_type is null or x.connection_type = case when sub.connection_type in ('pmp','ptp') then 'wireless' else sub.connection_type end)
+          order by (x.connection_type is not null) desc, x.site limit 1
+       ) sp on true
        left join lateral (
          select shortcode from tenant_payment_config
           where tenant_id=sub.tenant_id and shortcode is not null and scope = 'tenant'
@@ -2787,6 +2792,7 @@ app.get('/portal/me', wrap(async (req, res) => {
     company: org?.name ?? '',
     supportPhone: org?.support_phone ?? '',
     paybill: gw?.shortcode ?? '',
+    payPrefix: gw?.account_prefix ?? '',
     payments,
     invoices,
     tickets,
@@ -2861,18 +2867,20 @@ const viaPlatform = (mode, platformOn, hasOwnGateway) =>
  * PIGGYBACK_TILL_ENABLED=true. `service` is 'pppoe' or 'hotspot' (hotspot is chosen by Hotspot → Settings instead).
  */
 /** The direct-settlement gateway a router's site payment profile points at, if any. */
-async function sitePiggyback(tenantId, routerId) {
+async function sitePiggyback(tenantId, routerId, connectionType = null) {
   if (!routerId || process.env.PIGGYBACK_TILL_ENABLED !== 'true') return null;
   const { rows: [pb] } = await pool.query(
     `select tpc.shortcode, tpc.credentials, tpc.enabled_pppoe
        from site_profiles sp join tenant_payment_config tpc on tpc.id = sp.payment_config_id
-      where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider='piggyback_till'`, [routerId, tenantId]);
+      where sp.router_id=$1 and sp.tenant_id=$2 and tpc.provider='piggyback_till'
+        and (sp.connection_type is null or sp.connection_type = $3)
+      order by (sp.connection_type is not null) desc, sp.site limit 1`, [routerId, tenantId, connGroup(connectionType)]);
   return pb ?? null;
 }
-async function piggybackFor(tenantId, service, routerId = null) {
+async function piggybackFor(tenantId, service, routerId = null, connectionType = null) {
   if (process.env.PIGGYBACK_TILL_ENABLED !== 'true') return null;
   // A site payment profile that points a router at a direct-settlement gateway wins over the tenant's default one.
-  const site = await sitePiggyback(tenantId, routerId);
+  const site = await sitePiggyback(tenantId, routerId, connectionType);
   if (site) return site;
   const { rows: [pb] } = await pool.query(
     "select shortcode, credentials, enabled_pppoe from tenant_payment_config where tenant_id=$1 and provider='piggyback_till' and scope='tenant' order by is_default desc, id limit 1",
@@ -2907,7 +2915,10 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
   const { config } = await import('./db.js');
   const ownDaraja = await config(tenantId, 'daraja');
 
-  const pb = await piggybackFor(tenantId, 'pppoe', routerId);
+  const connType = purpose?.subscriber_id
+    ? (await pool.query('select connection_type from subscribers where id=$1 and tenant_id=$2', [purpose.subscriber_id, tenantId]).catch(() => ({ rows: [] }))).rows[0]?.connection_type ?? null
+    : null;
+  const pb = await piggybackFor(tenantId, 'pppoe', routerId, connType);
   if (viaPlatform(await routerCollection(tenantId, routerId), t?.platform_collect_enabled, !!(ownDaraja || pb))) {
     const { rows: [owner] } = await pool.query(
       "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
@@ -2945,7 +2956,7 @@ async function stkPushForSubscriber(tenantId, { phone, amount, accountCode, desc
     return { checkoutId: id };
   }
 
-  const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description, routerId });
+  const data = await mpesa.stkPush(tenantId, { phone, amount, accountRef: accountCode, description, routerId, connectionType: connType });
   const checkoutId = data?.CheckoutRequestID ?? null;
   if (checkoutId) {
     await pool.query(
@@ -3209,6 +3220,7 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
            -- client-side from the tenant default alone, showing the wrong
            -- paybill for anyone not on the site that default belongs to.
            coalesce(sp.shortcode, tpc.shortcode) as paybill,
+           sp.account_prefix as pay_prefix,
            -- Wallet credit is pooled per account_code (account_wallets), not
            -- per subscriber row — a customer with several lines shares one
            -- balance across all of them (settleSubscriber in apply.js).
@@ -3219,7 +3231,11 @@ app.get('/api/subscribers', requirePermission('clients.view'), async (req, res) 
       from subscribers s
       left join account_wallets w on w.tenant_id = s.tenant_id and w.account_code = s.account_code
       left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
-      left join site_profiles sp on sp.router_id = s.router_id and sp.tenant_id = s.tenant_id
+      left join lateral (
+        select * from site_profiles x where x.router_id = s.router_id and x.tenant_id = s.tenant_id
+           and (x.connection_type is null or x.connection_type = case when s.connection_type in ('pmp','ptp') then 'wireless' else s.connection_type end)
+         order by (x.connection_type is not null) desc, x.site limit 1
+      ) sp on true
       left join lateral (
         -- /api/subscribers is PPPoE-only (see the comment on this route above),
         -- so this always wants the PPPoE-enabled gateway — without the filter
@@ -5325,7 +5341,7 @@ app.post('/api/messages', requirePermission('messaging.send'), async (req, res) 
     phone = s?.phone ?? null;
     if (s) {
       // The subscriber's own router decides which paybill the {paybill} tag names (platform or the tenant's own).
-      const org = await sms.orgVars(req.tenant.id, s.router_id ?? null);
+      const org = await sms.orgVars(req.tenant.id, s.router_id ?? null, s.connection_type ?? null);
       filled = sms.fill(body, sms.subscriberVars(s, org));
     }
   }
@@ -9717,7 +9733,7 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
       where s.id = $1 and s.tenant_id = $2`, [subscriberId, tenantId]);
   if (!s) return;
 
-  const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId, s.router_id ?? null)), ...extra };
+  const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId, s.router_id ?? null, s.connection_type ?? null)), ...extra };
   // Duplicates would text the same handset twice when both fields match.
   const numbers = [...new Set([s.phone, s.phone_alt].filter(Boolean))];
   for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});
@@ -12635,14 +12651,15 @@ app.get('/api/site-profiles', requirePermission('site_profiles.view'), wrap(asyn
 app.post('/api/site-profiles', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
   const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
   if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
+  const connectionType = ['fibre', 'wireless'].includes(req.body.connectionType) ? req.body.connectionType : null;
   const { rows: [p] } = await pool.query(
-    `insert into site_profiles (tenant_id, site, router_id, provider, shortcode, account_prefix, payment_config_id)
-     values ($1,$2,$3,$4,$5,$6,$7)
+    `insert into site_profiles (tenant_id, site, router_id, provider, shortcode, account_prefix, payment_config_id, connection_type)
+     values ($1,$2,$3,$4,$5,$6,$7,$8)
      on conflict (tenant_id, site) do update set router_id=excluded.router_id,
        provider=excluded.provider, shortcode=excluded.shortcode, account_prefix=excluded.account_prefix,
-       payment_config_id=excluded.payment_config_id
+       payment_config_id=excluded.payment_config_id, connection_type=excluded.connection_type
      returning *`,
-    [req.tenant.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null]);
+    [req.tenant.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null, connectionType]);
   res.json(p);
 }));
 
@@ -12650,11 +12667,12 @@ app.post('/api/site-profiles', requirePermission('site_profiles.edit'), wrap(asy
 app.put('/api/site-profiles/:id', requirePermission('site_profiles.edit'), wrap(async (req, res) => {
   const { site, routerId, provider, shortcode, accountPrefix, paymentConfigId } = req.body;
   if (!site || !shortcode) return res.status(400).json({ error: 'site and shortcode are required' });
+  const connectionType = ['fibre', 'wireless'].includes(req.body.connectionType) ? req.body.connectionType : null;
   try {
     const { rowCount } = await pool.query(
-      `update site_profiles set site=$3, router_id=$4, provider=$5, shortcode=$6, account_prefix=$7, payment_config_id=$8
+      `update site_profiles set site=$3, router_id=$4, provider=$5, shortcode=$6, account_prefix=$7, payment_config_id=$8, connection_type=$9
         where tenant_id=$1 and id=$2`,
-      [req.tenant.id, req.params.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null]);
+      [req.tenant.id, req.params.id, site, routerId ?? null, provider ?? 'daraja', shortcode, accountPrefix ?? null, paymentConfigId ?? null, connectionType]);
     if (!rowCount) return res.status(404).json({ error: 'not found' });
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'Another profile already uses that site name.' });
@@ -12800,7 +12818,7 @@ app.post('/api/sms/send', requirePermission('messaging.send'), wrap(async (req, 
       where s.tenant_id=$1 and (s.phone=$2 or s.phone_alt=$2) limit 1`,
     [req.tenant.id, phone]);
   // Looked up after the subscriber so their router can decide which paybill the {paybill} tag names.
-  const org = await sms.orgVars(req.tenant.id, s?.router_id ?? null);
+  const org = await sms.orgVars(req.tenant.id, s?.router_id ?? null, s?.connection_type ?? null);
 
   const vars = s ? sms.subscriberVars(s, org) : { ...org };
   await sms.send(req.tenant.id, phone, 'custom', { ...vars, body: sms.fill(body, vars) });
@@ -12887,8 +12905,8 @@ app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (
   // One lookup per router for the run (each router can name its own paybill), not one per recipient.
   const orgByRouter = new Map();
   for (const s of recipients) {
-    const key = s.router_id ?? '';
-    if (!orgByRouter.has(key)) orgByRouter.set(key, await sms.orgVars(req.tenant.id, s.router_id ?? null));
+    const key = `${s.router_id ?? ''}:${connGroup(s.connection_type) ?? ''}`;
+    if (!orgByRouter.has(key)) orgByRouter.set(key, await sms.orgVars(req.tenant.id, s.router_id ?? null, s.connection_type ?? null));
     const org = orgByRouter.get(key);
     // Expanded per recipient — the whole point of the tags is that each person
     // gets their own name, account and expiry rather than a form letter.

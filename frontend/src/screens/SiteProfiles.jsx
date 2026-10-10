@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { collect: 'own', site: '', router: '', provider: 'daraja', shortcode: '', account: '', paymentConfigId: '' };
+const BLANK = { collect: 'own', connectionType: '', site: '', router: '', provider: 'daraja', shortcode: '', account: '', paymentConfigId: '' };
 const PROVIDERS = [
   { value: 'daraja', label: 'M-Pesa Paybill (Daraja)' },
   { value: 'kopokopo', label: 'KopoKopo till (hotspot)' },
@@ -26,7 +26,7 @@ export default function SiteProfiles() {
   const openProfile = (p, readOnly) => {
     setF({
       ...BLANK, site: p.site, router: p.router_id ?? '', provider: p.provider, shortcode: p.shortcode ?? '',
-      account: p.account_prefix ?? '', paymentConfigId: p.payment_config_id ?? '',
+      account: p.account_prefix ?? '', paymentConfigId: p.payment_config_id ?? '', connectionType: p.connection_type ?? '',
     });
     setEditing(readOnly ? null : p);
     setView(readOnly);
@@ -91,6 +91,7 @@ export default function SiteProfiles() {
         provider: f.provider,
         shortcode: f.shortcode,
         accountPrefix: f.account || null,
+        connectionType: f.connectionType || null,
         // Hotspot always uses the tenant's one default gateway, by design —
         // only PPPoE payments can be routed to a specific paybill per site.
         paymentConfigId: f.provider === 'kopokopo' ? null : (f.paymentConfigId || null),
@@ -144,6 +145,7 @@ export default function SiteProfiles() {
           columns={[
             { key: 'site', label: 'Site', render: (p) => <span style={{ fontWeight: 600 }}>{p.site}</span> },
             { key: 'router_name', label: 'Router', render: (p) => p.router_name ?? '—' },
+            { key: 'connection_type', label: 'Customers', render: (p) => (p.connection_type === 'fibre' ? 'Fibre' : p.connection_type === 'wireless' ? 'Wireless' : 'Everyone') },
             { key: 'provider', label: 'Channel', render: (p) => <Badge tone="default">{p.provider}</Badge> },
             { key: 'shortcode', label: 'Shortcode', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.shortcode}</span> },
             {
@@ -256,6 +258,13 @@ export default function SiteProfiles() {
               options={[{ value: '', label: 'Any router' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
             />
           </Field>
+          <Field label="Customers" hint="To give fibre and wireless customers on the same router their own paybill, save two profiles with different site names (for example “Kimilili – Fibre” and “Kimilili – Wireless”).">
+            <Select
+              value={f.connectionType}
+              onChange={set('connectionType')}
+              options={[{ value: '', label: 'Everyone at this site' }, { value: 'fibre', label: 'Fibre customers only' }, { value: 'wireless', label: 'Wireless customers only (PMP and P2P)' }]}
+            />
+          </Field>
           <Field label="Channel">
             <Select value={f.provider} onChange={setProvider} options={PROVIDERS.some((p) => p.value === f.provider) ? PROVIDERS : [...PROVIDERS, { value: f.provider, label: `${f.provider} (no longer offered)` }]} />
           </Field>
@@ -282,7 +291,7 @@ export default function SiteProfiles() {
               ]}
             />
           </Field>
-          <Field label="Account prefix" hint="Prepended to what the client types">
+          <Field label="Account prefix" hint="Customers here pay with this in front of their account number (W-12345). Payments typed with it are matched automatically; without it still works.">
             <Input value={f.account} onChange={set('account')} placeholder="KIM-" />
           </Field>
           </>

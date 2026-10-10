@@ -1128,6 +1128,9 @@ export default function ClientDetail() {
             {client.service === 'pppoe' && (
               <KV k="Pay to paybill" v={client.paybill ?? 'Not configured — see Settings → Payment gateways'} />
             )}
+            {client.service === 'pppoe' && client.pay_prefix && (
+              <KV k="Account to enter" v={`${client.pay_prefix}${client.account_code ?? ''}`} />
+            )}
           </div>
 
           {/* Splynx's "linked accounts" — one customer, several separate

@@ -863,7 +863,7 @@ export default function CustomerPortal() {
 
         <div style={card}>
           {me.paybill && <Row k="Pay to paybill" v={me.paybill} />}
-          <Row k="Your account number" v={me.account} />
+          <Row k="Your account number" v={`${me.payPrefix ?? ''}${me.account}`} />
           {/* Typing the paybill and account number by hand is where most
               support calls about payment start — a wrong digit sends money
               nowhere findable. Pushing a prompt to the number on file skips
