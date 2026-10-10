@@ -277,7 +277,6 @@ export default function ClientDetail() {
       category: client.category ?? '', identification: client.identification ?? '',
       billingType: client.billing_type ?? '', tags: client.tags ?? [],
       customerRef: client.customer_ref ?? '',
-      connectionType: client.connection_type ?? '', apNodeId: client.ap_node_id ?? '',
     });
     // A different line's password must not inherit the last one's revealed value.
     setPortalPassword(undefined);
@@ -300,9 +299,6 @@ export default function ClientDetail() {
         billing_type: infoForm.billingType || null,
         tags: infoForm.tags,
         customer_ref: infoForm.customerRef.trim() || null,
-        // Sent only when changed, so saving an unrelated edit never depends on the map columns existing.
-        ...((infoForm.connectionType || null) !== (client.connection_type ?? null) ? { connection_type: infoForm.connectionType || null } : {}),
-        ...((infoForm.apNodeId || null) !== (client.ap_node_id ?? null) ? { ap_node_id: infoForm.apNodeId || null } : {}),
       });
       store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
       store.toast('Client info saved');
@@ -514,7 +510,11 @@ export default function ClientDetail() {
         lng: serviceForm.lng === '' ? null : Number(serviceForm.lng),
         allowDuplicatePhone: true,
       });
-      store.setCollection('clients', (cs) => [created, ...cs]);
+      let shown = created;
+      if (serviceForm.connectionType) {
+        shown = await api.updateSubscriber(created.id, { connection_type: serviceForm.connectionType }).catch(() => created);
+      }
+      store.setCollection('clients', (cs) => [shown, ...cs]);
       store.toast(`${serviceForm.lineLabel.trim()} added to ${addingService.account_code}`);
       setAddingService(null);
     } catch (e) {
@@ -657,6 +657,12 @@ export default function ClientDetail() {
       const nextPrice = price === '' ? null : Number(price);
       const wasPrice = orig.custom_price == null ? null : Number(orig.custom_price);
       if (nextPrice !== wasPrice) patch.custom_price = nextPrice;
+    }
+    {
+      // How this one service is reached — per service, since an account can have a fibre line and a wireless one.
+      const orig = clients.find((c) => c.id === editing.id) ?? {};
+      if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
+      if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
     }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -1034,24 +1040,6 @@ export default function ClientDetail() {
                     options={['', 'Monthly (prepaid)', 'Monthly (postpaid)', 'Weekly', 'Daily']}
                   />
                 </Field>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                <Field label="Connection" hint="How this customer is reached. Shows as a different shape on the map.">
-                  <Select
-                    value={infoForm.connectionType}
-                    onChange={(e) => setInfoForm((s) => ({ ...s, connectionType: e.target.value }))}
-                    options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'PMP (shared radio / sector)' }, { value: 'ptp', label: 'P2P (dedicated radio)' }]}
-                  />
-                </Field>
-                {(infoForm.connectionType === 'pmp' || infoForm.connectionType === 'ptp') && aps.length > 0 && (
-                  <Field label="Served by radio" hint="The access point or sector on the map this customer connects to.">
-                    <Select
-                      value={infoForm.apNodeId}
-                      onChange={(e) => setInfoForm((s) => ({ ...s, apNodeId: e.target.value }))}
-                      options={[{ value: '', label: 'Not set' }, ...aps.map((a) => ({ value: a.id, label: a.name }))]}
-                    />
-                  </Field>
-                )}
               </div>
               <Field
                 label="Linked-accounts reference"
@@ -1577,6 +1565,13 @@ export default function ClientDetail() {
                 <Input value={serviceForm.lineLabel} onChange={(e) => setServiceForm((s) => ({ ...s, lineLabel: e.target.value }))} autoFocus />
               </Field>
             )}
+            <Field label="Connection" span={2} hint="How this service is reached (fibre, or a shared PMP / dedicated P2P wireless link)">
+              <Select
+                value={serviceForm.connectionType ?? ''}
+                onChange={(e) => setServiceForm((s) => ({ ...s, connectionType: e.target.value }))}
+                options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'Wireless · PMP' }, { value: 'ptp', label: 'Wireless · P2P' }]}
+              />
+            </Field>
             <Field label="Location of this service" span={2} hint="Its own place — a second line is often a different building">
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <Input value={serviceForm.location} onChange={(e) => setServiceForm((s) => ({ ...s, location: e.target.value }))} placeholder="Kilimani, Block C" style={{ flex: '2 1 160px' }} />
@@ -1704,6 +1699,22 @@ export default function ClientDetail() {
                 options={[{ value: '', label: 'Not assigned' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
               />
             </Field>
+            <Field label="Connection" hint="How this service is reached. Set per service, so one account can have a fibre line and a wireless one.">
+              <Select
+                value={editing.connection_type ?? ''}
+                onChange={(e) => setEditing((v) => ({ ...v, connection_type: e.target.value }))}
+                options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'Wireless · PMP (shared radio / sector)' }, { value: 'ptp', label: 'Wireless · P2P (dedicated radio)' }]}
+              />
+            </Field>
+            {(editing.connection_type === 'pmp' || editing.connection_type === 'ptp') && aps.length > 0 && (
+              <Field label="Served by radio" hint="The access point or sector on the map this service connects to.">
+                <Select
+                  value={editing.ap_node_id ?? ''}
+                  onChange={(e) => setEditing((v) => ({ ...v, ap_node_id: e.target.value }))}
+                  options={[{ value: '', label: 'Not set' }, ...aps.map((a) => ({ value: a.id, label: a.name }))]}
+                />
+              </Field>
+            )}
             <Field label="Static IP" hint={editing.router_id ? undefined : 'Pick a router first for a pool to choose from'}>
               {(() => {
                 const pool = (store.ipPools ?? []).find((p) => p.router_id === editing.router_id && p.service !== 'hotspot' && p.purpose !== 'expired');

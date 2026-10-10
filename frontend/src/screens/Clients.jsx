@@ -435,6 +435,12 @@ export default function Clients() {
       autopay: editing.autopay || null,
       location: editing.location || null,
     };
+    {
+      // How this one service is reached — per service, since an account can have a fibre line and a wireless one.
+      const orig = clients.find((c) => c.id === editing.id) ?? {};
+      if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
+      if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
+    }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
       // Wallet is pooled per account_code — refresh every sibling line's
@@ -862,6 +868,13 @@ export default function Clients() {
                   { value: '', label: 'Not assigned' },
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name })),
                 ]}
+              />
+            </Field>
+            <Field label="Connection" hint="How this service is reached. Set per service, so one account can have a fibre line and a wireless one.">
+              <Select
+                value={editing.connection_type ?? ''}
+                onChange={(e) => setEditing((v) => ({ ...v, connection_type: e.target.value }))}
+                options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'Wireless · PMP (shared radio / sector)' }, { value: 'ptp', label: 'Wireless · P2P (dedicated radio)' }]}
               />
             </Field>
             <Field label="Static IP" hint={editing.router_id ? undefined : 'Pick a router first for a pool to choose from'}>
