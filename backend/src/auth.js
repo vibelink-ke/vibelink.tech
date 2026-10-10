@@ -206,6 +206,15 @@ const smartoltEnabled = async (tenantId) => {
   } catch { return false; }   // before the migration has run
 };
 
+/** SkyPlan as the Map: on for the platform owner, and for any tenant it has been switched on for. */
+const skyplanEnabled = async (s) => {
+  if (s.is_super_admin) return true;
+  try {
+    const { rows: [r] } = await pool.query('select skyplan_enabled from tenants where id=$1', [s.tenant_id]);
+    return !!r?.skyplan_enabled;
+  } catch { return false; }   // before the migration has run
+};
+
 export const publicSession = async (s) => ({
   // The signed-in staff member's own id — "My jobs" (FieldTech.jsx) and the sidebar's own-jobs count key off this
   // (t.assigned_to === session.id). It was never sent to the browser at all, so both always matched nothing,
@@ -225,7 +234,7 @@ export const publicSession = async (s) => ({
       ),
   platformCollectEnabled: s.platform_collect_enabled,
   // Which optional integrations this tenant has switched on, so the app can show or hide their pages.
-  features: { smartolt: await smartoltEnabled(s.tenant_id) },
+  features: { smartolt: await smartoltEnabled(s.tenant_id), skyplan: await skyplanEnabled(s) },
   // Known the moment they sign in, so an expired tenant lands on the licence page
   // rather than on a dashboard that then redirects.
   // Judged from the date itself, not only the stored status: the status is updated

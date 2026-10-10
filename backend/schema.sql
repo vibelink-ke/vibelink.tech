@@ -3338,3 +3338,6 @@ alter table ip_pools drop constraint if exists ip_pools_purpose_check;
 alter table ip_pools add constraint ip_pools_purpose_check check (purpose in ('normal','expired','mgmt'));
 alter table subscribers add column if not exists mgmt_ip inet;
 create unique index if not exists subscribers_mgmt_ip_uniq on subscribers (tenant_id, host(mgmt_ip)) where mgmt_ip is not null;
+
+-- SkyPlan (the network planner) as the Map: switched on per tenant by the platform owner.
+alter table tenants add column if not exists skyplan_enabled boolean not null default false;

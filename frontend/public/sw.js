@@ -39,7 +39,7 @@ self.addEventListener('fetch', (event) => {
   // is exactly why a guest saw "expected a JavaScript module, got
   // text/html": the fallback below doesn't know or care what the original
   // request was for, only that fetching it failed.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/hotspot/')) return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/hotspot/') || url.pathname.startsWith('/skyplan/')) return;
 
   event.respondWith(
     fetch(event.request).then((res) => {

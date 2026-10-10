@@ -25,6 +25,7 @@ const HOSTS = ['tower', 'pole'];
 const MOUNTABLE = { ap: 'radio', ptp: 'radio', station: 'radio', switch: 'switch', power: 'power' };
 
 const idOf = (x) => x.details?.skyplan || x.id;
+const lifeOf = (x) => (['proposed', 'planned', 'retired'].includes(x.details?.stage) ? x.details.stage : 'active');
 const hasPos = (lat, lng) => Number.isFinite(lat) && Number.isFinite(lng) && !(lat === 0 && lng === 0);
 
 const metres = (a, b) => {
@@ -61,7 +62,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
     }
     return {
       id: idOf(h), name: h.name, lat: Number(h.lat), lon: Number(h.lng),
-      maxHeight: num(h.details?.height) ?? 30, kind: h.kind, lifecycle: 'active',
+      maxHeight: num(h.details?.height) ?? 30, kind: h.kind, lifecycle: lifeOf(h),
       ...(h.details?.note ? { notes: h.details.note } : {}),
       ...(equipment.length ? { equipment } : {}),
     };
@@ -71,7 +72,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
   const fiberNodes = fibreNodes.map((n) => {
     const ratio = /^1:(\d+)/.exec(String(n.details?.ratio ?? ''));
     return {
-      id: idOf(n), name: n.name, kind: FIBRE_OUT[n.kind], lat: Number(n.lat), lon: Number(n.lng), lifecycle: 'active',
+      id: idOf(n), name: n.name, kind: FIBRE_OUT[n.kind], lat: Number(n.lat), lon: Number(n.lng), lifecycle: lifeOf(n),
       ...(n.kind === 'splitter' && ratio ? { split: Number(ratio[1]) } : {}),
     };
   });
@@ -88,7 +89,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
     fiberCables.push({
       id: idOf(l), name: l.label || `${na.name} → ${nb.name}`, aId: idOf(na), bId: idOf(nb),
       path: [[Number(na.lat), Number(na.lng)], ...(l.path ?? []).map((p) => [Number(p[0]), Number(p[1])]), [Number(nb.lat), Number(nb.lng)]],
-      fibers: num(l.details?.cores) ?? 12, placement: 'aerial', slackPct: 5, lifecycle: 'active',
+      fibers: num(l.details?.cores) ?? 12, placement: 'aerial', slackPct: 5, lifecycle: lifeOf(l),
     });
   }
 
@@ -120,7 +121,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
  * Read a SkyPlan project into Map nodes and cables. Returns what it did; nothing is deleted, and an item that already
  * exists is renamed (and its SkyPlan id remembered) but never moved.
  */
-export async function importSkyPlanProject(project, { nodes, links }, api, { includePlanned = false, onProgress } = {}) {
+export async function importSkyPlanProject(project, { nodes, links }, api, { includePlanned = false, moveExisting = false, onProgress } = {}) {
   if (project?.format !== 'skyplan-rf' || !Array.isArray(project.sites)) throw new Error('That is not a SkyPlan RF project file.');
   const keep = (x) => includePlanned || !x.lifecycle || x.lifecycle === 'active';
   const out = { created: 0, updated: 0, skipped: 0 };
@@ -130,14 +131,16 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
   const haveLinks = new Map();
   for (const l of links) { haveLinks.set(l.id, l); if (l.details?.skyplan) haveLinks.set(l.details.skyplan, l); }
   const idMap = new Map();   // SkyPlan id -> billing node id
-  const stage = (x) => (x.lifecycle && x.lifecycle !== 'active' ? { stage: x.lifecycle } : {});
+  const stage = (x) => ({ stage: x.lifecycle && x.lifecycle !== 'active' ? x.lifecycle : '' });
   const str = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, typeof v === 'number' ? v : String(v)]));
 
   const upsert = async (spId, kind, name, lat, lon, details) => {
     const existing = have.get(spId);
     if (existing) {
       const merged = str({ ...(existing.details ?? {}), ...details, skyplan: spId });
-      await api.updateNetNode(existing.id, { name, details: merged });
+      const moved = moveExisting && hasPos(lat, lon) && hasPos(Number(existing.lat), Number(existing.lng))
+        && metres([lat, lon], [Number(existing.lat), Number(existing.lng)]) > 1;
+      await api.updateNetNode(existing.id, { name, details: merged, ...(moved ? { lat, lng: lon } : {}) });
       idMap.set(spId, existing.id);
       out.updated += 1;
       return existing.id;
@@ -175,7 +178,7 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
       const existing = haveLinks.get(c.id);
       const interior = (c.path ?? []).slice(1, -1).map((p) => [Number(p[0]), Number(p[1])]);
       if (existing) {
-        await api.updateNetLink(existing.id, { label: c.name, details: str({ ...(existing.details ?? {}), cores: c.fibers, skyplan: c.id }) });
+        await api.updateNetLink(existing.id, { label: c.name, ...(moveExisting ? { path: interior } : {}), details: str({ ...(existing.details ?? {}), cores: c.fibers, skyplan: c.id }) });
         out.updated += 1;
         return;
       }
@@ -193,6 +196,27 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
     onProgress?.(done, ordered.length);
   }
   return out;
+}
+
+/** Every SkyPlan-side id a project carries: sites, their equipment, fibre nodes and cables. */
+export function projectIds(project) {
+  const ids = new Set();
+  for (const s of project.sites ?? []) { ids.add(s.id); for (const d of s.equipment ?? []) ids.add(d.id); }
+  for (const n of project.fiberNodes ?? []) ids.add(n.id);
+  for (const c of project.fiberCables ?? []) ids.add(c.id);
+  return ids;
+}
+
+/**
+ * What was in the network when it was handed to SkyPlan and is no longer in the project: the person deleted it there.
+ * Only ids billing itself handed over (`known`) count, so nothing SkyPlan never saw can be removed by a save.
+ */
+export function findRemoved(project, { nodes, links }, known) {
+  const ids = projectIds(project);
+  return {
+    nodes: nodes.filter((n) => known.has(idOf(n)) && !ids.has(idOf(n))),
+    links: links.filter((l) => l.kind === 'fibre' && known.has(idOf(l)) && !ids.has(idOf(l))),
+  };
 }
 
 /** Download text as a file. */

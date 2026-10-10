@@ -355,6 +355,8 @@ export default function Tenants() {
         status: editing.status,
         support_phone: editing.support_phone || null,
         platform_collect_enabled: !!editing.platform_collect_enabled,
+        // Only sent when it was changed, so saving anything else never depends on the SkyPlan column existing.
+        ...(!!editing.skyplan_enabled !== !!editing.skyplan_was ? { skyplan_enabled: !!editing.skyplan_enabled } : {}),
         settlement_phone: editing.settlement_phone || null,
         // Left blank: charged by billing_mode below (revenue share, or the flat tier) rather
         // than a fixed amount. A number here overrides either one for this tenant specifically.
@@ -857,6 +859,8 @@ export default function Tenants() {
                         ...t,
                         support_phone: t.support_phone ?? '',
                         platform_collect_enabled: t.platform_collect_enabled ?? false,
+                        skyplan_enabled: t.skyplan_enabled ?? false,
+                        skyplan_was: t.skyplan_enabled ?? false,
                         settlement_phone: t.settlement_phone ?? '',
                         flat_monthly_fee: t.flat_monthly_fee ?? '',
                         billing_mode: t.billing_mode ?? 'tiered',
@@ -1099,6 +1103,13 @@ export default function Tenants() {
             <p style={{ gridColumn: '1 / -1', margin: 0, fontSize: 12.5, color: color.muted }}>
               Changes apply to this month and after; statements already drawn keep the amounts they were drawn at.
             </p>
+            <Field label="SkyPlan map" span={2} hint="Gives this ISP the SkyPlan network planner as its Map (with the classic map still one tab away). Off by default.">
+              <Select
+                value={editing.skyplan_enabled ? 'yes' : 'no'}
+                onChange={(e) => setEditing((s) => ({ ...s, skyplan_enabled: e.target.value === 'yes' }))}
+                options={['no', 'yes']}
+              />
+            </Field>
             <Field label="Platform collects on their behalf" span={2} hint="For a tenant with no payment gateway of their own: customers pay into our own paybill, and we pay it out to them in full on their schedule">
               <Select
                 value={editing.platform_collect_enabled ? 'yes' : 'no'}

@@ -13665,7 +13665,7 @@ app.patch('/api/tenants/:id', superAdminOnly, wrap(async (req, res) => {
                    'platform_collect_enabled', 'settlement_phone', 'settlement_commission_pct', 'settlement_fee_mode',
                    'settlement_frequency', 'settlement_time', 'flat_monthly_fee', 'billing_mode',
                    'hotspot_commission_pct', 'pppoe_client_rate',
-                   'max_concurrent_clients'];
+                   'max_concurrent_clients', 'skyplan_enabled'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
   // null means unlimited — the RADIUS-side check (sites-available/billing) skips
