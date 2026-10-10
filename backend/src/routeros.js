@@ -2277,6 +2277,49 @@ export async function applyPppoeServer(conn, {
  * purpose='expired' — not offered under Networks, since it's system-managed
  * (see server.js's autoExpiredCidr/the Configure route).
  */
+export async function applyRadioPool(conn, { cidr, iface = null } = {}) {
+  if (!cidr) return { configured: false, done: [] };
+  const done = [];
+  const [base, bitsRaw] = String(cidr).split('/');
+  const bits = Number(bitsRaw);
+  const o = base.split('.').map(Number);
+  if (o.length !== 4 || o.some((n) => !Number.isInteger(n) || n < 0 || n > 255) || !(bits >= 8 && bits <= 30)) {
+    throw new Error(`${cidr} is not a usable range`);
+  }
+
+  // The router's own address in the range, on the port the radios are reached through: that is what makes the
+  // radios reachable (from this system and from the router). Only when told which port; never guessed.
+  if (iface) {
+    const net = ((o[0] << 24) >>> 0) + (o[1] << 16) + (o[2] << 8) + o[3];
+    const gw = net + 1;
+    const gwIp = [(gw >>> 24) & 255, (gw >>> 16) & 255, (gw >>> 8) & 255, gw & 255].join('.');
+    const have = await conn.write('/ip/address/print', []);
+    const exists = have.some((a) => String(a.address).startsWith(`${gwIp}/`));
+    if (!exists) {
+      await cmd(conn, 'radio management address', '/ip/address/add',
+        [`=address=${gwIp}/${bits}`, `=interface=${iface}`, `=comment=${managed('radio management gateway')}`]);
+      done.push(`address ${gwIp}/${bits} on ${iface}`);
+    }
+  }
+
+  // The radios may answer, but may not start anything: no new connection from the range is forwarded, so they have
+  // no internet and cannot reach customers' networks. Connections this system opens to them are still answered.
+  const rules = await conn.write('/ip/firewall/filter/print', []);
+  const mine = rules.filter((r) => isManaged(r) && String(r.chain) === 'forward' && r['src-address'] === cidr
+    && String(r.action) === 'drop');
+  const want = ['=action=drop', '=chain=forward', `=src-address=${cidr}`, '=connection-state=new',
+    `=comment=${managed(`radio management ${cidr} — no internet`)}`];
+  if (mine.length) {
+    if (!unchanged(mine[0], want)) await cmd(conn, 'radio no-internet rule', '/ip/firewall/filter/set', [`=.id=${idOf(mine[0])}`, ...want]);
+  } else {
+    await cmd(conn, 'radio no-internet rule', '/ip/firewall/filter/add', rules.length ? [...want, '=place-before=0'] : want);
+    done.push(`rule dropping new connections from ${cidr}`);
+  }
+  for (const dupe of mine.slice(1)) await cmd(conn, 'remove duplicate radio rule', '/ip/firewall/filter/remove', [`=.id=${idOf(dupe)}`]);
+
+  return { configured: true, cidr, done };
+}
+
 export async function applyExpiredPool(conn, { cidr } = {}) {
   if (!cidr) return { configured: false };
   const LIST = 'ispblocking';

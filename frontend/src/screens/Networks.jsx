@@ -4,7 +4,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Bar, Button, Card, Drawer, Field, Grid, Input, KV, Modal, RowAction, RowActions, Screen, Select, Stat, Table } from '../ui/primitives';
 
-const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe', purpose: 'normal' };
+const BLANK = { name: '', cidr: '', routerId: '', service: 'pppoe', purpose: 'normal', connectionType: '', iface: '' };
 
 const act = (c) => ({ fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginRight: 10, color: c });
 
@@ -49,6 +49,7 @@ export default function Networks() {
       const updated = await api.updateIpPool(editing.id, {
         name: editing.name, cidr: editing.cidr,
         routerId: editing.routerId, service: editing.service, purpose: editing.purpose,
+        connectionType: editing.connectionType ?? '', iface: editing.iface ?? '',
       });
       store.setCollection('ipPools', (ps) => ps.map((x) => (x.id === updated.id ? { ...x, ...updated } : x)));
       store.toast(`${updated.name} updated`);
@@ -74,6 +75,7 @@ export default function Networks() {
   const create = async () => {
     if (!f.name.trim() || !f.cidr.trim()) return store.toast('Name and CIDR are required');
     if (!cidrHosts(f.cidr)) return store.toast('That does not look like a valid CIDR block');
+    if (f.purpose === 'radio' && !f.routerId) return store.toast('Pick the router the radios are reached through');
     setBusy(true);
     try {
       const created = await api.createIpPool({
@@ -82,6 +84,8 @@ export default function Networks() {
         routerId: f.routerId || null,
         service: f.service,
         purpose: f.purpose,
+        connectionType: f.connectionType,
+        iface: f.iface,
       });
       store.setCollection('ipPools', (ps) => [...ps, created]);
       store.toast('IP pool created');
@@ -124,7 +128,14 @@ export default function Networks() {
             { key: 'name', label: 'Pool', render: (p) => <span style={{ fontWeight: 600 }}>{p.name}</span> },
             { key: 'cidr', label: 'Range', render: (p) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{p.cidr}</span> },
             { key: 'router_name', label: 'Router', render: (p) => p.router_name ?? <span style={{ color: color.muted }}>Any</span> },
-            { key: 'service', label: 'Service' },
+            {
+              key: 'service',
+              label: 'Used for',
+              render: (p) => (p.purpose === 'radio'
+                ? <span style={{ color: '#8a4fd0', fontWeight: 600 }}>Radio management · no internet</span>
+                : p.connection_type === 'wireless' ? 'Internet · wireless'
+                  : p.connection_type === 'fibre' ? 'Internet · fibre' : 'Internet · everyone'),
+            },
             {
               key: 'used',
               label: 'Used',
@@ -153,7 +164,7 @@ export default function Networks() {
                 <span style={{ whiteSpace: 'nowrap' }}>
                   <RowActions>
                     <RowAction onClick={() => viewPool(p)}>View</RowAction>
-                    <RowAction tone={color.green} onClick={() => setEditing({ ...p, routerId: p.router_id ?? '' })}>
+                    <RowAction tone={color.green} onClick={() => setEditing({ ...p, routerId: p.router_id ?? '', connectionType: p.connection_type ?? '', iface: p.iface ?? '' })}>
                       Edit
                     </RowAction>
                     {p.locked && p.router_id ? (
@@ -233,6 +244,19 @@ export default function Networks() {
                   ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
               />
             </Field>
+            {editing.purpose === 'radio' ? (
+              <Field label="Port the radios are on" hint="Optional. If set, the router gets the first address of the range on this port so the radios can be reached.">
+                <Input value={editing.iface ?? ''} onChange={(e) => setEditing((s) => ({ ...s, iface: e.target.value }))} placeholder="bridge-radios" />
+              </Field>
+            ) : (
+              <Field label="For">
+                <Select
+                  value={editing.connectionType ?? ''}
+                  onChange={(e) => setEditing((s) => ({ ...s, connectionType: e.target.value }))}
+                  options={[{ value: '', label: 'Everyone' }, { value: 'fibre', label: 'Fibre services' }, { value: 'wireless', label: 'Wireless services' }]}
+                />
+              </Field>
+            )}
             <span style={{ gridColumn: '1 / -1', fontSize: 12, color: color.muted }}>
               Narrowing a range that clients already sit inside does not move them — check View
               first to see who holds an address.
@@ -267,10 +291,27 @@ export default function Networks() {
               (applyHotspotServer, routeros.js, builds a fixed 'hotspot-pool'
               from that CIDR directly). PPPoE is real: repushPppoePool
               (server.js) queries this exact table for it. */}
-          <Field label="Service">
-            <Select value={f.service} onChange={set('service')} options={[{ value: 'pppoe', label: 'PPPoE' }]} />
+          <Field label="Type">
+            <Select
+              value={f.purpose}
+              onChange={set('purpose')}
+              options={[{ value: 'normal', label: 'Internet pool' }, { value: 'radio', label: 'Radio management (reachable, no internet)' }]}
+            />
           </Field>
-          <Field label="Router" span={2}>
+          {f.purpose === 'radio' ? (
+            <Field label="Port the radios are on" hint="Optional: the router takes the first address of the range on this port">
+              <Input value={f.iface} onChange={set('iface')} placeholder="bridge-radios" />
+            </Field>
+          ) : (
+            <Field label="For">
+              <Select
+                value={f.connectionType}
+                onChange={set('connectionType')}
+                options={[{ value: '', label: 'Everyone' }, { value: 'fibre', label: 'Fibre services' }, { value: 'wireless', label: 'Wireless services' }]}
+              />
+            </Field>
+          )}
+          <Field label="Router" span={2} hint={f.purpose === 'radio' ? 'Required: the router the radios connect through' : undefined}>
             <Select
               value={f.routerId}
               onChange={set('routerId')}

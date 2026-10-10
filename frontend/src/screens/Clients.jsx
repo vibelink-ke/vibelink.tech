@@ -440,6 +440,7 @@ export default function Clients() {
       const orig = clients.find((c) => c.id === editing.id) ?? {};
       if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
       if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
+      if ((editing.radio_ip ? String(editing.radio_ip).split('/')[0] : null) !== (orig.radio_ip ? String(orig.radio_ip).split('/')[0] : null)) patch.radio_ip = editing.radio_ip ? String(editing.radio_ip).split('/')[0] : null;
     }
     try {
       const updated = await api.updateSubscriber(editing.id, patch);
@@ -877,6 +878,30 @@ export default function Clients() {
                 options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'Wireless · PMP (shared radio / sector)' }, { value: 'ptp', label: 'Wireless · P2P (dedicated radio)' }]}
               />
             </Field>
+            {(editing.connection_type === 'pmp' || editing.connection_type === 'ptp') && (
+              <Field label="Radio address" hint="Management address of the radio at the customer's home. It is reachable from the system but has no internet.">
+                {(() => {
+                  const rp = (store.ipPools ?? []).filter((p) => p.purpose === 'radio' && p.router_id === editing.router_id);
+                  const heldBy = new Set(clients.filter((c) => c.id !== editing.id && c.radio_ip).map((c) => String(c.radio_ip).split('/')[0]));
+                  const free = rp.flatMap((p) => hostsInCidr(p.cidr, 254)).filter((ip) => !heldBy.has(ip));
+                  if (!rp.length) {
+                    return <span style={{ fontSize: 12.5, color: '#8a6d1d' }}>No radio-management pool on this router yet. Add one under Networks (type: Radio management).</span>;
+                  }
+                  const cur = editing.radio_ip ? String(editing.radio_ip).split('/')[0] : '';
+                  return (
+                    <Select
+                      value={cur}
+                      onChange={(e) => setEditing((s) => ({ ...s, radio_ip: e.target.value }))}
+                      options={[
+                        { value: '', label: 'Not assigned' },
+                        ...(cur && !free.includes(cur) ? [{ value: cur, label: `${cur} (current)` }] : []),
+                        ...free.slice(0, 250).map((ip) => ({ value: ip, label: ip })),
+                      ]}
+                    />
+                  );
+                })()}
+              </Field>
+            )}
             <Field label="Static IP" hint={editing.router_id ? undefined : 'Pick a router first for a pool to choose from'}>
               {(() => {
                 // Every free address in this router's pool, minus whoever
@@ -888,8 +913,9 @@ export default function Clients() {
                 // other one on this router — that range exists to be
                 // firewalled off, not handed to an active client by editing
                 // their static IP.
-                const pool = (store.ipPools ?? [])
-                  .find((p) => p.router_id === editing.router_id && p.service !== 'hotspot' && p.purpose !== 'expired');
+                const pools = (store.ipPools ?? []).filter((p) => p.router_id === editing.router_id && p.service !== 'hotspot' && p.purpose === 'normal');
+                const grp = editing.connection_type === 'pmp' || editing.connection_type === 'ptp' ? 'wireless' : editing.connection_type === 'fibre' ? 'fibre' : null;
+                const pool = (grp && pools.find((p) => p.connection_type === grp)) || pools.find((p) => !p.connection_type);
                 const taken = new Set(
                   clients.filter((c) => c.id !== editing.id && c.static_ip).map((c) => c.static_ip)
                 );

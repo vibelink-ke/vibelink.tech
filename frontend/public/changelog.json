@@ -114,7 +114,8 @@
       "Payment gateways: \"Direct settlement\" is now called \"Till / Bank\", and KopoKopo moved into the same payment-method dropdown.",
       "Customers: new Fibre, Wireless and Type not set tabs, and a bulk \"Set connection…\" for ticked clients (fibre, wireless PMP or P2P).",
       "Site payment profiles can now be set for fibre or wireless customers only, so fibre income and wireless income go to different paybills (per site). Each profile has its own account prefix: reminders, the customer portal and the client page show it, and payments typed with it are matched automatically.",
-      "Fibre / PMP / P2P is now set per service (in a service's Edit, or when adding a service), not per customer, so one account can have a fibre line and a wireless one."
+      "Fibre / PMP / P2P is now set per service (in a service's Edit, or when adding a service), not per customer, so one account can have a fibre line and a wireless one.",
+      "Wireless gets its own pools: a wireless internet pool per router (wireless services draw their address from it), and radio-management pools for the radios at customers' homes — reachable from the system, with no internet. Each wireless service can be given a radio address; the router rule that blocks internet for the radio range is applied on Configure."
     ]
   }
 ]

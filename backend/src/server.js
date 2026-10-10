@@ -7046,7 +7046,7 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
           `select cidr from ip_pools
             where tenant_id=$1 and service='pppoe' and purpose='normal'
               and (router_id = $2 or router_id is null)
-            order by (router_id = $2) desc nulls last
+            order by (router_id = $2) desc nulls last, (connection_type is null) desc
             limit 1`, [req.tenant.id, r.id]);
 
         // A cidr has to become a usable range: .1 is the gateway, and the
@@ -7125,6 +7125,15 @@ app.post('/api/routers/:id/autoconfig', requirePermission('routers.configure'), 
           done.push('could not auto-create an expired-customers pool — every candidate range is taken; '
             + 'suspended/expired accounts fall back to a near-zero speed limit instead of a firewall block');
         }
+      }
+    }
+    {
+      // Radio-management ranges for this router: reachable, but with no way out.
+      const { rows: radioPools } = await pool.query(
+        "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='radio'", [req.tenant.id, r.id]);
+      for (const rp of radioPools) {
+        const x = await tryStep(`radio management pool ${rp.cidr}`, () => ros.applyRadioPool(conn, { cidr: rp.cidr, iface: rp.iface }), 20000);
+        done.push(x.done?.length ? `radio pool ${rp.cidr}: ${x.done.join('; ')}` : `radio pool ${rp.cidr} already set up (reachable, no internet)`);
       }
     }
     /**
@@ -8992,8 +9001,8 @@ app.post('/api/routers/:id/test-coa', requirePermission('routers.configure'), wr
  */
 app.put('/api/ip-pools/:id', wrap(async (req, res) => {
   const { name, cidr, routerId, service, purpose } = req.body ?? {};
-  if (purpose !== undefined && purpose !== 'normal') {
-    return res.status(400).json({ error: 'purpose must be normal' });
+  if (purpose !== undefined && !['normal', 'radio'].includes(purpose)) {
+    return res.status(400).json({ error: 'purpose must be normal or radio' });
   }
 
   const { rows: [existing] } = await pool.query(
@@ -9013,14 +9022,20 @@ app.put('/api/ip-pools/:id', wrap(async (req, res) => {
        router_id = case when $5::text is null then router_id
                         when $5 = '' then null else $5::uuid end,
        service   = coalesce(nullif($6,''), service),
-       purpose   = coalesce(nullif($7,''), purpose)
+       purpose   = coalesce(nullif($7,''), purpose),
+       connection_type = case when $8::text is null then connection_type when $8 = '' then null else $8 end,
+       iface     = case when $9::text is null then iface when $9 = '' then null else $9 end
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, name ?? '', cidr ?? '',
-     routerIdInput === undefined ? null : String(routerIdInput), service ?? '', purpose ?? '']);
+     routerIdInput === undefined ? null : String(routerIdInput), service ?? '', purpose ?? '',
+     ['fibre', 'wireless', ''].includes(req.body?.connectionType) ? req.body.connectionType : null,
+     req.body?.iface === undefined ? null : String(req.body.iface).trim().slice(0, 40)]);
 
   // Either end of a changed assignment needs the router it now applies (or
   // no longer applies) to told, not just the pool's own new router_id.
-  if (existing.service === 'pppoe' || p.service === 'pppoe') {
+  if (p.purpose === 'radio' && p.router_id) {
+    pushRadioPools(req.tenant.id, p.router_id);
+  } else if (existing.service === 'pppoe' || p.service === 'pppoe') {
     const targets = new Set();
     if (p.service === 'pppoe') { if (p.router_id) targets.add(p.router_id); else targets.add(null); }
     if (existing.service === 'pppoe' && existing.router_id !== p.router_id) {
@@ -9053,9 +9068,10 @@ app.delete('/api/ip-pools/:id', wrap(async (req, res) => {
     });
   }
 
+  const holdCol = p.purpose === 'radio' ? 'radio_ip' : 'static_ip';
   const { rows: [{ count }] } = await pool.query(
     `select count(*)::int from subscribers
-      where tenant_id=$1 and static_ip is not null and static_ip << $2::cidr`,
+      where tenant_id=$1 and ${holdCol} is not null and ${holdCol} << $2::cidr`,
     [req.tenant.id, p.cidr]);
   if (count > 0)
     return res.status(409).json({
@@ -9074,11 +9090,12 @@ app.get('/api/ip-pools/:id/usage', wrap(async (req, res) => {
     'select * from ip_pools where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
   if (!p) return res.status(404).json({ error: 'No such pool' });
 
+  const useCol = p.purpose === 'radio' ? 'radio_ip' : 'static_ip';
   const { rows: taken } = await pool.query(
-    `select host(static_ip) as ip, name, account_code, status
+    `select host(${useCol}) as ip, name, account_code, status
        from subscribers
-      where tenant_id=$1 and static_ip is not null and static_ip << $2::cidr
-      order by static_ip`, [req.tenant.id, p.cidr]);
+      where tenant_id=$1 and ${useCol} is not null and ${useCol} << $2::cidr
+      order by ${useCol}`, [req.tenant.id, p.cidr]);
 
   const { rows: [size] } = await pool.query(
     'select (broadcast($1::cidr) - network($1::cidr) - 1)::bigint as hosts', [p.cidr]);
@@ -9102,7 +9119,12 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
        where tenant_id = $1
          and (router_id = $2 or router_id is null)
          and service = 'pppoe'
-         and purpose != 'expired'
+         and purpose = $4
+         and ($4 = 'radio'
+              or ($5::text is null and connection_type is null)
+              or ($5::text is not null and (connection_type = $5 or (connection_type is null and not exists (
+                    select 1 from ip_pools w where w.tenant_id = $1 and w.purpose = 'normal' and w.service = 'pppoe'
+                       and w.connection_type = $5 and (w.router_id = $2 or w.router_id is null))))))
     )
     select host(network(p.cidr) + i) as ip, text(p.cidr) as pool
       from pools p,
@@ -9115,9 +9137,10 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
        -- so a stored 10.44.0.1/32 never matches a generated 10.44.0.1/22 and
        -- every taken address was being offered again.
        select 1 from subscribers s
-        where s.tenant_id = $1 and host(s.static_ip) = host(network(p.cidr) + i))
+        where s.tenant_id = $1 and host(case when $4 = 'radio' then s.radio_ip else s.static_ip end) = host(network(p.cidr) + i))
      order by 1
-     limit $3`, [req.tenant.id, req.params.id, limit]);
+     limit $3`, [req.tenant.id, req.params.id, limit, req.query.kind === 'radio' ? 'radio' : 'normal',
+       ['fibre', 'wireless'].includes(req.query.conn) ? req.query.conn : null]);
 
   res.json({ addresses: rows.map((r) => r.ip), pools: [...new Set(rows.map((r) => r.pool))] });
 }));
@@ -9131,7 +9154,9 @@ app.get('/api/routers/:id/free-ips', wrap(async (req, res) => {
 app.get('/api/ip-pools', async (req, res) => {
   const { rows } = await pool.query(
     `select p.*, r.name as router_name,
-       (select count(*) from subscribers s where s.router_id=p.router_id) used
+       case when p.purpose = 'radio'
+            then (select count(*) from subscribers s where s.tenant_id=p.tenant_id and s.radio_ip is not null and s.radio_ip <<= p.cidr)
+            else (select count(*) from subscribers s where s.router_id=p.router_id) end used
      from ip_pools p left join routers r on r.id=p.router_id
      where p.tenant_id=$1 and p.purpose != 'expired'`, [req.tenant.id]);
   res.json(rows);
@@ -9219,6 +9244,29 @@ function poolFromCidr(cidr) {
  * (never Configured — nothing to push to yet) or one whose PPPoE server was
  * never set up, rather than starting one from scratch unattended.
  */
+/** Apply a router's radio-management pools (reachable, no internet). Best effort; the Configure push does the same. */
+async function pushRadioPools(tenantId, routerId) {
+  let conn;
+  const ros = await import('./routeros.js');
+  try {
+    const { rows: pools } = await pool.query(
+      "select cidr, iface from ip_pools where tenant_id=$1 and router_id=$2 and purpose='radio'", [tenantId, routerId]);
+    if (!pools.length) return;
+    const { rows: [r] } = await pool.query(
+      'select id, host, api_port, service_user, service_password_enc from routers where id=$1 and tenant_id=$2 and service_user is not null',
+      [routerId, tenantId]);
+    if (!r) return;
+    const secrets = await import('./secrets.js');
+    conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 15 });
+    for (const p of pools) await ros.applyRadioPool(conn, { cidr: p.cidr, iface: p.iface });
+    console.log('radio pools applied on router', routerId);
+  } catch (e) {
+    console.error('radio pool push', routerId, '→ failed:', e.message);
+  } finally {
+    if (conn) { try { ros.close(conn); } catch { /* already gone */ } }
+  }
+}
+
 async function repushPppoePool(tenantId, routerId) {
   let conn;
   try {
@@ -9232,7 +9280,7 @@ async function repushPppoePool(tenantId, routerId) {
     // walled-garden range for 'pppoe' had no way to tell them apart here,
     // and LIMIT 1 with no purpose filter could pick either arbitrarily.
     const { rows: [confPool] } = await pool.query(
-      `select cidr from ip_pools where tenant_id=$1 and router_id=$2 and service='pppoe' and purpose='normal' limit 1`,
+      `select cidr from ip_pools where tenant_id=$1 and router_id=$2 and service='pppoe' and purpose='normal' order by (connection_type is null) desc limit 1`,
       [tenantId, routerId]);
 
     const { rows: [t] } = await pool.query('select tunnel_subnet from tenants where id=$1', [tenantId]);
@@ -9276,7 +9324,9 @@ async function repushPppoePool(tenantId, routerId) {
       const { rows: affected } = await pool.query(
         `select s.id, s.pppoe_user from subscribers s
           where s.tenant_id=$1 and s.router_id=$2 and s.static_ip is not null
-            and not (s.static_ip <<= $3::cidr)`,
+            and not (s.static_ip <<= $3::cidr)
+            and not exists (select 1 from ip_pools np where np.tenant_id=$1 and np.purpose='normal' and np.service='pppoe'
+                              and (np.router_id=$2 or np.router_id is null) and s.static_ip <<= np.cidr)`,
         [tenantId, routerId, confPool.cidr]);
       if (affected.length) {
         const radius = await import('./radius.js');
@@ -9319,7 +9369,10 @@ async function repushPppoePoolToFallbackRouters(tenantId) {
 app.post('/api/ip-pools', wrap(async (req, res) => {
   const { name, cidr, routerId, service = 'pppoe', purpose = 'normal' } = req.body;
   if (!name || !cidr) return res.status(400).json({ error: 'A pool needs a name and a range' });
-  if (purpose !== 'normal') return res.status(400).json({ error: 'purpose must be normal' });
+  if (!['normal', 'radio'].includes(purpose)) return res.status(400).json({ error: 'purpose must be normal or radio' });
+  if (purpose === 'radio' && !routerId) return res.status(400).json({ error: 'A radio-management pool belongs to one router: pick it.' });
+  const connectionType = purpose === 'normal' && ['fibre', 'wireless'].includes(req.body.connectionType) ? req.body.connectionType : null;
+  const iface = purpose === 'radio' ? (String(req.body.iface ?? '').trim().slice(0, 40) || null) : null;
 
   const { rows: existing } = await pool.query(
     'select name, cidr, service from ip_pools where tenant_id=$1', [req.tenant.id]);
@@ -9355,10 +9408,12 @@ app.post('/api/ip-pools', wrap(async (req, res) => {
   }
 
   const { rows: [p] } = await pool.query(
-    'insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose) values ($1,$2,$3,$4,$5,$6) returning *',
-    [req.tenant.id, name, cidr, routerId ?? null, service, purpose]);
+    'insert into ip_pools (tenant_id, name, cidr, router_id, service, purpose, connection_type, iface) values ($1,$2,$3,$4,$5,$6,$7,$8) returning *',
+    [req.tenant.id, name, cidr, routerId ?? null, service, purpose, connectionType, iface]);
 
-  if (service === 'pppoe') {
+  if (purpose === 'radio') {
+    pushRadioPools(req.tenant.id, routerId);
+  } else if (service === 'pppoe') {
     if (routerId) repushPppoePool(req.tenant.id, routerId);
     else repushPppoePoolToFallbackRouters(req.tenant.id);
   }
@@ -9846,7 +9901,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'radio_ip'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -9911,6 +9966,20 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     const v = req.body.connection_type || null;
     if (v !== null && !['fibre', 'pmp', 'ptp'].includes(v)) return res.status(400).json({ error: 'Connection type is fibre, pmp or ptp.' });
     req.body.connection_type = v;
+  }
+  // The management address of the radio at the customer's home: from a radio pool, and held by one service only.
+  if ('radio_ip' in req.body) {
+    const v = String(req.body.radio_ip ?? '').trim() || null;
+    if (v !== null) {
+      if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(v)) return res.status(400).json({ error: 'That is not an IP address.' });
+      const { rowCount: inPool } = await pool.query(
+        "select 1 from ip_pools where tenant_id=$1 and purpose='radio' and $2::inet <<= cidr", [req.tenant.id, v]);
+      if (!inPool) return res.status(400).json({ error: 'That address is not in a radio-management pool. Add the range under Networks first.' });
+      const { rows: [held] } = await pool.query(
+        'select name, line_label from subscribers where tenant_id=$1 and host(radio_ip)=$2 and id<>$3', [req.tenant.id, v, req.params.id]);
+      if (held) return res.status(409).json({ error: `${v} is already the radio of ${held.line_label || held.name}.` });
+    }
+    req.body.radio_ip = v;
   }
   if ('ap_node_id' in req.body) {
     const v = req.body.ap_node_id || null;

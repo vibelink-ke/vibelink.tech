@@ -359,7 +359,7 @@ export async function syncSubscriberCredentials(c, tenantId, subId) {
     // affected line's Framed-IP-Address silently never got set — a
     // customer stuck re-dialling forever with no address, indistinguishable
     // from a credentials problem.
-    `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac, s.router_id, s.status,
+    `select s.pppoe_user, s.pppoe_pass, s.static_ip, s.locked_mac, s.router_id, s.status, s.connection_type,
             p.rate_down, p.rate_up, p.radius_profile,
             r.pppoe_pool, r.queue_profiles, r.queue_shaping
        from subscribers s
@@ -491,13 +491,17 @@ async function framedAddress(c, tenantId, subId, s) {
   // edit that appeared to save (the response already carried the new
   // value) but read back as reverted moments later, because this ran
   // after that response was built and rewrote the row again underneath it.
+  // A wireless service draws from the wireless internet pool when the router has one, a fibre service from a fibre
+  // pool, and anyone else (or a type with no pool of its own) from the ordinary one.
+  const group = s.connection_type === 'pmp' || s.connection_type === 'ptp' ? 'wireless' : s.connection_type === 'fibre' ? 'fibre' : null;
   const poolFor = async (p) => {
     const { rows: [row] } = await c.query(
       `select cidr from ip_pools
         where tenant_id=$1 and service='pppoe' and purpose=$2
           and (router_id = $3 or router_id is null)
-        order by (router_id = $3) desc nulls last
-        limit 1`, [tenantId, p, s.router_id]);
+          and (connection_type is null or connection_type = $4)
+        order by (connection_type is not null) desc, (router_id = $3) desc nulls last
+        limit 1`, [tenantId, p, s.router_id, group]);
     return row;
   };
 
