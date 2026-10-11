@@ -125,7 +125,8 @@
       "Fixed imported hotspot users being refused at login: an imported voucher now takes its own code as its password (the login page sends only the code), not the password the router had.",
       "Fixed router Configure stopping at the DNS proxy step with \"done is not defined\" when the guest DNS firewall rules were in the wrong order; the order is now repaired and reported.",
       "Fixed hotspot vouchers whose clock never started (so they never expired): the 30-second online sync now starts the clock of any voucher it sees online, instead of relying only on FreeRADIUS reporting the login.",
-      "A new hotspot plan now creates its router profile on every hotspot router straight away. Before, codes of a brand-new plan (or a new device count) were accepted at login and then refused by the router until the next Configure."
+      "A new hotspot plan now creates its router profile on every hotspot router straight away. Before, codes of a brand-new plan (or a new device count) were accepted at login and then refused by the router until the next Configure.",
+      "Hotspot → Portal design: choose where the voucher-code box sits on the login page, above the bundles (as before) or at the bottom."
     ]
   }
 ]

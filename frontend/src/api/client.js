@@ -178,6 +178,7 @@ export const api = {
   deleteVouchers: (ids) => post('/api/vouchers/delete', { ids }),
   compensateVouchers: (ids, hours) => post('/api/vouchers/compensate', { ids, hours }),
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),
+  setLoginPosition: (position) => patch('/api/hotspot/settings/login-position', { position }),
   setAutoPurgeVouchers: (enabled) => patch('/api/hotspot/settings/auto-purge', { enabled }),
   setUnusedExpiry: (days, shortDays) => patch('/api/hotspot/settings/unused-expiry', { days, shortDays }),
 

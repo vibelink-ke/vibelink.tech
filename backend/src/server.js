@@ -907,7 +907,11 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     hotspotGateway = planNetwork(hs?.hotspot_network ?? '10.5.50.0/24').gateway;
   } catch { /* keep the DNS-name fallback as the only option */ }
 
+  // Read on its own so a database without the column yet still serves the page (the box simply stays on top).
+  const { rows: [pos] } = await pool.query('select login_position from hotspot_settings where tenant_id=$1', [tenant.id]).catch(() => ({ rows: [] }));
+
   res.type('html').send(loginPage({
+    loginPosition: pos?.login_position ?? 'top',
     currency: String(tenant.currency ?? 'KES').trim(),
     company: tenant.name ?? 'WiFi',
     plans,
@@ -3660,6 +3664,18 @@ app.put('/api/hotspot/settings', requirePermission('hotspot.edit'), async (req, 
  * settings form back to. Vouchers has never had that form and should not
  * need to fetch and resend fifteen unrelated fields to flip one switch.
  */
+/** Where the voucher-code box sits on the login page (top or bottom), from Portal design. Pushes the page to the routers. */
+app.patch('/api/hotspot/settings/login-position', requirePermission('hotspot.edit'), wrap(async (req, res) => {
+  const position = req.body?.position === 'bottom' ? 'bottom' : 'top';
+  const { rows: [s] } = await pool.query(
+    `insert into hotspot_settings (tenant_id, login_position) values ($1,$2)
+     on conflict (tenant_id) do update set login_position=excluded.login_position
+     returning login_position`,
+    [req.tenant.id, position]);
+  repushHotspotLoginPage(req.tenant.id);
+  res.json(s);
+}));
+
 app.patch('/api/hotspot/settings/auto-purge', requirePermission('hotspot.edit'), wrap(async (req, res) => {
   const { rows: [s] } = await pool.query(
     `insert into hotspot_settings (tenant_id, auto_purge_vouchers) values ($1,$2)

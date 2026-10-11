@@ -3345,3 +3345,6 @@ alter table tenants add column if not exists skyplan_enabled boolean not null de
 -- A licence date the platform owner set by hand is respected by the unpaid-statement lock: until this date the lock job
 -- leaves the tenant alone, instead of putting the licence back to yesterday on its next run.
 alter table tenants add column if not exists lock_exempt_until date;
+
+-- Where the voucher-code box sits on the hotspot login page: above the bundles (top, as always) or below them (bottom).
+alter table hotspot_settings add column if not exists login_position text not null default 'top' check (login_position in ('top','bottom'));

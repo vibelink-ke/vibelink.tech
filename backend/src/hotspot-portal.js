@@ -117,7 +117,26 @@ function bestInkOn(hex) {
   return onWhite >= onBlack ? '#ffffff' : '#161a17';
 }
 
-export function loginPage({
+/**
+ * The login page. The voucher-code block is marked in the markup (LOGIN-START/LOGIN-END) so it can be placed above the bundles
+ * (the default) or below them and the payment box (loginPosition 'bottom', set under Hotspot → Portal design) without
+ * touching the page's script: everything on it is found by id, wherever it sits.
+ */
+export function loginPage(opts = {}) {
+  const html = loginPageRaw(opts);
+  if (opts?.loginPosition !== 'bottom') return html;
+  const START = '<!--LOGIN-START-->';
+  const END = '<!--LOGIN-END-->';
+  const AFTER = '<!--LOGIN-AFTER-->';
+  const a = html.indexOf(START);
+  const b = html.indexOf(END);
+  const dest = html.indexOf(AFTER);
+  if (a < 0 || b < 0 || dest < 0 || dest < b) return html;   // not this template's layout: leave the page as it is
+  const block = html.slice(a, b + END.length);
+  return html.slice(0, a) + html.slice(b + END.length, dest) + block + html.slice(dest);
+}
+
+function loginPageRaw({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
@@ -510,7 +529,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       the page is served by the router to a guest who cannot reach anything
       else; an external file would simply not load.
     -->
-    ${codeBoxOpen}
+    <!--LOGIN-START-->${codeBoxOpen}
     <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="event.preventDefault(); handleLoginSubmit(); return false;">
       <!--
         Where the guest lands once connected. An operator's configured
@@ -583,7 +602,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       </div>
       <p class="hint" id="phoneNote"></p>
     </div>
-    ${codeBoxClose}
+    ${codeBoxClose}<!--LOGIN-END-->
 
     <p class="plans-title">Buy a bundle</p>
     <ul class="${plansClass}">${planCards}</ul>
@@ -614,6 +633,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
            already failed once on this same page load. -->
       <button type="button" id="connectNow" style="display:none">Connect now</button>
     </div>
+    <!--LOGIN-AFTER-->
     <!-- Support, before paying. A guest whose code will not work cannot buy
          their way to an answer, and the operator would rather hear it now than
          from somebody who gave up and left. -->

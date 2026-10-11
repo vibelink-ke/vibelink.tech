@@ -230,6 +230,29 @@ export default function PortalDesign() {
             </div>
           </Card>
 
+          <Card title="Voucher box" subtitle="Where guests type their code on the login page">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              {[['top', 'Above the bundles'], ['bottom', 'At the bottom']].map(([key, label]) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={(store.hotspotSettings?.login_position ?? 'top') === key ? 'primary' : undefined}
+                  onClick={async () => {
+                    try {
+                      await api.setLoginPosition(key);
+                      store.setHotspotSettings({ ...store.hotspotSettings, login_position: key });
+                      store.toast(key === 'bottom' ? 'Voucher box moved to the bottom of the login page' : 'Voucher box moved back above the bundles');
+                    } catch (e) {
+                      store.toast(`Could not change it: ${e.message}`);
+                    }
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </Card>
+
           <Card title="Banner copy" subtitle="Shown at the top of the portal">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <Field label="Headline">
