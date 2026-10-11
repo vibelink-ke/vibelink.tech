@@ -11691,7 +11691,14 @@ app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res
   }
   // The login page bakes in the top hotspot bundles at fetch time, so a new
   // one is invisible on the captive portal until this runs.
-  if (service === 'hotspot') repushHotspotLoginPage(req.tenant.id);
+  if (service === 'hotspot') {
+    repushHotspotLoginPage(req.tenant.id);
+    // A new plan is a new router profile (hs-cookie-<minutes>[-d<devices>]). Without it on the router, codes of this plan are
+    // accepted by RADIUS and then refused by the router, which does not know the profile. Create it on every hotspot router now,
+    // not at the next Configure.
+    syncPlanDeviceProfile(req.tenant.id, row).then((r) => { if (!r.synced) console.warn('new plan profile not on:', (r.failed ?? []).join(', ')); })
+      .catch((e) => console.warn('new plan profile:', e.message));
+  }
   res.json({ ...row, site_ids: sites });
 }));
 
