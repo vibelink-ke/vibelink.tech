@@ -132,8 +132,21 @@ export function loginPage(opts = {}) {
   const b = html.indexOf(END);
   const dest = html.indexOf(AFTER);
   if (a < 0 || b < 0 || dest < 0 || dest < b) return html;   // not this template's layout: leave the page as it is
-  const block = html.slice(a, b + END.length);
-  return html.slice(0, a) + html.slice(b + END.length, dest) + block + html.slice(dest);
+  let block = html.slice(a, b + END.length);
+
+  // The "paid but no SMS" box (find a code from the M-Pesa confirmation) goes where the voucher box was, open, so someone who
+  // has already paid sees it first; the voucher box itself moves to the bottom. Its toggle link below is hidden, because the
+  // box is no longer something to open. The script still finds the link by id, so it is hidden and not removed.
+  let top = '';
+  const ma = block.indexOf('<!--MPESA-START-->');
+  const mb = block.indexOf('<!--MPESA-END-->');
+  if (ma >= 0 && mb > ma) {
+    const mpesa = block.slice(ma, mb + '<!--MPESA-END-->'.length).replace('class="reveal" id="mpesaBox"', 'class="reveal on" id="mpesaBox"');
+    block = block.slice(0, ma) + block.slice(mb + '<!--MPESA-END-->'.length);
+    block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
+    top = '<p class="hint" style="margin:14px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
+  }
+  return html.slice(0, a) + top + html.slice(b + END.length, dest) + block + html.slice(dest);
 }
 
 function loginPageRaw({
@@ -580,13 +593,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       keys on) and hands back the voucher code, which is then submitted
       exactly like one typed in by hand.
     -->
-    <div class="reveal" id="mpesaBox">
+    <!--MPESA-START--><div class="reveal" id="mpesaBox">
       <label for="mpesaCode">M-Pesa transaction code</label>
       <input id="mpesaCode" type="text" placeholder="e.g. SFH7XXXXXX"
              autocapitalize="characters" autocorrect="off" spellcheck="false">
       <button type="button" id="mpesaGo">Find my code</button>
       <p class="hint" id="mpesaNote"></p>
-    </div>
+    </div><!--MPESA-END-->
     <!-- The number that paid, then a six-digit code texted to it (see phone-login.js): the code is
          what proves the number is theirs. -->
     <div class="reveal" id="phoneBox">
