@@ -123,7 +123,8 @@
       "Import from a router now also reads its saved hotspot users (not only who is online). By default each comes across as a voucher on the bundle named like its profile, with the time of that profile (or the user's own limit) less what it has used, the same name and password, and the phone number written in its comment. Permanent access codes are an option, with a tick-list. For PPPoE clients being brought in, three options (on by default): a new address from the billing pool (online ones are dropped to reconnect on it), a MAC lock to the device each is on, and its package from its profile.",
       "Fixed PPPoE clients logging in and being dropped (\"0.0.0.0\") when their address pool was set to fibre or wireless only and they had no connection type: a pool made for another type is now used as a fallback instead of giving them no address.",
       "Fixed imported hotspot users being refused at login: an imported voucher now takes its own code as its password (the login page sends only the code), not the password the router had.",
-      "Fixed router Configure stopping at the DNS proxy step with \"done is not defined\" when the guest DNS firewall rules were in the wrong order; the order is now repaired and reported."
+      "Fixed router Configure stopping at the DNS proxy step with \"done is not defined\" when the guest DNS firewall rules were in the wrong order; the order is now repaired and reported.",
+      "Fixed hotspot vouchers whose clock never started (so they never expired): the 30-second online sync now starts the clock of any voucher it sees online, instead of relying only on FreeRADIUS reporting the login."
     ]
   }
 ]

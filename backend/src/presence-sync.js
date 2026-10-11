@@ -1,4 +1,5 @@
-import { pool } from './db.js';
+import { pool, withTenant } from './db.js';
+import { startVoucherClock } from './radius.js';
 import * as ros from './routeros.js';
 import * as secrets from './secrets.js';
 
@@ -71,6 +72,24 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
          on conflict (tenant_id, username) do update
             set router_id = excluded.router_id, address = excluded.address, service = excluded.service, seen_at = now()`,
         [tenantId, r.id, s.username, s.address, s.service]);
+    }
+
+    // A hotspot voucher seen online starts its clock now, whether or not FreeRADIUS's own call reached the app: that call is
+    // fire-and-forget and was missed for weeks, leaving codes that never ran out. Only codes still unused are touched, so
+    // a clock that has started is never restarted, and a guest never gets a fresh full duration.
+    try {
+      const codes = [...new Set(sessions.filter((s) => s.service === 'hotspot' && s.username).map((s) => s.username))];
+      if (codes.length) {
+        const { rows: unstarted } = await pool.query(
+          "select code from vouchers where tenant_id=$1 and status='unused' and starts_at is null and code = any($2::text[])",
+          [tenantId, codes]);
+        for (const v of unstarted) {
+          await withTenant(tenantId, (c) => startVoucherClock(c, tenantId, v.code)).catch((e) => console.warn('startVoucherClock:', v.code, e.message));
+        }
+        if (unstarted.length) console.log(`presence: started the clock on ${unstarted.length} hotspot voucher(s) seen online`);
+      }
+    } catch (e) {
+      console.warn('presence: hotspot clocks:', e.message);
     }
 
     // Usage from the router's own queue counters, for fair use: it does not depend on accounting reaching us.
