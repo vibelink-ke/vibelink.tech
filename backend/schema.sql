@@ -3348,3 +3348,19 @@ alter table tenants add column if not exists lock_exempt_until date;
 
 -- Where the voucher-code box sits on the hotspot login page: above the bundles (top, as always) or below them (bottom).
 alter table hotspot_settings add column if not exists login_position text not null default 'top' check (login_position in ('top','bottom'));
+
+-- API keys: a key lets SkyPlan (or anything else we allow later) read, and optionally save, this organisation's network design
+-- without a sign-in. Only the hash is kept, so a key is shown once when it is made. Revoking stops it at once.
+create table if not exists api_keys (
+  id           uuid primary key default gen_random_uuid(),
+  tenant_id    uuid not null references tenants on delete cascade,
+  name         text not null,
+  key_hash     text not null unique,
+  key_last4    text not null,
+  can_write    boolean not null default false,
+  created_by   text,
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz,
+  revoked_at   timestamptz
+);
+create index if not exists api_keys_tenant on api_keys (tenant_id);

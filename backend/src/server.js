@@ -8,6 +8,7 @@ import rateLimit from 'express-rate-limit';
 import { pool, tenantByHost, withTenant, config, platformCollectConfig, connGroup } from './db.js';
 import { auditTap, issuesFor } from './audit.js';
 import { passkeyRouter } from './passkeys.js';
+import { skyplanOpenRouter, newKey } from './skyplan-open.js';
 import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
 import { registerPhoneLogin } from './phone-login.js';
@@ -100,6 +101,8 @@ app.use((req, res, next) => {
 app.use('/api/expenses/:id/receipt', express.json({ limit: '8mb' }));
 // A job photo arrives as a base64 data URL (the app shrinks it first); same reasoning as the receipt above.
 app.use('/api/field/jobs/:id/photos', express.json({ limit: '8mb' }));
+// A whole network design saved from SkyPlan.
+app.use('/api/open', express.json({ limit: '25mb' }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use('/api', auditTap);
 
@@ -2392,6 +2395,9 @@ app.get('/api/instance/pay/:checkoutId', ...instance(async (id, req, res) => {
 // What a tenant whose licence has expired can still reach: the pages to pay it,
 // and everything their customers and hotspot visitors use. Nothing else.
 const LICENCE_OPEN = ['/api/billing', '/api/licence', '/portal', '/hotspot', '/radius', '/chat'];
+
+// The key-authenticated API SkyPlan uses (skyplan-open.js): its own sign-in is the key, so it sits above the session checks.
+app.use('/api/open', skyplanOpenRouter());
 
 // Tenant resolution for everything else.
 // The signed-in session is authoritative; hostname is the fallback for the captive
@@ -8527,6 +8533,32 @@ app.get('/api/audit', requirePermission('audit.view'), wrap(async (req, res) => 
 /** Everything that has gone wrong lately: unmatched payments, failed prompts and messages, routers, SmartOLT, sign-ins. */
 app.get('/api/issues', requirePermission('issues.view'), wrap(async (req, res) => {
   res.json(await issuesFor(req.tenant.id, { superAdmin: !!req.session?.is_super_admin, days: req.query.days }));
+}));
+
+/** API keys (for SkyPlan). The key itself is returned once, on creation; only its hash is stored. */
+app.get('/api/api-keys', requirePermission('apikeys.manage'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    'select id, name, key_last4, can_write, created_at, last_used_at, revoked_at from api_keys where tenant_id=$1 order by created_at desc',
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+app.post('/api/api-keys', requirePermission('apikeys.manage'), wrap(async (req, res) => {
+  const name = String(req.body?.name ?? '').trim().slice(0, 80);
+  if (!name) return res.status(400).json({ error: 'Give the key a name.' });
+  const { key, hash, last4 } = newKey();
+  const { rows: [k] } = await pool.query(
+    `insert into api_keys (tenant_id, name, key_hash, key_last4, can_write, created_by) values ($1,$2,$3,$4,$5,$6)
+     returning id, name, key_last4, can_write, created_at`,
+    [req.tenant.id, name, hash, last4, !!req.body?.canWrite, req.session?.email ?? null]);
+  res.status(201).json({ ...k, key });
+}));
+
+app.delete('/api/api-keys/:id', requirePermission('apikeys.manage'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query(
+    'update api_keys set revoked_at = now() where tenant_id=$1 and id=$2 and revoked_at is null', [req.tenant.id, req.params.id]);
+  if (!rowCount) return res.status(404).json({ error: 'not found' });
+  res.json({ ok: true });
 }));
 
 app.get('/api/network', requirePermission('network.view'), wrap(async (req, res) => {

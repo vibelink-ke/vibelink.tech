@@ -12,6 +12,7 @@ import Gateways from './settings/Gateways';
 import MpesaValidation from './settings/MpesaValidation';
 import Templates from './settings/Templates';
 import { Badge, Button, Card, Field, Input, Modal, Screen, Select, Tabs } from '../ui/primitives';
+import ApiKeys from './settings/ApiKeys';
 
 const CURRENCIES = [
   'KES — Kenyan shilling', 'UGX — Ugandan shilling', 'TZS — Tanzanian shilling', 'RWF — Rwandan franc', 'GHS — Ghanaian cedi',
@@ -603,6 +604,7 @@ export default function Settings() {
           { id: 'smtp', label: 'Email' },
           { id: 'templates', label: 'Message templates' },
           { id: 'prefs', label: 'Preferences' },
+          ...(store.session?.perms?.['apikeys.manage'] ? [{ id: 'apikeys', label: 'API keys' }] : []),
           { id: 'account', label: 'My account' },
         ]}
       />
@@ -610,6 +612,7 @@ export default function Settings() {
       {tab === 'gateways' && <Gateways />}
       {tab === 'validation' && <MpesaValidation />}
       {tab === 'templates' && <Templates />}
+      {tab === 'apikeys' && store.session?.perms?.['apikeys.manage'] && <ApiKeys />}
 
       {/* Your own login, not the business. Neither could be changed from inside
           the product: a mistyped name at signup was permanent, and anyone who
