@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import { useMediaQuery } from '../app/useMediaQuery';
 import { Button, Card, Empty, Grid, Input, Screen, Stat } from '../ui/primitives';
 
 const CANNED = [
@@ -17,7 +18,8 @@ function Bubble({ from, text, mine }) {
     <div style={{ display: 'flex', justifyContent: mine ? 'flex-end' : 'flex-start' }}>
       <div
         style={{
-          maxWidth: '76%',
+          maxWidth: '88%',
+          overflowWrap: 'anywhere',
           background: mine ? color.green : color.tileBg,
           color: mine ? '#fff' : color.ink,
           borderRadius: 12,
@@ -43,6 +45,7 @@ const visitorName = (c) => {
 
 export default function LiveSupport() {
   const store = useStore();
+  const isMobile = useMediaQuery('(max-width: 700px)');
   const [activeId, setActiveId] = useState(null);
   const [chats, setChats] = useState({}); // id -> [{from, text, mine}]
   const [draft, setDraft] = useState('');
@@ -196,8 +199,8 @@ export default function LiveSupport() {
         />
       </Grid>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 260px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
-        <Card title="Queue" subtitle={`${queue.length} open`}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'minmax(0, 1fr)' : 'minmax(0, 260px) minmax(0, 1fr)', gap: 14, alignItems: 'start' }}>
+        <Card title="Queue" style={isMobile && current ? { order: 2 } : undefined} subtitle={`${queue.length} open`}>
           {/* An empty page with one word on it reads as broken. Say where
               conversations come from, so an operator knows whether to wait or
               to go and turn something on. */}
@@ -241,6 +244,7 @@ export default function LiveSupport() {
         </Card>
 
         <Card
+          style={isMobile ? { order: 1 } : undefined}
           title={current ? `Chat · ${visitorName(current)}${current.visitor_ref && current.visitor_ref !== 'anonymous' ? ` · ${current.visitor_ref}` : ''}` : 'Chat'}
           actions={
             current && (
@@ -278,7 +282,7 @@ export default function LiveSupport() {
                 )}
               </div>
 
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
                 {CANNED.map((t) => (
                   <span
                     key={t}
@@ -290,19 +294,21 @@ export default function LiveSupport() {
                       background: color.tileBg,
                       color: color.neutralInk,
                       cursor: 'pointer',
+                      lineHeight: 1.4,
                     }}
                   >
-                    {t.slice(0, 34)}…
+                    {isMobile ? t : `${t.slice(0, 34)}…`}
                   </span>
                 ))}
               </div>
 
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
                 <Input
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && send()}
                   placeholder="Type a reply…"
+                  style={{ flex: 1, minWidth: 0 }}
                 />
                 <Button variant="primary" onClick={send}>
                   Send
