@@ -146,6 +146,13 @@ export function loginPage(opts = {}) {
     block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
     top = '<p class="hint" style="margin:6px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
   }
+  // The "I already have an active bundle" button goes first, at the very top.
+  const ra = block.indexOf('<!--RECON-START-->');
+  const rb = block.indexOf('<!--RECON-END-->');
+  if (ra >= 0 && rb > ra) {
+    top = block.slice(ra, rb + '<!--RECON-END-->'.length) + top;
+    block = block.slice(0, ra) + block.slice(rb + '<!--RECON-END-->'.length);
+  }
   // The username and password link belongs right under the M-Pesa box, wherever the voucher box is.
   const ua = block.indexOf('<!--UPT-START-->');
   const ub = block.indexOf('<!--UPT-END-->');
@@ -584,6 +591,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
+    <!--RECON-START-->
+    <div style="margin-top:8px">
+      <button type="button" id="reconnectBtn" style="background:transparent;color:var(--green);border:1px solid var(--green);margin-top:0;padding:9px;font-size:14px">I already have an active bundle: connect me</button>
+      <p class="hint" id="reconnectNote" style="margin-top:4px"></p>
+    </div>
+    <!--RECON-END-->
     <p class="hint">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
     </p>
@@ -1381,6 +1394,28 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         .catch(function () { /* the router could not be asked; try again next time */ });
     }
     setTimeout(function () { setInterval(check, 4000); }, 3000);
+  })();
+
+  // "I already have an active bundle": ask the system whether this phone already has a running voucher and, if so, sign it in with
+  // that voucher, no typing. Works on the router's copy of the page, which knows the phone's address.
+  (function reconnectButton() {
+    var btn = document.getElementById('reconnectBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var note = document.getElementById('reconnectNote');
+      var mac = (typeof DEVICE_MAC !== 'undefined') ? DEVICE_MAC : '';
+      if (!mac || mac.indexOf('$') === 0) { note.textContent = 'Open this page from the Wi-Fi login screen, then try again.'; return; }
+      btn.disabled = true;
+      note.textContent = 'Looking for your active bundle...';
+      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          btn.disabled = false;
+          if (d && d.code) { note.textContent = 'Found it, connecting...'; submitHotspotLogin(d.code); }
+          else note.textContent = 'No active bundle found for this phone. Type your voucher code, use your M-Pesa code, or buy a bundle below.';
+        })
+        .catch(function () { btn.disabled = false; note.textContent = 'Could not reach the server. Try again.'; });
+    });
   })();
   </script>
 </body>

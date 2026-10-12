@@ -159,7 +159,8 @@
       "Routers → ⋯ → \"Remove old local copies\": removes the router's own hotspot users and PPP logins that billing already holds, so they no longer override billing. It previews first, skips anyone online right now and never touches a login billing does not hold. Offered after an import too.",
       "Hotspot login: back to a plain Voucher code box, with the separate options for an M-Pesa code and for the phone number that paid. Typing an M-Pesa code or a phone number into the voucher box still points the guest the right way.",
       "Hotspot → Access codes → Lock to devices: one button locks every access code to its devices, one turns the lock off for all, and one deletes all saved devices so each code starts learning its devices again.",
-      "Hotspot login: the 'Have a username and password instead?' link is smaller and now sits directly under the M-Pesa code option (and under the M-Pesa box when the voucher box is at the bottom)."
+      "Hotspot login: the 'Have a username and password instead?' link is smaller and now sits directly under the M-Pesa code option (and under the M-Pesa box when the voucher box is at the bottom).",
+      "Hotspot login: a button \"I already have an active bundle: connect me\" finds the running voucher of the phone and signs it in with one tap."
     ]
   }
 ]
