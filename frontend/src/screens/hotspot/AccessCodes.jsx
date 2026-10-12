@@ -178,6 +178,40 @@ export default function AccessCodes() {
     }
   };
 
+  // One button for the whole list: lock every code to the devices that use it, turn the lock off everywhere, or forget all saved devices.
+  const [lockBusy, setLockBusy] = useState(false);
+  const lockedCodes = (codes ?? []).filter((c) => c.lock_mac).length;
+  const savedDevices = (codes ?? []).reduce((n, c) => n + Number(c.locked_count ?? 0), 0);
+  const lockAll = async (lock) => {
+    const msg = lock
+      ? `Lock all ${codes.length} access code(s) to their devices? Each code remembers the first devices that use it (up to its Max devices) and refuses any other device. Devices already connected stay on until they reconnect.`
+      : 'Turn the device lock off for every access code? Any device can use them again.';
+    if (!window.confirm(msg)) return;
+    setLockBusy(true);
+    try {
+      await api.lockAllAccessCodes(lock);
+      store.setCollection('accessCodes', (cs) => cs.map((x) => ({ ...x, lock_mac: lock })));
+      store.toast(lock ? 'All access codes are now locked to their devices' : 'Device lock is off for all access codes');
+    } catch (e) {
+      store.toast(`Could not change it: ${e.message}`);
+    } finally {
+      setLockBusy(false);
+    }
+  };
+  const forgetAllDevices = async () => {
+    if (!window.confirm(`Delete all ${savedDevices} saved device(s) from every access code? Each code starts learning its devices again, so the next devices to log in take the places.`)) return;
+    setLockBusy(true);
+    try {
+      await api.clearAllAccessCodeMacs();
+      store.setCollection('accessCodes', (cs) => cs.map((x) => ({ ...x, locked_count: 0 })));
+      store.toast('All saved devices deleted');
+    } catch (e) {
+      store.toast(`Could not delete them: ${e.message}`);
+    } finally {
+      setLockBusy(false);
+    }
+  };
+
   const remove = async (c) => {
     if (!window.confirm(`Delete "${c.label}"? Anyone still connected with it will need a different code.`)) return;
     try {
@@ -211,6 +245,25 @@ export default function AccessCodes() {
           <div style={{ paddingBottom: 6 }}>
             <Button variant="primary" onClick={applyAll} disabled={all.busy || !all.down || !all.up}>
               {all.busy ? 'Applying…' : codes.length ? `Apply to all ${codes.length} code(s)` : 'Save'}
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card
+        title="Lock to devices"
+        subtitle={`${lockedCodes} of ${(codes ?? []).length} access code(s) locked · ${savedDevices} device(s) saved`}
+      >
+        <div style={{ display: 'grid', gap: 10 }}>
+          <span style={{ fontSize: 12.5, color: color.muted, lineHeight: 1.5 }}>
+            A locked code remembers the first devices that log in with it, up to its Max devices, and refuses every other device.
+            Use these to do it for all codes at once. You can still change one code under its Edit.
+          </span>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button variant="primary" onClick={() => lockAll(true)} disabled={lockBusy || !(codes ?? []).length}>Lock all codes to devices</Button>
+            <Button onClick={() => lockAll(false)} disabled={lockBusy || !lockedCodes}>Turn the lock off for all</Button>
+            <Button onClick={forgetAllDevices} disabled={lockBusy || !savedDevices} style={{ color: color.rust, borderColor: color.rust }}>
+              Delete all saved devices
             </Button>
           </div>
         </div>

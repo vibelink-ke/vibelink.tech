@@ -12617,6 +12617,20 @@ app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers')
   res.json(row);
 }));
 
+/** Lock every access code to its devices, or turn the lock off for all of them (one button). */
+app.post('/api/hotspot/access-codes-lock', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const lock = req.body?.lock === true;
+  const { rowCount } = await pool.query(
+    'update hotspot_access_codes set lock_mac=$2 where tenant_id=$1 and lock_mac is distinct from $2', [req.tenant.id, lock]);
+  res.json({ ok: true, locked: lock, changed: rowCount });
+}));
+
+/** Forget every device saved against this organisation's access codes, so each code starts learning its devices again. */
+app.delete('/api/hotspot/access-codes-macs', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const { rowCount } = await pool.query('delete from hotspot_access_code_macs where tenant_id=$1', [req.tenant.id]);
+  res.json({ ok: true, removed: rowCount });
+}));
+
 /** TVs and consoles added to an access code from the Add TV / console page. */
 app.get('/api/hotspot/access-codes/:id/devices', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
