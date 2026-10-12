@@ -140,7 +140,8 @@
       "Router logs: the server now sets every router's log rules itself (shortly after the app starts, then hourly), so the red RADIUS error lines disappear on all routers without a Configure.",
       "Security: the database port is no longer published to the internet, security headers and request limits on every site, a flood limit and tighter limits on sign-up and live chat, slow-connection timeouts, and updated libraries that fix reported vulnerabilities (including a mail-library flaw that could expose one ISP's SMTP login to another).",
       "Ready to sit behind Cloudflare: the real visitor address is read through it, so sign-in and payment limits stay per person.",
-      "Hotspot login and Add TV / console pages are more compact on phones: smaller text and tighter spacing, so more fits on the screen without scrolling."
+      "Hotspot login and Add TV / console pages are more compact on phones: smaller text and tighter spacing, so more fits on the screen without scrolling.",
+      "Hotspot: guests now keep their network address for 4 hours instead of 1, so a phone that sleeps for a while is no longer logged out for 'lost dhcp lease'. Configure the router to apply it."
     ]
   }
 ]

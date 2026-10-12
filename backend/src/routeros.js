@@ -562,7 +562,7 @@ export async function applyHotspotServer(conn, {
   const DHCP = 'hotspot-dhcp';
   const dhcp = (await conn.write('/ip/dhcp-server/print', [`?name=${DHCP}`]))[0];
   const dhcpFields = [`=interface=${bridge}`, `=address-pool=${POOL}`, '=disabled=no',
-                      `=lease-time=1h`, `=comment=${managed('ispHotspot DHCP')}`];
+                      `=lease-time=4h`, `=comment=${managed('ispHotspot DHCP')}`];
   if (dhcp) {
     if (!unchanged(dhcp, dhcpFields)) {
       await cmd(conn, 'DHCP server', '/ip/dhcp-server/set', [`=.id=${idOf(dhcp)}`, ...dhcpFields]);
