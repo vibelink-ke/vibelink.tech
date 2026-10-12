@@ -4,7 +4,7 @@ import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Button, Card, Drawer, Field, Input, KV, Modal, Screen, Select, Table, Toggle } from '../../ui/primitives';
 
-const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited', siteRouterIds: [], visible: true };
+const BLANK = { title: '', price: '', durationCount: '3', durationUnit: 'Hours', devices: '1', speed: '', dataCap: 'Unlimited', siteRouterIds: [], visible: true, deviceClass: 'normal' };
 const UNITS = ['Minutes', 'Hours', 'Days', 'Weeks', 'Months'];
 const CAPS = ['Unlimited', '250 MB', '500 MB', '1 GB', '2 GB', '5 GB'];
 
@@ -67,6 +67,7 @@ export default function HotspotPlans() {
     dataCapMb: CAP_MB[v.dataCap] ?? null,
     routerIds: v.siteRouterIds ?? [],
     visible: !!v.visible,
+    deviceClass: v.deviceClass === 'tv' ? 'tv' : 'normal',
   });
 
   // A plan named "... 2 devices" with Devices left at 1 would sell a code that refuses the second device.
@@ -131,6 +132,7 @@ export default function HotspotPlans() {
     dataCap: mbToCapLabel(p.data_cap_mb),
     siteRouterIds: p.site_ids ?? [],
     visible: p.visible ?? true,
+    deviceClass: p.device_class ?? 'normal',
     ...minutesToCountUnit(p.duration_min),
   });
 
@@ -155,6 +157,13 @@ export default function HotspotPlans() {
         </Field>
         <Field label="Devices">
           <Input value={v.devices} onChange={update('devices')} type="number" />
+        </Field>
+        <Field label="Type" span={2}>
+          <Select
+            value={v.deviceClass ?? 'normal'}
+            onChange={update('deviceClass')}
+            options={[{ value: 'normal', label: 'Normal — shown on the login page' }, { value: 'tv', label: 'TV / console — shown under Add TV / console, and for TV vouchers' }]}
+          />
         </Field>
         <Field label="Duration">
           <Input value={v.durationCount} onChange={update('durationCount')} type="number" />
@@ -209,7 +218,7 @@ export default function HotspotPlans() {
           empty="No bundles yet — the portal has nothing to sell"
           rows={store.hsPlans ?? []}
           columns={[
-            { key: 'title', label: 'Bundle', render: (p) => <span style={{ fontWeight: 600 }}>{p.title}</span> },
+            { key: 'title', label: 'Bundle', render: (p) => <span style={{ fontWeight: 600 }}>{p.title}{p.device_class === 'tv' && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 600, color: color.muted, border: `1px solid ${color.line}`, borderRadius: 6, padding: '1px 6px' }}>TV</span>}</span> },
             { key: 'price', label: 'Price', render: (p) => <span style={{ fontFamily: font.mono }}>{cur()} {kes(p.price)}</span> },
             { key: 'duration_min', label: 'Duration', render: (p) => duration(p.duration_min) },
             { key: 'devices', label: 'Devices', align: 'right' },

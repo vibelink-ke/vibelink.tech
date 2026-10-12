@@ -881,7 +881,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
 
   const { rows: plans } = await pool.query(
     `select id, title, price, duration_min, rate_down from plans p
-      where tenant_id=$1 and service='hotspot' and active and visible
+      where tenant_id=$1 and service='hotspot' and active and visible and device_class <> 'tv'
         and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
              or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
       order by price limit 40`,
@@ -1566,8 +1566,10 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
  */
 async function voucherAndRouter(tenantId, code, pageRouterId) {
   const { rows: [v] } = await pool.query(
-    `select * from vouchers where tenant_id=$1 and code=$2 and status='in_use'
-       and (expires_at is null or expires_at > now())`,
+    `select v.* from vouchers v join plans p on p.id = v.plan_id
+      where v.tenant_id=$1 and v.code=$2
+        and ((v.status='in_use' and (v.expires_at is null or v.expires_at > now()))
+             or (v.status='unused' and p.device_class='tv'))`,
     [tenantId, code]);
   if (!v) return { error: 'That code is not an active voucher.' };
 
@@ -1640,20 +1642,23 @@ app.get('/hotspot/tv-options', pollLimiter, wrap(async (req, res) => {
 
   const siteRouterId = req.query.router && req.query.router !== '1' ? String(req.query.router) : null;
 
-  const { rows: plans } = siteRouterId
+  const loadPlans = async (tvOnly) => (siteRouterId
     ? await pool.query(
         `select id, title, price, duration_min, rate_down from plans p
-          where tenant_id=$1 and service='hotspot' and active and visible
+          where tenant_id=$1 and service='hotspot' and active and visible ${tvOnly ? "and device_class = 'tv'" : ''}
             and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
                  or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
           order by price limit 40`,
         [tenant.id, siteRouterId])
     : await pool.query(
         `select id, title, price, duration_min, rate_down from plans p
-          where tenant_id=$1 and service='hotspot' and active and visible
+          where tenant_id=$1 and service='hotspot' and active and visible ${tvOnly ? "and device_class = 'tv'" : ''}
             and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
           order by price limit 40`,
-        [tenant.id]);
+        [tenant.id]));
+
+  let { rows: plans } = await loadPlans(true);
+  if (!plans.length) ({ rows: plans } = await loadPlans(false));
 
   const { rows: routers } = siteRouterId
     ? await pool.query(
@@ -2053,6 +2058,13 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
      on conflict (voucher_id, mac) do update set router_id = excluded.router_id,
        label = coalesce(excluded.label, voucher_devices.label)`,
     [found.voucher.id, mac, r.id, label]);
+
+  // A TV voucher that was only generated, never used: its time starts now, with this device.
+  if (found.voucher.status === 'unused') {
+    const { withTenant } = await import('./db.js');
+    const { startVoucherClock } = await import('./radius.js');
+    await withTenant(tenant.id, (c) => startVoucherClock(c, tenant.id, found.voucher.code, mac)).catch((e) => console.warn('tv voucher clock:', e.message));
+  }
 
   /**
    * The ip-binding above is a router-level bypass — it never touches RADIUS,
@@ -11721,14 +11733,14 @@ app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) =
 
 app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
-          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible, contentionRatio } = req.body;
+          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible, contentionRatio, deviceClass } = req.body;
   const { rows: [row] } = await pool.query(
     `insert into plans (tenant_id, service, title, price, duration_min, devices,
-       rate_down, rate_up, data_cap_mb, radius_profile, visible, contention_ratio)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) returning *`,
+       rate_down, rate_up, data_cap_mb, radius_profile, visible, contention_ratio, device_class)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
      rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`,
-     visible ?? true, contentionRatio ?? 1]);
+     visible ?? true, contentionRatio ?? 1, deviceClass === 'tv' ? 'tv' : 'normal']);
 
   const sites = Array.isArray(routerIds) ? routerIds.filter(Boolean) : [];
   if (sites.length) {
@@ -11792,7 +11804,7 @@ async function syncPlanDeviceProfile(tenantId, plan) {
 
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
   const { rows: [before] } = await pool.query('select devices, duration_min, service from plans where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio } = req.body ?? {};
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio, deviceClass } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
        title        = coalesce(nullif($3,''), title),
@@ -11805,12 +11817,13 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
        data_cap_mb  = case when $9::text = 'keep' then data_cap_mb else $10::bigint end,
        visible      = coalesce($11, visible),
        contention_ratio = coalesce($12, contention_ratio),
+       device_class = coalesce($13, device_class),
        updated_at   = now()
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
      devices ?? null, rateDown ?? null, rateUp ?? null,
      dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
-     visible ?? null, contentionRatio ?? null]);
+     visible ?? null, contentionRatio ?? null, deviceClass === 'tv' || deviceClass === 'normal' ? deviceClass : null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
   // The device count or length changed on a hotspot plan: bring the routers and the codes already sold along with it.
   let profileSync = null;

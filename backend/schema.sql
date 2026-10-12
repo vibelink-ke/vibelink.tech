@@ -3390,3 +3390,9 @@ begin
   insert into hotspot_access_code_macs (tenant_id, username, mac) values (t, p_user, upper(p_mac)) on conflict do nothing;
   return true;
 end $fn$;
+
+-- TV / console bundles: a plan is either 'normal' (the login page's price list) or 'tv' (offered on the Add TV / console page, with its
+-- own price and speed, and the kind of voucher that can be generated and used to activate a TV).
+alter table plans add column if not exists device_class text not null default 'normal';
+alter table plans drop constraint if exists plans_device_class_check;
+alter table plans add constraint plans_device_class_check check (device_class in ('normal', 'tv'));

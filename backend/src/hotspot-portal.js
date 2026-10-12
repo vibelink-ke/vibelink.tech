@@ -660,7 +660,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       only once the guest already has a working code, which the page itself
       asks for, so nothing here needs to know it in advance.
     -->
-    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}">Adding a TV or console?</a></p>
+    <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">Add TV / console</a><span style="display:block;margin-top:6px">Pay for a TV or console package, or activate a TV voucher.</span></p>
     ${loyalty ? `<button type="button" class="chat-open" id="loyOpen">My loyalty points</button>
     <div class="chat" id="loyPanel">
       <div id="loyStep1">
@@ -1385,7 +1385,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 <body>
   <div class="card">
     <h1>Add a device</h1>
-    <p class="sub">Pick your TV or console, choose a bundle, and pay — nothing to type on it.</p>
+    <p class="sub">Pick your TV or console, choose a TV package, and pay — nothing to type on it.</p>
     <div id="loading" class="hint">Looking for devices on this network…</div>
     <div id="err0"></div>
     <div id="buyForm" style="display:none">
@@ -1404,12 +1404,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   </div>
 
   <div class="card toggle" id="oldFlow">
-    <a href="#" id="haveCode">Already have a code and just adding an extra device?</a>
+    <a href="#" id="haveCode">Have a voucher code? Activate it on your TV or console</a>
   </div>
 
   <div class="card" id="step1" style="display:none">
-    <h2>Add an extra device to a code</h2>
-    <p class="sub">For a bundle that already allows more than one device.</p>
+    <h2>Activate a voucher on a device</h2>
+    <p class="sub">Enter the voucher code, then pick the TV or console from the list.</p>
     <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
     <button id="find">Find devices</button>
     <div id="err1"></div>

@@ -131,7 +131,8 @@
       "Settings → API keys: make a key so SkyPlan can load your live network (towers, equipment, fibre, customers on the map) and, with a write key, save its design back. Keys are shown once and can be revoked.",
       "Hotspot: a visitor whose phone sleeps or steps out of range for a few minutes is no longer logged out after 2 minutes (keepalive is now 10 minutes). Configure the router to apply it.",
       "Hotspot: a returning visitor's phone is now logged back in by its MAC address (the router sent an empty password before, so it never worked). Configure the router to apply it.",
-      "Hotspot → Access codes: lock a code to its devices. The first devices that log in with it (up to Max devices) are remembered by MAC address and no other device can use it; forget a device to free its place."
+      "Hotspot → Access codes: lock a code to its devices. The first devices that log in with it (up to Max devices) are remembered by MAC address and no other device can use it; forget a device to free its place.",
+      "Hotspot → Bundles: a bundle can be marked TV / console. Those are kept off the normal price list and shown under Add TV / console (own price and speed). A generated TV voucher can be activated on a TV or console from that page."
     ]
   }
 ]
