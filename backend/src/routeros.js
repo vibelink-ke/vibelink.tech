@@ -1100,7 +1100,9 @@ export async function ensureHotspotUserProfile(conn, {
     '=status-autorefresh=1m',
     // RouterOS's own default is 2 minutes: a phone that has its WiFi asleep for two minutes (screen off, in a pocket, a walk to
     // the shop) is logged out. 10 minutes rides through that; a device that really has gone is still dropped, just later.
-    `=keepalive-timeout=${neverIdle ? 'none' : '10m'}`,
+    // Five minutes for every profile: a phone that does not answer for that long is taken off the list (and signed straight back in by
+    // its MAC when it returns). Idle time is separate and, for vouchers, off (neverIdle above).
+    '=keepalive-timeout=5m',
     /**
      * MAC cookie: the device is remembered and logged back in by itself.
      *
