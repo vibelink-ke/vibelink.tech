@@ -128,7 +128,8 @@
       "A new hotspot plan now creates its router profile on every hotspot router straight away. Before, codes of a brand-new plan (or a new device count) were accepted at login and then refused by the router until the next Configure.",
       "Hotspot → Portal design: choose where the voucher-code box sits on the login page, above the bundles (as before) or at the bottom (the M-Pesa find-my-code box then shows at the top).",
       "Live support now fits a phone: the chat opens above the queue, the reply box and Send button use the full width, and quick replies show in full.",
-      "Settings → API keys: make a key so SkyPlan can load your live network (towers, equipment, fibre, customers on the map) and, with a write key, save its design back. Keys are shown once and can be revoked."
+      "Settings → API keys: make a key so SkyPlan can load your live network (towers, equipment, fibre, customers on the map) and, with a write key, save its design back. Keys are shown once and can be revoked.",
+      "Hotspot: a visitor whose phone sleeps or steps out of range for a few minutes is no longer logged out after 2 minutes (keepalive is now 10 minutes). Configure the router to apply it."
     ]
   }
 ]
