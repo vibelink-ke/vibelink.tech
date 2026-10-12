@@ -162,7 +162,8 @@
       "Hotspot login: the 'Have a username and password instead?' link is smaller and now sits directly under the M-Pesa code option (and under the M-Pesa box when the voucher box is at the bottom).",
       "Hotspot login: a button \"I already have an active bundle: connect me\" finds the running voucher of the phone and signs it in with one tap.",
       "Payments: a hotspot payment is never held up by the 'which phone paid' lookup. It now runs on its own connection, so a missing table or an error there cannot stop the voucher being issued.",
-      "Payments → Reconcile statement: also takes a plain list of \"CODE amount phone\", never applies a code that is already on file under any channel, and lists what happened to each line."
+      "Payments → Reconcile statement: also takes a plain list of \"CODE amount phone\", never applies a code that is already on file under any channel, and lists what happened to each line.",
+      "SMS: a code text sent through the shared SMS relay is retried (up to three tries) when the relay answers 502 or times out, so a customer who just paid is no longer left without their code by a passing glitch."
     ]
   }
 ]
