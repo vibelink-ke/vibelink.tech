@@ -625,8 +625,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       }
     </script>
     <!--UPT-END-->
-    <p class="hint">
-      <a href="javascript:void(0)" id="phoneOpen">Paid with M-Pesa? Sign in with your phone number</a>
+    <p class="hint" style="font-size:14px">
+      <a href="javascript:void(0)" id="phoneOpen" style="display:inline-block;padding:8px 4px;font-size:14px;font-weight:600">Paid with M-Pesa? Sign in with your phone number</a>
     </p>
     <!--
       Recovers a voucher from the one thing a guest still has even when the
