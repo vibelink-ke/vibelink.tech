@@ -57,7 +57,9 @@ export async function quietRouterLogs() {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const { rows } = await pool.query(
-    'select id, tenant_id, role, name, host, api_port, service_user, service_password_enc from routers where service_user is not null and service_password_enc is not null');
+    `select r.id, r.tenant_id, r.role, r.name, r.host, r.api_port, r.service_user, r.service_password_enc, t.subdomain
+       from routers r join tenants t on t.id = r.tenant_id
+      where r.service_user is not null and r.service_password_enc is not null`);
   let changed = 0;
   const settings = new Map();
   const one = async (r) => {
@@ -68,10 +70,19 @@ export async function quietRouterLogs() {
       // The voucher profiles (idle and keepalive never end a running voucher) on every hotspot router; a router already right is left alone.
       if (r.role === 'hotspot' || r.role === 'both') {
         if (!settings.has(r.tenant_id)) {
-          const { rows: [hs] } = await pool.query('select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1', [r.tenant_id]);
+          const { rows: [hs] } = await pool.query('select multi_device, idle_timeout_sec, bind_mac, walled_garden from hotspot_settings where tenant_id=$1', [r.tenant_id]);
           settings.set(r.tenant_id, hs ?? null);
         }
         await ensureHotspotProfiles(conn, pool, r.tenant_id, settings.get(r.tenant_id));
+
+        // The walled garden's ADDRESS layer is filled in when a router is Configured, by looking the sites up at that moment. Behind
+        // Cloudflare those names answer with Cloudflare's addresses instead of the server's, so a router set up before that holds the
+        // wrong ones, and guests were left relying on the name-based layer, which can miss. Looked up again here, from the server, so
+        // the router follows whatever the names answer now; only the entries that differ are touched.
+        const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+        const portal = r.subdomain ? `${r.subdomain}.${root}` : null;
+        const hosts = [...(settings.get(r.tenant_id)?.walled_garden ?? []), portal].filter(Boolean);
+        if (hosts.length) await ros.applyWalledGarden(conn, hosts);
       }
     } catch { /* offline or no API access right now */ } finally { if (conn) ros.close(conn); }
   };
