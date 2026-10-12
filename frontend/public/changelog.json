@@ -145,7 +145,8 @@
       "Fixes guests being refused a correct code, or not connected automatically after paying, at busy times: the login server was running out of database connections. It now has more (10 to 48), and routers report usage every 60 seconds for hotspot and 2 minutes for PPPoE instead of every 10 and 30 seconds, which removes most of that load. Routers pick the new interval up within about 10 minutes.",
       "Hotspot login: if a guest types an M-Pesa receipt code into the voucher box, their voucher is looked up and used; if they type a phone number, the page says so instead of a bare error.",
       "Hotspot login: one box for a voucher code, an M-Pesa code or the phone number that paid. A phone number is sent a 6-digit code by SMS and signs the guest in; an M-Pesa code finds the voucher. The separate M-Pesa and phone links are gone.",
-      "Hotspot: a guest's device is now recorded on their voucher while they are online (and from their last session if they have already left), so a phone that drops or comes back from a walk is signed straight back in without retyping the code."
+      "Hotspot: a guest's device is now recorded on their voucher while they are online (and from their last session if they have already left), so a phone that drops or comes back from a walk is signed straight back in without retyping the code.",
+      "Hotspot: a guest with a running voucher is no longer disconnected for being idle or quiet. Only the bundle's own time or data limit ends the session. Applied to every router automatically within the hour."
     ]
   }
 ]

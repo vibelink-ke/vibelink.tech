@@ -111,6 +111,7 @@ export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
       // the anti-sharing toggle below — see hotspotCookieProfile's own comment for why.
       sharedUsers: devices > 1 ? devices : ((hs?.multi_device ?? true) ? 3 : 1),
       idleSeconds: hs?.idle_timeout_sec ?? 1200,
+      neverIdle: true,   // a running voucher is never dropped for being idle; its own time or data ends it
       bindMac: hs?.bind_mac ?? true,
       cookieMinutes: durationMin,
     });
@@ -121,6 +122,7 @@ export async function ensureHotspotProfiles(conn, dbClient, tenantId, hs) {
     name: 'hs-default',
     sharedUsers: (hs?.multi_device ?? true) ? 3 : 1,
     idleSeconds: hs?.idle_timeout_sec ?? 1200,
+    neverIdle: true,
     bindMac: hs?.bind_mac ?? true,
     cookieMinutes: 1440,
   });

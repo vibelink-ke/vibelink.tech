@@ -57,13 +57,22 @@ export async function quietRouterLogs() {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   const { rows } = await pool.query(
-    'select id, name, host, api_port, service_user, service_password_enc from routers where service_user is not null and service_password_enc is not null');
+    'select id, tenant_id, role, name, host, api_port, service_user, service_password_enc from routers where service_user is not null and service_password_enc is not null');
   let changed = 0;
+  const settings = new Map();
   const one = async (r) => {
     let conn;
     try {
       conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 6 });
       changed += await ros.quietHotspotLog(conn);
+      // The voucher profiles (idle and keepalive never end a running voucher) on every hotspot router; a router already right is left alone.
+      if (r.role === 'hotspot' || r.role === 'both') {
+        if (!settings.has(r.tenant_id)) {
+          const { rows: [hs] } = await pool.query('select multi_device, idle_timeout_sec, bind_mac from hotspot_settings where tenant_id=$1', [r.tenant_id]);
+          settings.set(r.tenant_id, hs ?? null);
+        }
+        await ensureHotspotProfiles(conn, pool, r.tenant_id, settings.get(r.tenant_id));
+      }
     } catch { /* offline or no API access right now */ } finally { if (conn) ros.close(conn); }
   };
   for (let i = 0; i < rows.length; i += 5) await Promise.all(rows.slice(i, i + 5).map(one));

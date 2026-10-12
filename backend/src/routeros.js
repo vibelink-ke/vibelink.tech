@@ -1078,7 +1078,7 @@ export async function applyWalledGarden(conn, hosts = []) {
  * built-in one, which we would otherwise be editing on a box we do not own.
  */
 export async function ensureHotspotUserProfile(conn, {
-  name = 'hs-default', sharedUsers = 1, idleSeconds = 1200, bindMac = true, cookieMinutes = 1440,
+  name = 'hs-default', sharedUsers = 1, idleSeconds = 1200, bindMac = true, cookieMinutes = 1440, neverIdle = false,
 } = {}) {
   const rows = await conn.write('/ip/hotspot/user/profile/print', []);
   const found = rows.find((p) => p.name === name);
@@ -1095,11 +1095,12 @@ export async function ensureHotspotUserProfile(conn, {
   const ss = String(secs % 60).padStart(2, '0');
   const fields = [
     `=shared-users=${sharedUsers}`,
-    `=idle-timeout=${hh}:${mm}:${ss}`,
+    // neverIdle: a guest with a running voucher is never dropped for being quiet. Only the bundle's own time or data ends it.
+    `=idle-timeout=${neverIdle ? 'none' : `${hh}:${mm}:${ss}`}`,
     '=status-autorefresh=1m',
     // RouterOS's own default is 2 minutes: a phone that has its WiFi asleep for two minutes (screen off, in a pocket, a walk to
     // the shop) is logged out. 10 minutes rides through that; a device that really has gone is still dropped, just later.
-    '=keepalive-timeout=10m',
+    `=keepalive-timeout=${neverIdle ? 'none' : '10m'}`,
     /**
      * MAC cookie: the device is remembered and logged back in by itself.
      *
