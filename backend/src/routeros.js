@@ -441,7 +441,7 @@ export async function quietHotspotLog(conn) {
       const topics = String(r.topics ?? '');
       const list = topics.split(',').map((x) => x.trim()).filter(Boolean);
       if (r.action !== 'memory' || r.disabled === 'true') continue;
-      if (!list.some((t) => t === 'info' || t === 'error') || list.includes('!hotspot') || list.includes('hotspot')) continue;
+      if (!list.some((t) => t === 'info' || t === 'error' || t === 'warning') || list.includes('!hotspot') || list.includes('hotspot')) continue;
       await conn.write('/system/logging/set', [`=.id=${idOf(r)}`, `=topics=${[...list, '!hotspot'].join(',')}`]);
       changed += 1;
     }
