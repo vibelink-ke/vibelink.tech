@@ -300,7 +300,10 @@ function unchanged(row, fields) {
       continue;
     }
     if (!(key in row)) return false;
-    if (String(row[key]) !== value) return false;
+    // A comment with a dash or other non-ASCII character comes back from the router in a different encoding than it was sent in, so
+    // compared as-is it never matched and the rule was rewritten on every refresh. Compare the plain-ASCII part only.
+    const plain = (x) => String(x).replace(/[^ -~]/g, '');
+    if (key === 'comment' ? plain(row[key]) !== plain(value) : String(row[key]) !== value) return false;
   }
   return true;
 }
