@@ -2442,6 +2442,39 @@ app.get('/chat/:id', wrap(async (req, res) => {
  * a Caddy misconfiguration alone is no longer enough. Left optional so this
  * does not silently break an existing FreeRADIUS deployment that predates it.
  */
+/**
+ * FreeRADIUS asks this BEFORE it tells the router yes, for a hotspot login by a phone that already has an open session on the same
+ * code. If that old session is the phone's own on an address it no longer holds, it is removed here, so the router does not refuse
+ * the new login as "already logged in". Anything else (a genuinely live session, another device) is left exactly as it is.
+ */
+app.post('/radius/pre-auth', wrap(async (req, res) => {
+  const secret = process.env.RADIUS_INTERNAL_SECRET;
+  if (secret && req.get('X-Internal-Secret') !== secret) return res.status(403).end();
+  const username = String(req.body?.username ?? '').trim();
+  const mac = String(req.body?.mac ?? '').trim().toUpperCase();
+  const nas = String(req.body?.nas ?? '').trim();
+  if (!username || !/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac) || !nas) return res.json({ ok: true });
+  const { rows: [r] } = await pool.query(
+    `select r.tenant_id, r.host, r.api_port, r.service_user, r.service_password_enc from routers r
+      where host(r.host) = $1 and r.service_user is not null and r.service_password_enc is not null limit 1`, [nas]);
+  if (!r) return res.json({ ok: true });
+  const { rows: [v] } = await pool.query("select 1 from vouchers where tenant_id=$1 and code=$2 and status='in_use'", [r.tenant_id, username]);
+  if (!v) return res.json({ ok: true });
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let conn;
+  try {
+    conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 4 });
+    const out = await ros.releaseStaleHotspotUser(conn, { user: username, mac, login: false });
+    if (out.released) console.log(`voucher ${username}: cleared this phone's old session before its new login`);
+    res.json({ ok: true, released: out.released });
+  } catch (e) {
+    res.json({ ok: true });   // never stands in the way of a login
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/radius/post-auth', wrap(async (req, res) => {
   const secret = process.env.RADIUS_INTERNAL_SECRET;
   if (secret && req.get('X-Internal-Secret') !== secret) return res.status(403).end();

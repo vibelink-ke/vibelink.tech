@@ -868,6 +868,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       var box = document.getElementById('username');
       var say = function (t) { if (hint) hint.textContent = t; };
       var plain = code.split(' ').join('');
+      // A whole M-Pesa confirmation pasted in (the code is the first word, then "Confirmed"): take the code out of it.
+      var firstWord = code.split(' ')[0];
+      if (code.indexOf('Confirmed') !== -1 && /^[A-Za-z0-9]{10}$/.test(firstWord)) { plain = firstWord; box.value = firstWord; }
       var phoneStart = function (ph) {
         say('Sending a 6-digit code to ' + ph + '...');
         return fetch(API + '/hotspot/phone-login/otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: ph }) })

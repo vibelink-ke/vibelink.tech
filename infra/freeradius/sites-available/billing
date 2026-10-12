@@ -132,6 +132,21 @@ server billing {
         }
 
         #
+        # A phone that rejoined the Wi-Fi on a new address still has its old session open, and the router refuses the new login as
+        # "already logged in". Only when THIS phone (same MAC) already has an open session on THIS code do we ask the app to clear
+        # that old one, and only then, so ordinary logins pay one small lookup and nothing else.
+        if (&NAS-Port-Type == "Wireless-802.11" && &User-Name =~ /^[A-Za-z0-9]{4,12}$/ && &Calling-Station-Id =~ /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/) {
+            update control {
+                &Tmp-Integer-2 := "%{sql: SELECT count(*) FROM radacct WHERE username='%{User-Name}' AND callingstationid='%{toupper:%{Calling-Station-Id}}' AND acctstoptime IS NULL}"
+            }
+            if (&control:Tmp-Integer-2 > 0) {
+                update control {
+                    &Tmp-String-5 := "%{exec:/bin/sh /config/pre-auth-hook.sh %{User-Name} %{toupper:%{Calling-Station-Id}} %{Packet-Src-IP-Address}}"
+                }
+            }
+        }
+
+        #
         # Per-tenant licence cap on concurrent clients (tenants.max_concurrent_clients,
         # set from Super Admin's Tenants screen). Counts PPPoE and hotspot together,
         # using the exact same "online" definition the app's own dashboards use

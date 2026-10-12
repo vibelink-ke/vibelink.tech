@@ -2744,13 +2744,27 @@ export async function unbindDeviceByMac(conn, { mac }) {
  * the visitor who asked is logged in. A session that is genuinely busy, or one belonging to this same device, is
  * left alone — the code really is in use.
  */
-export async function releaseStaleHotspotUser(conn, { user, mac, staleAfterSec = 120 }) {
+export async function releaseStaleHotspotUser(conn, { user, mac, staleAfterSec = 120, login = true }) {
   const MAC = String(mac ?? '').toUpperCase();
   const rows = await conn.write('/ip/hotspot/active/print', [`?user=${user}`]).catch(() => []);
   const out = { found: rows.length, live: 0, released: 0, connected: false };
+  // The address this phone holds right now (its current lease). A phone that rejoined the Wi-Fi on a new address still has its old
+  // session listed under the old one; that session is the phone's own and is stale, so it must not block the phone's new login.
+  let currentAddr = null;
+  if (MAC) {
+    const leases = await conn.write('/ip/dhcp-server/lease/print', [`?mac-address=${MAC}`]).catch(() => []);
+    currentAddr = (leases.find((l) => l.status === 'bound') ?? leases[0])?.address ?? null;
+  }
   for (const a of rows) {
     const rowMac = String(a['mac-address'] ?? '').toUpperCase();
-    if (MAC && rowMac === MAC) { out.live++; continue; }          // this same device: already connected
+    if (MAC && rowMac === MAC) {
+      if (!currentAddr || !a.address || a.address === currentAddr) { out.live++; continue; }   // this device, same address: already connected
+      await cmd(conn, 'release the old session of this phone', '/ip/hotspot/active/remove', [`=.id=${idOf(a)}`]);
+      const old = await conn.write('/ip/hotspot/host/print', [`?address=${a.address}`]).catch(() => []);
+      for (const h of old) await cmd(conn, 'clear the old address', '/ip/hotspot/host/remove', [`=.id=${idOf(h)}`]);
+      out.released++;
+      continue;
+    }
     const idle = parseRouterOSDuration(a['idle-time']);
     if (idle == null || idle < staleAfterSec) { out.live++; continue; }   // busy, or cannot tell: leave it
     await cmd(conn, 'release stale hotspot session', '/ip/hotspot/active/remove', [`=.id=${idOf(a)}`]);
@@ -2760,7 +2774,7 @@ export async function releaseStaleHotspotUser(conn, { user, mac, staleAfterSec =
     }
     out.released++;
   }
-  if (out.released && !out.live && MAC) {
+  if (login && out.released && !out.live && MAC) {
     const [host] = await conn.write('/ip/hotspot/host/print', [`?mac-address=${MAC}`]).catch(() => []);
     if (host?.address && String(host.authorized) !== 'true') {
       // The password of a voucher is its code (see issueVoucherAccess).
