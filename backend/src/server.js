@@ -2091,10 +2091,9 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
       `insert into access_code_devices (tenant_id, username, mac, router_id, label) values ($1,$2,$3,$4,$5)
        on conflict (tenant_id, username, mac) do update set router_id = excluded.router_id, label = coalesce(excluded.label, access_code_devices.label)`,
       [tenant.id, code, mac, r.id, label]);
-    // A code locked to its devices counts this one among them.
-    if (ac.code.lock_mac) {
-      await pool.query('insert into hotspot_access_code_macs (tenant_id, username, mac) values ($1,$2,$3) on conflict do nothing', [tenant.id, code, mac]);
-    }
+    // A TV is always tied to its own MAC (the router bypass above is for that MAC only), and the MAC is recorded against the code so
+    // that, if the code is locked to its devices, the TV is one of them and takes up one of its places.
+    await pool.query('insert into hotspot_access_code_macs (tenant_id, username, mac) values ($1,$2,$3) on conflict do nothing', [tenant.id, code, mac]);
     return res.json({ ok: true });
   }
 
