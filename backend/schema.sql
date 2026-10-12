@@ -3364,3 +3364,29 @@ create table if not exists api_keys (
   revoked_at   timestamptz
 );
 create index if not exists api_keys_tenant on api_keys (tenant_id);
+
+-- Lock an access code to the devices that use it: the first max_devices phones to log in with it are remembered by MAC address,
+-- and any other device is refused. Enforced by FreeRADIUS (access_code_mac_ok, called from authorize), so it holds whatever the
+-- login page or the router does. Clearing the list under Hotspot -> Access codes lets new devices take the places.
+alter table hotspot_access_codes add column if not exists lock_mac boolean not null default false;
+create table if not exists hotspot_access_code_macs (
+  tenant_id  uuid not null references tenants on delete cascade,
+  username   text not null,
+  mac        text not null,
+  first_seen timestamptz not null default now(),
+  primary key (tenant_id, username, mac)
+);
+create or replace function access_code_mac_ok(p_user text, p_mac text, p_nas text) returns boolean language plpgsql as $fn$
+declare t uuid; c record; n int;
+begin
+  select r.tenant_id into t from routers r where host(r.host) = p_nas limit 1;
+  if t is null then return true; end if;
+  select lock_mac, max_devices into c from hotspot_access_codes where tenant_id = t and username = p_user;
+  if not found or not c.lock_mac then return true; end if;
+  if p_mac is null or p_mac = '' then return false; end if;
+  if exists (select 1 from hotspot_access_code_macs where tenant_id = t and username = p_user and mac = upper(p_mac)) then return true; end if;
+  select count(*) into n from hotspot_access_code_macs where tenant_id = t and username = p_user;
+  if n >= c.max_devices then return false; end if;
+  insert into hotspot_access_code_macs (tenant_id, username, mac) values (t, p_user, upper(p_mac)) on conflict do nothing;
+  return true;
+end $fn$;

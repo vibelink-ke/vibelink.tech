@@ -12211,7 +12211,8 @@ app.get('/api/hotspot/access-codes', requirePermission('hotspot.view'), wrap(asy
               (select count(*) from live_sessions l
                 where l.tenant_id = ac.tenant_id and l.username = ac.username
                   and l.seen_at > now() - interval '5 minutes')
-            )::int as online
+            )::int as online,
+            (select count(*) from hotspot_access_code_macs m where m.tenant_id = ac.tenant_id and m.username = ac.username)::int as locked_count
        from hotspot_access_codes ac
        left join plans p on p.id = ac.plan_id
       where ac.tenant_id=$1
@@ -12258,7 +12259,7 @@ app.post('/api/hotspot/access-codes-speed', requirePermission('hotspot.vouchers'
 }));
 
 app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
-  const { label, username, password, maxDevices, planId, speedDownMbps, speedUpMbps } = req.body;
+  const { label, username, password, maxDevices, planId, speedDownMbps, speedUpMbps, lockMac } = req.body;
   if (!String(label ?? '').trim()) return res.status(400).json({ error: 'Give this code a label' });
   // A speed typed in, in Mbps (decimals allowed: 0.5 = 512 kbps). Both or neither.
   const hasSpeed = (speedDownMbps ?? '') !== '' || (speedUpMbps ?? '') !== '';
@@ -12292,9 +12293,9 @@ app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wra
   let row;
   try {
     ({ rows: [row] } = await pool.query(
-      `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id, rate_down_kbps, rate_up_kbps)
-       values ($1,$2,$3,$4,$5,$6,$7,$8) returning *`,
-      [req.tenant.id, label.trim(), username, password, devices, hasSpeed ? null : (planId || null), downKbps, upKbps]));
+      `insert into hotspot_access_codes (tenant_id, label, username, password, max_devices, plan_id, rate_down_kbps, rate_up_kbps, lock_mac)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+      [req.tenant.id, label.trim(), username, password, devices, hasSpeed ? null : (planId || null), downKbps, upKbps, !!lockMac]));
   } catch (e) {
     if (e.code === '23505') return res.status(409).json({ error: 'That username is already in use — pick another.' });
     throw e;
@@ -12331,6 +12332,7 @@ app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers')
   const set = (col, val) => { vals.push(val); sets.push(`${col}=$${vals.length}`); };
 
   if ('enabled' in req.body) set('enabled', !!req.body.enabled);
+  if ('lockMac' in req.body) set('lock_mac', !!req.body.lockMac);
 
   if ('maxDevices' in req.body) {
     const devices = Math.round(Number(req.body.maxDevices));
@@ -12374,11 +12376,31 @@ app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers')
   res.json(row);
 }));
 
+/** The devices an access code is locked to (the first ones that logged in with it). */
+app.get('/api/hotspot/access-codes/:id/macs', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select m.mac, m.first_seen from hotspot_access_code_macs m
+       join hotspot_access_codes ac on ac.tenant_id = m.tenant_id and ac.username = m.username
+      where ac.tenant_id=$1 and ac.id=$2 order by m.first_seen`, [req.tenant.id, req.params.id]);
+  res.json(rows);
+}));
+
+/** Forget one device (?mac=…) or all of them, so others can take the places. Anyone connected stays on until they reconnect. */
+app.delete('/api/hotspot/access-codes/:id/macs', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const mac = String(req.query.mac ?? '').toUpperCase();
+  const { rowCount } = await pool.query(
+    `delete from hotspot_access_code_macs m using hotspot_access_codes ac
+      where ac.tenant_id=$1 and ac.id=$2 and m.tenant_id = ac.tenant_id and m.username = ac.username
+        and ($3 = '' or m.mac = $3)`, [req.tenant.id, req.params.id, mac]);
+  res.json({ removed: rowCount });
+}));
+
 app.delete('/api/hotspot/access-codes/:id', requirePermission('hotspot.delete'), wrap(async (req, res) => {
   const { rows: [row] } = await pool.query(
     'delete from hotspot_access_codes where tenant_id=$1 and id=$2 returning username',
     [req.tenant.id, req.params.id]);
   if (!row) return res.status(404).json({ error: 'not found' });
+  await pool.query('delete from hotspot_access_code_macs where tenant_id=$1 and username=$2', [req.tenant.id, row.username]);
   const radius = await import('./radius.js');
   await radius.forgetAccessCode(pool, req.tenant.id, row.username);
   res.json({ ok: true });

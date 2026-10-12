@@ -64,7 +64,7 @@ export default function AccessCodes() {
   // after the modal opens could overwrite a username/password already typed
   // by hand in that window. Typing your own is just as valid as pressing
   // Generate below — this only avoids the two racing.
-  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '', downMbps: '', upMbps: '' });
+  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '', downMbps: '', upMbps: '', lockMac: false });
 
   const genCredentials = async () => {
     try {
@@ -87,6 +87,7 @@ export default function AccessCodes() {
         username: creating.username,
         password: creating.password,
         maxDevices: Number(creating.maxDevices),
+        lockMac: !!creating.lockMac,
         planId: creating.planId && creating.planId !== CUSTOM ? creating.planId : null,
         ...(creating.planId === CUSTOM ? { speedDownMbps: creating.downMbps, speedUpMbps: creating.upMbps } : {}),
       });
@@ -115,14 +116,27 @@ export default function AccessCodes() {
 
   // Same shape as "creating" — pre-filled from the row rather than fetched,
   // since everything it needs is already sitting in the table.
-  const openEdit = (c) => setEditing({
+  const openEdit = (c) => { setLocked(null); api.accessCodeMacs(c.id).then(setLocked).catch(() => setLocked([])); setEditing({
     id: c.id,
     label: c.label,
     maxDevices: c.max_devices,
+    lockMac: !!c.lock_mac,
     planId: c.rate_down_kbps && c.rate_up_kbps ? CUSTOM : (c.plan_id ?? ''),
     downMbps: c.rate_down_kbps ? mbps(c.rate_down_kbps) : '',
     upMbps: c.rate_up_kbps ? mbps(c.rate_up_kbps) : '',
-  });
+  }); };
+
+  // The devices the code being edited is locked to; null while they load.
+  const [locked, setLocked] = useState(null);
+  const forgetDevice = async (mac) => {
+    try {
+      await api.clearAccessCodeMacs(editing.id, mac);
+      setLocked(await api.accessCodeMacs(editing.id));
+      store.setCollection('accessCodes', (cs) => cs.map((x) => (x.id === editing.id ? { ...x, locked_count: mac ? Math.max(0, (x.locked_count ?? 1) - 1) : 0 } : x)));
+    } catch (e) {
+      store.toast(`Could not change it: ${e.message}`);
+    }
+  };
 
   const submitEdit = async () => {
     if (editing.planId === CUSTOM && !(Number(editing.downMbps) > 0 && Number(editing.upMbps) > 0)) {
@@ -132,6 +146,7 @@ export default function AccessCodes() {
     try {
       const updated = await api.updateAccessCode(editing.id, {
         maxDevices: Number(editing.maxDevices),
+        lockMac: !!editing.lockMac,
         planId: editing.planId && editing.planId !== CUSTOM ? editing.planId : null,
         ...(editing.planId === CUSTOM
           ? { speedDownMbps: editing.downMbps, speedUpMbps: editing.upMbps }
@@ -197,7 +212,7 @@ export default function AccessCodes() {
             { key: 'label', label: 'Label', render: (c) => <span style={{ fontWeight: 500 }}>{c.label}</span> },
             { key: 'username', label: 'Username', render: (c) => <span style={{ fontFamily: font.mono }}>{c.username}</span> },
             { key: 'password', label: 'Password', render: (c) => <span style={{ fontFamily: font.mono }}>{c.password}</span> },
-            { key: 'max_devices', label: 'Max devices', align: 'right', render: (c) => c.max_devices },
+            { key: 'max_devices', label: 'Max devices', align: 'right', render: (c) => (c.lock_mac ? <span title="Locked to its first devices">{c.max_devices} · locked {c.locked_count ?? 0}/{c.max_devices}</span> : c.max_devices) },
             {
               key: 'online',
               label: 'Online now',
@@ -271,6 +286,24 @@ export default function AccessCodes() {
                 onChange={(e) => setEditing((s) => ({ ...s, maxDevices: e.target.value }))}
               />
             </Field>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+              <input type="checkbox" checked={!!editing.lockMac} onChange={(e) => setEditing((s) => ({ ...s, lockMac: e.target.checked }))} style={{ marginTop: 3 }} />
+              <span>Lock to devices. The first {editing.maxDevices || 'few'} devices that log in with it are remembered, and no other device can use it.</span>
+            </label>
+            {editing.lockMac && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12.5, color: color.muted }}>
+                  {locked === null ? 'Loading devices…' : locked.length ? `Locked to ${locked.length} device${locked.length === 1 ? '' : 's'}:` : 'No device has used it yet — the first ones to log in will be locked in.'}
+                </span>
+                {(locked ?? []).map((d) => (
+                  <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${color.line}`, borderRadius: 8, padding: '6px 10px' }}>
+                    <span style={{ fontFamily: font.mono, fontSize: 12.5 }}>{d.mac}</span>
+                    <Button size="sm" onClick={() => forgetDevice(d.mac)}>Forget</Button>
+                  </div>
+                ))}
+                {(locked ?? []).length > 1 && <div><Button size="sm" onClick={() => forgetDevice(null)}>Forget all devices</Button></div>}
+              </div>
+            )}
             <Field label="Speed" hint="Pick a bundle's speed, or set your own">
               <Select
                 value={editing.planId}
@@ -340,6 +373,10 @@ export default function AccessCodes() {
                 onChange={(e) => setCreating((s) => ({ ...s, maxDevices: e.target.value }))}
               />
             </Field>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+              <input type="checkbox" checked={!!creating.lockMac} onChange={(e) => setCreating((s) => ({ ...s, lockMac: e.target.checked }))} style={{ marginTop: 3 }} />
+              <span>Lock to devices. The first devices that log in with it (up to the max above) are remembered, and no other device can use it.</span>
+            </label>
             <Field label="Speed" hint="Pick a bundle's speed, or set your own">
               <Select
                 value={creating.planId}
