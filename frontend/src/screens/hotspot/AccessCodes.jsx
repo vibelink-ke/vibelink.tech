@@ -64,7 +64,10 @@ export default function AccessCodes() {
   // after the modal opens could overwrite a username/password already typed
   // by hand in that window. Typing your own is just as valid as pressing
   // Generate below — this only avoids the two racing.
-  const openCreate = () => setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '', downMbps: '', upMbps: '', lockMac: false });
+  const openCreate = () => {
+    setTimeout(() => document.getElementById('ac-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+    setCreating({ label: '', username: '', password: '', maxDevices: 5, planId: '', downMbps: '', upMbps: '', lockMac: false });
+  };
 
   const genCredentials = async () => {
     try {
@@ -124,7 +127,10 @@ export default function AccessCodes() {
     planId: c.rate_down_kbps && c.rate_up_kbps ? CUSTOM : (c.plan_id ?? ''),
     downMbps: c.rate_down_kbps ? mbps(c.rate_down_kbps) : '',
     upMbps: c.rate_up_kbps ? mbps(c.rate_up_kbps) : '',
-  }); };
+  });
+    // The form opens below the list, which can be a long way down; bring it into view.
+    setTimeout(() => document.getElementById('ac-form')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+  };
 
   // The devices the code being edited is locked to; null while they load.
   const [locked, setLocked] = useState(null);
@@ -287,7 +293,7 @@ export default function AccessCodes() {
       </Card>
 
       {editing && (
-        <Card title={`Edit ${editing.label}`}>
+        <div id="ac-form"><Card title={`Edit ${editing.label}`}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
             <Field label="Max devices" hint="How many phones/laptops can be online on this code at once">
               <Input
@@ -361,11 +367,11 @@ export default function AccessCodes() {
               </Button>
             </div>
           </div>
-        </Card>
+        </Card></div>
       )}
 
       {creating && (
-        <Card title="New access code">
+        <div id="ac-form"><Card title="New access code">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 420 }}>
             <Field label="Label" hint={'What you\'ll recognise it by — "Lounge WiFi", "Staff WiFi"'}>
               <Input value={creating.label} onChange={(e) => setCreating((s) => ({ ...s, label: e.target.value }))} autoFocus />
@@ -434,7 +440,7 @@ export default function AccessCodes() {
               </Button>
             </div>
           </div>
-        </Card>
+        </Card></div>
       )}
     </Screen>
   );
