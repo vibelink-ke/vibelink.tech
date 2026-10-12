@@ -192,6 +192,8 @@ export const api = {
   setAccessCodesSpeed: (speedDownMbps, speedUpMbps) => post('/api/hotspot/access-codes-speed', { speedDownMbps, speedUpMbps }),
   updateAccessCode: (id, c) => patch(`/api/hotspot/access-codes/${id}`, c),
   deleteAccessCode: (id) => del(`/api/hotspot/access-codes/${id}`),
+  accessCodeDevices: (id) => get(`/api/hotspot/access-codes/${id}/devices`),
+  removeAccessCodeDevice: (id, mac) => del(`/api/hotspot/access-codes/${id}/devices?mac=${encodeURIComponent(mac)}`),
   accessCodeMacs: (id) => get(`/api/hotspot/access-codes/${id}/macs`),
   clearAccessCodeMacs: (id, mac) => del(`/api/hotspot/access-codes/${id}/macs${mac ? `?mac=${encodeURIComponent(mac)}` : ''}`),
 

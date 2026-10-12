@@ -116,7 +116,7 @@ export default function AccessCodes() {
 
   // Same shape as "creating" — pre-filled from the row rather than fetched,
   // since everything it needs is already sitting in the table.
-  const openEdit = (c) => { setLocked(null); api.accessCodeMacs(c.id).then(setLocked).catch(() => setLocked([])); setEditing({
+  const openEdit = (c) => { setTvs(null); api.accessCodeDevices(c.id).then(setTvs).catch(() => setTvs([])); setLocked(null); api.accessCodeMacs(c.id).then(setLocked).catch(() => setLocked([])); setEditing({
     id: c.id,
     label: c.label,
     maxDevices: c.max_devices,
@@ -128,6 +128,16 @@ export default function AccessCodes() {
 
   // The devices the code being edited is locked to; null while they load.
   const [locked, setLocked] = useState(null);
+  // TVs and consoles added to the code being edited from the Add TV / console page.
+  const [tvs, setTvs] = useState(null);
+  const removeTv = async (mac) => {
+    try {
+      await api.removeAccessCodeDevice(editing.id, mac);
+      setTvs(await api.accessCodeDevices(editing.id));
+    } catch (e) {
+      store.toast(`Could not remove it: ${e.message}`);
+    }
+  };
   const forgetDevice = async (mac) => {
     try {
       await api.clearAccessCodeMacs(editing.id, mac);
@@ -286,6 +296,17 @@ export default function AccessCodes() {
                 onChange={(e) => setEditing((s) => ({ ...s, maxDevices: e.target.value }))}
               />
             </Field>
+            {(tvs ?? []).length > 0 && (
+              <div style={{ display: 'grid', gap: 6 }}>
+                <span style={{ fontSize: 12.5, color: color.muted }}>TVs and consoles on this code (added from Add TV / console):</span>
+                {tvs.map((d) => (
+                  <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', border: `1px solid ${color.line}`, borderRadius: 8, padding: '6px 10px' }}>
+                    <span style={{ fontSize: 12.5 }}>{d.label ? `${d.label} · ` : ''}<span style={{ fontFamily: font.mono }}>{d.mac}</span></span>
+                    <Button size="sm" onClick={() => removeTv(d.mac)}>Remove</Button>
+                  </div>
+                ))}
+              </div>
+            )}
             <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
               <input type="checkbox" checked={!!editing.lockMac} onChange={(e) => setEditing((s) => ({ ...s, lockMac: e.target.checked }))} style={{ marginTop: 3 }} />
               <span>Lock to devices. The first {editing.maxDevices || 'few'} devices that log in with it are remembered, and no other device can use it.</span>

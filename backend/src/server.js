@@ -1564,6 +1564,62 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
  * client-supplied router id — by re-checking the device against that
  * router's own live host list below, never by trusting the id alone.
  */
+/**
+ * An access code used from the Add TV / console page: the username and password of a hotspot access code, plus the router the
+ * guest's page was served from (or the one the code is online through). Both are needed, so a guessed short username alone
+ * gets nothing. Mirrors voucherAndRouter.
+ */
+async function accessCodeAndRouter(tenantId, username, password, pageRouterId) {
+  const { rows: [ac] } = await pool.query(
+    `select ac.*, p.rate_down as plan_down, p.rate_up as plan_up
+       from hotspot_access_codes ac left join plans p on p.id = ac.plan_id
+      where ac.tenant_id=$1 and ac.username=$2 and ac.password=$3 and ac.enabled`,
+    [tenantId, username, password]);
+  if (!ac) return { error: 'That access code or password is not right.' };
+  const { rows: [session] } = await pool.query(
+    `select host(nasipaddress) as nas from radacct where username=$1 and acctstoptime is null order by acctstarttime desc limit 1`, [username]);
+  const q = session?.nas
+    ? { text: 'select id, name, host, api_port, service_user, service_password_enc from routers where tenant_id=$1 and host(host)=$2', values: [tenantId, session.nas] }
+    : pageRouterId
+    ? { text: 'select id, name, host, api_port, service_user, service_password_enc from routers where tenant_id=$1 and id=$2', values: [tenantId, pageRouterId] }
+    : null;
+  if (!q) return { error: 'Could not tell which network this is — open this page from the WiFi login page.' };
+  const { rows: [r] } = await pool.query(q.text, q.values);
+  if (!r?.service_user || !r.service_password_enc) return { error: 'This router has not been configured for the billing system yet.' };
+  return { code: ac, router: r };
+}
+
+/** How many more devices an access code can take: its Max devices, less the TVs on it and the devices online with it now. */
+async function accessCodeSlots(tenantId, ac) {
+  const { rows: [{ n: bound }] } = await pool.query('select count(*)::int as n from access_code_devices where tenant_id=$1 and username=$2', [tenantId, ac.username]);
+  const { rows: [{ n: live }] } = await pool.query(
+    `select count(distinct coalesce(callingstationid, acctuniqueid))::int as n from radacct
+      where username=$1 and acctstoptime is null and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'`, [ac.username]);
+  return Math.max(0, ac.max_devices - bound - live);
+}
+
+/** Take a code's TVs and consoles off their routers (all of them, or one MAC) and forget them. Best-effort on the router. */
+async function unbindAccessCodeDevices(tenantId, username, mac = null) {
+  const { rows } = await pool.query(
+    `select d.mac, r.host, r.api_port, r.service_user, r.service_password_enc
+       from access_code_devices d left join routers r on r.id = d.router_id
+      where d.tenant_id=$1 and d.username=$2 and ($3::text is null or d.mac = $3)`, [tenantId, username, mac]);
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  for (const d of rows) {
+    if (!d.host || !d.service_user || !d.service_password_enc) continue;
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(d.host).split('/')[0], port: d.api_port ?? 8728, user: d.service_user, password: secrets.decrypt(d.service_password_enc), timeoutSec: 8 });
+      await ros.unbindDeviceByMac(conn, { mac: d.mac });
+    } catch (e) {
+      console.warn('unbindAccessCodeDevices:', d.mac, e.message);
+    } finally { if (conn) ros.close(conn); }
+  }
+  await pool.query('delete from access_code_devices where tenant_id=$1 and username=$2 and ($3::text is null or mac = $3)', [tenantId, username, mac]);
+  await pool.query('delete from hotspot_access_code_macs where tenant_id=$1 and username=$2 and ($3::text is null or mac = $3)', [tenantId, username, mac]);
+}
+
 async function voucherAndRouter(tenantId, code, pageRouterId) {
   const { rows: [v] } = await pool.query(
     `select v.* from vouchers v join plans p on p.id = v.plan_id
@@ -1925,7 +1981,27 @@ app.get('/hotspot/nearby-devices', pollLimiter, wrap(async (req, res) => {
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
 
   const found = await voucherAndRouter(tenant.id, code, pageRouterId);
-  if (found.error) return res.status(404).json({ error: found.error });
+  if (found.error) {
+    // Not a voucher: it may be an access code (username here, its password alongside).
+    const pw = String(req.query.password ?? '');
+    if (!pw) return res.status(404).json({ error: found.error + ' If it is an access code, type its password too.' });
+    const ac = await accessCodeAndRouter(tenant.id, code, pw, pageRouterId);
+    if (ac.error) return res.status(404).json({ error: ac.error });
+    const slotsLeft = await accessCodeSlots(tenant.id, ac.code);
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const r = ac.router;
+    try {
+      const conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+      let devices;
+      try { devices = await ros.rankByLatency(conn, await ros.nearbyDevices(conn), r.id); } finally { ros.close(conn); }
+      const { rows: have } = await pool.query('select mac from access_code_devices where tenant_id=$1 and username=$2', [tenant.id, code]);
+      const taken = new Set(have.map((x) => String(x.mac).toUpperCase()));
+      return res.json({ devices: devices.filter((d) => !taken.has(String(d.mac).toUpperCase())), slotsLeft });
+    } catch (e) {
+      return res.status(502).json({ error: `Could not read the router: ${e.message}` });
+    }
+  }
 
   const { rows: existing } = await pool.query(
     `select mac from voucher_devices where voucher_id=$1
@@ -1987,7 +2063,40 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   const { rows: [hs] } = await pool.query('select multi_device from hotspot_settings where tenant_id=$1', [tenant.id]);
 
   const found = await voucherAndRouter(tenant.id, code, pageRouterId);
-  if (found.error) return res.status(404).json({ error: found.error });
+  if (found.error) {
+    const pw = String(req.body?.password ?? '');
+    if (!pw) return res.status(404).json({ error: found.error + ' If it is an access code, type its password too.' });
+    const ac = await accessCodeAndRouter(tenant.id, code, pw, pageRouterId);
+    if (ac.error) return res.status(404).json({ error: ac.error });
+    if ((await accessCodeSlots(tenant.id, ac.code)) < 1) return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
+    const { rows: [hsx] } = await pool.query('select access_down_kbps, access_up_kbps from hotspot_settings where tenant_id=$1', [tenant.id]);
+    const downKbps = ac.code.rate_down_kbps ?? ac.code.plan_down ?? hsx?.access_down_kbps ?? 2000;
+    const upKbps = ac.code.rate_up_kbps ?? ac.code.plan_up ?? hsx?.access_up_kbps ?? 1000;
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const r = ac.router;
+    try {
+      const conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+      try {
+        // Re-read the router's own host list: the device list is a convenience, not a permission slip.
+        if (!(await ros.nearbyDevices(conn)).some((d) => String(d.mac).toUpperCase() === mac)) {
+          return res.status(404).json({ error: 'That device is not currently on this network.' });
+        }
+        await ros.bindDeviceByMac(conn, { mac, downKbps, upKbps, comment: label ? `${ac.code.label} — ${label}` : `${ac.code.label} (access code)` });
+      } finally { ros.close(conn); }
+    } catch (e) {
+      return res.status(502).json({ error: `Could not add that device on the router: ${e.message}` });
+    }
+    await pool.query(
+      `insert into access_code_devices (tenant_id, username, mac, router_id, label) values ($1,$2,$3,$4,$5)
+       on conflict (tenant_id, username, mac) do update set router_id = excluded.router_id, label = coalesce(excluded.label, access_code_devices.label)`,
+      [tenant.id, code, mac, r.id, label]);
+    // A code locked to its devices counts this one among them.
+    if (ac.code.lock_mac) {
+      await pool.query('insert into hotspot_access_code_macs (tenant_id, username, mac) values ($1,$2,$3) on conflict do nothing', [tenant.id, code, mac]);
+    }
+    return res.json({ ok: true });
+  }
 
   // Same limit as the list above — see deviceLimitFor.
   const limit = await deviceLimitFor(tenant.id, found.voucher, hs);
@@ -12384,9 +12493,27 @@ app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers')
     await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
   } else {
     await radius.forgetAccessCode(pool, req.tenant.id, row.username);
+    unbindAccessCodeDevices(req.tenant.id, row.username).catch(() => {});
   }
   repushHotspotConfigToAllRouters(req.tenant.id);
   res.json(row);
+}));
+
+/** TVs and consoles added to an access code from the Add TV / console page. */
+app.get('/api/hotspot/access-codes/:id/devices', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select d.mac, d.label, d.added_at from access_code_devices d
+       join hotspot_access_codes ac on ac.tenant_id = d.tenant_id and ac.username = d.username
+      where ac.tenant_id=$1 and ac.id=$2 order by d.added_at`, [req.tenant.id, req.params.id]);
+  res.json(rows);
+}));
+
+app.delete('/api/hotspot/access-codes/:id/devices', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const { rows: [ac] } = await pool.query('select username from hotspot_access_codes where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (!ac) return res.status(404).json({ error: 'not found' });
+  const mac = String(req.query.mac ?? '').toUpperCase() || null;
+  await unbindAccessCodeDevices(req.tenant.id, ac.username, mac);
+  res.json({ ok: true });
 }));
 
 /** The devices an access code is locked to (the first ones that logged in with it). */
@@ -12414,6 +12541,7 @@ app.delete('/api/hotspot/access-codes/:id', requirePermission('hotspot.delete'),
     [req.tenant.id, req.params.id]);
   if (!row) return res.status(404).json({ error: 'not found' });
   await pool.query('delete from hotspot_access_code_macs where tenant_id=$1 and username=$2', [req.tenant.id, row.username]);
+  unbindAccessCodeDevices(req.tenant.id, row.username).catch(() => {});
   const radius = await import('./radius.js');
   await radius.forgetAccessCode(pool, req.tenant.id, row.username);
   res.json({ ok: true });

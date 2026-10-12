@@ -1409,8 +1409,9 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
 
   <div class="card" id="step1" style="display:none">
     <h2>Activate a voucher on a device</h2>
-    <p class="sub">Enter the voucher code, then pick the TV or console from the list.</p>
-    <input id="code" inputmode="numeric" placeholder="Your voucher code" autocomplete="off">
+    <p class="sub">Enter a voucher code (or an access code and its password), then pick the TV or console from the list.</p>
+    <input id="code" placeholder="Voucher code, or access code username" autocomplete="off">
+    <input id="codePass" type="text" placeholder="Password (only for an access code)" autocomplete="off" style="margin-top:8px">
     <button id="find">Find devices</button>
     <div id="err1"></div>
     <input id="oldDeviceFilter" type="text" placeholder="Type a name or part of the MAC to filter…" autocomplete="off" style="display:none">
@@ -1641,7 +1642,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       if (!code) return;
       var err = document.getElementById('err1');
       err.innerHTML = '';
-      fetch(API + '/hotspot/nearby-devices?code=' + encodeURIComponent(code) + (ROUTER_ID ? '&router=' + encodeURIComponent(ROUTER_ID) : ''))
+      fetch(API + '/hotspot/nearby-devices?code=' + encodeURIComponent(code) + '&password=' + encodeURIComponent(document.getElementById('codePass').value.trim()) + (ROUTER_ID ? '&router=' + encodeURIComponent(ROUTER_ID) : ''))
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
           if (!res.ok) { err.innerHTML = '<p class="err">' + (res.d.error || 'Could not check that code.') + '</p>'; return; }
@@ -1703,7 +1704,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       var note = document.getElementById('bindNote');
       fetch(API + '/hotspot/nearby-devices/bind', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: code, mac: mac, label: name.trim(), routerId: ROUTER_ID }),
+        body: JSON.stringify({ code: code, password: document.getElementById('codePass').value.trim(), mac: mac, label: name.trim(), routerId: ROUTER_ID }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {

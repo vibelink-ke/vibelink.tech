@@ -3396,3 +3396,15 @@ end $fn$;
 alter table plans add column if not exists device_class text not null default 'normal';
 alter table plans drop constraint if exists plans_device_class_check;
 alter table plans add constraint plans_device_class_check check (device_class in ('normal', 'tv'));
+
+-- TVs and consoles put on an access code from the Add TV / console page: bypassed on their router (like a TV bundle), counted
+-- against the code's Max devices, and taken off the router again when the code is switched off or deleted.
+create table if not exists access_code_devices (
+  tenant_id uuid not null references tenants on delete cascade,
+  username  text not null,
+  mac       text not null,
+  router_id uuid references routers on delete set null,
+  label     text,
+  added_at  timestamptz not null default now(),
+  primary key (tenant_id, username, mac)
+);
