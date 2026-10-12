@@ -11642,16 +11642,30 @@ app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(as
   const { parseMpesaSms } = await import('./payments/manual.js');
   const { applyPayment } = await import('./payments/apply.js');
 
-  const results = { parsed: 0, applied: 0, unmatched: 0, duplicate: 0, skipped: 0 };
-  for (const line of String(text).split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const tx = parseMpesaSms(line.trim());
-    if (!tx) { results.skipped++; continue; }
+  const results = { parsed: 0, applied: 0, unmatched: 0, duplicate: 0, skipped: 0, lines: [] };
+  const plain = (s) => String(s).replace(/\s+/g, ' ').trim();
+  // A plain row also works: "CODE amount phone" (spaces, commas or tabs), for a list copied from the M-Pesa statement.
+  const asRow = (line) => {
+    const m = /^([A-Z0-9]{10})[\s,;\t]+(?:KES|Ksh)?\s*([0-9][0-9,]*(?:\.[0-9]{1,2})?)[\s,;\t]+(\+?[0-9]{9,13})\b/i.exec(line);
+    if (!m) return null;
+    const digits = m[3].replace(/[^0-9]/g, '');
+    return { ref: m[1].toUpperCase(), amount: Number(m[2].replace(/,/g, '')), name: null, rawAccount: null,
+             phone: digits.length === 9 ? '254' + digits : digits.replace(/^0/, '254') };
+  };
+  for (const raw of String(text).split(/\r?\n/)) {
+    const line = plain(raw);
+    if (!line) continue;
+    const tx = parseMpesaSms(line) ?? asRow(line);
+    if (!tx) { results.skipped++; results.lines.push({ line: line.slice(0, 60), outcome: 'unreadable' }); continue; }
     results.parsed++;
-    const out = await applyPayment(req.tenant.id, { ...tx, provider: 'manual_till', payload: { sms: line } });
-    if (out.duplicate) results.duplicate++;
-    else if (out.unmatched) results.unmatched++;
-    else if (out.applied) results.applied++;
+    // The same M-Pesa code may already be on file under another channel (the paybill's own confirmation, a till): never apply it twice.
+    const { rows: [have] } = await pool.query('select 1 from payments where tenant_id=$1 and provider_ref=$2 limit 1', [req.tenant.id, tx.ref]);
+    if (have) { results.duplicate++; results.lines.push({ ref: tx.ref, amount: tx.amount, outcome: 'already recorded' }); continue; }
+    const out = await applyPayment(req.tenant.id, { ...tx, provider: 'manual_till', payload: { sms: line, source: 'recovered' } });
+    if (out.duplicate) { results.duplicate++; results.lines.push({ ref: tx.ref, amount: tx.amount, outcome: 'already recorded' }); }
+    else if (out.unmatched) { results.unmatched++; results.lines.push({ ref: tx.ref, amount: tx.amount, outcome: 'needs a person' }); }
+    else if (out.applied) { results.applied++; results.lines.push({ ref: tx.ref, amount: tx.amount, outcome: 'applied, voucher or credit issued' }); }
+    else results.lines.push({ ref: tx.ref, amount: tx.amount, outcome: 'recorded' });
   }
   res.json(results);
 }));

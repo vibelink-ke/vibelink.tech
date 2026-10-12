@@ -463,6 +463,7 @@ export default function Payments() {
             `${r.unmatched} could not be matched — these need a person`,
             `${r.duplicate} already recorded`,
             `${r.skipped} unreadable`,
+            ...(r.lines ?? []).slice(0, 25).map((l) => (l.ref ? `${l.ref}  KES ${l.amount}: ${l.outcome}` : `"${l.line}": ${l.outcome}`)),
           ],
         }),
       });
@@ -1292,8 +1293,9 @@ export default function Payments() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <span style={{ fontSize: 12.5, color: color.neutralInk }}>
-            Paste forwarded M-Pesa messages, one per line. Each is parsed and applied;
-            codes already in the ledger are skipped as duplicates.
+            Paste forwarded M-Pesa messages, one per line, or a plain list of "CODE amount phone" (for example
+            UJC3IALXI1, 20, 0702222048). Each is parsed and applied, and a hotspot payment gets its voucher and SMS the normal way;
+            codes already in the ledger, from any channel, are skipped.
           </span>
           <Textarea
             value={reconcileText ?? ''}
