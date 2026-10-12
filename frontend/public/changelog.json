@@ -151,7 +151,8 @@
       "SkyPlan (skyplan.vibelink.co.ke), once connected to billing, now stays current by itself: a customer added or moved in billing appears within two minutes, without pressing Load. Unsaved design work is never overwritten. The saved billing connection is now kept per user.",
       "Hotspot login page: if the phone is signed in by its device while the page is still open (for example after the phone rejoined the Wi-Fi), the page now changes to 'You are connected' by itself instead of still showing the price list.",
       "Hotspot: a phone that rejoined the Wi-Fi on a new address no longer gets refused as 'already logged in' by its own old session; the old one is cleared just before the new login. The login box also picks the M-Pesa code out of a whole pasted M-Pesa message.",
-      "Hotspot login: the 'Have a username and password instead?' link now works on its own, even if another part of the page fails to run on a customer's phone."
+      "Hotspot login: the 'Have a username and password instead?' link now works on its own, even if another part of the page fails to run on a customer's phone.",
+      "Hotspot: paying now signs the phone in by itself. The login page sends the phone's device with a purchase, and the paid voucher is tied to it, so the router connects it without the guest typing a code or keeping the page open while they are in the M-Pesa app."
     ]
   }
 ]

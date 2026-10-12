@@ -1218,6 +1218,22 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   let phone = String(req.body?.phone ?? '').trim();
   if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
 
+  // The phone this purchase is made from. Remembered against the payment's checkout id once the gateway has one, so that when the
+  // money arrives the voucher can be tied to this device and the router signs it in by itself. A bad or missing address changes nothing.
+  const deviceMac = String(req.body?.mac ?? '').trim().toUpperCase();
+  if (/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(deviceMac)) {
+    const sendJson = res.json.bind(res);
+    res.json = (body) => {
+      if (body?.checkoutId) {
+        pool.query(
+          `insert into hotspot_pending_devices (tenant_id, checkout_id, phone, mac) values ($1,$2,$3,$4)
+           on conflict (tenant_id, checkout_id) do update set mac = excluded.mac, phone = excluded.phone, created_at = now()`,
+          [tenant.id, String(body.checkoutId), String(phone), deviceMac]).catch((e) => console.warn('pending device:', e.message));
+      }
+      return sendJson(body);
+    };
+  }
+
   // 07xx, +2547xx and 2547xx all arrive; Daraja wants the last form.
   phone = await msisdnFor(tenant.id, phone);
   if (!phone) {

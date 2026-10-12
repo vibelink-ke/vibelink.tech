@@ -754,6 +754,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   // DNS" and similar) can never resolve HOTSPOT_DNS at all; an IP needs no
   // lookup. null only for a malformed/unreadable network setting.
   var HOTSPOT_GATEWAY = ${JSON.stringify(hotspotGateway)};
+  // This phone's own address (filled in by the router), sent with a purchase so the paid voucher can sign this same phone in by itself.
+  var DEVICE_MAC = ${JSON.stringify(macToken)};
 
   /**
    * A quiet inline note next to the pay button was easy to miss — a guest
@@ -1090,7 +1092,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       fetch(API + '/hotspot/buy', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value, routerId: ROUTER_ID }),
+        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value, routerId: ROUTER_ID, mac: (DEVICE_MAC && DEVICE_MAC.indexOf('$') !== 0) ? DEVICE_MAC : '' }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {

@@ -3438,3 +3438,16 @@ begin
   end if;
   return true;
 end $fn$;
+
+-- The phone a hotspot purchase was started from. The login page sends its device address when someone taps Buy; when the payment
+-- arrives, the voucher is created already tied to that device, so the router signs the phone in by itself (no code to type, and
+-- no page that has to stay open while the guest is in the M-Pesa app). Kept by checkout and by phone; old rows are not needed.
+create table if not exists hotspot_pending_devices (
+  tenant_id   uuid not null references tenants on delete cascade,
+  checkout_id text not null,
+  phone       text,
+  mac         text not null,
+  created_at  timestamptz not null default now(),
+  primary key (tenant_id, checkout_id)
+);
+create index if not exists hotspot_pending_devices_phone on hotspot_pending_devices (tenant_id, phone, created_at desc);

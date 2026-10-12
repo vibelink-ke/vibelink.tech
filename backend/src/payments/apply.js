@@ -207,7 +207,27 @@ export async function applyPayment(tenantId, tx) {
       return { paymentId, applied: true, ...r };
     }
 
-    const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, target.mac);
+    // A phone that started this purchase from the login page: its device is known, so the voucher is tied to it from the start and the
+    // router signs it in by itself. (target.mac is the other thing, the TV flow's own device; it is not touched.)
+    let buyerMac = target.mac ?? null;
+    if (!buyerMac) {
+      try {
+        const { rows: [pd] } = await c.query(
+          `select mac from hotspot_pending_devices
+            where tenant_id = $1 and created_at > now() - interval '30 minutes'
+              and (checkout_id = $2 or (phone is not null and right(regexp_replace(phone, '[^0-9]', '', 'g'), 9) = right(regexp_replace($3, '[^0-9]', '', 'g'), 9)))
+            order by (checkout_id = $2) desc, created_at desc limit 1`,
+          [tenantId, String(tx.payload?.checkoutId ?? ''), String(tx.phone ?? '')]);
+        buyerMac = pd?.mac ?? null;
+        // A device that already has a running voucher is left as it is: the address came from a public request, and this must never be
+        // a way to replace another phone's automatic sign-in with a shorter or cheaper one.
+        if (buyerMac) {
+          const { rows: [busy] } = await c.query("select 1 from vouchers where tenant_id=$1 and mac=$2::macaddr and status='in_use' and expires_at > now() limit 1", [tenantId, buyerMac]);
+          if (busy) buyerMac = null;
+        }
+      } catch { /* before the table exists: the voucher is issued exactly as it always was */ }
+    }
+    const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, buyerMac);
     await c.query("update payments set status='applied', voucher_id=$2, service='hotspot', applied_at=now() where id=$1", [paymentId, v.id]);
     // Loyalty points for this purchase (off unless the tenant turned them on; never affects the payment).
     const loyalty = await awardForPayment(c, tenantId, { paymentId, phone: tx.phone, amount: tx.amount });
