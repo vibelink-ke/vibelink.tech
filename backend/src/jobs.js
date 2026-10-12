@@ -67,6 +67,8 @@ export async function quietRouterLogs() {
     try {
       conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 6 });
       changed += await ros.quietHotspotLog(conn);
+      // PPPoE routers: a longer keepalive, so a short stall on a customer's line does not make the router drop and re-dial them.
+      if (r.role === 'pppoe' || r.role === 'both') await ros.ensurePppoeKeepalive(conn, 60);
       // The voucher profiles (idle and keepalive never end a running voucher) on every hotspot router; a router already right is left alone.
       if (r.role === 'hotspot' || r.role === 'both') {
         if (!settings.has(r.tenant_id)) {

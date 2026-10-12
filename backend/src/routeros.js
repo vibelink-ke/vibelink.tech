@@ -2291,6 +2291,8 @@ export async function applyPppoeServer(conn, {
     // All four work against a Cleartext-Password in radcheck, and the client
     // picks the strongest both ends share.
     '=authentication=pap,chap,mschap1,mschap2',
+    // Sixty seconds, not RouterOS's ten: a short stall on a customer's line must not cost them a re-dial (see ensurePppoeKeepalive).
+    '=keepalive-timeout=60',
   ];
   const server = (await conn.write('/interface/pppoe-server/server/print', [`?interface=${bridge}`]))[0];
   if (server) {
@@ -2794,6 +2796,28 @@ export async function removeLocalCopies(conn, { hotspotNames = [], pppNames = []
     }
   } catch (e) { out.ppp.error = e.message; }
   return out;
+}
+
+/**
+ * PPPoE keepalive. RouterOS ends a customer's session ("terminating... - peer is not responding") when their line has not answered its
+ * checks for keepalive-timeout seconds, and the default is only 10. On a busy or slightly lossy line, a wireless link most of all, a
+ * stall of more than ten seconds then costs the customer a full re-dial: some seconds with no internet while it reconnects. Sixty
+ * seconds lets an ordinary stall pass; a line that is truly gone is still cleared within the minute.
+ */
+export async function ensurePppoeKeepalive(conn, seconds = 60) {
+  let changed = 0;
+  try {
+    const servers = await conn.write('/interface/pppoe-server/server/print', []);
+    for (const sv of servers) {
+      const have = String(sv['keepalive-timeout'] ?? '').replace(/s$/, '');
+      if (have === String(seconds)) continue;
+      await conn.write('/interface/pppoe-server/server/set', [`=.id=${idOf(sv)}`, `=keepalive-timeout=${seconds}`]);
+      changed += 1;
+    }
+  } catch (e) {
+    console.warn('ensurePppoeKeepalive:', e.message);
+  }
+  return changed;
 }
 
 /**
