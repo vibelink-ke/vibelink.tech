@@ -52,14 +52,18 @@ echo "== ssh"
 WHO="${SUDO_USER:-root}"; HOME_DIR=$(getent passwd "$WHO" | cut -d: -f6)
 if [ -s "$HOME_DIR/.ssh/authorized_keys" ]; then
   if [ "$APPLY" -eq 1 ]; then
-    cat > /etc/ssh/sshd_config.d/99-hardening.conf <<'SSH'
+    # Named 00- on purpose: sshd keeps the FIRST value it reads for a setting, and files load in name order, so a 50-cloud-init.conf
+    # saying PasswordAuthentication yes beat a 99- file and left passwords on.
+    rm -f /etc/ssh/sshd_config.d/99-hardening.conf
+    cat > /etc/ssh/sshd_config.d/00-hardening.conf <<'SSH'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 MaxAuthTries 4
 LoginGraceTime 30
 SSH
-    sshd -t && systemctl reload ssh || systemctl reload sshd
+    sshd -t && { systemctl reload ssh || systemctl reload sshd; }
+    if sshd -T | grep -qi '^passwordauthentication no'; then echo "SSH passwords are off"; else echo "WARNING: sshd still allows passwords. Look at: grep -ri PasswordAuthentication /etc/ssh/sshd_config /etc/ssh/sshd_config.d/"; fi
   else
     echo "would turn off SSH password logins (a key is installed for $WHO)"
   fi
