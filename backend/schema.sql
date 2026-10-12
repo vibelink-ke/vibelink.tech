@@ -3408,3 +3408,33 @@ create table if not exists access_code_devices (
   added_at  timestamptz not null default now(),
   primary key (tenant_id, username, mac)
 );
+
+-- A TV added from the Add TV / console page is tied to its MAC: a voucher bought for a TV, or a generated one activated on a TV,
+-- can only be used from the TV's own device(s); typing its code on anything else is refused. (Replaces the earlier version of
+-- this function: access codes behave as before, and vouchers are now checked too.)
+create or replace function access_code_mac_ok(p_user text, p_mac text, p_nas text) returns boolean language plpgsql as $fn$
+declare t uuid; c record; n int; vv record;
+begin
+  select r.tenant_id into t from routers r where host(r.host) = p_nas limit 1;
+  if t is null then return true; end if;
+
+  select lock_mac, max_devices into c from hotspot_access_codes where tenant_id = t and username = p_user;
+  if found then
+    if not c.lock_mac then return true; end if;
+    if p_mac is null or p_mac = '' then return false; end if;
+    if exists (select 1 from hotspot_access_code_macs where tenant_id = t and username = p_user and mac = upper(p_mac)) then return true; end if;
+    select count(*) into n from hotspot_access_code_macs where tenant_id = t and username = p_user;
+    if n >= c.max_devices then return false; end if;
+    insert into hotspot_access_code_macs (tenant_id, username, mac) values (t, p_user, upper(p_mac)) on conflict do nothing;
+    return true;
+  end if;
+
+  -- A voucher that belongs to a TV or console (its own MAC is one of its registered devices) works only from those devices.
+  select v.id, v.mac into vv from vouchers v where v.tenant_id = t and v.code = p_user;
+  if found and vv.mac is not null
+     and exists (select 1 from voucher_devices d where d.voucher_id = vv.id and d.mac = vv.mac) then
+    if p_mac is null or p_mac = '' then return false; end if;
+    return exists (select 1 from voucher_devices d where d.voucher_id = vv.id and upper(d.mac::text) = upper(p_mac));
+  end if;
+  return true;
+end $fn$;

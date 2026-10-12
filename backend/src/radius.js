@@ -1181,6 +1181,10 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false, { only
       framedIp = live?.ip;
     } catch { /* the router-reported table may not have it either */ }
   }
+  // Only a hotspot guest is matched by address. A PPPoE session is found by its id or username, and a CoA that also carries a
+  // Framed-IP-Address makes the router look that address up among its hotspot hosts first: for a customer parked on the expired
+  // range there is no such host, and every one of those requests came out as a red "Radius request for unknown ip" line.
+  if (!onlyIfOnline) framedIp = undefined;
   if (onlyIfOnline && !sessionId && !framedIp) return { ok: true, skipped: true };
 
   const result = await coaClient.send({
