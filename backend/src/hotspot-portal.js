@@ -144,7 +144,7 @@ export function loginPage(opts = {}) {
     const mpesa = block.slice(ma, mb + '<!--MPESA-END-->'.length).replace('class="reveal" id="mpesaBox"', 'class="reveal on" id="mpesaBox"');
     block = block.slice(0, ma) + block.slice(mb + '<!--MPESA-END-->'.length);
     block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
-    top = '<p class="hint" style="margin:6px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
+    top = mpesa;
   }
   // The "I already have an active bundle" button goes first, at the very top.
   const ra = block.indexOf('<!--RECON-START-->');
@@ -477,6 +477,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .reveal { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:10px;
             background:var(--bg); display:none; }
   .reveal.on { display:block; }
+  /* The M-Pesa code box: kept small, it is a side door and not the main thing on the page. */
+  #mpesaBox { margin-top:6px; padding:8px; }
+  #mpesaBox label { margin:0 0 3px; font-size:11.5px; }
+  #mpesaBox input { padding:6px 9px; }
+  #mpesaBox button { margin-top:6px; padding:8px; font-size:13px; }
+  #mpesaBox .hint { margin:4px 0 0; }
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
   .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }

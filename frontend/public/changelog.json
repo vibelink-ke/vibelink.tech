@@ -164,7 +164,8 @@
       "Payments: a hotspot payment is never held up by the 'which phone paid' lookup. It now runs on its own connection, so a missing table or an error there cannot stop the voucher being issued.",
       "Payments → Reconcile statement: also takes a plain list of \"CODE amount phone\", never applies a code that is already on file under any channel, and lists what happened to each line.",
       "SMS: a code text sent through the shared SMS relay is retried (up to three tries) when the relay answers 502 or times out, so a customer who just paid is no longer left without their code by a passing glitch.",
-      "Security: reconnecting a phone that already has a running bundle no longer reveals the voucher code. The server asks the router to sign that device in itself, so naming someone else's device address can no longer get you their code."
+      "Security: reconnecting a phone that already has a running bundle no longer reveals the voucher code. The server asks the router to sign that device in itself, so naming someone else's device address can no longer get you their code.",
+      "Hotspot login: the M-Pesa code box is smaller and no longer has the instruction line above it."
     ]
   }
 ]
