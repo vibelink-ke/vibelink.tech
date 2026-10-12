@@ -566,8 +566,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
-    <p class="hint" style="font-size:15px;margin-top:10px">
-      <a href="javascript:void(0)" id="userPassToggle" style="display:inline-block;padding:6px 4px;font-weight:600">Have a username and password instead?</a>
+    <p class="hint" style="font-size:16px;margin-top:10px">
+      <a href="javascript:void(0)" id="userPassToggle" style="display:inline-block;padding:8px 4px;font-size:16px;font-weight:700">Have a username and password instead?</a>
     </p>
     <p class="hint" style="display:none">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
@@ -1404,8 +1404,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .hint { margin:6px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
   .err { margin:10px 0 0; padding:9px 11px; border-radius:8px; font-size:14px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
-  .toggle { text-align:center; font-size:13px; color:var(--muted); }
-  .toggle a { color:var(--green); font-weight:600; text-decoration:none; }
+  .toggle { text-align:center; font-size:15px; color:var(--muted); }
+  .toggle a { display:inline-block; padding:8px 4px; color:var(--green); font-size:16px; font-weight:700; text-decoration:underline; }
   .add { width:auto; margin-top:0; padding:8px 14px; font-size:13.5px; }
   /* Same popup as the sign-in page — see its stylesheet for why this
      replaces a quiet inline note for a moment that matters this much. */
