@@ -566,8 +566,8 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
-    <p class="hint">
-      <a href="javascript:void(0)" id="userPassToggle">Have a username and password instead?</a>
+    <p class="hint" style="font-size:15px;margin-top:10px">
+      <a href="javascript:void(0)" id="userPassToggle" style="display:inline-block;padding:6px 4px;font-weight:600">Have a username and password instead?</a>
     </p>
     <p class="hint" style="display:none">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
