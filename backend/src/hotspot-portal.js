@@ -144,7 +144,7 @@ export function loginPage(opts = {}) {
     const mpesa = block.slice(ma, mb + '<!--MPESA-END-->'.length).replace('class="reveal" id="mpesaBox"', 'class="reveal on" id="mpesaBox"');
     block = block.slice(0, ma) + block.slice(mb + '<!--MPESA-END-->'.length);
     block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
-    top = '<p class="hint" style="margin:14px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
+    top = '<p class="hint" style="margin:6px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
   }
   return html.slice(0, a) + top + html.slice(b + END.length, dest) + block + html.slice(dest);
 }
@@ -370,11 +370,11 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
      custom value is ignored, not an error) also avoids the extra scroll
      gap mobile Chrome adds when 100vh includes the address bar's height. */
   body { margin:0; min-height:100vh; min-height:100dvh; display:flex; align-items:flex-start; justify-content:center;
-         background:var(--bg); color:var(--ink); padding:20px;
-         font:14.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; margin-top:${tvMode ? '0' : 'max(5vh, 16px)'};
+         background:var(--bg); color:var(--ink); padding:12px;
+         font:13.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { width:100%; max-width:${tvMode ? '620px' : '440px'}; margin-top:${tvMode ? '0' : 'max(2vh, 6px)'};
           background:var(--card); border:1px solid var(--line); border-radius:var(--rad);
-          padding:${tvMode ? '40px 34px' : '26px 22px'}; }
+          padding:${tvMode ? '40px 34px' : '16px 14px'}; }
   /* Television: read from a sofa, and typed with a remote. Everything scales up
      and the code box gets wide, spaced characters so a wrong digit is obvious
      from across the room. A TV's screen is short and wide rather than tall, so
@@ -389,43 +389,43 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .plan strong { font-size:21px; }
   .meta, .hint { font-size:16px !important; }
   ` : ''}
-  h1 { margin:0 0 2px; font-size:21px; }
-  .sub { margin:0 0 18px; color:var(--muted); font-size:13.5px; }
-  label { display:block; font-size:13px; color:var(--muted); margin:12px 0 5px; }
+  h1 { margin:0 0 2px; font-size:18px; }
+  .sub { margin:0 0 10px; color:var(--muted); font-size:12.5px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
   /* Background is a fixed light color regardless of template, so the text
      color has to be fixed dark too — using var(--ink) here made typed text
      on the 'dark' template (near-white ink) nearly invisible against this
      always-light field. */
-  input { width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--line);
-          border-radius:9px; background:#fafbf9; color:#161a17; }
+  input { width:100%; padding:8px 10px; font-size:16px; border:1px solid var(--line);
+          border-radius:8px; background:#fafbf9; color:#161a17; }
   /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
      focus, which shoves the form off screen on the phones most guests use. */
-  button { width:100%; margin-top:16px; padding:12px; font-size:15px; font-weight:600;
+  button { width:100%; margin-top:10px; padding:10px; font-size:14px; font-weight:600;
            color:var(--btnInk); background:var(--green); border:0; border-radius:9px; cursor:pointer; }
-  .plans { list-style:none; margin:20px 0 0; padding:16px 0 0; border-top:1px solid var(--line); }
-  .plans-title { font-size:13px; color:var(--muted); margin:0 0 10px; }
+  .plans { list-style:none; margin:12px 0 0; padding:10px 0 0; border-top:1px solid var(--line); }
+  .plans-title { font-size:12px; color:var(--muted); margin:0 0 6px; }
   /* Three parts now, not two: name (grows to fill the row), then price and
      Buy sitting together at the end — price is no longer the button, so
      space-between alone would strand it in the middle of the row instead of
      next to the action it describes. */
-  .plan { display:flex; align-items:center; gap:14px;
-          padding:10px 0; border-bottom:1px solid var(--line); }
+  .plan { display:flex; align-items:center; gap:10px;
+          padding:7px 0; border-bottom:1px solid var(--line); }
   .plan:last-child { border-bottom:0; }
   .plan-name { min-width:0; flex:1 1 auto; }
-  .plan-name strong { display:block; font-size:14.5px; }
-  .meta { display:block; color:var(--muted); font-size:12.5px; white-space:nowrap; }
+  .plan-name strong { display:block; font-size:13.5px; }
+  .meta { display:block; color:var(--muted); font-size:11.5px; white-space:nowrap; }
   .price { font-weight:600; white-space:nowrap; flex:0 0 auto; }
   /* width:auto and margin-top:0 undo the global button rule above, which exists
      for Connect. Without them every price button stretched to the full width of
      the card and squeezed the bundle name into a two-line column. */
-  .buy { width:auto; margin-top:0; padding:8px 14px; font-size:14px; font-weight:600;
+  .buy { width:auto; margin-top:0; padding:6px 11px; font-size:13px; font-weight:600;
          white-space:nowrap; color:var(--btnInk); background:var(--green); border:0;
-         border-radius:8px; cursor:pointer; min-width:96px; }
+         border-radius:8px; cursor:pointer; min-width:84px; }
   .buy:hover { background:var(--greenDark); }
   /* bigCta templates: the row itself is the button (no separate .buy button
      rendered inside it), so it needs its own tap affordance and a bigger
      hit area than a plain list row. */
-  li.plan.bigcta { cursor:pointer; padding:16px 4px; }
+  li.plan.bigcta { cursor:pointer; padding:11px 4px; }
   /* bigCta rows carry class="buy" too (see planCards above) purely so the
      click handler's existing 'was this a buy tap' check keeps working —
      .buy's solid accent background/text-color rules are NOT wanted here:
@@ -438,37 +438,37 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .plan .chev { color:var(--muted); font-size:22px; flex:0 0 auto; line-height:1; }
   /* grid: bundles as self-contained tiles, two per row, instead of full-width
      rows separated by a bottom border. */
-  .plans.grid { display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  .plans.grid { display:grid; grid-template-columns:1fr 1fr; gap:8px;
                 border-top:0; padding-top:0; }
   .plans.grid .plan { flex-direction:column; align-items:flex-start; gap:6px;
                        border:1px solid var(--line); border-radius:10px;
-                       padding:12px; }
+                       padding:9px; }
   .plans.grid .plan-name { width:100%; }
   .plans.grid .price { align-self:flex-start; }
   /* A whole tappable tile doesn't need the ">" affordance the list layout uses. */
   .plans.grid .chev { display:none; }
-  .codebox { margin:0 0 4px; padding:14px 14px 4px; border-radius:12px;
+  .codebox { margin:0 0 4px; padding:10px 10px 2px; border-radius:12px;
              background:var(--card); border:2px solid var(--green); }
-  .banner { margin:0 0 16px; padding:10px 12px; border-radius:10px; font-size:13.5px;
+  .banner { margin:0 0 10px; padding:7px 10px; border-radius:10px; font-size:12.5px;
             text-align:center; background:var(--card); border:1px dashed var(--line);
             color:var(--muted); }
   .banner a { font-weight:600; }
-  .pay { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+  .pay { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px;
          background:var(--bg); display:none; }
   .pay.on { display:block; }
   .pay h2 { margin:0 0 4px; font-size:15px; }
   /* Shared by the M-Pesa-code-recovery box below the login form — same
      reveal-panel shape as .pay/.chat, distinct name since it isn't either
      of those specific panels. */
-  .reveal { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+  .reveal { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:10px;
             background:var(--bg); display:none; }
   .reveal.on { display:block; }
   .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
           background:#e8f3ee; border:1px solid #b9dccd; }
   .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }
-  .chat-open { width:auto; margin:16px auto 0; display:block; padding:8px 14px; font-size:13.5px;
+  .chat-open { width:auto; margin:10px auto 0; display:block; padding:6px 12px; font-size:12.5px;
                background:transparent; color:var(--green); border:1px solid var(--green); }
-  .chat { margin-top:14px; padding:14px; border:1px solid var(--line); border-radius:10px;
+  .chat { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px;
           background:var(--bg); display:none; }
   .chat.on { display:block; }
   .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
@@ -476,13 +476,13 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
   .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
-  .hint { margin:10px 0 0; font-size:13px; color:var(--muted); text-align:center; }
-  .foot { margin:22px 0 0; padding-top:12px; border-top:1px solid var(--line); display:flex; justify-content:space-between;
+  .hint { margin:6px 0 0; font-size:12px; color:var(--muted); text-align:center; }
+  .foot { margin:14px 0 0; padding-top:8px; border-top:1px solid var(--line); display:flex; justify-content:space-between;
           flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
-  .note { margin:0 0 16px; padding:9px 11px; border-radius:8px; font-size:14px;
+  .note { margin:0 0 10px; padding:7px 9px; border-radius:8px; font-size:13px;
           color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
   .err:empty { display:none; }
-  .err { margin:0 0 14px; padding:9px 11px; border-radius:8px; font-size:14.5px;
+  .err { margin:0 0 8px; padding:7px 9px; border-radius:8px; font-size:13.5px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   a { color:var(--green); }
   /* A quiet inline note was easy to miss on a phone screen that had just
@@ -1344,25 +1344,25 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   :root { --ink:#161a17; --muted:#8a9186; --line:rgba(128,128,128,.25); --green:#0f7a5f; --bg:#f5f6f3; --card:#fff; }
   * { box-sizing: border-box; }
   body { margin:0; min-height:100vh; background:var(--bg); color:var(--ink); padding:20px;
-         font:14.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
-  .card { max-width:440px; margin:0 auto 14px; background:var(--card); border:1px solid var(--line);
+         font:13.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { max-width:440px; margin:0 auto 10px; background:var(--card); border:1px solid var(--line);
           border-radius:14px; padding:22px; }
-  h1 { margin:0 0 4px; font-size:20px; }
+  h1 { margin:0 0 3px; font-size:18px; }
   h2 { margin:0 0 4px; font-size:15px; }
-  .sub { margin:0 0 16px; color:var(--muted); font-size:14px; }
-  input { width:100%; padding:10px 12px; font-size:16px; border:1px solid var(--line);
+  .sub { margin:0 0 10px; color:var(--muted); font-size:13px; }
+  input { width:100%; padding:8px 10px; font-size:16px; border:1px solid var(--line);
           border-radius:9px; background:#fafbf9; color:#161a17; }
-  button { width:100%; margin-top:12px; padding:13px; font-size:16px; font-weight:600;
+  button { width:100%; margin-top:8px; padding:10px; font-size:14.5px; font-weight:600;
            color:#fff; background:var(--green); border:0; border-radius:9px; cursor:pointer; }
   button:disabled { opacity:.6; cursor:default; }
   .device, .plan { display:flex; justify-content:space-between; align-items:center; gap:12px;
-            padding:12px 10px; border:1px solid var(--line); border-radius:10px; margin-top:8px; cursor:pointer; }
+            padding:8px 9px; border:1px solid var(--line); border-radius:10px; margin-top:6px; cursor:pointer; }
   .device.on, .plan.on { border-color:var(--green); background:#eef7f1; }
   .device-name, .plan-name { font-weight:600; font-size:14.5px; }
   .device-meta, .plan-meta { color:var(--muted); font-size:13px; }
   .plan-price { font-weight:700; color:var(--green); font-size:14.5px; white-space:nowrap; }
-  .label { margin:16px 0 0; font-size:13px; font-weight:600; color:var(--muted); }
-  .hint { margin:10px 0 0; font-size:13.5px; color:var(--muted); text-align:center; }
+  .label { margin:10px 0 0; font-size:12px; font-weight:600; color:var(--muted); }
+  .hint { margin:6px 0 0; font-size:12.5px; color:var(--muted); text-align:center; }
   .err { margin:10px 0 0; padding:9px 11px; border-radius:8px; font-size:14px;
          color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
   .toggle { text-align:center; font-size:13px; color:var(--muted); }
