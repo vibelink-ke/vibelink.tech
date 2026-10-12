@@ -1564,8 +1564,8 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
 
-  const mac = String(req.query.mac ?? '').trim().toLowerCase();
-  if (!mac || mac === '00:00:00:00:00:00') return res.json({ code: null });
+  const mac = String(req.query.mac ?? '').trim().toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac) || mac === '00:00:00:00:00:00') return res.json({ code: null, connected: false });
 
   await pool.query(
     `update vouchers set status='expired'
@@ -1577,16 +1577,50 @@ app.get('/hotspot/voucher-for-mac', pollLimiter, wrap(async (req, res) => {
   // too — not just the one the voucher was originally bought from.
   const { rows: [v] } = await pool.query(
     `select v.code from vouchers v
-      where v.tenant_id=$1 and lower(v.mac::text)=$2 and v.status='in_use'
+      where v.tenant_id=$1 and upper(v.mac::text)=$2 and v.status='in_use'
         and (v.expires_at is null or v.expires_at > now())
       union all
       select v.code from voucher_devices d
       join vouchers v on v.id = d.voucher_id
-      where v.tenant_id=$1 and lower(d.mac::text)=$2 and v.status='in_use'
+      where v.tenant_id=$1 and upper(d.mac::text)=$2 and v.status='in_use'
         and (v.expires_at is null or v.expires_at > now())
       limit 1`,
     [tenant.id, mac]);
-  res.json({ code: v?.code ?? null });
+  if (!v) return res.json({ code: null, connected: false });
+
+  /**
+   * The code is NEVER sent back. This used to answer with the voucher code for whatever device address was named, and a device
+   * address is visible to everybody on the same Wi-Fi, so anyone could ask for someone else's code and use it. Now the server
+   * asks the router, which can see who is really there: if a device with this address is waiting to sign in, the router signs
+   * THAT device in with its own voucher. Someone naming another phone's address only ever gets that phone connected, with its
+   * own paid bundle, and learns nothing.
+   */
+  const routerHint = String(req.query.router ?? '').trim();
+  const { rows: routers } = await pool.query(
+    `select id, host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null and service_password_enc is not null
+      order by (id::text = $2) desc, name limit 8`, [tenant.id, routerHint]);
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  for (const r of routers) {
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 4 });
+      const hosts = await conn.write('/ip/hotspot/host/print', [`?mac-address=${mac}`]).catch(() => []);
+      if (!hosts.length) continue;                                        // not on this router
+      if (hosts.some((h) => String(h.authorized) === 'true')) return res.json({ code: null, connected: true, already: true });
+      const host = hosts.find((h) => h.address);
+      if (!host) continue;
+      // A voucher's password is its code (see issueVoucherAccess).
+      await conn.write('/ip/hotspot/active/login', [`=user=${v.code}`, `=password=${v.code}`, `=ip=${host.address}`, `=mac-address=${mac}`]);
+      return res.json({ code: null, connected: true });
+    } catch (e) {
+      console.warn('voucher-for-mac: router login failed:', e.message);
+    } finally {
+      if (conn) ros.close(conn);
+    }
+  }
+  res.json({ code: null, connected: false });
 }));
 
 /**

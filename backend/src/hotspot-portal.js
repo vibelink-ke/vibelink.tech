@@ -956,11 +956,11 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     if (prefillCode && !hadError) {
       submitHotspotLogin(prefillCode);
     } else if (mac && mac.indexOf('\$') !== 0 && !hadError) {
-      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
+      // The server now signs this device in itself (it no longer hands the code back); the page below then notices and says so.
+      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac) + (ROUTER_ID ? '&router=' + encodeURIComponent(ROUTER_ID) : ''))
         .then(function (r) { return r.json(); })
         .then(function (d) {
-          if (!d.code) return;
-          submitHotspotLogin(d.code);
+          if (d && d.code) submitHotspotLogin(d.code);   // an older server that still answers with the code
         })
         .catch(function () { /* stay on the manual form — nothing to recover from here */ });
     }
@@ -1407,11 +1407,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       if (!mac || mac.indexOf('$') === 0) { note.textContent = 'Open this page from the Wi-Fi login screen, then try again.'; return; }
       btn.disabled = true;
       note.textContent = 'Looking for your active bundle...';
-      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
+      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac) + (ROUTER_ID ? '&router=' + encodeURIComponent(ROUTER_ID) : ''))
         .then(function (r) { return r.json(); })
         .then(function (d) {
           btn.disabled = false;
-          if (d && d.code) { note.textContent = 'Found it, connecting...'; submitHotspotLogin(d.code); }
+          if (d && d.connected) { note.textContent = 'Found your bundle. You are being connected...'; }
+          else if (d && d.code) { note.textContent = 'Found it, connecting...'; submitHotspotLogin(d.code); }
           else note.textContent = 'No active bundle found for this phone. Type your voucher code, use your M-Pesa code, or buy a bundle below.';
         })
         .catch(function () { btn.disabled = false; note.textContent = 'Could not reach the server. Try again.'; });
