@@ -557,6 +557,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         <input id="username" name="username" type="text" inputmode="numeric"
                autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
                spellcheck="false" placeholder="Type the code from your voucher">
+        <p class="hint" id="codeHint" style="color:#b85c1a"></p>
       </div>
       <!--
         A separate mode, not a second always-visible pair of fields — every
@@ -869,6 +870,26 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     } else {
       var code = document.getElementById('username').value.trim();
       if (!code) return;
+      // The wrong thing is often typed into this box: a phone number, or the M-Pesa receipt code from the payment SMS. Say so, or
+      // (for the receipt) go and find the voucher, instead of letting the router answer a bare "invalid username or password".
+      var hint = document.getElementById('codeHint');
+      var plain = code.split(' ').join('');
+      if (/^([+]?254|0)[17][0-9]{8}$/.test(plain)) {
+        if (hint) hint.textContent = 'That is a phone number, not a voucher code. Type the code from your voucher, or tap "Paid with M-Pesa? Sign in with your phone number" below.';
+        return;
+      }
+      if (/^[A-Za-z][A-Za-z0-9]{9}$/.test(plain) && /[0-9]/.test(plain)) {
+        if (hint) hint.textContent = 'That looks like an M-Pesa code. Looking up your voucher...';
+        fetch(API + '/hotspot/voucher-by-mpesa?code=' + encodeURIComponent(plain.toUpperCase()))
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (res.ok && res.d && res.d.code) { if (hint) hint.textContent = 'Found it, connecting...'; submitHotspotLogin(res.d.code); }
+            else { if (hint) hint.textContent = ''; submitHotspotLogin(code); }
+          })
+          .catch(function () { if (hint) hint.textContent = ''; submitHotspotLogin(code); });
+        return;
+      }
+      if (hint) hint.textContent = '';
       submitHotspotLogin(code);
     }
   }
