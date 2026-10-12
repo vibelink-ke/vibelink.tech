@@ -137,7 +137,8 @@
       "Router logs: the red \"Radius request for unknown ip 10.250.x.x\" lines are gone — PPPoE changes no longer carry an address that makes the hotspot look for a guest. A voucher bought or activated for a TV on the Add TV / console page now works only on that TV.",
       "Router logs: no more red \"Radius with no ip provided\" / \"unknown ip\" lines — changes for a customer who is not online on the router are no longer sent to it; they apply when the customer next connects.",
       "Hotspot Configure now keeps only the red RADIUS error lines (\"Radius with no ip provided\", \"unknown ip\") out of the router log; other hotspot messages, including failed guest logins, still show.",
-      "Router logs: the server now sets every router's log rules itself (shortly after the app starts, then hourly), so the red RADIUS error lines disappear on all routers without a Configure."
+      "Router logs: the server now sets every router's log rules itself (shortly after the app starts, then hourly), so the red RADIUS error lines disappear on all routers without a Configure.",
+      "Security: the database port is no longer published to the internet, security headers and request limits on every site, a flood limit and tighter limits on sign-up and live chat, slow-connection timeouts, and updated libraries that fix reported vulnerabilities (including a mail-library flaw that could expose one ISP's SMTP login to another)."
     ]
   }
 ]

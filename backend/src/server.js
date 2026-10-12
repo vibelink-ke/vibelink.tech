@@ -82,6 +82,18 @@ const app = express();
  * current; there is nothing worth this trade for either kind.
  */
 app.set('etag', false);
+app.disable('x-powered-by');
+app.use((req, res, next) => { res.set('X-Content-Type-Options', 'nosniff'); next(); });
+
+// Everything below this is behind one flood ceiling per address. Guests share their router's address, so it is far above what a
+// real site does (the portal's own polling alone is allowed 4000/min); it exists to turn a flood into cheap 429s. Payment
+// webhooks, RADIUS and the health check are exempt. It does not replace an upstream DDoS shield for volumetric attacks.
+const floodLimiter = rateLimit({
+  windowMs: 60 * 1000, max: 6000, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many requests. Slow down and try again.' },
+  skip: (req) => req.path === '/healthz' || req.path.startsWith('/webhooks/') || req.path.startsWith('/radius/') || req.path.startsWith('/internal/'),
+});
+app.use(floodLimiter);
 app.use((req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
@@ -185,6 +197,17 @@ const stkPhoneLimiter = rateLimit({
   message: { error: 'Too many payment attempts for this number. Try again in a few minutes.' },
 });
 const stkLimiter = stkPhoneLimiter;
+// Opening live chats and sending messages are open to anyone on the hotspot, so they get a ceiling too (per site, like the
+// poll above): enough for a busy site, not enough to fill the staff queue with junk.
+const chatStartLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, max: 120, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many chats started. Try again shortly.' },
+});
+const chatMessageLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000, max: 1500, standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many messages. Try again shortly.' },
+});
+
 // The guest's own page polls this every few seconds while waiting on M-Pesa,
 // so the ceiling is generous — this exists to stop someone using the poll
 // endpoint to brute-force checkoutId values, not to slow down a real wait.
@@ -498,7 +521,7 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
 }));
 
 /** Provisions a tenant plus its owner in one transaction. */
-app.post('/api/auth/signup', wrap(async (req, res) => {
+app.post('/api/auth/signup', loginLimiter, wrap(async (req, res) => {
   const { company, subdomain, name, email, phone, password, terms, username } = req.body;
   const sub = String(subdomain ?? '').toLowerCase().replace(/[^a-z0-9-]/g, '');
   const user = String(username ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '') || null;
@@ -2274,7 +2297,7 @@ function filter(){
  * conversation. Without it the chat id alone would let anyone read somebody
  * else's by guessing.
  */
-app.post('/chat/start', wrap(async (req, res) => {
+app.post('/chat/start', chatStartLimiter, wrap(async (req, res) => {
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
   if (!tenant) return res.status(404).json({ error: 'Unknown network' });
@@ -2344,7 +2367,7 @@ app.post('/chat/start', wrap(async (req, res) => {
 }));
 
 /** One message from the visitor. */
-app.post('/chat/:id/message', wrap(async (req, res) => {
+app.post('/chat/:id/message', chatMessageLimiter, wrap(async (req, res) => {
   const body = String(req.body?.body ?? '').trim().slice(0, 2000);
   if (!body) return res.status(400).json({ error: 'Type a message first' });
 

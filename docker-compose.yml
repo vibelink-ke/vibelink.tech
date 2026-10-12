@@ -16,7 +16,9 @@ services:
       POSTGRES_PASSWORD: secret
       POSTGRES_DB: billing
     ports:
-      - '5432:5432'
+      # Loopback only. The production file publishes nothing for the database, but Compose adds ports from every file it is given,
+      # so this line was publishing Postgres to the whole internet on the server too.
+      - '127.0.0.1:5432:5432'
     volumes:
       - billing-pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -9,6 +9,17 @@
 {
 	email {$ACME_EMAIL}
 
+	# Slow-connection attacks (a client that opens a connection and drips bytes to hold it): the whole request header must
+	# arrive in 10 seconds, the body in 30, and an idle connection is closed after 2 minutes.
+	servers {
+		timeouts {
+			read_header 10s
+			read_body 30s
+			idle 2m
+		}
+		max_header_size 16KB
+	}
+
 	on_demand_tls {
 		# Caddy asks before issuing. The API answers 200 only for a hostname that
 		# is a real tenant inside our own zone. Without this, anyone could point a
@@ -27,6 +38,7 @@
 	}
 
 	encode gzip zstd
+	import secure
 
 	# Only the marketing site (the apex) should turn up in search results. Every
 	# other name here is one ISP's own sign-in page, and indexing those would
@@ -130,5 +142,22 @@
 	log {
 		output stdout
 		format console
+	}
+}
+
+# Security headers and a ceiling on request bodies, for every site below (import secure).
+#   HSTS: browsers keep to https. nosniff / X-Frame-Options / Referrer-Policy: the usual. Server header off.
+#   max_size 30MB: the biggest legitimate body is a SkyPlan save (25MB); anything larger is cut off here, not in the app.
+(secure) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "interest-cohort=()"
+		-Server
+	}
+	request_body {
+		max_size 30MB
 	}
 }
