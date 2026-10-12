@@ -122,7 +122,12 @@ app.use('/api', auditTap);
 // rate limiting keys on Caddy's own address instead of the real client, and
 // express-rate-limit refuses to run at all once it sees X-Forwarded-For
 // without a trust setting — logging a warning on every single request.
-app.set('trust proxy', 1);
+// The address a request really came from. Caddy is one hop in front of us; when the site is behind Cloudflare, Cloudflare is
+// another, and the visitor's own address sits before both in X-Forwarded-For. Trusting only Caddy would make every visitor look like
+// a Cloudflare address, so every per-address limit (sign-in, payments, floods) would be shared by the whole world. These are
+// Caddy's own side (private addresses) and Cloudflare's published ranges; an address outside them is never believed.
+const CLOUDFLARE_RANGES = ["173.245.48.0/20","103.21.244.0/22","103.22.200.0/22","103.31.4.0/22","141.101.64.0/18","108.162.192.0/18","190.93.240.0/20","188.114.96.0/20","197.234.240.0/22","198.41.128.0/17","162.158.0.0/15","104.16.0.0/13","104.24.0.0/14","172.64.0.0/13","131.0.72.0/22","2400:cb00::/32","2606:4700::/32","2803:f800::/32","2405:b500::/32","2405:8100::/32","2a06:98c0::/29","2c0f:f248::/32"];
+app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', ...CLOUDFLARE_RANGES]);
 
 /**
  * The hotspot login page is not served from this app's own origin — it is
