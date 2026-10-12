@@ -150,7 +150,8 @@
       "SkyPlan is the Map again: the Map page opens SkyPlan loaded with the live network and customers, and new installations, customers and equipment appear in it by themselves (a quiet refresh every two minutes and whenever something new arrives). Edits are saved back. The classic map, with live online/offline colours, is one tab away.",
       "SkyPlan (skyplan.vibelink.co.ke), once connected to billing, now stays current by itself: a customer added or moved in billing appears within two minutes, without pressing Load. Unsaved design work is never overwritten. The saved billing connection is now kept per user.",
       "Hotspot login page: if the phone is signed in by its device while the page is still open (for example after the phone rejoined the Wi-Fi), the page now changes to 'You are connected' by itself instead of still showing the price list.",
-      "Hotspot: a phone that rejoined the Wi-Fi on a new address no longer gets refused as 'already logged in' by its own old session; the old one is cleared just before the new login. The login box also picks the M-Pesa code out of a whole pasted M-Pesa message."
+      "Hotspot: a phone that rejoined the Wi-Fi on a new address no longer gets refused as 'already logged in' by its own old session; the old one is cleared just before the new login. The login box also picks the M-Pesa code out of a whole pasted M-Pesa message.",
+      "Hotspot login: the 'Have a username and password instead?' link now works on its own, even if another part of the page fails to run on a customer's phone."
     ]
   }
 ]

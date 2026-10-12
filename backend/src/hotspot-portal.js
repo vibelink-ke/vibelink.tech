@@ -567,8 +567,21 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <button type="submit">Connect</button>
     </form>
     <p class="hint" style="font-size:16px;margin-top:10px">
-      <a href="javascript:void(0)" id="userPassToggle" style="display:inline-block;padding:8px 4px;font-size:16px;font-weight:700">Have a username and password instead?</a>
+      <a href="#" id="userPassToggle" onclick="return toggleUserPass();" style="display:inline-block;padding:10px 6px;font-size:16px;font-weight:700">Have a username and password instead?</a>
     </p>
+    <script>
+      function toggleUserPass() {
+        var up = document.getElementById('userPassMode');
+        var code = document.getElementById('codeMode');
+        var link = document.getElementById('userPassToggle');
+        if (!up || !code || !link) return false;
+        var toCode = up.style.display !== 'none';
+        up.style.display = toCode ? 'none' : 'block';
+        code.style.display = toCode ? 'block' : 'none';
+        link.textContent = toCode ? 'Have a username and password instead?' : 'Have a voucher code instead?';
+        return false;
+      }
+    </script>
     <p class="hint" style="display:none">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
     </p>
@@ -1283,14 +1296,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     var codeModeEl = document.getElementById('codeMode');
     var userPassModeEl = document.getElementById('userPassMode');
     var userPassToggleBtn = document.getElementById('userPassToggle');
-    userPassToggleBtn.addEventListener('click', function () {
-      var switchingToCode = userPassModeEl.style.display !== 'none';
-      userPassModeEl.style.display = switchingToCode ? 'none' : 'block';
-      codeModeEl.style.display = switchingToCode ? 'block' : 'none';
-      userPassToggleBtn.textContent = switchingToCode
-        ? 'Have a username and password instead?'
-        : 'Have a voucher code instead?';
-    });
+    // (the toggle itself is toggleUserPass(), defined beside the link)
 
     var mpesaBox = document.getElementById('mpesaBox');
     var mpesaNote = document.getElementById('mpesaNote');
