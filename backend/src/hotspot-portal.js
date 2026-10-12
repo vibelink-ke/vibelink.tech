@@ -1345,6 +1345,40 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         .catch(function () { phoneNote.textContent = 'Could not reach the server. Try again.'; });
     });
   } catch (e) { /* toggle/recovery stay unresponsive; the voucher-code field above still works */ }
+
+  // A guest can be signed in by their device a moment after this page loaded (the phone dropped and rejoined), and the page they
+  // are looking at would still show the price list, which reads as "pay again". While the page is open, ask the router whether this
+  // phone is signed in now and, if so, say so. Only for the copy served by the router itself (plain http); it never touches the
+  // login form, and it stops after 20 minutes.
+  (function watchConnected() {
+    if (location.protocol !== 'http:') return;
+    var stop = false;
+    var started = Date.now();
+    function connected() {
+      if (stop) return;
+      stop = true;
+      var card = document.querySelector('.card');
+      if (!card) return;
+      var dst = '';
+      try { dst = document.querySelector('input[name="dst"]').value; } catch (e) { dst = ''; }
+      if (dst.indexOf('http') !== 0) dst = '';
+      card.innerHTML = '<h1>You are connected</h1><p class="sub">Your internet is on. You can close this page and carry on.</p>'
+        + (dst ? '<a href="' + dst + '"><button type="button">Continue</button></a>' : '');
+    }
+    function check() {
+      if (stop || document.hidden) return;
+      if (Date.now() - started > 20 * 60 * 1000) { stop = true; return; }
+      fetch('/status?t=' + Date.now(), { cache: 'no-store' })
+        .then(function (r) { return r.text().then(function (t) { return { ok: r.ok, u: r.url, t: t }; }); })
+        .then(function (x) {
+          var low = x.t.toLowerCase();
+          // the router's status page, not our login page and not an error page
+          if (x.ok && x.t.indexOf('id="loginForm"') === -1 && x.u.indexOf('/login') === -1 && (low.indexOf('uptime') !== -1 || low.indexOf('log off') !== -1 || low.indexOf('logout') !== -1)) connected();
+        })
+        .catch(function () { /* the router could not be asked; try again next time */ });
+    }
+    setTimeout(function () { setInterval(check, 4000); }, 3000);
+  })();
   </script>
 </body>
 </html>`;

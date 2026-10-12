@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<!-- vibelink-hotspot-login -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>HOMECONNECT WiFi</title>
+
+<style>
+  :root { --ink:#eef2f0; --muted:#8a9186; --line:rgba(128,128,128,.25);
+          --green:#2fbf8f; --greenDark:#2fbf8f; --bg:#12171a;
+          --card:#1b2227; --rad:14px; --btnInk:#161a17; }
+  * { box-sizing: border-box; }
+  /* align-items:center vertically centers the card in the viewport — on a
+     phone's tall aspect ratio that leaves a huge, dead-looking blank gap
+     above and below it instead of a page that reads as designed for a
+     phone. Anchoring to the top with breathing room fixes that; 100dvh
+     (falls back to 100vh on browsers that don't know it — an invalid
+     custom value is ignored, not an error) also avoids the extra scroll
+     gap mobile Chrome adds when 100vh includes the address bar's height. */
+  body { margin:0; min-height:100vh; min-height:100dvh; display:flex; align-items:flex-start; justify-content:center;
+         background:var(--bg); color:var(--ink); padding:12px;
+         font:13.5px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .card { width:100%; max-width:440px; margin-top:max(2vh, 6px);
+          background:var(--card); border:1px solid var(--line); border-radius:var(--rad);
+          padding:16px 14px; }
+  /* Television: read from a sofa, and typed with a remote. Everything scales up
+     and the code box gets wide, spaced characters so a wrong digit is obvious
+     from across the room. A TV's screen is short and wide rather than tall, so
+     the top-anchoring above (tuned for phones) isn't needed here — centered
+     reads better on a landscape screen from a couch. */
+  
+  h1 { margin:0 0 2px; font-size:18px; }
+  .sub { margin:0 0 10px; color:var(--muted); font-size:12.5px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  /* Background is a fixed light color regardless of template, so the text
+     color has to be fixed dark too — using var(--ink) here made typed text
+     on the 'dark' template (near-white ink) nearly invisible against this
+     always-light field. */
+  input { width:100%; padding:8px 10px; font-size:16px; border:1px solid var(--line);
+          border-radius:8px; background:#fafbf9; color:#161a17; }
+  /* 16px+ on inputs is deliberate: anything smaller makes iOS Safari zoom in on
+     focus, which shoves the form off screen on the phones most guests use. */
+  button { width:100%; margin-top:10px; padding:10px; font-size:14px; font-weight:600;
+           color:var(--btnInk); background:var(--green); border:0; border-radius:9px; cursor:pointer; }
+  .plans { list-style:none; margin:12px 0 0; padding:10px 0 0; border-top:1px solid var(--line); }
+  .plans-title { font-size:12px; color:var(--muted); margin:0 0 6px; }
+  /* Three parts now, not two: name (grows to fill the row), then price and
+     Buy sitting together at the end — price is no longer the button, so
+     space-between alone would strand it in the middle of the row instead of
+     next to the action it describes. */
+  .plan { display:flex; align-items:center; gap:10px;
+          padding:7px 0; border-bottom:1px solid var(--line); }
+  .plan:last-child { border-bottom:0; }
+  .plan-name { min-width:0; flex:1 1 auto; }
+  .plan-name strong { display:block; font-size:13.5px; }
+  .meta { display:block; color:var(--muted); font-size:11.5px; white-space:nowrap; }
+  .price { font-weight:600; white-space:nowrap; flex:0 0 auto; }
+  /* width:auto and margin-top:0 undo the global button rule above, which exists
+     for Connect. Without them every price button stretched to the full width of
+     the card and squeezed the bundle name into a two-line column. */
+  .buy { width:auto; margin-top:0; padding:6px 11px; font-size:13px; font-weight:600;
+         white-space:nowrap; color:var(--btnInk); background:var(--green); border:0;
+         border-radius:8px; cursor:pointer; min-width:84px; }
+  .buy:hover { background:var(--greenDark); }
+  /* bigCta templates: the row itself is the button (no separate .buy button
+     rendered inside it), so it needs its own tap affordance and a bigger
+     hit area than a plain list row. */
+  li.plan.bigcta { cursor:pointer; padding:11px 4px; }
+  /* bigCta rows carry class="buy" too (see planCards above) purely so the
+     click handler's existing 'was this a buy tap' check keeps working —
+     .buy's solid accent background/text-color rules are NOT wanted here:
+     applied to the whole row they turned every bigCta bundle into a block
+     of solid accent color, and --muted's subtext (tuned for sitting on
+     --card/--bg) read at a barely-legible ~2:1 contrast on top of it. */
+  li.plan.bigcta.buy { background:none; color:var(--ink); border-radius:0; }
+  li.plan.bigcta.buy:hover, li.plan.bigcta.buy:active { background:rgba(127,127,127,.08); }
+  li.plan.bigcta .price { color:var(--green); }
+  .plan .chev { color:var(--muted); font-size:22px; flex:0 0 auto; line-height:1; }
+  /* grid: bundles as self-contained tiles, two per row, instead of full-width
+     rows separated by a bottom border. */
+  .plans.grid { display:grid; grid-template-columns:1fr 1fr; gap:8px;
+                border-top:0; padding-top:0; }
+  .plans.grid .plan { flex-direction:column; align-items:flex-start; gap:6px;
+                       border:1px solid var(--line); border-radius:10px;
+                       padding:9px; }
+  .plans.grid .plan-name { width:100%; }
+  .plans.grid .price { align-self:flex-start; }
+  /* A whole tappable tile doesn't need the ">" affordance the list layout uses. */
+  .plans.grid .chev { display:none; }
+  .codebox { margin:0 0 4px; padding:10px 10px 2px; border-radius:12px;
+             background:var(--card); border:2px solid var(--green); }
+  .banner { margin:0 0 10px; padding:7px 10px; border-radius:10px; font-size:12.5px;
+            text-align:center; background:var(--card); border:1px dashed var(--line);
+            color:var(--muted); }
+  .banner a { font-weight:600; }
+  .pay { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px;
+         background:var(--bg); display:none; }
+  .pay.on { display:block; }
+  .pay h2 { margin:0 0 4px; font-size:15px; }
+  /* Shared by the M-Pesa-code-recovery box below the login form — same
+     reveal-panel shape as .pay/.chat, distinct name since it isn't either
+     of those specific panels. */
+  .reveal { margin-top:8px; padding:10px; border:1px solid var(--line); border-radius:10px;
+            background:var(--bg); display:none; }
+  .reveal.on { display:block; }
+  .code { margin-top:10px; padding:12px; border-radius:9px; text-align:center;
+          background:#e8f3ee; border:1px solid #b9dccd; }
+  .code b { display:block; font-size:26px; letter-spacing:.12em; font-family:monospace; }
+  .chat-open { width:auto; margin:10px auto 0; display:block; padding:6px 12px; font-size:12.5px;
+               background:transparent; color:var(--green); border:1px solid var(--green); }
+  .chat { margin-top:10px; padding:10px; border:1px solid var(--line); border-radius:10px;
+          background:var(--bg); display:none; }
+  .chat.on { display:block; }
+  .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
+         margin:0 0 10px; }
+  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
+  .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
+  .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
+  .hint { margin:6px 0 0; font-size:12px; color:var(--muted); text-align:center; }
+  .foot { margin:14px 0 0; padding-top:8px; border-top:1px solid var(--line); display:flex; justify-content:space-between;
+          flex-wrap:wrap; gap:4px 12px; font-size:12px; color:var(--muted); }
+  .note { margin:0 0 10px; padding:7px 9px; border-radius:8px; font-size:13px;
+          color:#7d5c11; background:#fdf3dc; border:1px solid #ecd9a8; }
+  .err:empty { display:none; }
+  .err { margin:0 0 8px; padding:7px 9px; border-radius:8px; font-size:13.5px;
+         color:#8a2d16; background:#fdece5; border:1px solid #f3c7b6; }
+  a { color:var(--green); }
+  /* A quiet inline note was easy to miss on a phone screen that had just
+     been handed off to M-Pesa and back — a guest who glanced away for the
+     PIN prompt came back to text that had already changed, with nothing
+     drawing the eye to it. This sits over everything until dismissed or
+     timed out, the same weight a "payment successful" moment deserves. */
+  .popup-overlay { position:fixed; inset:0; background:rgba(15,20,17,.5);
+                    display:flex; align-items:center; justify-content:center;
+                    padding:20px; z-index:50; }
+  .popup { width:100%; max-width:360px; background:var(--card); border-radius:var(--rad);
+           padding:26px 22px; text-align:center; box-shadow:0 20px 50px rgba(0,0,0,.25); }
+  .popup .icon { width:52px; height:52px; margin:0 auto 12px; border-radius:50%;
+                 display:flex; align-items:center; justify-content:center; font-size:26px; }
+  .popup.success .icon { background:#e8f3ee; color:var(--green);
+                          animation:pop-in .35s cubic-bezier(.2,1.4,.4,1); }
+  .popup.notice .icon { background:#fdf3dc; color:#a9790f; }
+  /* Waiting on M-Pesa: a spinning ring instead of a static glyph, so "we are
+     doing something" reads at a glance rather than needing the words below
+     it to be read first — the same reason a spinner beats a bare "Loading". */
+  .popup.pending .icon { background:#eef1ed; padding:0; }
+  .popup.pending .icon::after {
+    content:''; width:26px; height:26px; border-radius:50%;
+    border:3px solid var(--line); border-top-color:var(--green);
+    animation:spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes pop-in { 0% { transform:scale(0); } 70% { transform:scale(1.15); } 100% { transform:scale(1); } }
+  .popup h3 { margin:0 0 6px; font-size:18px; }
+  .popup p { margin:0; color:var(--muted); font-size:14.5px; }
+  .popup button { margin-top:16px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <!-- Both come from Hotspot -> Settings, so the operator can change what a
+         guest reads without anyone touching this file. Falling back to the
+         company name and a plain instruction means an operator who sets neither
+         still gets a sensible page. -->
+    <h1>HOMECONNECT</h1>
+    <p class="sub">Enter your voucher code, M-Pesa code or phone number to get online</p>
+    
+    
+    
+
+    <!--
+      One field, not two.
+
+      A hotspot guest has no account. They buy a voucher and type the code, and
+      issueVoucherAccess stores that code as both the RADIUS username and its
+      Cleartext-Password — so asking for a username and a password separately
+      demanded a distinction that does not exist and left people guessing what
+      to put where.
+
+      The router's login form still wants both fields, so the code is copied
+      into a hidden password on submit. The script is inline and tiny because
+      the page is served by the router to a guest who cannot reach anything
+      else; an external file would simply not load.
+    -->
+    <!--LOGIN-START-->
+    <form id="loginForm" action="$(link-login-only)" method="post" onsubmit="event.preventDefault(); handleLoginSubmit(); return false;">
+      <!--
+        Where the guest lands once connected. An operator's configured
+        redirect (Hotspot -> Settings -> "Redirect after login") is a fixed
+        destination they chose, so it wins when set; our own confirmation
+        page is the fallback rather than $(link-orig) — see fallbackDst above
+        for why link-orig is not reliable enough to depend on by default.
+      -->
+      <input type="hidden" name="dst" value="$(link-orig)">
+      <div id="codeMode">
+        <label for="username" id="codeLabel">Voucher code, M-Pesa code or phone number</label>
+        <input id="username" name="username" type="text" inputmode="text"
+               autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
+               spellcheck="false" placeholder="Voucher, M-Pesa code or phone number">
+        <p class="hint" id="codeHint" style="color:#b85c1a"></p>
+      </div>
+      <!--
+        A separate mode, not a second always-visible pair of fields — every
+        voucher's password is the same as its code (see the note above), so
+        showing both by default just doubled the typing for no reason. This
+        exists for the rarer case of credentials that were actually issued
+        as a distinct username/password pair (staff set up by hand, or a
+        router's own local user), toggled in and out of view rather than
+        shown alongside the code field.
+      -->
+      <div id="userPassMode" style="display:none">
+        <label for="upUser">Username</label>
+        <input id="upUser" type="text" autocapitalize="none" autocorrect="off" spellcheck="false">
+        <label for="upPass">Password</label>
+        <input id="upPass" type="text" autocapitalize="none" autocorrect="off" spellcheck="false">
+      </div>
+      <input id="password" name="password" type="hidden">
+      <button type="submit">Connect</button>
+    </form>
+    <p class="hint" style="font-size:16px;margin-top:10px">
+      <a href="javascript:void(0)" id="userPassToggle" style="display:inline-block;padding:8px 4px;font-size:16px;font-weight:700">Have a username and password instead?</a>
+    </p>
+    <p class="hint" style="display:none">
+      <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
+    </p>
+    <p class="hint" style="display:none">
+      <a href="javascript:void(0)" id="phoneOpen">Paid with M-Pesa? Sign in with your phone number</a>
+    </p>
+    <!--
+      Recovers a voucher from the one thing a guest still has even when the
+      SMS never arrived: Safaricom's own confirmation, which always carries
+      the M-Pesa transaction code. /hotspot/voucher-by-mpesa looks that up
+      against payments.provider_ref (the same value applyPayment already
+      keys on) and hands back the voucher code, which is then submitted
+      exactly like one typed in by hand.
+    -->
+    <!--MPESA-START--><div class="reveal" id="mpesaBox">
+      <label for="mpesaCode">M-Pesa transaction code</label>
+      <input id="mpesaCode" type="text" placeholder="e.g. SFH7XXXXXX"
+             autocapitalize="characters" autocorrect="off" spellcheck="false">
+      <button type="button" id="mpesaGo">Find my code</button>
+      <p class="hint" id="mpesaNote"></p>
+    </div><!--MPESA-END-->
+    <!-- The number that paid, then a six-digit code texted to it (see phone-login.js): the code is
+         what proves the number is theirs. -->
+    <div class="reveal" id="phoneBox">
+      <div id="phoneStep1">
+        <label for="phoneNumber">Phone number you paid with</label>
+        <input id="phoneNumber" type="tel" inputmode="tel" placeholder="07xx xxx xxx" autocomplete="tel" maxlength="20">
+        <button type="button" id="phoneSend">Text me a code</button>
+      </div>
+      <div id="phoneStep2" style="display:none">
+        <label for="phoneOtp">6-digit code we texted you</label>
+        <input id="phoneOtp" type="text" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" maxlength="6">
+        <button type="button" id="phoneVerify">Sign in</button>
+      </div>
+      <p class="hint" id="phoneNote"></p>
+    </div>
+    <!--LOGIN-END-->
+
+    <p class="plans-title">Buy a bundle</p>
+    <ul class="plans">
+      <li class="plan">
+        <div class="plan-name">
+          <strong>1 Hour</strong>
+          <span class="meta">1 hour · 3 Mbps</span>
+        </div>
+        <span class="price">KES 20</span>
+        <button type="button" class="buy" data-plan="1"
+                data-title="1 Hour">Buy</button>
+      </li></ul>
+
+    <!-- Buying happens here rather than on another page. A guest on the walled
+         garden can reach this router and their own bank's USSD, and not much
+         else; sending them elsewhere to pay is where they give up. -->
+    <div class="pay" id="pay">
+      <h2 id="payTitle">Buy a bundle</h2>
+      <p class="hint" style="text-align:left;margin:0 0 8px">
+        Enter the M-Pesa number to pay from. The code arrives by SMS.
+      </p>
+      <input id="payPhone" type="tel" inputmode="tel" placeholder="07xx xxx xxx"
+             autocomplete="tel">
+      <button type="button" id="payGo">Send M-Pesa request</button>
+      <p class="hint" id="payNote"></p>
+      <div class="code" id="payCode" style="display:none">
+        Your code
+        <b id="payCodeValue"></b>
+        Type it above to get online.
+      </div>
+      <!-- Shown only if the in-place auto-submit below did not actually get
+           the guest online within a few seconds — see the fallback timer in
+           poll(). A fresh page load, not another form.submit() attempt: it
+           reuses the exact same auto-login path the SMS's tap-to-connect
+           link already relies on ($(...) tokens re-resolved fresh by
+           RouterOS on that new request), rather than retrying whatever
+           already failed once on this same page load. -->
+      <button type="button" id="connectNow" style="display:none">Connect now</button>
+    </div>
+    <!--LOGIN-AFTER-->
+    <!-- Support, before paying. A guest whose code will not work cannot buy
+         their way to an answer, and the operator would rather hear it now than
+         from somebody who gave up and left. -->
+    <!--
+      No longer gated on multiDevice. /hotspot/devices lists MACs seen on
+      the network and lets the guest pick the TV off that list rather than
+      typing a code onto it with a remote — useful for the very first
+      device on any code, not only an extra one on a sharing-enabled code.
+      The route itself still caps how many devices a code can carry (1
+      without sharing, 3 with it), so this is safe to offer unconditionally;
+      only once the guest already has a working code, which the page itself
+      asks for, so nothing here needs to know it in advance.
+    -->
+    <p class="hint"><a href="/hotspot/devices" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">Add TV / console</a><span style="display:block;margin-top:6px">Pay for a TV or console package, or activate a TV voucher.</span></p>
+    
+    <button type="button" class="chat-open" id="chatOpen">Talk to support</button>
+    <div class="chat" id="chat">
+      <div id="chatForm">
+        <p class="hint" style="margin:0 0 10px">Tell us who you are so support can follow up with you.</p>
+        <input id="chatName" type="text" placeholder="Your name" autocomplete="name" maxlength="60">
+        <input id="chatPhone" type="tel" inputmode="tel" placeholder="Your phone number, e.g. 0712 345 678" autocomplete="tel" maxlength="20" style="margin-top:8px">
+        <button type="button" id="chatStart" style="margin-top:8px">Start chat</button>
+      </div>
+      <div id="chatBody" style="display:none">
+        <div class="log" id="chatLog"></div>
+        <input id="chatText" type="text" placeholder="Type your message" autocomplete="off">
+        <button type="button" id="chatSend">Send</button>
+      </div>
+      <p class="hint" id="chatNote"></p>
+    </div>
+    
+    <!-- The old "Using a TV or set-top box?" link (a bigger-text version of
+         this same code-entry form, for reading across a room) is gone —
+         "Adding a TV or console?" above replaces it: pick the device, pick a
+         bundle, pay, nothing to type on the TV at all, which is strictly
+         better than a bigger font on a form the TV still could not fill in
+         itself. tvMode/?tv=1 stays reachable directly for anyone who still
+         wants it; nothing on this page links to it any more. -->
+    <div class="foot"><span>2026 © HOMECONNECT</span><span>Designed and developed by Vibelink</span></div>
+  </div>
+
+  <div class="popup-overlay" id="popupOverlay" style="display:none">
+    <div class="popup" id="popup">
+      <div class="icon" id="popupIcon"></div>
+      <h3 id="popupTitle"></h3>
+      <p id="popupBody"></p>
+    </div>
+  </div>
+
+  <script>
+  /**
+   * Rebuilt as independent, self-contained sections rather than one script
+   * that runs top to bottom — the exact shape of two bugs already found in
+   * this file's own history (the unquoted $(if error) block, the TV/set-top
+   * link). Either one worked by making some earlier line throw, which
+   * silently skipped every addEventListener after it in the same function:
+   * a JS error nobody sees (RouterOS serves this with no console attached),
+   * on a page where "the button does nothing" and "a wall of buttons all
+   * stopped working at once" look identical from the guest's side. Auto-
+   * login, Buy, and Talk to support each run inside their own try/catch now,
+   * so a failure in one can never prevent the others' listeners from
+   * attaching — the actual guarantee this needs, not just this particular
+   * bug fixed again.
+   */
+
+  // Absolute, not relative. The router serves this page from its own hotspot
+  // DNS name (billing.spot), so a relative URL would post to the router
+  // itself — which knows nothing about bundles. This host is in the walled
+  // garden, so it is reachable before the guest has paid; that is the whole
+  // point of putting it there.
+  var API = "";
+  // Which physical router served this page — set at Configure time (see
+  // server.js's ?router= on the pushed login URL) so a sale can be
+  // attributed to a site for reporting. Null for a page opened directly in
+  // a browser, or one cached from before this existed; /hotspot/buy treats
+  // it as optional either way.
+  var ROUTER_ID = null;
+  // The router's own hotspot DNS name — see submitHotspotLogin below. Not
+  // the tenant's real domain: this only resolves on the guest's own LAN,
+  // straight to RouterOS's own login handler, in plain HTTP.
+  var HOTSPOT_DNS = "billing.spot";
+  // The router's own LAN gateway IP — preferred over HOTSPOT_DNS above
+  // whenever we have it, since a guest whose device sends every DNS lookup
+  // to a public resolver instead of the router's own (Android's "Private
+  // DNS" and similar) can never resolve HOTSPOT_DNS at all; an IP needs no
+  // lookup. null only for a malformed/unreadable network setting.
+  var HOTSPOT_GATEWAY = "10.5.50.1";
+
+  /**
+   * A quiet inline note next to the pay button was easy to miss — a guest
+   * who hands their phone to M-Pesa for the PIN prompt and comes back finds
+   * text that already changed, nothing drawing the eye to it. This covers
+   * the screen instead, for a moment, the way a real "payment successful"
+   * confirmation should. kind picks the icon/color: "success" (green check)
+   * "notice" (amber, session-ended), or "pending" (a spinner, no glyph —
+   * dismissing on tap is disabled for it below, since it is describing work
+   * still in flight, not something to wave away). Auto-hides after ms unless
+   * ms is 0, in which case it waits for the tap anywhere to dismiss — used
+   * for success, where the guest is about to be connected and dismissing
+   * early would just hide useful status text. Shared by both sections below,
+   * but defined at the top level and defensive on its own: a popup that
+   * fails to show is not worth taking either section down over.
+   */
+  function popup(kind, title, body, ms) {
+    try {
+      var overlay = document.getElementById('popupOverlay');
+      var box = document.getElementById('popup');
+      box.className = 'popup ' + kind;
+      document.getElementById('popupIcon').textContent = kind === 'success' ? '✓' : kind === 'pending' ? '' : '!';
+      document.getElementById('popupTitle').textContent = title;
+      document.getElementById('popupBody').textContent = body;
+      overlay.style.display = 'flex';
+      // A guest tapping away mid-payment to check something reads as "close
+      // this, it is done" the same as it does for the other two kinds — for
+      // pending specifically that would hide the only sign anything is
+      // still happening, so this is the one kind that stays up regardless.
+      overlay.onclick = kind === 'pending' ? null : function () { overlay.style.display = 'none'; };
+      if (ms) setTimeout(function () { overlay.style.display = 'none'; }, ms);
+    } catch (e) { /* a missing popup is not worth breaking whatever called it */ }
+  }
+
+  /**
+   * $(link-login-only) only ever becomes a real URL when RouterOS itself
+   * serves this exact markup — it substitutes the token as it hands the page
+   * to a guest. The meta-refresh at the top of this page (routerRedirect)
+   * fetches this same markup straight from us instead, specifically to
+   * escape a broken WebView, and we are not RouterOS: the token reaches the
+   * browser untouched, so a plain form.submit() posts to the literal string
+   * "$(link-login-only)", resolved as a relative URL against this page — a
+   * guest landed on billing.<domain>/hotspot/$(link-login-only), a 404/405
+   * from our own Express app, instead of ever reaching the router.
+   *
+   * The visible "Connect" button's form submit routes through here too, not
+   * just the background auto-login paths below — it used to call
+   * form.submit() directly, so anyone who opened this page any way other
+   * than RouterOS actually proxying the walled-garden fetch (a bookmark, a
+   * shared link, the same broken-WebView case routerRedirect already works
+   * around) hit exactly that dead POST on manual submit as well.
+   *
+   * The fallback goes straight to HOTSPOT_DNS — the router's own hotspot DNS
+   * name (applyHotspotServer in routeros.js, "${subdomain}.spot") — a real
+   * plain-HTTP server RouterOS runs itself, reachable directly on the
+   * guest's own LAN with no interception needed. A third-party host relying
+   * on the walled-garden NAT rules to transparently redirect unauthenticated
+   * traffic was tried first and abandoned: modern browsers opportunistically
+   * retry plain HTTP as HTTPS, and RouterOS's HTTPS interception terminates
+   * that with its own self-signed certificate, which throws a security
+   * interstitial instead of ever reaching a login handler. Going directly to
+   * the router's real HTTP server sidesteps that entirely.
+   */
+  function submitHotspotLoginPair(user, pass) {
+    try {
+      var form = document.getElementById('loginForm');
+      if (String(form.getAttribute('action') || '').indexOf('$(') === 0) {
+        // RouterOS's own login handler only ever parses this from a POST
+        // body — login-by is http-pap, not http-chap (routeros.js pins it,
+        // so no challenge/hash dance is needed), but a GET with the same
+        // fields in the query string still isn't a POST, and got no further
+        // than window.location.href='http://...&username=...' did on its
+        // own. A second, real <form> built and submitted here performs a
+        // genuine top-level POST navigation to the router's own server,
+        // exactly as if the guest had typed the code into a form whose
+        // action already pointed there — no fetch/XHR involved, so no CORS
+        // question ever comes up either.
+        var dst = document.querySelector('input[name="dst"]').value;
+        var f = document.createElement('form');
+        f.method = 'post';
+        f.action = 'http://' + (HOTSPOT_GATEWAY || HOTSPOT_DNS) + '/login';
+        [['username', user], ['password', pass], ['dst', dst]].forEach(function (pair) {
+          var input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = pair[0];
+          input.value = pair[1];
+          f.appendChild(input);
+        });
+        document.body.appendChild(f);
+        f.submit();
+        return;
+      }
+      document.getElementById('username').value = user;
+      document.getElementById('password').value = pass;
+      form.submit();
+    } catch (e) { /* nothing left to try but leave the code visible on screen */ }
+  }
+
+  // Every voucher's password is the same as its code (see the note by the
+  // form above) — this is just the common case of the pair-submit above.
+  function submitHotspotLogin(code) { submitHotspotLoginPair(code, code); }
+
+  /**
+   * Reads whichever fields are actually visible right now (userPassToggle
+   * below swaps which div is shown) rather than assuming code mode — a
+   * guest who switched to username/password and then hit Enter must not
+   * silently submit the empty code field underneath it.
+   */
+  var otpPhone = '';
+  var otpTried = '';
+  function handleLoginSubmit() {
+    var userPassOn = document.getElementById('userPassMode').style.display !== 'none';
+    if (userPassOn) {
+      var u = document.getElementById('upUser').value.trim();
+      var p = document.getElementById('upPass').value.trim();
+      if (!u || !p) return;
+      submitHotspotLoginPair(u, p);
+    } else {
+      var code = document.getElementById('username').value.trim();
+      if (!code) return;
+      // One box for everything a guest might have: a voucher code, the M-Pesa receipt code from the payment SMS, or the phone number
+      // that paid. Work out which it is and do the right thing, so none of them ends in a bare "invalid username or password".
+      var hint = document.getElementById('codeHint');
+      var label = document.getElementById('codeLabel');
+      var box = document.getElementById('username');
+      var say = function (t) { if (hint) hint.textContent = t; };
+      var plain = code.split(' ').join('');
+      var phoneStart = function (ph) {
+        say('Sending a 6-digit code to ' + ph + '...');
+        return fetch(API + '/hotspot/phone-login/otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: ph }) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (!res.ok) { say((res.d && res.d.error) || 'Could not send a code to that number.'); return; }
+            otpPhone = ph; otpTried = '';
+            box.value = '';
+            box.placeholder = '6-digit code from the SMS';
+            if (label) label.textContent = '6-digit code we texted you';
+            say((res.d && res.d.message) || 'If that number has a bundle running, a code has been sent to it. Type it here and press Connect.');
+          })
+          .catch(function () { say('Could not reach the server. Try again.'); });
+      };
+      // Second step of a phone sign-in: the code that was texted.
+      if (otpPhone && /^[0-9]{6}$/.test(plain) && plain !== otpTried) {
+        otpTried = plain;
+        say('Checking...');
+        fetch(API + '/hotspot/phone-login/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: otpPhone, otp: plain }) })
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (res.ok && res.d && res.d.code) { say('Signed in, connecting...'); submitHotspotLogin(res.d.code); }
+            else say(((res.d && res.d.error) || 'That code did not work.') + ' Try it again, or type a different voucher code.');
+          })
+          .catch(function () { say('Could not reach the server. Try again.'); });
+        return;
+      }
+      if (/^([+]?254|0)[17][0-9]{8}$/.test(plain)) { phoneStart(plain); return; }
+      if (/^[A-Za-z][A-Za-z0-9]{9}$/.test(plain) && /[0-9]/.test(plain)) {
+        say('That looks like an M-Pesa code. Looking up your voucher...');
+        fetch(API + '/hotspot/voucher-by-mpesa?code=' + encodeURIComponent(plain.toUpperCase()))
+          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+          .then(function (res) {
+            if (res.ok && res.d && res.d.code) { say('Found it, connecting...'); submitHotspotLogin(res.d.code); }
+            else { say(''); submitHotspotLogin(code); }
+          })
+          .catch(function () { say(''); submitHotspotLogin(code); });
+        return;
+      }
+      say('');
+      submitHotspotLogin(code);
+    }
+  }
+
+  /**
+   * Recognise a device that already paid, without depending on the router's
+   * own add-mac-cookie table — that one lives in RAM and is exactly what a
+   * power outage wipes, which is the whole reason a customer who is still
+   * well within their paid time lands back on this page instead of being
+   * waved straight through. Skipped after a just-failed attempt
+   * ($(if error)), so a wrong code cannot loop into auto-resubmitting
+   * itself forever.
+   */
+  try {
+    var mac = "";
+    var hadError = "" === 'yes';
+    // The SMS a guest gets on payment carries the code as text and as a tap
+    // link to this page with ?code=... attached — for someone who would
+    // rather tap than type it back in on a small keyboard. Takes priority
+    // over the MAC lookup below: it names an exact voucher, nothing to look
+    // up first.
+    var prefillCode = "";
+    if (prefillCode && !hadError) {
+      submitHotspotLogin(prefillCode);
+    } else if (mac && mac.indexOf('$') !== 0 && !hadError) {
+      fetch(API + '/hotspot/voucher-for-mac?mac=' + encodeURIComponent(mac))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.code) return;
+          submitHotspotLogin(d.code);
+        })
+        .catch(function () { /* stay on the manual form — nothing to recover from here */ });
+    }
+  } catch (e) { /* falls back to the plain sign-in form, already on screen */ }
+
+  // ── buy a bundle ───────────────────────────────────────────────────
+  try {
+    var pay = document.getElementById('pay');
+    var payTitle = document.getElementById('payTitle');
+    var payPhone = document.getElementById('payPhone');
+    var payGo = document.getElementById('payGo');
+    var payNote = document.getElementById('payNote');
+    var payCode = document.getElementById('payCode');
+    var payCodeValue = document.getElementById('payCodeValue');
+    var pickedPlanId = null;
+    var payPollTimer = null;
+
+    document.querySelectorAll('.buy').forEach(function (b) {
+      b.addEventListener('click', function () {
+        pickedPlanId = b.getAttribute('data-plan');
+        // The preview's bundles are illustrations and carry no id. Saying so
+        // beats a button that swallows the click and looks broken.
+        if (!pickedPlanId) {
+          pay.classList.add('on');
+          payTitle.textContent = b.getAttribute('data-title');
+          payNote.textContent = 'This is an example bundle. On your own subdomain this sends the M-Pesa prompt.';
+          payPhone.style.display = 'none';
+          payGo.style.display = 'none';
+          return;
+        }
+        payPhone.style.display = '';
+        payGo.style.display = '';
+        payTitle.textContent = 'Buy ' + b.getAttribute('data-title');
+        pay.classList.add('on');
+        payNote.textContent = '';
+        payCode.style.display = 'none';
+        payPhone.focus();
+      });
+    });
+
+    /**
+     * Nothing watched a voucher after it was shown as paid — a guest who kept
+     * this tab open just quietly lost internet with no explanation once time
+     * ran out, and had to work out on their own that reloading would get them
+     * back to a sign-in form. This polls the same status this page's own
+     * server-side sweep updates on every read, and the instant it sees
+     * anything other than in_use, shows a plain "your time has ended" notice
+     * and then sends them to a fresh copy of the sign-in page — RouterOS
+     * itself has already stopped treating them as authenticated by then, so
+     * that fresh load is what actually puts the sign-in form back in front
+     * of them, same as a reload would, just with an explicit reason shown
+     * first instead of the page just silently changing under them.
+     */
+    function watchVoucher(code) {
+      var watchTimer = setInterval(function () {
+        fetch(API + '/hotspot/voucher-status?code=' + encodeURIComponent(code))
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.status && d.status !== 'in_use') {
+              clearInterval(watchTimer);
+              popup('notice', 'Your time has ended', 'Taking you back to sign in…', 0);
+              setTimeout(function () { window.location.href = API + '/hotspot/login.html'; }, 1800);
+            }
+          })
+          .catch(function () { /* keep watching; a dropped check is not expiry */ });
+      }, 30000);
+    }
+
+    function pollPayment(checkoutId) {
+      fetch(API + '/hotspot/buy/' + encodeURIComponent(checkoutId))
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (d.code) {
+            clearInterval(payPollTimer);
+            payNote.textContent = 'Paid. Connecting…';
+            payCodeValue.textContent = d.code;
+            payCode.style.display = 'block';
+            document.getElementById('username').value = d.code;
+            watchVoucher(d.code);
+            // 0 = stays up until tapped, not timed out — this is the moment
+            // that matters most on the whole page, and the guest is about
+            // to be sent through the auto-connect below regardless.
+            popup('success', 'Payment successful', 'Your code is ' + d.code + '. Connecting you now…', 0);
+            // form.submit() does not fire the 'submit' event, so the form's
+            // own onsubmit — which copies the code into the hidden password
+            // field — never runs: submitting with the password still empty
+            // sends the router a login RouterOS silently rejects the same
+            // way a wrong password would. Doing that copy here, the same as
+            // onsubmit does, before calling submit() avoids depending on an
+            // event .submit() never dispatches.
+            setTimeout(function () { submitHotspotLogin(d.code); }, 1200);
+            /**
+             * A successful hotspot login navigates the guest away from this
+             * page entirely — RouterOS redirects to dst the instant it
+             * accepts the credentials. So if this script is still running
+             * several seconds later, the submit above did not actually get
+             * them online, whatever the reason (a $(...) token RouterOS
+             * resolved differently for this request than for the original
+             * page load, a slow router, anything). Rather than leave a paid
+             * guest staring at a page that looks stuck, a fresh load of this
+             * same page with the code attached goes through the exact path
+             * the SMS's own tap-to-connect link already uses successfully —
+             * new request, tokens resolved fresh, same auto-login above.
+             */
+            setTimeout(function () {
+              var btn = document.getElementById('connectNow');
+              btn.style.display = 'block';
+              btn.addEventListener('click', function () {
+                window.location.href = API + '/hotspot/login.html?code=' + encodeURIComponent(d.code);
+              });
+            }, 2500);
+            return;
+          }
+          if (d.status === 'failed' || d.status === 'cancelled' || d.status === 'timeout') {
+            clearInterval(payPollTimer);
+            payGo.disabled = false;
+            var failMsg = d.detail || 'The payment did not go through.';
+            payNote.textContent = failMsg;
+            // The pending spinner was the only thing on screen while this was
+            // in flight — leaving it up after a failure reads as still
+            // waiting on a payment that has already died.
+            document.getElementById('popupOverlay').style.display = 'none';
+            popup('notice', 'Payment did not go through', failMsg, 4000);
+          }
+        })
+        .catch(function () { /* keep polling; a dropped request is not a failure */ });
+    }
+
+    payGo.addEventListener('click', function () {
+      if (!pickedPlanId) return;
+      payGo.disabled = true;
+      payNote.textContent = 'Sending…';
+      popup('pending', 'Sending request…', 'Asking Safaricom to prompt your phone.', 0);
+      fetch(API + '/hotspot/buy', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ planId: pickedPlanId, phone: payPhone.value, routerId: ROUTER_ID }),
+      })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          payGo.disabled = false;
+          if (!res.ok) {
+            var msg = res.d.error || 'Could not start the payment.';
+            payNote.textContent = msg;
+            document.getElementById('popupOverlay').style.display = 'none';
+            popup('notice', 'Could not start payment', msg, 4000);
+            return;
+          }
+          if (res.d.redirectUrl) {
+            payNote.textContent = '';
+            var link = document.createElement('a');
+            link.href = res.d.redirectUrl; link.target = '_blank'; link.rel = 'noopener';
+            link.textContent = 'Tap here to approve the payment';
+            payNote.appendChild(link);
+            popup('pending', 'Approve the payment', 'Tap the link under the button to approve it.', 0);
+          } else if (res.d.note) {
+            payNote.textContent = res.d.note + '.';
+            popup('pending', 'Check your phone', res.d.note + '.', 0);
+          } else {
+            payNote.textContent = 'Check your phone and enter your M-Pesa PIN.';
+            popup('pending', 'Check your phone', 'Enter your M-Pesa PIN to finish paying.', 0);
+          }
+          clearInterval(payPollTimer);
+          payPollTimer = setInterval(function () { pollPayment(res.d.checkoutId); }, 3000);
+        })
+        .catch(function () {
+          payGo.disabled = false;
+          payNote.textContent = 'Could not reach the billing system from here.';
+        });
+    });
+  } catch (e) { /* Buy stays unresponsive; Talk to support below is unaffected */ }
+
+  // ── loyalty points ─────────────────────────────────────────────────
+  try {
+    var loyOpen = document.getElementById('loyOpen');
+    if (loyOpen) {
+      var loyPanel = document.getElementById('loyPanel');
+      var loyNote = document.getElementById('loyNote');
+      var loyPhoneVal = '', loyToken = '';
+      var loyPost = function (path, body) {
+        return fetch(API + '/hotspot/loyalty/' + path, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+      };
+      var loyShow = function (n) {
+        ['loyStep1', 'loyStep2', 'loyStep3'].forEach(function (id, i) {
+          document.getElementById(id).style.display = (i + 1 === n) ? 'block' : 'none';
+        });
+      };
+      loyOpen.addEventListener('click', function () { loyPanel.classList.toggle('on'); });
+
+      document.getElementById('loySend').addEventListener('click', function () {
+        loyPhoneVal = document.getElementById('loyPhone').value.trim();
+        var digits = loyPhoneVal.replace(/[^0-9]/g, '');
+        if (digits.length < 9 || digits.length > 13) { loyNote.textContent = 'Please enter a valid phone number.'; return; }
+        loyNote.textContent = 'Sending…';
+        loyPost('otp', { phone: loyPhoneVal }).then(function (res) {
+          if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'Could not send the code.'; return; }
+          loyNote.textContent = (res.d && res.d.message) || 'If that number has points, a code is on its way.';
+          loyShow(2);
+        }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; });
+      });
+
+      document.getElementById('loyVerify').addEventListener('click', function () {
+        var otp = document.getElementById('loyOtp').value.trim();
+        if (otp.length < 6) { loyNote.textContent = 'Enter the 6-digit code.'; return; }
+        loyNote.textContent = 'Checking…';
+        loyPost('verify', { phone: loyPhoneVal, otp: otp }).then(function (res) {
+          if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'That code is not right.'; return; }
+          loyToken = res.d.token;
+          loyShow(3);
+          loyNote.textContent = '';
+          renderLoyRewards(res.d.points, res.d.rewards || []);
+        }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; });
+      });
+
+      var renderLoyRewards = function (points, rewards) {
+        document.getElementById('loyPoints').textContent = 'You have ' + points + ' loyalty point' + (points === 1 ? '' : 's') + '.';
+        var box = document.getElementById('loyRewards');
+        box.textContent = '';
+        if (!rewards.length) { box.textContent = 'There are no rewards to redeem yet.'; return; }
+        rewards.forEach(function (rw) {
+          var row = document.createElement('div');
+          row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px';
+          var label = document.createElement('span');
+          label.textContent = 'Free ' + rw.title + ' — ' + rw.points_cost + ' points';
+          var btn = document.createElement('button');
+          btn.type = 'button';
+          btn.textContent = 'Redeem';
+          btn.style.width = 'auto';
+          btn.disabled = rw.points_cost > points;
+          btn.addEventListener('click', function () {
+            btn.disabled = true;
+            loyNote.textContent = 'Getting your code…';
+            loyPost('redeem', { token: loyToken, rewardId: rw.id }).then(function (res) {
+              if (!res.ok) { loyNote.textContent = (res.d && res.d.error) || 'Could not redeem.'; btn.disabled = false; return; }
+              loyNote.textContent = 'Your code is ' + res.d.code + ' — connecting…';
+              document.getElementById('loyPoints').textContent = 'Points left: ' + res.d.remaining + '.';
+              submitHotspotLogin(res.d.code);
+            }).catch(function () { loyNote.textContent = 'Could not reach the server. Try again.'; btn.disabled = false; });
+          });
+          row.appendChild(label);
+          row.appendChild(btn);
+          box.appendChild(row);
+        });
+      };
+    }
+  } catch (e) { /* the points panel stays unresponsive; the rest of the page is unaffected */ }
+
+  // ── talk to support ────────────────────────────────────────────────
+  try {
+    var chatPanel = document.getElementById('chat');
+    var chatLog = document.getElementById('chatLog');
+    var chatText = document.getElementById('chatText');
+    var chatNote = document.getElementById('chatNote');
+    var chatId = null, chatToken = null, chatLastId = 0, chatPollTimer = null;
+
+    function appendMessage(sender, body) {
+      var el = document.createElement('div');
+      el.className = 'msg ' + (sender === 'staff' ? 'them' : 'me');
+      el.textContent = body;
+      chatLog.appendChild(el);
+      chatLog.scrollTop = chatLog.scrollHeight;
+    }
+
+    function pollChat() {
+      if (!chatId) return;
+      fetch(API + '/chat/' + chatId + '?token=' + encodeURIComponent(chatToken) + '&since=' + chatLastId)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          (d.messages || []).forEach(function (m) {
+            chatLastId = m.id;
+            // Only the other side: our own were shown the moment they were sent.
+            if (m.sender === 'staff') appendMessage('staff', m.body);
+          });
+          if (d.status === 'closed') {
+            clearInterval(chatPollTimer);
+            chatNote.textContent = 'Support closed this conversation.';
+          }
+        })
+        .catch(function () { /* a dropped poll is not the end of the chat */ });
+    }
+
+    document.getElementById('chatOpen').addEventListener('click', function () {
+      chatPanel.classList.toggle('on');
+    });
+
+    // The visitor says who they are first, so support has a name and a number to follow up on.
+    document.getElementById('chatStart').addEventListener('click', function () {
+      if (chatId) return;
+      var name = document.getElementById('chatName').value.trim();
+      var phone = document.getElementById('chatPhone').value.trim();
+      var digits = phone.replace(/[^0-9]/g, '');
+      if (name.length < 2) { chatNote.textContent = 'Please enter your name.'; return; }
+      if (digits.length < 9 || digits.length > 13) { chatNote.textContent = 'Please enter a valid phone number.'; return; }
+      chatNote.textContent = 'Connecting…';
+      fetch(API + '/chat/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: name, phone: phone }),
+      })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          if (!d.chatId) { chatNote.textContent = d.error || 'Support is not available.'; return; }
+          chatId = d.chatId; chatToken = d.token;
+          document.getElementById('chatForm').style.display = 'none';
+          document.getElementById('chatBody').style.display = 'block';
+          chatNote.textContent = 'Someone will reply here.';
+          chatPollTimer = setInterval(pollChat, 3000);
+        })
+        .catch(function () { chatNote.textContent = 'Could not reach support from here.'; });
+    });
+
+    function sendChat() {
+      var body = chatText.value.trim();
+      if (!body || !chatId) return;
+      chatText.value = '';
+      appendMessage('visitor', body);
+      fetch(API + '/chat/' + chatId + '/message', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ token: chatToken, body: body }),
+      }).catch(function () { chatNote.textContent = 'That message did not send.'; });
+    }
+    document.getElementById('chatSend').addEventListener('click', sendChat);
+    chatText.addEventListener('keydown', function (e) { if (e.key === 'Enter') sendChat(); });
+  } catch (e) { /* Talk to support stays unresponsive; Buy above is unaffected */ }
+
+  /**
+   * The two login-page fallbacks: swap to a username/password pair for
+   * credentials that were actually issued as a distinct pair rather than a
+   * single code, and recover a voucher from the M-Pesa transaction code
+   * alone when the SMS carrying it never arrived. Own try/catch so a
+   * failure in either leaves the ordinary code field (and Buy/Talk to
+   * support above) fully working.
+   */
+  try {
+    var codeModeEl = document.getElementById('codeMode');
+    var userPassModeEl = document.getElementById('userPassMode');
+    var userPassToggleBtn = document.getElementById('userPassToggle');
+    userPassToggleBtn.addEventListener('click', function () {
+      var switchingToCode = userPassModeEl.style.display !== 'none';
+      userPassModeEl.style.display = switchingToCode ? 'none' : 'block';
+      codeModeEl.style.display = switchingToCode ? 'block' : 'none';
+      userPassToggleBtn.textContent = switchingToCode
+        ? 'Have a username and password instead?'
+        : 'Have a voucher code instead?';
+    });
+
+    var mpesaBox = document.getElementById('mpesaBox');
+    var mpesaNote = document.getElementById('mpesaNote');
+    document.getElementById('mpesaOpen').addEventListener('click', function () {
+      mpesaBox.classList.toggle('on');
+    });
+    document.getElementById('mpesaGo').addEventListener('click', function () {
+      var code = document.getElementById('mpesaCode').value.trim();
+      if (!code) { mpesaNote.textContent = 'Type the M-Pesa transaction code from your confirmation SMS.'; return; }
+      mpesaNote.textContent = 'Looking…';
+      fetch(API + '/hotspot/voucher-by-mpesa?code=' + encodeURIComponent(code))
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (res) {
+          if (!res.ok || !res.d.code) {
+            mpesaNote.textContent = (res.d && res.d.error) || 'No payment found for that code.';
+            return;
+          }
+          mpesaNote.textContent = 'Found it — connecting…';
+          submitHotspotLogin(res.d.code);
+        })
+        .catch(function () { mpesaNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+
+    // Sign in with the phone number that paid: text a code to it, then use the bundle it bought.
+    var phoneBox = document.getElementById('phoneBox');
+    var phoneNote = document.getElementById('phoneNote');
+    function phonePost(path, body) {
+      return fetch(API + path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+    }
+    document.getElementById('phoneOpen').addEventListener('click', function () { phoneBox.classList.toggle('on'); });
+    document.getElementById('phoneSend').addEventListener('click', function () {
+      var phone = document.getElementById('phoneNumber').value.trim();
+      if (!phone) { phoneNote.textContent = 'Type the phone number you paid with.'; return; }
+      phoneNote.textContent = 'Sending…';
+      phonePost('/hotspot/phone-login/otp', { phone: phone })
+        .then(function (res) {
+          if (!res.ok) { phoneNote.textContent = (res.d && res.d.error) || 'Could not send a code.'; return; }
+          phoneNote.textContent = (res.d && res.d.message) || 'If that number has a bundle running, a code has been sent to it.';
+          document.getElementById('phoneStep2').style.display = 'block';
+        })
+        .catch(function () { phoneNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+    document.getElementById('phoneVerify').addEventListener('click', function () {
+      var phone = document.getElementById('phoneNumber').value.trim();
+      var otp = document.getElementById('phoneOtp').value.trim();
+      if (!otp) { phoneNote.textContent = 'Type the 6-digit code from the SMS.'; return; }
+      phoneNote.textContent = 'Checking…';
+      phonePost('/hotspot/phone-login/verify', { phone: phone, otp: otp })
+        .then(function (res) {
+          if (!res.ok || !res.d.code) { phoneNote.textContent = (res.d && res.d.error) || 'That did not work.'; return; }
+          phoneNote.textContent = 'Signed in — connecting…';
+          submitHotspotLogin(res.d.code);
+        })
+        .catch(function () { phoneNote.textContent = 'Could not reach the server. Try again.'; });
+    });
+  } catch (e) { /* toggle/recovery stay unresponsive; the voucher-code field above still works */ }
+  </script>
+</body>
+</html>
