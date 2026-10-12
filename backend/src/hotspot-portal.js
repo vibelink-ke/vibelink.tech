@@ -134,7 +134,18 @@ export function loginPage(opts = {}) {
   if (a < 0 || b < 0 || dest < 0 || dest < b) return html;   // not this template's layout: leave the page as it is
   let block = html.slice(a, b + END.length);
 
-  const top = '';
+  // The "paid but no SMS" box (find a code from the M-Pesa confirmation) goes where the voucher box was, open, so someone who
+  // has already paid sees it first; the voucher box itself moves to the bottom. Its toggle link below is hidden, because the
+  // box is no longer something to open. The script still finds the link by id, so it is hidden and not removed.
+  let top = '';
+  const ma = block.indexOf('<!--MPESA-START-->');
+  const mb = block.indexOf('<!--MPESA-END-->');
+  if (ma >= 0 && mb > ma) {
+    const mpesa = block.slice(ma, mb + '<!--MPESA-END-->'.length).replace('class="reveal" id="mpesaBox"', 'class="reveal on" id="mpesaBox"');
+    block = block.slice(0, ma) + block.slice(mb + '<!--MPESA-END-->'.length);
+    block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
+    top = '<p class="hint" style="margin:6px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
+  }
   return html.slice(0, a) + top + html.slice(b + END.length, dest) + block + html.slice(dest);
 }
 
@@ -512,7 +523,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
          company name and a plain instruction means an operator who sets neither
          still gets a sensible page. -->
     <h1>${esc(headline || company)}</h1>
-    <p class="sub">${esc(subtext || 'Enter your voucher code, M-Pesa code or phone number to get online')}</p>
+    <p class="sub">${esc(subtext || 'Enter your voucher code to get online')}</p>
     ${bannerBlock}
     ${previewNote}
     ${errorBlock}
@@ -542,10 +553,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       -->
       <input type="hidden" name="dst" value="${normalizedRedirect ? esc(normalizedRedirect) : fallbackDst}">
       <div id="codeMode">
-        <label for="username" id="codeLabel">Voucher code, M-Pesa code or phone number</label>
-        <input id="username" name="username" type="text" inputmode="text"
+        <label for="username">Voucher code</label>
+        <input id="username" name="username" type="text" inputmode="numeric"
                autocomplete="one-time-code" autocapitalize="characters" autocorrect="off"
-               spellcheck="false" placeholder="Voucher, M-Pesa code or phone number">
+               spellcheck="false" placeholder="Type the code from your voucher">
         <p class="hint" id="codeHint" style="color:#b85c1a"></p>
       </div>
       <!--
@@ -582,10 +593,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         return false;
       }
     </script>
-    <p class="hint" style="display:none">
+    <p class="hint">
       <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
     </p>
-    <p class="hint" style="display:none">
+    <p class="hint">
       <a href="javascript:void(0)" id="phoneOpen">Paid with M-Pesa? Sign in with your phone number</a>
     </p>
     <!--
@@ -864,8 +875,6 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
    * guest who switched to username/password and then hit Enter must not
    * silently submit the empty code field underneath it.
    */
-  var otpPhone = '';
-  var otpTried = '';
   function handleLoginSubmit() {
     var userPassOn = document.getElementById('userPassMode').style.display !== 'none';
     if (userPassOn) {
@@ -876,56 +885,29 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     } else {
       var code = document.getElementById('username').value.trim();
       if (!code) return;
-      // One box for everything a guest might have: a voucher code, the M-Pesa receipt code from the payment SMS, or the phone number
-      // that paid. Work out which it is and do the right thing, so none of them ends in a bare "invalid username or password".
+      // The wrong thing is often typed into this box: a phone number, or the M-Pesa receipt code from the payment SMS. Say so, or
+      // (for the receipt) go and find the voucher, instead of letting the router answer a bare "invalid username or password".
       var hint = document.getElementById('codeHint');
-      var label = document.getElementById('codeLabel');
-      var box = document.getElementById('username');
-      var say = function (t) { if (hint) hint.textContent = t; };
       var plain = code.split(' ').join('');
       // A whole M-Pesa confirmation pasted in (the code is the first word, then "Confirmed"): take the code out of it.
       var firstWord = code.split(' ')[0];
-      if (code.indexOf('Confirmed') !== -1 && /^[A-Za-z0-9]{10}$/.test(firstWord)) { plain = firstWord; box.value = firstWord; }
-      var phoneStart = function (ph) {
-        say('Sending a 6-digit code to ' + ph + '...');
-        return fetch(API + '/hotspot/phone-login/otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: ph }) })
-          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-          .then(function (res) {
-            if (!res.ok) { say((res.d && res.d.error) || 'Could not send a code to that number.'); return; }
-            otpPhone = ph; otpTried = '';
-            box.value = '';
-            box.placeholder = '6-digit code from the SMS';
-            if (label) label.textContent = '6-digit code we texted you';
-            say((res.d && res.d.message) || 'If that number has a bundle running, a code has been sent to it. Type it here and press Connect.');
-          })
-          .catch(function () { say('Could not reach the server. Try again.'); });
-      };
-      // Second step of a phone sign-in: the code that was texted.
-      if (otpPhone && /^[0-9]{6}$/.test(plain) && plain !== otpTried) {
-        otpTried = plain;
-        say('Checking...');
-        fetch(API + '/hotspot/phone-login/verify', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: otpPhone, otp: plain }) })
-          .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-          .then(function (res) {
-            if (res.ok && res.d && res.d.code) { say('Signed in, connecting...'); submitHotspotLogin(res.d.code); }
-            else say(((res.d && res.d.error) || 'That code did not work.') + ' Try it again, or type a different voucher code.');
-          })
-          .catch(function () { say('Could not reach the server. Try again.'); });
+      if (code.indexOf('Confirmed') !== -1 && /^[A-Za-z0-9]{10}$/.test(firstWord)) { plain = firstWord; }
+      if (/^([+]?254|0)[17][0-9]{8}$/.test(plain)) {
+        if (hint) hint.textContent = 'That is a phone number, not a voucher code. Type the code from your voucher, or tap "Paid with M-Pesa? Sign in with your phone number" below.';
         return;
       }
-      if (/^([+]?254|0)[17][0-9]{8}$/.test(plain)) { phoneStart(plain); return; }
       if (/^[A-Za-z][A-Za-z0-9]{9}$/.test(plain) && /[0-9]/.test(plain)) {
-        say('That looks like an M-Pesa code. Looking up your voucher...');
+        if (hint) hint.textContent = 'That looks like an M-Pesa code. Looking up your voucher...';
         fetch(API + '/hotspot/voucher-by-mpesa?code=' + encodeURIComponent(plain.toUpperCase()))
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (res) {
-            if (res.ok && res.d && res.d.code) { say('Found it, connecting...'); submitHotspotLogin(res.d.code); }
-            else { say(''); submitHotspotLogin(code); }
+            if (res.ok && res.d && res.d.code) { if (hint) hint.textContent = 'Found it, connecting...'; submitHotspotLogin(res.d.code); }
+            else { if (hint) hint.textContent = ''; submitHotspotLogin(code); }
           })
-          .catch(function () { say(''); submitHotspotLogin(code); });
+          .catch(function () { if (hint) hint.textContent = ''; submitHotspotLogin(code); });
         return;
       }
-      say('');
+      if (hint) hint.textContent = '';
       submitHotspotLogin(code);
     }
   }
