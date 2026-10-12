@@ -211,21 +211,26 @@ export async function applyPayment(tenantId, tx) {
     // router signs it in by itself. (target.mac is the other thing, the TV flow's own device; it is not touched.)
     let buyerMac = target.mac ?? null;
     if (!buyerMac) {
+      // Looked up on its OWN connection, outside this payment's transaction. A failed query inside a Postgres transaction poisons
+      // everything after it ("current transaction is aborted"), so a missing table or any error here would have stopped the
+      // voucher from being issued at all. On its own connection, whatever happens here can only mean "no phone known".
+      let pd = null;
       try {
-        const { rows: [pd] } = await c.query(
+        ({ rows: [pd] } = await pool.query(
           `select mac from hotspot_pending_devices
             where tenant_id = $1 and created_at > now() - interval '30 minutes'
               and (checkout_id = $2 or (phone is not null and right(regexp_replace(phone, '[^0-9]', '', 'g'), 9) = right(regexp_replace($3, '[^0-9]', '', 'g'), 9)))
             order by (checkout_id = $2) desc, created_at desc limit 1`,
-          [tenantId, String(tx.payload?.checkoutId ?? ''), String(tx.phone ?? '')]);
-        buyerMac = pd?.mac ?? null;
-        // A device that already has a running voucher is left as it is: the address came from a public request, and this must never be
-        // a way to replace another phone's automatic sign-in with a shorter or cheaper one.
-        if (buyerMac) {
-          const { rows: [busy] } = await c.query("select 1 from vouchers where tenant_id=$1 and mac=$2::macaddr and status='in_use' and expires_at > now() limit 1", [tenantId, buyerMac]);
-          if (busy) buyerMac = null;
-        }
-      } catch { /* before the table exists: the voucher is issued exactly as it always was */ }
+          [tenantId, String(tx.payload?.checkoutId ?? ''), String(tx.phone ?? '')]));
+      } catch { pd = null; }
+      buyerMac = pd?.mac ?? null;
+      // A device that already has a running voucher is left as it is: the address came from a public request, and this must never be
+      // a way to replace another phone's automatic sign-in with a shorter or cheaper one. (vouchers always exists, so this one is
+      // safe inside the transaction.)
+      if (buyerMac) {
+        const { rows: [busy] } = await c.query("select 1 from vouchers where tenant_id=$1 and mac=$2::macaddr and status='in_use' and expires_at > now() limit 1", [tenantId, buyerMac]);
+        if (busy) buyerMac = null;
+      }
     }
     const v = await issueVoucherAccess(c, tenantId, target.planId, tx.phone, buyerMac);
     await c.query("update payments set status='applied', voucher_id=$2, service='hotspot', applied_at=now() where id=$1", [paymentId, v.id]);

@@ -160,7 +160,8 @@
       "Hotspot login: back to a plain Voucher code box, with the separate options for an M-Pesa code and for the phone number that paid. Typing an M-Pesa code or a phone number into the voucher box still points the guest the right way.",
       "Hotspot → Access codes → Lock to devices: one button locks every access code to its devices, one turns the lock off for all, and one deletes all saved devices so each code starts learning its devices again.",
       "Hotspot login: the 'Have a username and password instead?' link is smaller and now sits directly under the M-Pesa code option (and under the M-Pesa box when the voucher box is at the bottom).",
-      "Hotspot login: a button \"I already have an active bundle: connect me\" finds the running voucher of the phone and signs it in with one tap."
+      "Hotspot login: a button \"I already have an active bundle: connect me\" finds the running voucher of the phone and signs it in with one tap.",
+      "Payments: a hotspot payment is never held up by the 'which phone paid' lookup. It now runs on its own connection, so a missing table or an error there cannot stop the voucher being issued."
     ]
   }
 ]
