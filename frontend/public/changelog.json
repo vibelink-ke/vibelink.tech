@@ -136,7 +136,8 @@
       "Access codes can now be used on a TV or console: on the Add TV / console page enter the code and its password, pick the device, and it is added to that code (counted in Max devices, removable under Hotspot → Access codes → Edit).",
       "Router logs: the red \"Radius request for unknown ip 10.250.x.x\" lines are gone — PPPoE changes no longer carry an address that makes the hotspot look for a guest. A voucher bought or activated for a TV on the Add TV / console page now works only on that TV.",
       "Router logs: no more red \"Radius with no ip provided\" / \"unknown ip\" lines — changes for a customer who is not online on the router are no longer sent to it; they apply when the customer next connects.",
-      "Hotspot Configure now keeps only the red RADIUS error lines (\"Radius with no ip provided\", \"unknown ip\") out of the router log; other hotspot messages, including failed guest logins, still show."
+      "Hotspot Configure now keeps only the red RADIUS error lines (\"Radius with no ip provided\", \"unknown ip\") out of the router log; other hotspot messages, including failed guest logins, still show.",
+      "Router logs: the server now sets every router's log rules itself (shortly after the app starts, then hourly), so the red RADIUS error lines disappear on all routers without a Configure."
     ]
   }
 ]

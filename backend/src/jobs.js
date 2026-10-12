@@ -48,6 +48,28 @@ const safely = (name, fn) => async () => {
   } catch { /* bookkeeping only */ }
 };
 
+/**
+ * Keeps every router's log free of the red RADIUS error lines (see quietHotspotLog in routeros.js), from the server, so it reaches
+ * all routers without a Configure on each. Runs a couple of minutes after the app starts and then hourly; a router already set is
+ * left alone, one that cannot be reached is skipped until the next run. Five at a time, so a slow router never holds up the rest.
+ */
+export async function quietRouterLogs() {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { rows } = await pool.query(
+    'select id, name, host, api_port, service_user, service_password_enc from routers where service_user is not null and service_password_enc is not null');
+  let changed = 0;
+  const one = async (r) => {
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 6 });
+      changed += await ros.quietHotspotLog(conn);
+    } catch { /* offline or no API access right now */ } finally { if (conn) ros.close(conn); }
+  };
+  for (let i = 0; i < rows.length; i += 5) await Promise.all(rows.slice(i, i + 5).map(one));
+  if (changed) console.log(`quietRouterLogs: updated the log rules on ${changed} rule(s)`);
+}
+
 export function startJobs() {
   // Every 30s, not every 5 minutes: an expired hotspot voucher's bypassed
   // device (a TV with no login step to fail) had nothing else forcing it
@@ -70,6 +92,9 @@ export function startJobs() {
   cron.schedule('7 * * * *', safely('smartoltDetails', () => import('./smartolt.js').then((m) => m.syncAll('full'))));
   cron.schedule('* * * * *', safely('smartoltEnforce', () => import('./smartolt.js').then((m) => m.enforceOnus())));
   cron.schedule('*/10 * * * *', safely('healRouters', healRouters));
+  // Router log rules (no red RADIUS error lines): shortly after start, then hourly.
+  cron.schedule('17 * * * *', safely('quietRouterLogs', quietRouterLogs));
+  setTimeout(safely('quietRouterLogs', quietRouterLogs), 120000).unref?.();
   cron.schedule('*/2 * * * *', safely('autoProvisionNewRouters', autoProvisionNewRouters));
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every 10 minutes: which online PPPoE lines are connected but passing nothing and not answering (online, no internet).
