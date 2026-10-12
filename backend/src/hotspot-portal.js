@@ -146,6 +146,13 @@ export function loginPage(opts = {}) {
     block = block.replace('id="mpesaOpen">', 'id="mpesaOpen" style="display:none">');
     top = '<p class="hint" style="margin:6px 0 0">Paid but did not get your voucher code? Enter your M-Pesa code to get it.</p>' + mpesa;
   }
+  // The username and password link belongs right under the M-Pesa box, wherever the voucher box is.
+  const ua = block.indexOf('<!--UPT-START-->');
+  const ub = block.indexOf('<!--UPT-END-->');
+  if (ua >= 0 && ub > ua) {
+    top += block.slice(ua, ub + '<!--UPT-END-->'.length);
+    block = block.slice(0, ua) + block.slice(ub + '<!--UPT-END-->'.length);
+  }
   return html.slice(0, a) + top + html.slice(b + END.length, dest) + block + html.slice(dest);
 }
 
@@ -577,8 +584,12 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       <input id="password" name="password" type="hidden">
       <button type="submit">Connect</button>
     </form>
-    <p class="hint" style="font-size:16px;margin-top:10px">
-      <a href="#" id="userPassToggle" onclick="return toggleUserPass();" style="display:inline-block;padding:10px 6px;font-size:16px;font-weight:700">Have a username and password instead?</a>
+    <p class="hint">
+      <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
+    </p>
+    <!--UPT-START-->
+    <p class="hint" style="font-size:14px;margin-top:6px">
+      <a href="#" id="userPassToggle" onclick="return toggleUserPass();" style="display:inline-block;padding:8px 4px;font-size:14px;font-weight:600">Have a username and password instead?</a>
     </p>
     <script>
       function toggleUserPass() {
@@ -590,12 +601,11 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
         up.style.display = toCode ? 'none' : 'block';
         code.style.display = toCode ? 'block' : 'none';
         link.textContent = toCode ? 'Have a username and password instead?' : 'Have a voucher code instead?';
+        try { (toCode ? code : up).scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) { /* the form is simply where it is */ }
         return false;
       }
     </script>
-    <p class="hint">
-      <a href="javascript:void(0)" id="mpesaOpen">Paid but got no SMS? Use your M-Pesa code</a>
-    </p>
+    <!--UPT-END-->
     <p class="hint">
       <a href="javascript:void(0)" id="phoneOpen">Paid with M-Pesa? Sign in with your phone number</a>
     </p>
