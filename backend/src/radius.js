@@ -1185,6 +1185,18 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false, { only
   // Framed-IP-Address makes the router look that address up among its hotspot hosts first: for a customer parked on the expired
   // range there is no such host, and every one of those requests came out as a red "Radius request for unknown ip" line.
   if (!onlyIfOnline) framedIp = undefined;
+  // A PPPoE change for a customer the router does not currently report online has nothing to hit. The router answers each such
+  // request with a red hotspot error line ("Radius request for unknown ip", "Radius with no ip provided"), and a stale accounting
+  // row is not proof they are online. The router-reported session list is, so a customer not on it is skipped: their new speed or
+  // address applies when they next connect, which is when it would have anyway.
+  if (!onlyIfOnline) {
+    let seen = true;
+    try {
+      const { rowCount } = await c.query("select 1 from live_sessions where username = $1 and seen_at > now() - interval '5 minutes' limit 1", [user]);
+      seen = rowCount > 0;
+    } catch { /* no session list to consult: send as before */ }
+    if (!seen) return { ok: true, skipped: true };
+  }
   if (onlyIfOnline && !sessionId && !framedIp) return { ok: true, skipped: true };
 
   const result = await coaClient.send({
