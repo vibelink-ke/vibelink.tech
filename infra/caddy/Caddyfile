@@ -31,6 +31,23 @@
 	}
 }
 
+# Security headers and a ceiling on request bodies, for every site below (import secure).
+#   HSTS: browsers keep to https. nosniff / X-Frame-Options / Referrer-Policy: the usual. Server header off.
+#   max_size 30MB: the biggest legitimate body is a SkyPlan save (25MB); anything larger is cut off here, not in the app.
+(secure) {
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "interest-cohort=()"
+		-Server
+	}
+	request_body {
+		max_size 30MB
+	}
+}
+
 # The apex plus every tenant subdomain.
 *.{$ROOT_DOMAIN}, {$ROOT_DOMAIN} {
 	tls {
@@ -142,22 +159,5 @@
 	log {
 		output stdout
 		format console
-	}
-}
-
-# Security headers and a ceiling on request bodies, for every site below (import secure).
-#   HSTS: browsers keep to https. nosniff / X-Frame-Options / Referrer-Policy: the usual. Server header off.
-#   max_size 30MB: the biggest legitimate body is a SkyPlan save (25MB); anything larger is cut off here, not in the app.
-(secure) {
-	header {
-		Strict-Transport-Security "max-age=31536000"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "SAMEORIGIN"
-		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "interest-cohort=()"
-		-Server
-	}
-	request_body {
-		max_size 30MB
 	}
 }
