@@ -428,6 +428,30 @@ export async function applyHotspot(conn, { interimSeconds = 10 } = {}) {
  */
 
 /**
+ * Keep the hotspot's own chatter out of the router's log. RouterOS writes every RADIUS request it cannot match to a guest, and every
+ * failed guest login, as a red error line in the memory log; on a busy site that is hundreds of lines and it buries everything else.
+ * Adds "!hotspot" to the info and error rules that write to memory. Nothing else changes, and the rules are left alone if they
+ * already carry it. Best-effort: a log rule that cannot be edited never stops Configure.
+ */
+export async function quietHotspotLog(conn) {
+  let changed = 0;
+  try {
+    const rules = await conn.write('/system/logging/print', []);
+    for (const r of rules) {
+      const topics = String(r.topics ?? '');
+      const list = topics.split(',').map((x) => x.trim()).filter(Boolean);
+      if (r.action !== 'memory' || r.disabled === 'true') continue;
+      if (!list.some((t) => t === 'info' || t === 'error') || list.includes('!hotspot') || list.includes('hotspot')) continue;
+      await conn.write('/system/logging/set', [`=.id=${idOf(r)}`, `=topics=${[...list, '!hotspot'].join(',')}`]);
+      changed += 1;
+    }
+  } catch (e) {
+    console.warn('quietHotspotLog:', e.message);
+  }
+  return changed;
+}
+
+/**
  * Turn an operator-supplied subnet into the exact values RouterOS wants.
  *
  * Two bugs this closes. The old code took the first three octets verbatim and
@@ -661,6 +685,8 @@ export async function applyHotspotServer(conn, {
   // has none of them, and a login then fails with "unknown user profile" —
   // the code and the password are perfect and the guest is refused, the
   // same trap Mikrotik-Group set for PPPoE.
+
+  await quietHotspotLog(conn);
 
   // Without this the guests have a lease and no internet, which is the single
   // most common "the hotspot does not work" report.
