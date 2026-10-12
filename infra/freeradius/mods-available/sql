@@ -44,10 +44,13 @@ sql {
 
 
     pool {
-        start    = 1
-        min      = 1
-        max      = 10
-        spare    = 3
+        # Ten was far too few: every login and every accounting update holds one of these while it writes to the database, and under
+        # load requests queued, ran out ("Cannot open new connection, already at max") and were REJECTED, even with a correct code.
+        # Postgres allows 100 connections and the API uses up to 20, so 48 here leaves room.
+        start    = 8
+        min      = 8
+        max      = 48
+        spare    = 8
         uses     = 0
         lifetime = 0
         idle_timeout = 60

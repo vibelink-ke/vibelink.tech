@@ -122,7 +122,7 @@ server billing {
         # Access codes locked to their devices (hotspot_access_codes.lock_mac). Hotspot access-code usernames are 2-12 letters or
         # digits, which is what makes them safe to put in the query; the NAS's own MAC format is checked for the same reason.
         # access_code_mac_ok remembers a new device's MAC while the code still has room, and answers f for any other device.
-        if (&User-Name =~ /^[A-Za-z0-9]{2,12}$/ && &Calling-Station-Id =~ /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/) {
+        if (&NAS-Port-Type == "Wireless-802.11" && &User-Name =~ /^[A-Za-z0-9]{2,12}$/ && &Calling-Station-Id =~ /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/) {
             update control {
                 &Tmp-String-4 := "%{sql: SELECT access_code_mac_ok('%{User-Name}', '%{toupper:%{Calling-Station-Id}}', '%{Packet-Src-IP-Address}')}"
             }

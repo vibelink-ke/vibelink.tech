@@ -387,7 +387,7 @@ export async function applyRadius(conn, { serverIp, secret, coaPort = 3799, serv
  * interim-update matters more than it looks: without it the router reports usage
  * only when a session ends, so fair-use sees zero all day and then a cliff.
  */
-export async function applyPpp(conn, { interimSeconds = 30 } = {}) {
+export async function applyPpp(conn, { interimSeconds = 120 } = {}) {
   await conn.write('/ppp/aaa/set', [
     '=use-radius=yes',
     '=accounting=yes',
@@ -402,7 +402,7 @@ export async function applyPpp(conn, { interimSeconds = 30 } = {}) {
  * below — "the hotspot package is not installed" — instead of RouterOS's raw
  * "no such command or directory (hotspot)".
  */
-export async function applyHotspot(conn, { interimSeconds = 10 } = {}) {
+export async function applyHotspot(conn, { interimSeconds = 60 } = {}) {
   const profiles = await cmd(conn, 'read hotspot profiles', '/ip/hotspot/profile/print', []);
   const fields = ['=use-radius=yes', `=radius-interim-update=${hhmmss(interimSeconds)}`];
   let changed = 0;
@@ -510,7 +510,7 @@ export function planNetwork(input) {
 export async function applyHotspotServer(conn, {
   bridge = 'bridge-lan',
   network = '10.5.50.0/24',
-  interimSeconds = 10,
+  interimSeconds = 60,
   dnsName = 'billing.spot',
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
