@@ -12483,7 +12483,19 @@ app.post('/api/hotspot/access-codes', requirePermission('hotspot.vouchers'), wra
   // and the odds of a clash are far higher with two characters than with eight.
   const { rows: [taken] } = await pool.query(
     'select 1 from radcheck where tenant_id=$1 and username=$2 limit 1', [req.tenant.id, username]);
-  if (taken) return res.status(409).json({ error: 'That username is already used by another login — pick another.' });
+  if (taken) {
+    // Is the name really in use, or only left behind (rows of a voucher, customer or access code that no longer exists)? Say who has it;
+    // clear it only when nothing owns it, so a real login is never overwritten.
+    const { rows: [owner] } = await pool.query(
+      `select case
+                when exists (select 1 from vouchers where tenant_id=$1 and code=$2) then 'a voucher with that code'
+                when exists (select 1 from subscribers where tenant_id=$1 and pppoe_user=$2) then 'a customer with that PPPoE username'
+                when exists (select 1 from hotspot_access_codes where tenant_id=$1 and username=$2) then 'another access code'
+                else null end as who`, [req.tenant.id, username]);
+    if (owner?.who) return res.status(409).json({ error: `That username is already used by ${owner.who} — pick another.` });
+    await pool.query('delete from radcheck where tenant_id=$1 and username=$2', [req.tenant.id, username]);
+    await pool.query('delete from radreply where tenant_id=$1 and username=$2', [req.tenant.id, username]);
+  }
   const devices = Math.round(Number(maxDevices));
   if (!Number.isFinite(devices) || devices < 1 || devices > 50) {
     return res.status(400).json({ error: 'Max devices must be between 1 and 50' });
