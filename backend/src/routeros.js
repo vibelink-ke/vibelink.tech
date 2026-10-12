@@ -595,6 +595,10 @@ export async function applyHotspotServer(conn, {
     // Needs to be re-tested against a single non-production router on the
     // actual RouterOS version in use before trying again.
     '=login-by=http-pap,mac,cookie',
+    // The MAC login (above) sends the device's MAC as the username; radcheck holds the MAC as its password too (ensureMacRadiusLogin).
+    // RouterOS's default, mac-as-username, sends an EMPTY password, which never matches, so a returning phone always fell through
+    // to the login page. This sends the MAC as the password as well.
+    '=mac-auth-mode=mac-as-username-and-password',
     /**
      * Deliberately always cleared, never set.
      *
