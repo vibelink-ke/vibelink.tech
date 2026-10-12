@@ -1,5 +1,5 @@
 import { pool, withTenant } from './db.js';
-import { startVoucherClock } from './radius.js';
+import { startVoucherClock, ensureMacRadiusLogin } from './radius.js';
 import * as ros from './routeros.js';
 import * as secrets from './secrets.js';
 
@@ -78,13 +78,28 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
     // fire-and-forget and was missed for weeks, leaving codes that never ran out. Only codes still unused are touched, so
     // a clock that has started is never restarted, and a guest never gets a fresh full duration.
     try {
-      const codes = [...new Set(sessions.filter((s) => s.service === 'hotspot' && s.username).map((s) => s.username))];
+      const hotspotNow = sessions.filter((s) => s.service === 'hotspot' && s.username);
+      const codes = [...new Set(hotspotNow.map((s) => s.username))];
+      const macOf = new Map(hotspotNow.filter((s) => s.mac).map((s) => [s.username, String(s.mac).toUpperCase()]));
       if (codes.length) {
         const { rows: unstarted } = await pool.query(
           "select code from vouchers where tenant_id=$1 and status='unused' and starts_at is null and code = any($2::text[])",
           [tenantId, codes]);
         for (const v of unstarted) {
-          await withTenant(tenantId, (c) => startVoucherClock(c, tenantId, v.code)).catch((e) => console.warn('startVoucherClock:', v.code, e.message));
+          await withTenant(tenantId, (c) => startVoucherClock(c, tenantId, v.code, macOf.get(v.code))).catch((e) => console.warn('startVoucherClock:', v.code, e.message));
+        }
+        // A running voucher whose device was never recorded (the clock was started without it) gets the device now, and with it the
+        // MAC login that lets that phone straight back in after it drops or leaves and returns, without typing the code again.
+        const { rows: noMac } = await pool.query(
+          "select code from vouchers where tenant_id=$1 and status='in_use' and mac is null and expires_at > now() and code = any($2::text[])",
+          [tenantId, codes]);
+        for (const v of noMac) {
+          const mac = macOf.get(v.code);
+          if (!mac) continue;
+          await withTenant(tenantId, async (c) => {
+            await c.query('update vouchers set mac=$3::macaddr where tenant_id=$1 and code=$2 and mac is null', [tenantId, v.code, mac]);
+            await ensureMacRadiusLogin(c, tenantId, v.code);
+          }).catch((e) => console.warn('voucher device login:', v.code, e.message));
         }
         if (unstarted.length) console.log(`presence: started the clock on ${unstarted.length} hotspot voucher(s) seen online`);
       }
@@ -164,5 +179,32 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
       "select id, router_id from subscribers where tenant_id=$1 and service='pppoe'", [tenantId]);
     summary.moved = after.filter((s) => before.has(s.id) && before.get(s.id) !== s.router_id).length;
   }
+  await backfillVoucherDevices(tenantId);
   return summary;
+}
+
+/**
+ * A running voucher that has no device recorded gets the device it was last used from (the MAC in its accounting rows), and with
+ * it the MAC login that lets that phone back in by itself after it drops or comes back from a walk. Covers guests who have
+ * already left the router's list by the time anyone looked, which the live pass above cannot. Only vouchers with time still
+ * left are touched, and only the first device is ever recorded: a voucher that already has one is never changed.
+ */
+async function backfillVoucherDevices(tenantId) {
+  try {
+    const { rows } = await pool.query(
+      `select v.code, (select a.callingstationid from radacct a where a.username = v.code and a.callingstationid ~* '^([0-9a-f]{2}:){5}[0-9a-f]{2}$'
+                         order by a.acctstarttime desc limit 1) as mac
+         from vouchers v
+        where v.tenant_id = $1 and v.status = 'in_use' and v.mac is null and v.expires_at > now()
+        limit 300`, [tenantId]);
+    for (const v of rows) {
+      if (!v.mac) continue;
+      await withTenant(tenantId, async (c) => {
+        await c.query('update vouchers set mac=$3::macaddr where tenant_id=$1 and code=$2 and mac is null', [tenantId, v.code, String(v.mac).toUpperCase()]);
+        await ensureMacRadiusLogin(c, tenantId, v.code);
+      }).catch((e) => console.warn('voucher device backfill:', v.code, e.message));
+    }
+  } catch (e) {
+    console.warn('presence: voucher device backfill:', e.message);
+  }
 }
