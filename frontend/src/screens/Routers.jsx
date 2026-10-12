@@ -758,6 +758,30 @@ export default function Routers() {
    */
   const [importing, setImporting] = useState(null);   // { router, preview, result, busy }
 
+  /**
+   * The router's own copies of logins billing already holds (old hotspot users and PPP secrets from before billing took over).
+   * RouterOS answers from its local list first, so those copies override billing. Preview, then remove; anyone online is skipped.
+   */
+  const [cleaning, setCleaning] = useState(null);   // { router, preview, result, busy, error }
+  const openClean = async (r) => {
+    setCleaning({ router: r, busy: true });
+    try {
+      setCleaning({ router: r, preview: await api.cleanLocalCopies(r.id, { apply: false }), busy: false });
+    } catch (e) {
+      setCleaning({ router: r, error: e.message, busy: false });
+    }
+  };
+  const applyClean = async () => {
+    setCleaning((c) => ({ ...c, busy: true, error: null }));
+    try {
+      setCleaning((c) => ({ ...c, result: undefined, busy: true }));
+      const result = await api.cleanLocalCopies(cleaning.router.id, { apply: true });
+      setCleaning((c) => ({ ...c, result, busy: false }));
+    } catch (e) {
+      setCleaning((c) => ({ ...c, error: e.message, busy: false }));
+    }
+  };
+
   // The hotspot users that will become access codes: every valid one that has not been unticked.
   const accessPicked = (i) => (i?.preview?.hotspotUsers?.access ?? []).filter((u) => !u.problem && !(i.unticked ?? []).includes(u.name)).map((u) => u.name);
   const importCount = (i) => {
@@ -1393,6 +1417,12 @@ Revoke anyway?`
                     >
                       Import
                     </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); openClean(r); }}
+                      title="Remove the router's own copies of hotspot users and PPP logins that billing already holds"
+                    >
+                      Remove old local copies
+                    </MenuItem>
                     <MenuItem onClick={() => { setMenuFor(null); openEdit(r); }}>
                       Edit
                     </MenuItem>
@@ -1993,6 +2023,60 @@ Revoke anyway?`
         )}
       </Modal>
 
+      {/* Old local copies: preview, then remove. */}
+      <Modal
+        open={!!cleaning}
+        title={`Old local copies on ${cleaning?.router?.name ?? ''}`}
+        onClose={() => !cleaning?.busy && setCleaning(null)}
+        footer={
+          <>
+            <Button onClick={() => setCleaning(null)} disabled={cleaning?.busy}>Close</Button>
+            {cleaning?.preview && !cleaning?.result && (
+              <Button
+                variant="primary"
+                disabled={cleaning.busy || !(cleaning.preview.hotspot.toRemove + cleaning.preview.ppp.toRemove)}
+                onClick={applyClean}
+              >
+                {cleaning.busy ? 'Removing…' : `Remove ${cleaning.preview.hotspot.toRemove + cleaning.preview.ppp.toRemove}`}
+              </Button>
+            )}
+          </>
+        }
+      >
+        {cleaning?.error && <div style={{ fontSize: 13, color: color.rust }}>{cleaning.error}</div>}
+        {cleaning?.busy && !cleaning?.preview && <div style={{ fontSize: 13, color: color.muted }}>Reading the router's own hotspot users and PPP logins…</div>}
+        {(cleaning?.result ?? cleaning?.preview) && (() => {
+          const d = cleaning.result ?? cleaning.preview;
+          const done = !!cleaning.result;
+          const block = (title, p, noun) => (
+            <div style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10, display: 'grid', gap: 4 }}>
+              <strong>{title}</strong>
+              {p.error ? <span style={{ color: color.rust }}>Could not read this part: {p.error}</span>
+                : p.skipped ? <span style={{ color: color.muted }}>{p.skipped}</span>
+                : (
+                  <>
+                    <span>{p.local} on the router · billing holds {p.held} of them under the same name</span>
+                    <span>
+                      {done ? <><strong>{p.removed}</strong> removed</> : <><strong>{p.toRemove}</strong> can be removed now</>}
+                      {p.online.length ? <> · <strong>{p.online.length}</strong> online right now, left alone</> : null}
+                    </span>
+                    {p.online.length > 0 && <span style={{ color: color.muted, fontSize: 12 }}>Left alone for now: {p.online.slice(0, 12).join(', ')}{p.online.length > 12 ? '…' : ''}. Run this again later to remove them.</span>}
+                    {p.local - p.held > 0 && <span style={{ color: color.muted, fontSize: 12 }}>{p.local - p.held} {noun} on the router that billing does not hold are not touched.</span>}
+                  </>
+                )}
+            </div>
+          );
+          return (
+            <div style={{ display: 'grid', gap: 10, fontSize: 13 }}>
+              {!done && <span>These are logins the router still keeps itself. The router answers from them first, so billing's password, speed, device limit and on/off switch do not apply to them. Only ones billing holds under exactly the same name are removed; anyone online is skipped.</span>}
+              {block('Hotspot users', d.hotspot, 'hotspot users')}
+              {block('PPP logins', d.ppp, 'PPP logins')}
+              {done && <span style={{ color: color.green }}>Done. Those logins now go through billing.</span>}
+            </div>
+          );
+        })()}
+      </Modal>
+
       {/* Import: preview, then confirm. */}
       <Modal
         open={!!importing}
@@ -2001,6 +2085,11 @@ Revoke anyway?`
         footer={
           <>
             <Button onClick={() => setImporting(null)} disabled={importing?.busy}>Close</Button>
+            {importing?.result && (
+              <Button onClick={() => { const r = importing.router; setImporting(null); openClean(r); }}>
+                Remove the router's old copies…
+              </Button>
+            )}
             {importing?.preview && !importing?.result && (
               <Button
                 variant="primary"

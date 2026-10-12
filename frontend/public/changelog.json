@@ -155,7 +155,8 @@
       "Hotspot: paying now signs the phone in by itself. The login page sends the phone's device with a purchase, and the paid voucher is tied to it, so the router connects it without the guest typing a code or keeping the page open while they are in the M-Pesa app.",
       "Hotspot: the list of sites a guest may reach before signing in is now kept up to date by the server every hour, so it follows the site's addresses (including when they sit behind Cloudflare). This fixes the login page sometimes failing to reach the server.",
       "Hotspot: a voucher code sent without its password (by an older login page, or a browser that submitted the form itself) is now accepted, since a voucher's password is its code. Fixes guests tapping Connect with a correct code and nothing happening.",
-      "Access codes: when a username is refused as \"already used\", it now says who has it (a voucher, a customer or another access code), and a name only left over from something deleted can be used again."
+      "Access codes: when a username is refused as \"already used\", it now says who has it (a voucher, a customer or another access code), and a name only left over from something deleted can be used again.",
+      "Routers → ⋯ → \"Remove old local copies\": removes the router's own hotspot users and PPP logins that billing already holds, so they no longer override billing. It previews first, skips anyone online right now and never touches a login billing does not hold. Offered after an import too."
     ]
   }
 ]

@@ -7006,6 +7006,36 @@ function closestHotspotPlan(plans, remainingMinutes) {
   return hotspot.find((p) => p.duration_min >= remainingMinutes) ?? hotspot[hotspot.length - 1];
 }
 
+/**
+ * Remove the router's own copies of logins that billing already holds (see removeLocalCopies in routeros.js). Without apply it only
+ * reports what it would do. Uses the router's service login, never an admin password.
+ */
+app.post('/api/routers/:id/clean-local-copies', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const apply = req.body?.apply === true;
+  const { rows: [r] } = await pool.query('select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  if (!r.service_user || !r.service_password_enc) return res.status(428).json({ error: 'Configure this router first.' });
+
+  const { rows: ac } = await pool.query('select username as n from hotspot_access_codes where tenant_id=$1', [req.tenant.id]);
+  const { rows: vc } = await pool.query('select code as n from vouchers where tenant_id=$1', [req.tenant.id]);
+  const { rows: pp } = await pool.query("select pppoe_user as n from subscribers where tenant_id=$1 and service='pppoe' and pppoe_user is not null", [req.tenant.id]);
+
+  let conn;
+  try {
+    conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 10 });
+    const out = await ros.removeLocalCopies(conn, {
+      hotspotNames: [...ac, ...vc].map((x) => x.n), pppNames: pp.map((x) => x.n), apply,
+    });
+    res.json(out);
+  } catch (e) {
+    res.status(502).json({ error: `Could not read the router: ${e.message}` });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/api/routers/:id/import-secrets', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');

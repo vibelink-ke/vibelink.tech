@@ -2738,6 +2738,65 @@ export async function unbindDeviceByMac(conn, { mac }) {
 }
 
 /**
+ * The router's own copies of logins that billing already holds. RouterOS looks in its local lists first, so a leftover local hotspot
+ * user or PPP secret answers the login itself (with its old password, speed and address) and RADIUS, and so billing's rules, never
+ * hear about it. This lists them and, when apply is true, removes only the ones billing holds under exactly the same name.
+ * Anyone online right now is left alone, and a service is skipped altogether when the router is not set to use RADIUS for it,
+ * since the local list is then all it has. Nothing billing does not hold is ever touched.
+ */
+export async function removeLocalCopies(conn, { hotspotNames = [], pppNames = [], apply = false } = {}) {
+  const part = () => ({ local: 0, held: 0, toRemove: 0, removed: 0, online: [], skipped: null, error: null });
+  const out = { apply, hotspot: part(), ppp: part() };
+
+  try {
+    const profiles = await conn.write('/ip/hotspot/profile/print', []);
+    const users = await conn.write('/ip/hotspot/user/print', []);
+    out.hotspot.local = users.length;
+    if (!profiles.some((p) => String(p['use-radius']) === 'true')) {
+      out.hotspot.skipped = 'This router\'s hotspot is not set to use RADIUS, so its local users are all it has.';
+    } else {
+      const names = new Set(hotspotNames);
+      const online = new Set((await conn.write('/ip/hotspot/active/print', [])).map((a) => a.user));
+      for (const u of users) {
+        if (!u.name || u.name === 'default-trial' || !names.has(u.name)) continue;
+        out.hotspot.held++;
+        if (online.has(u.name)) { out.hotspot.online.push(u.name); continue; }
+        out.hotspot.toRemove++;
+        if (apply) {
+          await cmd(conn, 'remove local hotspot user', '/ip/hotspot/user/remove', [`=.id=${idOf(u)}`]);
+          out.hotspot.removed++;
+          await sleep(20);
+        }
+      }
+    }
+  } catch (e) { out.hotspot.error = e.message; }
+
+  try {
+    const aaa = await conn.write('/ppp/aaa/print', []);
+    const secrets = await conn.write('/ppp/secret/print', []);
+    out.ppp.local = secrets.length;
+    if (!aaa.some((a) => String(a['use-radius']) === 'true')) {
+      out.ppp.skipped = 'This router\'s PPP is not set to use RADIUS, so its local secrets are all it has.';
+    } else {
+      const names = new Set(pppNames);
+      const online = new Set((await conn.write('/ppp/active/print', [])).map((a) => a.name));
+      for (const sct of secrets) {
+        if (!sct.name || !names.has(sct.name)) continue;
+        out.ppp.held++;
+        if (online.has(sct.name)) { out.ppp.online.push(sct.name); continue; }
+        out.ppp.toRemove++;
+        if (apply) {
+          await cmd(conn, 'remove local PPP secret', '/ppp/secret/remove', [`=.id=${idOf(sct)}`]);
+          out.ppp.removed++;
+          await sleep(20);
+        }
+      }
+    }
+  } catch (e) { out.ppp.error = e.message; }
+  return out;
+}
+
+/**
  * A visitor typed a code that the router says is already in use. Ask the router whether it really is: a session
  * that has moved no traffic for a couple of minutes belongs to a device that walked away without logging out, and
  * the router keeps it (and refuses everyone else) until its own idle timeout. Such stale sessions are removed, and

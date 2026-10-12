@@ -445,6 +445,7 @@ export const api = {
   routerDevices: (id) => get(`/api/routers/${id}/devices`),
   lockRouterDevice: (id, body) => post(`/api/routers/${id}/devices/lock`, body),
   unlockRouterDevice: (id, mac) => post(`/api/routers/${id}/devices/unlock`, { mac }),
+  cleanLocalCopies: (id, body = {}) => post(`/api/routers/${id}/clean-local-copies`, body),
   previewSecrets: (id) => post(`/api/routers/${id}/import-secrets`, {}),
   importSecrets: (id, extra = {}) => post(`/api/routers/${id}/import-secrets`, { apply: true, ...extra }),
   revokeOvpnClient: (id) => del(`/api/ovpn-clients/${id}`),
