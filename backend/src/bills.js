@@ -19,9 +19,9 @@ import { pool, enabledTenants } from './db.js';
 export async function generateDueBills({ tenantId = null } = {}) {
   const { rows } = await pool.query(
     `insert into expenses (tenant_id, category, description, amount, paid_to, supplier_id,
-                           recurring_bill_id, bill_month, due_date)
-     select b.tenant_id, b.category, b.name, b.amount, sp.name, b.supplier_id,
-            b.id, m.month, d.due
+                           recurring_bill_id, bill_month, due_date, paid_in)
+     select b.tenant_id, b.category, b.name, b.amount, coalesce(sp.name, b.payee), b.supplier_id,
+            b.id, m.month, d.due, b.paid_in
        from recurring_bills b
        left join suppliers sp on sp.id = b.supplier_id
        cross join lateral (

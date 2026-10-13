@@ -3451,3 +3451,10 @@ create table if not exists hotspot_pending_devices (
   primary key (tenant_id, checkout_id)
 );
 create index if not exists hotspot_pending_devices_phone on hotspot_pending_devices (tenant_id, phone, created_at desc);
+
+-- Monthly bills paid to someone who is not a supplier (a shop), and bills settled in hotspot vouchers instead of money.
+alter table recurring_bills add column if not exists payee text;
+alter table recurring_bills add column if not exists paid_in text not null default 'money';
+alter table recurring_bills drop constraint if exists recurring_bills_paid_in_check;
+alter table recurring_bills add constraint recurring_bills_paid_in_check check (paid_in in ('money','vouchers'));
+alter table expenses add column if not exists paid_in text not null default 'money';

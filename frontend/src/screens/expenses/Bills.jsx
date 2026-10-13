@@ -4,7 +4,7 @@ import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Select, Stat, Table, Textarea } from '../../ui/primitives';
 
-const blank = () => ({ name: '', category: 'Rent', amount: '', dayOfMonth: '1', supplierId: '', notes: '' });
+const blank = () => ({ name: '', category: 'Rent', amount: '', dayOfMonth: '1', supplierId: '', notes: '', payee: '', paidIn: 'money' });
 
 /** The next date this bill falls due, today included. A day past a short month's end lands on its last day. */
 function nextDue(day) {
@@ -46,6 +46,7 @@ export default function Bills({ categories, suppliers, canEdit, canPay }) {
       const body = {
         name: form.name, category: form.category, amount, dayOfMonth: day,
         supplierId: form.supplierId || null, notes: form.notes || null,
+        payee: form.payee || null, paidIn: form.paidIn,
       };
       const out = form.id ? await api.updateBill(form.id, body) : await api.createBill(body);
       await load();
@@ -139,7 +140,7 @@ export default function Bills({ categories, suppliers, canEdit, canPay }) {
               render: (b) => (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   <span style={{ fontWeight: 600, opacity: b.active ? 1 : 0.55 }}>{b.name}</span>
-                  <span style={{ fontSize: 11.5, color: color.muted }}>{b.category}{b.supplier_name ? ` · ${b.supplier_name}` : ''}</span>
+                  <span style={{ fontSize: 11.5, color: color.muted }}>{b.category}{(b.supplier_name || b.payee) ? ` · ${b.supplier_name || b.payee}` : ''}{b.paid_in === 'vouchers' ? ' · paid in hotspot vouchers' : ''}</span>
                 </div>
               ),
             },
@@ -162,6 +163,7 @@ export default function Bills({ categories, suppliers, canEdit, canPay }) {
                   <span onClick={() => setForm({
                     id: b.id, name: b.name, category: b.category, amount: String(b.amount),
                     dayOfMonth: String(b.day_of_month), supplierId: b.supplier_id ?? '', notes: b.notes ?? '',
+                    payee: b.payee ?? '', paidIn: b.paid_in ?? 'money',
                   })} style={{ ...link, color: color.green }}>Edit</span>
                   <span onClick={() => toggle(b)} style={{ ...link, color: color.ink }}>{b.active ? 'Pause' : 'Resume'}</span>
                   <span onClick={() => remove(b)} style={{ ...link, color: color.rust, marginRight: 0 }}>Delete</span>
@@ -282,6 +284,12 @@ export default function Bills({ categories, suppliers, canEdit, canPay }) {
                 onChange={set('supplierId')}
                 options={[{ value: '', label: 'None' }, ...suppliers.filter((s) => s.active || s.id === form.supplierId).map((s) => ({ value: s.id, label: s.name }))]}
               />
+            </Field>
+            <Field label="Paid to" hint="A shop or person who is not a supplier. Used when no supplier is chosen.">
+              <Input value={form.payee} onChange={set('payee')} placeholder="e.g. Mama Njeri shop" />
+            </Field>
+            <Field label="Paid in" hint="Vouchers: they are given hotspot vouchers worth this amount instead of money.">
+              <Select value={form.paidIn} onChange={set('paidIn')} options={[{ value: 'money', label: 'Money' }, { value: 'vouchers', label: 'Hotspot vouchers' }]} />
             </Field>
             <Field label="Notes" span={2}>
               <Textarea rows={2} value={form.notes} onChange={set('notes')} placeholder="Account number, contract reference…" />

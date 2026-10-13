@@ -4778,7 +4778,7 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
     `select e.id, e.tenant_id, e.category, e.description, e.amount, e.paid_to, e.staff_id,
             e.status, e.created_by, e.approved_by, e.paid_at, e.created_at,
             (e.receipt_data is not null) as has_receipt,
-            e.supplier_id, e.recurring_bill_id, e.payout_id, e.reference,
+            e.supplier_id, e.recurring_bill_id, e.payout_id, e.reference, e.paid_in,
             e.pay_state, e.pay_error, e.pay_method, e.pay_reference, e.pay_requested_by, e.pay_requested_at,
             (select name from staff rq where rq.id = e.pay_requested_by) as pay_requested_by_name,
             sup.paybill as supplier_paybill, sup.till_number as supplier_till, sup.phone as supplier_phone,
@@ -5175,7 +5175,8 @@ async function readBillBody(req, res) {
     const { rowCount } = await pool.query('select 1 from suppliers where id=$1 and tenant_id=$2', [b.supplierId, req.tenant.id]);
     if (!rowCount) { res.status(404).json({ error: 'No such supplier' }); return null; }
   }
-  return { name, category, amount, day, supplierId: b.supplierId || null, notes: cleanText(b.notes) };
+  return { name, category, amount, day, supplierId: b.supplierId || null, notes: cleanText(b.notes),
+           payee: cleanText(b.payee), paidIn: b.paidIn === 'vouchers' ? 'vouchers' : 'money' };
 }
 
 app.get('/api/bills', requirePermission('bills.view'), wrap(async (req, res) => {
@@ -5255,10 +5256,10 @@ app.post('/api/bills/:id/month-paid', requirePermission('expenses.approve'), wra
   }
   await pool.query(
     `insert into expenses (tenant_id, category, description, amount, paid_to, supplier_id, recurring_bill_id, bill_month, due_date,
-                           status, approved_by, paid_at, reference)
-     select b.tenant_id, b.category, b.name, b.amount, sp.name, b.supplier_id, b.id, $3::date,
+                           status, approved_by, paid_at, reference, paid_in)
+     select b.tenant_id, b.category, b.name, b.amount, coalesce(sp.name, b.payee), b.supplier_id, b.id, $3::date,
             least($3::date + (b.day_of_month - 1), ($3::date + interval '1 month' - interval '1 day')::date),
-            'paid', $4::uuid, coalesce($5::timestamptz, now()), $6
+            'paid', $4::uuid, coalesce($5::timestamptz, now()), $6, b.paid_in
        from recurring_bills b left join suppliers sp on sp.id = b.supplier_id
       where b.id = $1 and b.tenant_id = $2
      on conflict (recurring_bill_id, bill_month) where recurring_bill_id is not null do nothing`,
@@ -5270,9 +5271,9 @@ app.post('/api/bills', requirePermission('bills.edit'), wrap(async (req, res) =>
   const v = await readBillBody(req, res);
   if (!v) return;
   const { rows: [bill] } = await pool.query(
-    `insert into recurring_bills (tenant_id, name, category, supplier_id, amount, day_of_month, notes)
-     values ($1,$2,$3,$4,$5,$6,$7) returning *`,
-    [req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes]);
+    `insert into recurring_bills (tenant_id, name, category, supplier_id, amount, day_of_month, notes, payee, paid_in)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+    [req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes, v.payee, v.paidIn]);
   // If it is already within three days of its due day this month, the entry
   // should be there now rather than after tomorrow morning's job.
   const made = await generateDueBills({ tenantId: req.tenant.id });
@@ -5291,9 +5292,9 @@ app.put('/api/bills/:id', requirePermission('bills.edit'), wrap(async (req, res)
   const v = await readBillBody(req, res);
   if (!v) return;
   const { rows: [bill] } = await pool.query(
-    `update recurring_bills set name=$3, category=$4, supplier_id=$5, amount=$6, day_of_month=$7, notes=$8
+    `update recurring_bills set name=$3, category=$4, supplier_id=$5, amount=$6, day_of_month=$7, notes=$8, payee=$9, paid_in=$10
       where id=$1 and tenant_id=$2 returning *`,
-    [req.params.id, req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes]);
+    [req.params.id, req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes, v.payee, v.paidIn]);
   if (!bill) return res.status(404).json({ error: 'No such bill' });
   res.json(bill);
 }));

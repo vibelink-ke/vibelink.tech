@@ -266,7 +266,7 @@ export default function Expenses() {
               key: 'category', label: 'Category',
               render: (e) => (
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontWeight: 600 }}>{e.category}{e.payout_id && <Tag>Payroll</Tag>}{e.recurring_bill_id && <Tag>Monthly bill</Tag>}</span>
+                  <span style={{ fontWeight: 600 }}>{e.category}{e.payout_id && <Tag>Payroll</Tag>}{e.recurring_bill_id && <Tag>Monthly bill</Tag>}{e.paid_in === 'vouchers' && <Tag>Paid in vouchers</Tag>}</span>
                   {e.description && <span style={{ fontSize: 11.5, color: color.muted }}>{e.description}</span>}
                 </div>
               ),
