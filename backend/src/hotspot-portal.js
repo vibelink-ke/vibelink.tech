@@ -25,6 +25,8 @@
  * cannot tell those apart; a marker can.
  */
 export const MARKER = 'vibelink-hotspot-login';
+// Bump when the page changes in a way a guest would miss on an old copy: Routers → Login pages shows which routers are behind.
+export const PAGE_VERSION = 13;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -363,7 +365,7 @@ function loginPageRaw({
     : '';
 
   return `<!DOCTYPE html>
-<!-- ${MARKER} -->
+<!-- ${MARKER} v${PAGE_VERSION} -->
 <html lang="en">
 <head>
 <meta charset="utf-8">

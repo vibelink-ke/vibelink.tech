@@ -1715,6 +1715,42 @@ export async function ensureHotspotSkin(conn, { dir = 'hotspot' } = {}) {
   return { restored };
 }
 
+/**
+ * Which login page a router is serving, read back from the router itself. The page carries "vibelink-hotspot-login v<N>" in its first
+ * lines, so the first few hundred bytes RouterOS shows of the file are enough. A router that has not been sent the page since it last
+ * changed keeps serving the old one, and guests on it miss whatever the newer page added.
+ * state: current | old | stock (not ours) | missing | unknown (could not read the file's start)
+ */
+export async function loginPageInfo(conn, expected) {
+  const servers = await conn.write('/ip/hotspot/print', []);
+  const dirs = new Set();
+  for (const s of servers) {
+    const profiles = s.profile ? await conn.write('/ip/hotspot/profile/print', [`?name=${s.profile}`]) : [];
+    dirs.add(String(profiles[0]?.['html-directory'] ?? 'hotspot').replace(/\/+$/, ''));
+  }
+  if (!dirs.size) dirs.add('hotspot');
+  let worst = { state: 'current', version: expected, dir: null };
+  const rank = { current: 0, unknown: 1, old: 2, stock: 3, missing: 4 };
+  for (const dir of dirs) {
+    const f = (await conn.write('/file/print', [`?name=${dir}/login.html`]))[0];
+    const size = Number(f?.size ?? 0);
+    let one;
+    if (!f || !size) one = { state: 'missing', version: null };
+    else {
+      const text = String(f.contents ?? '');
+      if (!text) one = { state: 'unknown', version: null };
+      else if (!text.includes('vibelink-hotspot-login')) one = { state: 'stock', version: null };
+      else {
+        const m = /vibelink-hotspot-login v(\d+)/.exec(text);
+        const version = m ? Number(m[1]) : 0;
+        one = { state: version >= expected ? 'current' : 'old', version };
+      }
+    }
+    if (rank[one.state] > rank[worst.state]) worst = { ...one, dir };
+  }
+  return worst;
+}
+
 export async function pushHotspotPage(conn, { url, bridge }) {
   if (!/^https?:\/\//i.test(String(url ?? ''))) {
     throw new Error(`"${url}" is not a usable URL for the hotspot page.`);

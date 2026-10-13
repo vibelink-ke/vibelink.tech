@@ -782,6 +782,14 @@ export default function Routers() {
     }
   };
 
+  /** Which login page each hotspot router serves; "Update" sends the current one to the routers that are behind. */
+  const [pages, setPages] = useState(null);   // { busy, error, data }
+  const checkPages = async (apply) => {
+    setPages((p) => ({ ...(p ?? {}), busy: true, error: null }));
+    try { setPages({ busy: false, data: await api.hotspotLoginPages({ apply }) }); }
+    catch (e) { setPages({ busy: false, error: e.message }); }
+  };
+
   // The hotspot users that will become access codes: every valid one that has not been unticked.
   const accessPicked = (i) => (i?.preview?.hotspotUsers?.access ?? []).filter((u) => !u.problem && !(i.unticked ?? []).includes(u.name)).map((u) => u.name);
   const importCount = (i) => {
@@ -1152,6 +1160,7 @@ Revoke anyway?`
               {showCredentials ? 'Hide tunnel credentials' : 'Tunnel credentials'}
             </Button>
           )}
+          <Button onClick={() => checkPages(false)} title="See which hotspot routers still serve an old login page, and update them">Login pages</Button>
           <Button onClick={() => setForm(blankRouter())}>Add manually</Button>
           <Button onClick={openDialog}>+ Onboard via OVPN</Button>
           <Button variant="primary" onClick={mintWireguard} disabled={busy}
@@ -1453,6 +1462,47 @@ Revoke anyway?`
           ]}
         />
       </Card>
+
+      <Modal
+        open={!!pages}
+        title="Hotspot login pages"
+        onClose={() => setPages(null)}
+        footer={
+          <>
+            <Button onClick={() => setPages(null)}>Close</Button>
+            <Button onClick={() => checkPages(false)} disabled={pages?.busy}>Check again</Button>
+            {(pages?.data?.routers ?? []).some((r) => ['old', 'stock', 'missing', 'unknown'].includes(r.state)) && (
+              <Button variant="primary" onClick={() => checkPages(true)} disabled={pages?.busy}>Update the ones behind</Button>
+            )}
+          </>
+        }
+      >
+        {pages?.busy && <p>Reading the routers…</p>}
+        {pages?.error && <p style={{ color: color.rust }}>{pages.error}</p>}
+        {!pages?.busy && pages?.data && (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <p style={{ margin: 0, color: color.inkSoft, fontSize: 13.5 }}>
+              A router keeps serving the login page it was last sent. One that is behind misses what the newer page does (for
+              example signing a returning phone in by itself). Current version: {pages.data.current}.
+            </p>
+            {pages.data.routers.length === 0 && <p>No hotspot routers.</p>}
+            {pages.data.routers.map((r) => {
+              const label = {
+                current: ['Up to date', color.green], updated: ['Updated just now', color.green],
+                old: [`Behind (version ${r.version ?? 0})`, color.rust], stock: ['Not our page', color.rust],
+                missing: ['No login page', color.rust], unknown: ['Could not read the page version', color.muted],
+                unconfigured: ['Not configured', color.muted], offline: ['Could not reach', color.rust],
+              }[r.state] ?? [r.state, color.muted];
+              return (
+                <div key={r.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, borderTop: `1px solid ${color.line ?? '#ddd'}`, paddingTop: 6 }}>
+                  <span><b>{r.name}</b>{r.note && <span style={{ color: color.muted, fontSize: 12.5 }}> — {r.note}</span>}</span>
+                  <span style={{ color: label[1], whiteSpace: 'nowrap' }}>{label[0]}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={!!cleanup}

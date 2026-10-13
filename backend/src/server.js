@@ -6648,6 +6648,49 @@ app.post('/api/routers/:id/cleanup-apply', requirePermission('routers.configure'
   }
 }));
 
+/**
+ * Which login page each hotspot router is serving, and (apply) re-send it to the ones that are behind. Reading is free; sending only
+ * rewrites the router's login.html, the same file a landing-page edit already re-sends.
+ */
+app.post('/api/hotspot/login-pages', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { PAGE_VERSION } = await import('./hotspot-portal.js');
+  const apply = !!req.body?.apply;
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  const { rows: [t] } = await pool.query('select subdomain from tenants where id=$1', [req.tenant.id]);
+  const portal = t?.subdomain ? `${t.subdomain}.${root}` : null;
+  const { rows: routers } = await pool.query(
+    `select id, name, host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') order by name`, [req.tenant.id]);
+  const out = [];
+  for (const r of routers) {
+    const row = { id: r.id, name: r.name, state: 'offline', version: null, note: null };
+    if (!r.service_user || !r.service_password_enc) { row.state = 'unconfigured'; row.note = 'Press Configure on this router first.'; out.push(row); continue; }
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+      const info = await ros.loginPageInfo(conn, PAGE_VERSION);
+      row.state = info.state; row.version = info.version;
+      if (apply && info.state !== 'current' && portal) {
+        const url = `https://${portal}/hotspot/login.html?router=${r.id}`;
+        const unreachable = await loginPageReachable(url);
+        if (unreachable) row.note = unreachable;
+        else {
+          const page = await ros.pushHotspotPage(conn, { url });
+          row.state = 'updated'; row.note = `${page.bytes} bytes sent`;
+        }
+      }
+    } catch (e) {
+      row.state = 'offline'; row.note = e.message;
+    } finally {
+      if (conn) try { ros.close(conn); } catch { /* already gone */ }
+    }
+    out.push(row);
+  }
+  res.json({ current: PAGE_VERSION, applied: apply, routers: out });
+}));
+
 app.post('/api/routers/:id/hotspot-check', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
