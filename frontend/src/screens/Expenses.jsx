@@ -5,6 +5,7 @@ import { useStore } from '../state/store';
 import { api } from '../api/client';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 import Bills from './expenses/Bills';
+import ExpenseCalendar from './expenses/ExpenseCalendar';
 import Suppliers from './expenses/Suppliers';
 import ProfitLoss from './expenses/ProfitLoss';
 
@@ -213,7 +214,7 @@ export default function Expenses() {
       actions={<Button variant="primary" onClick={() => setForm(blank())}>+ Log expense</Button>}
     >
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        {[['log', 'Expenses'], ...(perms['bills.view'] ? [['bills', 'Monthly bills']] : []),
+        {[['log', 'Expenses'], ['calendar', 'Calendar'], ...(perms['bills.view'] ? [['bills', 'Monthly bills']] : []),
           ...(perms['suppliers.view'] ? [['suppliers', 'Suppliers']] : []),
           ...(perms['profitloss.view'] ? [['pnl', 'Profit & loss']] : [])].map(([key, label]) => (
           <Button key={key} variant={tab === key ? 'primary' : undefined} onClick={() => setTab(key)}>{label}</Button>
@@ -221,10 +222,14 @@ export default function Expenses() {
       </div>
 
       {tab === 'bills' && (
-        <Bills categories={CATEGORIES} suppliers={suppliers} canEdit={!!perms['bills.edit']} />
+        <Bills categories={CATEGORIES} suppliers={suppliers} canEdit={!!perms['bills.edit']} canPay={!!perms['expenses.approve']} />
       )}
       {tab === 'suppliers' && (
         <Suppliers suppliers={suppliers} reload={loadSuppliers} categories={CATEGORIES} canEdit={!!perms['suppliers.edit']} />
+      )}
+
+      {tab === 'calendar' && (
+        <ExpenseCalendar items={items} categories={CATEGORIES} canEdit={!!perms['expenses.edit']} onChanged={reload} />
       )}
 
       {tab === 'pnl' && perms['profitloss.view'] && <ProfitLoss />}

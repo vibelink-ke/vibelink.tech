@@ -4797,7 +4797,7 @@ app.get('/api/expenses', requirePermission('expenses.view'), wrap(async (req, re
 }));
 
 app.post('/api/expenses', requirePermission('expenses.edit'), wrap(async (req, res) => {
-  const { category, description, amount, paidTo, staffId, supplierId, dueDate, reference } = req.body ?? {};
+  const { category, description, amount, paidTo, staffId, supplierId, dueDate, reference, spentOn } = req.body ?? {};
   const value = Number(amount);
   if (!category || !(value > 0)) return res.status(400).json({ error: 'category and a positive amount are required' });
   if (staffId) {
@@ -4811,13 +4811,21 @@ app.post('/api/expenses', requirePermission('expenses.edit'), wrap(async (req, r
     supplierName = sp.name;
   }
   const due = /^\d{4}-\d{2}-\d{2}$/.test(String(dueDate ?? '')) ? dueDate : null;
+  // The day it was actually spent, from the expenses calendar: stored as when it was logged, so it lands on that day everywhere.
+  let spentAt = null;
+  if (spentOn) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(spentOn))) return res.status(400).json({ error: 'spentOn must be a date' });
+    const { rows: [d] } = await pool.query("select ($1::date <= (now() at time zone 'Africa/Nairobi')::date and $1::date > (now() at time zone 'Africa/Nairobi')::date - 1830) as ok", [spentOn]);
+    if (!d.ok) return res.status(400).json({ error: 'That date is in the future or too far back.' });
+    spentAt = `${spentOn}T12:00:00+03:00`;
+  }
   const { rows: [e] } = await pool.query(
-    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by, supplier_id, due_date, reference)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    `insert into expenses (tenant_id, category, description, amount, paid_to, staff_id, created_by, supplier_id, due_date, reference, created_at)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, coalesce($11::timestamptz, now()))
      returning id, tenant_id, category, description, amount, paid_to, staff_id, status, created_by, approved_by, paid_at, created_at,
                supplier_id, reference, to_char(due_date, 'YYYY-MM-DD') as due_date`,
     [req.tenant.id, String(category).trim(), description || null, value, paidTo || supplierName || null, staffId || null,
-      req.session?.staff_id ?? null, supplierId || null, due, cleanText(reference)]);
+      req.session?.staff_id ?? null, supplierId || null, due, cleanText(reference), spentAt]);
   res.json(e);
 }));
 
@@ -5179,6 +5187,83 @@ app.get('/api/bills', requirePermission('bills.view'), wrap(async (req, res) => 
       where b.tenant_id = $1
       order by b.active desc, b.day_of_month, lower(b.name)`, [req.tenant.id]);
   res.json(rows);
+}));
+
+/**
+ * Which month each bill was paid, for the month-by-month grid. A bill's entry for a month is its expense with that bill_month, so this is
+ * only the expense log read from the bills' side. Two years back is plenty and keeps the answer small.
+ */
+app.get('/api/bills/months', requirePermission('bills.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select e.id, e.recurring_bill_id as bill_id, to_char(e.bill_month, 'YYYY-MM') as month, e.status, e.amount,
+            to_char(e.paid_at at time zone 'Africa/Nairobi', 'YYYY-MM-DD') as paid_on,
+            (e.pay_method is not null or e.pay_state is not null) as paid_by_mpesa
+       from expenses e
+      where e.tenant_id = $1 and e.recurring_bill_id is not null
+        and e.bill_month >= date_trunc('month', now() at time zone 'Africa/Nairobi')::date - interval '23 months'`,
+    [req.tenant.id]);
+  res.json(rows);
+}));
+
+const GRID_MARK = 'Marked paid in the monthly grid';
+
+/**
+ * Mark one month of a monthly bill paid (or undo it). Creates that month's expense if the daily job never did (an older month, or a bill
+ * that was paid before it was entered here), or settles the pending/approved one that is there. An entry paid through M-Pesa cannot be
+ * undone from here, and one that is on its way is left alone. Same permission as approving an expense: it records that money was paid.
+ */
+app.post('/api/bills/:id/month-paid', requirePermission('expenses.approve'), wrap(async (req, res) => {
+  const month = String(req.body?.month ?? '');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return res.status(400).json({ error: 'month must look like 2026-10' });
+  const first = `${month}-01`;
+  const { rows: [range] } = await pool.query(
+    `select ($1::date <= date_trunc('month', now() at time zone 'Africa/Nairobi')::date + interval '1 month') as not_far_ahead,
+            ($1::date >= date_trunc('month', now() at time zone 'Africa/Nairobi')::date - interval '23 months') as not_too_old`, [first]);
+  if (!range.not_far_ahead || !range.not_too_old) return res.status(400).json({ error: 'That month is outside the last two years.' });
+
+  const { rows: [bill] } = await pool.query('select id from recurring_bills where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!bill) return res.status(404).json({ error: 'No such bill' });
+
+  const paid = req.body?.paid !== false;
+  const { rows: [have] } = await pool.query(
+    'select id, status, reference, pay_method, pay_state from expenses where recurring_bill_id=$1 and bill_month=$2::date and tenant_id=$3',
+    [bill.id, first, req.tenant.id]);
+
+  if (!paid) {
+    if (!have || have.status !== 'paid') return res.status(404).json({ error: 'That month is not marked paid.' });
+    if (have.pay_method || have.pay_state) return res.status(409).json({ error: 'That month was paid through M-Pesa and cannot be undone here.' });
+    if (have.reference === GRID_MARK) await pool.query('delete from expenses where id=$1', [have.id]);
+    else await pool.query("update expenses set status='approved', paid_at=null where id=$1", [have.id]);
+    return res.json({ ok: true });
+  }
+
+  if (have?.status === 'paid') return res.json({ ok: true, unchanged: true });
+  if (have?.pay_state === 'processing') return res.status(409).json({ error: 'A payment for that month is already on its way.' });
+
+  const paidOn = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.paidOn ?? '')) ? req.body.paidOn : null;
+  if (paidOn) {
+    const { rows: [d] } = await pool.query("select ($1::date <= (now() at time zone 'Africa/Nairobi')::date) as ok", [paidOn]);
+    if (!d.ok) return res.status(400).json({ error: 'The payment date cannot be in the future.' });
+  }
+  const paidAt = paidOn ? `${paidOn}T12:00:00+03:00` : null;
+  const staffId = req.session?.staff_id ?? null;
+  if (have) {
+    await pool.query(
+      `update expenses set status='paid', paid_at=coalesce($2::timestamptz, now()), approved_by=coalesce(approved_by, $3::uuid) where id=$1`,
+      [have.id, paidAt, staffId]);
+    return res.json({ ok: true });
+  }
+  await pool.query(
+    `insert into expenses (tenant_id, category, description, amount, paid_to, supplier_id, recurring_bill_id, bill_month, due_date,
+                           status, approved_by, paid_at, reference)
+     select b.tenant_id, b.category, b.name, b.amount, sp.name, b.supplier_id, b.id, $3::date,
+            least($3::date + (b.day_of_month - 1), ($3::date + interval '1 month' - interval '1 day')::date),
+            'paid', $4::uuid, coalesce($5::timestamptz, now()), $6
+       from recurring_bills b left join suppliers sp on sp.id = b.supplier_id
+      where b.id = $1 and b.tenant_id = $2
+     on conflict (recurring_bill_id, bill_month) where recurring_bill_id is not null do nothing`,
+    [bill.id, req.tenant.id, first, staffId, paidAt, GRID_MARK]);
+  res.json({ ok: true });
 }));
 
 app.post('/api/bills', requirePermission('bills.edit'), wrap(async (req, res) => {
