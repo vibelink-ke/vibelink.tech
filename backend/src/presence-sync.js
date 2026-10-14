@@ -1,5 +1,5 @@
 import { pool, withTenant } from './db.js';
-import { startVoucherClock, ensureMacRadiusLogin } from './radius.js';
+import { startVoucherClock, ensureMacRadiusLogin, ensureAccessCodeMacLogin } from './radius.js';
 import * as ros from './routeros.js';
 import * as secrets from './secrets.js';
 
@@ -105,6 +105,26 @@ export async function syncOnlineCustomers(tenantId, { relocate = false } = {}) {
       }
     } catch (e) {
       console.warn('presence: hotspot clocks:', e.message);
+    }
+
+    // A device online with an access code is remembered, so it can sign itself in next time. Done from what the router lists as online, the same
+    // as the vouchers above, so it does not depend on FreeRADIUS's own call reaching the app. Up to the code's Max devices; nothing is
+    // changed for a device that already has its login.
+    try {
+      const typed = sessions.filter((s) => s.service === 'hotspot' && s.username && s.mac && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(s.username));
+      if (typed.length) {
+        const { rows: acs } = await pool.query(
+          'select username from hotspot_access_codes where tenant_id=$1 and enabled and username = any($2::text[])',
+          [tenantId, [...new Set(typed.map((s) => s.username))]]);
+        const isCode = new Set(acs.map((a) => a.username));
+        for (const s of typed) {
+          if (!isCode.has(s.username)) continue;
+          await withTenant(tenantId, (c) => ensureAccessCodeMacLogin(c, tenantId, s.username, String(s.mac).toUpperCase()))
+            .catch((e) => console.warn('access code device login:', s.username, e.message));
+        }
+      }
+    } catch (e) {
+      console.warn('presence: access code devices:', e.message);
     }
 
     // Usage from the router's own queue counters, for fair use: it does not depend on accounting reaching us.
