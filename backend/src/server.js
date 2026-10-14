@@ -970,6 +970,8 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // redirect target is fetched by a guest's own browser, not RouterOS, so
     // it must never re-trigger the very redirect that sent it here.
     routerId: loginRouterId,
+    // This phone's own address, carried from the router's copy through the redirect, so a purchase made on this copy can sign the same phone in.
+    deviceMac: /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(String(req.query.mac ?? '')) ? String(req.query.mac).toUpperCase() : null,
     loyalty: await selfServeOn(pool, tenant.id),
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS

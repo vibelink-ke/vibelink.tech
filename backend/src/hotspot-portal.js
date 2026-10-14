@@ -26,7 +26,7 @@
  */
 export const MARKER = 'vibelink-hotspot-login';
 // Bump when the page changes in a way a guest would miss on an old copy: Routers → Login pages shows which routers are behind.
-export const PAGE_VERSION = 13;
+export const PAGE_VERSION = 14;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -169,7 +169,7 @@ function loginPageRaw({
   company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
-  hotspotGateway = null, adText = null, adUrl = null, currency = 'KES',
+  hotspotGateway = null, adText = null, adUrl = null, deviceMac = null, currency = 'KES',
 }) {
   pageCurrency = String(currency || 'KES').trim().slice(0, 3).toUpperCase() || 'KES';
   const t = TEMPLATES[template] ?? TEMPLATES.sleek;
@@ -361,7 +361,7 @@ function loginPageRaw({
   // guests bouncing between the two copies forever. siteRouter only ever
   // carries the attribution id through.
   const routerRedirect = forRouter && apiBase
-    ? `<meta http-equiv="refresh" content="0;url=${esc(apiBase)}/hotspot/login.html${routerId ? `?siteRouter=${encodeURIComponent(routerId)}` : ''}">`
+    ? `<meta http-equiv="refresh" content="0;url=${esc(apiBase)}/hotspot/login.html?${routerId ? `siteRouter=${encodeURIComponent(routerId)}&amp;` : ''}mac=$(mac)">`
     : '';
 
   return `<!DOCTYPE html>
@@ -797,7 +797,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   // lookup. null only for a malformed/unreadable network setting.
   var HOTSPOT_GATEWAY = ${JSON.stringify(hotspotGateway)};
   // This phone's own address (filled in by the router), sent with a purchase so the paid voucher can sign this same phone in by itself.
-  var DEVICE_MAC = ${JSON.stringify(macToken)};
+  var DEVICE_MAC = ${JSON.stringify(macToken || deviceMac || '')};
 
   /**
    * A quiet inline note next to the pay button was easy to miss — a guest
