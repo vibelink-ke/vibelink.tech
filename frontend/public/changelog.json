@@ -183,7 +183,8 @@
       "Access codes: a device that signs in with a code is remembered (up to the code's Max devices, TVs included) and signs itself back in next time without typing the code. Switching the code off, deleting it, clearing its devices or locking it to devices removes them.",
       "Hotspot login: a wrong code now stays on screen in a box until it is tapped away (the page used to jump to another copy and wipe the message), and payment problems stay up for 12 seconds.",
       "Access codes: devices online with a code are now picked up from what the router lists as connected (every 30 seconds), so remembering them no longer depends on a call from FreeRADIUS that was not always arriving.",
-      "Field app: a technician can delete a photo (for example a blurred one) while the job is open, and can add a screenshot from the phone's gallery to a job."
+      "Field app: a technician can delete a photo (for example a blurred one) while the job is open, and can add a screenshot from the phone's gallery to a job.",
+      "Leads: a lead that still shows as New moves to Contacted by itself as soon as someone adds a note to it or sets a follow-up date, so contacted leads no longer look new."
     ]
   }
 ]

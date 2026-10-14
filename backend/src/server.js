@@ -4672,7 +4672,11 @@ app.post('/api/leads/:id/notes', wrap(async (req, res) => {
     `insert into lead_notes (tenant_id, lead_id, author, body) values ($1,$2,$3,$4) returning *`,
     [req.tenant.id, req.params.id, req.session?.name ?? 'system', body]);
   await pool.query('update leads set last_activity_at = now() where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-  res.json(n);
+  // Writing something down about a lead that is still 'new' means someone has been in touch: it stops showing as new.
+  const { rowCount: moved } = await pool.query(
+    "update leads set status='contacted', first_contacted_at = coalesce(first_contacted_at, now()) where id=$1 and tenant_id=$2 and status='new'",
+    [req.params.id, req.tenant.id]);
+  res.json({ ...n, lead_status: moved ? 'contacted' : undefined });
 }));
 
 /**
@@ -13329,6 +13333,11 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
     if (!sets.includes('lost_reason')) {
       setClauses.push(`lost_reason = case when ${sets.indexOf('status') + 3}::text = 'lost' then lost_reason else null end`);
     }
+  }
+  // A follow-up date on a lead that is still 'new' means it has been dealt with: it becomes 'contacted' (unless the same save sets a stage).
+  if (!sets.includes('status') && sets.includes('next_follow_up') && req.body.next_follow_up) {
+    setClauses.push("first_contacted_at = case when status = 'new' then coalesce(first_contacted_at, now()) else first_contacted_at end");
+    setClauses.push("status = case when status = 'new' then 'contacted' else status end");
   }
   setClauses.push('last_activity_at = now()');
 

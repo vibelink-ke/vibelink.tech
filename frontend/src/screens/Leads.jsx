@@ -234,6 +234,11 @@ export default function Leads() {
       const n = await api.addLeadNote(leadViewing.id, noteText.trim());
       setLeadNotes((ns) => [...(ns ?? []), n]);
       setNoteText('');
+      // A note on a new lead moves it to Contacted; show that without a refresh.
+      if (n.lead_status) {
+        store.setCollection('leads', (ls) => ls.map((x) => (x.id === leadViewing.id ? { ...x, status: n.lead_status } : x)));
+        setLeadViewing((v) => (v ? { ...v, status: n.lead_status } : v));
+      }
     } catch (e) {
       store.toast(`Could not save the note: ${e.message}`);
     } finally {
