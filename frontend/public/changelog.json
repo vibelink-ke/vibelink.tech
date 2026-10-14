@@ -166,7 +166,13 @@
       "SMS: a code text sent through the shared SMS relay is retried (up to three tries) when the relay answers 502 or times out, so a customer who just paid is no longer left without their code by a passing glitch.",
       "Security: reconnecting a phone that already has a running bundle no longer reveals the voucher code. The server asks the router to sign that device in itself, so naming someone else's device address can no longer get you their code.",
       "Hotspot login: the M-Pesa code box is smaller and no longer has the instruction line above it.",
-      "PPPoE: the router now waits 60 seconds (was 10) for a customer's line to answer before dropping the session, so a short stall no longer costs them a re-dial and a few seconds without internet. Applied to every PPPoE router within the hour.",
+      "PPPoE: the router now waits 60 seconds (was 10) for a customer's line to answer before dropping the session, so a short stall no longer costs them a re-dial and a few seconds without internet. Applied to every PPPoE router within the hour."
+    ]
+  },
+  {
+    "date": "2026-10-14",
+    "title": "Hotspot auto sign-in, router fixes, expenses calendar, access-code devices and field photos",
+    "items": [
       "Router refresh no longer rewrites firewall and NAT rules that are already correct: rules whose comment holds a dash or other special character were never recognised as unchanged and were pushed again every time.",
       "Routers → Login pages: shows which hotspot routers still serve an old login page (read from the router itself) and updates the ones that are behind in one click.",
       "Expenses: a Calendar tab to see and record each day's spending, and a month-by-month grid under Monthly bills to mark which months of each bill are paid, including earlier months.",
