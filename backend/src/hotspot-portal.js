@@ -26,7 +26,7 @@
  */
 export const MARKER = 'vibelink-hotspot-login';
 // Bump when the page changes in a way a guest would miss on an old copy: Routers → Login pages shows which routers are behind.
-export const PAGE_VERSION = 14;
+export const PAGE_VERSION = 15;
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
   (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -360,8 +360,10 @@ function loginPageRaw({
   // stay false on the page this redirects to — router=<id> here would send
   // guests bouncing between the two copies forever. siteRouter only ever
   // carries the attribution id through.
+  // Not when the router has just refused a code: this copy is the one that carries the error message, and bouncing to the hosted copy at once
+  // would wipe it before the guest could read it. The error stays on this copy; the next fresh visit redirects as usual.
   const routerRedirect = forRouter && apiBase
-    ? `<meta http-equiv="refresh" content="0;url=${esc(apiBase)}/hotspot/login.html?${routerId ? `siteRouter=${encodeURIComponent(routerId)}&amp;` : ''}mac=$(mac)">`
+    ? `$(if error)$(else)<meta http-equiv="refresh" content="0;url=${esc(apiBase)}/hotspot/login.html?${routerId ? `siteRouter=${encodeURIComponent(routerId)}&amp;` : ''}mac=$(mac)">$(endif)`
     : '';
 
   return `<!DOCTYPE html>
@@ -955,6 +957,11 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   try {
     var mac = ${JSON.stringify(macToken)};
     var hadError = ${JSON.stringify(hadErrorToken)} === 'yes';
+    if (hadError) {
+      // A wrong code: keep the router's message on screen until the guest taps it away, not just as a line near the top that is easy to miss.
+      var shownErr = document.querySelector('.err');
+      popup('notice', 'That did not work', (shownErr && shownErr.textContent.trim()) || 'Check the code and try again.', 0);
+    }
     // The SMS a guest gets on payment carries the code as text and as a tap
     // link to this page with ?code=... attached — for someone who would
     // rather tap than type it back in on a small keyboard. Takes priority
@@ -1091,7 +1098,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
             // in flight — leaving it up after a failure reads as still
             // waiting on a payment that has already died.
             document.getElementById('popupOverlay').style.display = 'none';
-            popup('notice', 'Payment did not go through', failMsg, 4000);
+            popup('notice', 'Payment did not go through', failMsg, 12000);
           }
         })
         .catch(function () { /* keep polling; a dropped request is not a failure */ });
@@ -1114,7 +1121,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
             var msg = res.d.error || 'Could not start the payment.';
             payNote.textContent = msg;
             document.getElementById('popupOverlay').style.display = 'none';
-            popup('notice', 'Could not start payment', msg, 4000);
+            popup('notice', 'Could not start payment', msg, 12000);
             return;
           }
           if (res.d.redirectUrl) {
