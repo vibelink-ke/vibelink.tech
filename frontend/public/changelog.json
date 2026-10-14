@@ -173,7 +173,8 @@
       "Monthly bills: a bill can be paid to a shop or person who is not a supplier, and can be marked as paid in hotspot vouchers instead of money.",
       "Hotspot: a purchase made on the hosted login page now remembers the buyer's phone (the router's page passes it along), so the paid voucher signs that phone back in by itself after it goes quiet.",
       "Router Configure: a setting the router reports as true/false but we write as yes/no was never recognised as already correct, so the hotspot server, firewall and similar rules were re-written on every Configure (and refused on some routers). They are now skipped when already right.",
-      "Router Configure no longer fails with 'hotspot on that interface is already enabled': a hotspot server already on the managed bridge is adopted instead of trying to move another one onto it."
+      "Router Configure no longer fails with 'hotspot on that interface is already enabled': a hotspot server already on the managed bridge is adopted instead of trying to move another one onto it.",
+      "Access codes: a device that signs in with a code is remembered (up to the code's Max devices, TVs included) and signs itself back in next time without typing the code. Switching the code off, deleting it, clearing its devices or locking it to devices removes them."
     ]
   }
 ]

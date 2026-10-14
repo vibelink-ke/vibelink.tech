@@ -3458,3 +3458,15 @@ alter table recurring_bills add column if not exists paid_in text not null defau
 alter table recurring_bills drop constraint if exists recurring_bills_paid_in_check;
 alter table recurring_bills add constraint recurring_bills_paid_in_check check (paid_in in ('money','vouchers'));
 alter table expenses add column if not exists paid_in text not null default 'money';
+
+-- Devices that sign in to an access code by themselves. The first time a device signs in with a code, its address is remembered here (up to the
+-- code's Max devices) and given its own login, so it comes back without typing the code again. Taken away when the code is switched off or deleted,
+-- when its devices are cleared, when it is locked to devices, or when Max devices is lowered.
+create table if not exists access_code_auto_macs (
+  tenant_id  uuid not null references tenants on delete cascade,
+  username   text not null,
+  mac        text not null,
+  first_seen timestamptz not null default now(),
+  primary key (tenant_id, username, mac)
+);
+create index if not exists access_code_auto_macs_mac on access_code_auto_macs (tenant_id, mac);

@@ -1672,10 +1672,13 @@ async function accessCodeAndRouter(tenantId, username, password, pageRouterId) {
 /** How many more devices an access code can take: its Max devices, less the TVs on it and the devices online with it now. */
 async function accessCodeSlots(tenantId, ac) {
   const { rows: [{ n: bound }] } = await pool.query('select count(*)::int as n from access_code_devices where tenant_id=$1 and username=$2', [tenantId, ac.username]);
+  const { rows: [{ n: auto }] } = await pool.query('select count(*)::int as n from access_code_auto_macs where tenant_id=$1 and username=$2', [tenantId, ac.username]);
+  // Devices online by typing the code, not counting those that already have their own automatic login (counted above).
   const { rows: [{ n: live }] } = await pool.query(
     `select count(distinct coalesce(callingstationid, acctuniqueid))::int as n from radacct
-      where username=$1 and acctstoptime is null and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'`, [ac.username]);
-  return Math.max(0, ac.max_devices - bound - live);
+      where username=$1 and acctstoptime is null and coalesce(acctupdatetime, acctstarttime) > now() - interval '15 minutes'
+        and not exists (select 1 from access_code_auto_macs a where a.tenant_id=$2 and a.username=$1 and upper(a.mac)=upper(radacct.callingstationid))`, [ac.username, tenantId]);
+  return Math.max(0, ac.max_devices - bound - auto - live);
 }
 
 /** Take a code's TVs and consoles off their routers (all of them, or one MAC) and forget them. Best-effort on the router. */
@@ -1698,6 +1701,7 @@ async function unbindAccessCodeDevices(tenantId, username, mac = null) {
   }
   await pool.query('delete from access_code_devices where tenant_id=$1 and username=$2 and ($3::text is null or mac = $3)', [tenantId, username, mac]);
   await pool.query('delete from hotspot_access_code_macs where tenant_id=$1 and username=$2 and ($3::text is null or mac = $3)', [tenantId, username, mac]);
+  await (await import('./radius.js')).dropAccessCodeAutoMacs(pool, tenantId, username, mac);
 }
 
 async function voucherAndRouter(tenantId, code, pageRouterId) {
@@ -2537,7 +2541,19 @@ app.post('/radius/post-auth', wrap(async (req, res) => {
 
   const { rows: [v] } = await pool.query(
     'select tenant_id from vouchers where code=$1', [username]);
-  if (!v) return res.json({ ok: true });   // not a voucher — a PPPoE login, most likely
+  if (!v) {
+    // Not a voucher. An access code: remember this device so it can sign itself in next time (up to the code's Max devices).
+    // The sign-in itself is by the device's own address, which is not a code, so those logins are skipped here.
+    if (mac && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(username)) {
+      pool.query('select tenant_id from hotspot_access_codes where username=$1 and enabled', [username]).then(async ({ rows }) => {
+        if (rows.length !== 1) return;            // not an access code, or the same name in two organisations: leave it
+        const { withTenant } = await import('./db.js');
+        const radius = await import('./radius.js');
+        await withTenant(rows[0].tenant_id, (c) => radius.ensureAccessCodeMacLogin(c, rows[0].tenant_id, username, mac));
+      }).catch((e) => console.warn('access code auto login:', e.message));
+    }
+    return res.json({ ok: true });   // otherwise a PPPoE login, most likely
+  }
 
   const { startVoucherClock } = await import('./radius.js');
   const { withTenant } = await import('./db.js');
@@ -12787,7 +12803,12 @@ app.patch('/api/hotspot/access-codes/:id', requirePermission('hotspot.vouchers')
   const radius = await import('./radius.js');
   if (row.enabled) {
     const { withTenant } = await import('./db.js');
-    await withTenant(req.tenant.id, (c) => radius.ensureAccessCodeRadius(c, req.tenant.id, row.id));
+    await withTenant(req.tenant.id, async (c) => {
+      await radius.ensureAccessCodeRadius(c, req.tenant.id, row.id);
+      // Locked to devices: the devices that sign in by themselves start over, so only the ones the lock learns can use the code.
+      if (row.lock_mac && !existing.lock_mac) await radius.dropAccessCodeAutoMacs(c, req.tenant.id, row.username);
+      else await radius.refreshAccessCodeAutoMacs(c, req.tenant.id, row.username);
+    });
   } else {
     await radius.forgetAccessCode(pool, req.tenant.id, row.username);
     unbindAccessCodeDevices(req.tenant.id, row.username).catch(() => {});
@@ -12801,12 +12822,14 @@ app.post('/api/hotspot/access-codes-lock', requirePermission('hotspot.vouchers')
   const lock = req.body?.lock === true;
   const { rowCount } = await pool.query(
     'update hotspot_access_codes set lock_mac=$2 where tenant_id=$1 and lock_mac is distinct from $2', [req.tenant.id, lock]);
+  if (lock) await (await import('./radius.js')).dropAccessCodeAutoMacs(pool, req.tenant.id);
   res.json({ ok: true, locked: lock, changed: rowCount });
 }));
 
 /** Forget every device saved against this organisation's access codes, so each code starts learning its devices again. */
 app.delete('/api/hotspot/access-codes-macs', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
   const { rowCount } = await pool.query('delete from hotspot_access_code_macs where tenant_id=$1', [req.tenant.id]);
+  await (await import('./radius.js')).dropAccessCodeAutoMacs(pool, req.tenant.id);
   res.json({ ok: true, removed: rowCount });
 }));
 
@@ -12843,6 +12866,8 @@ app.delete('/api/hotspot/access-codes/:id/macs', requirePermission('hotspot.vouc
     `delete from hotspot_access_code_macs m using hotspot_access_codes ac
       where ac.tenant_id=$1 and ac.id=$2 and m.tenant_id = ac.tenant_id and m.username = ac.username
         and ($3 = '' or m.mac = $3)`, [req.tenant.id, req.params.id, mac]);
+  const { rows: [owner] } = await pool.query('select username from hotspot_access_codes where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id]);
+  if (owner) await (await import('./radius.js')).dropAccessCodeAutoMacs(pool, req.tenant.id, owner.username, mac || null);
   res.json({ removed: rowCount });
 }));
 

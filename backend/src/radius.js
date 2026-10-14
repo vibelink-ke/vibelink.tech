@@ -184,16 +184,105 @@ export async function ensureAccessCodeRadius(c, tenantId, id) {
        ($1,$2,'Mikrotik-Rate-Limit',':=',$3),
        ($1,$2,'Mikrotik-Group',':=',$4)
      on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
-    [tenantId, row.username,
-     // a speed typed in for this code wins over a bundle's, and over the default
-     row.rate_up_kbps && row.rate_down_kbps ? `${row.rate_up_kbps}k/${row.rate_down_kbps}k`
-       : row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k`
-       : row.access_up_kbps && row.access_down_kbps ? `${row.access_up_kbps}k/${row.access_down_kbps}k` : '2048k/1024k',
-     hotspotAccessProfile(row.max_devices)]);
+    [tenantId, row.username, accessCodeReply(row).rate, accessCodeReply(row).group]);
 }
+
+/** Speed and router profile an access code hands out: a speed typed on the code wins over a bundle's, and over the default. */
+function accessCodeReply(row) {
+  return {
+    rate: row.rate_up_kbps && row.rate_down_kbps ? `${row.rate_up_kbps}k/${row.rate_down_kbps}k`
+      : row.rate_up && row.rate_down ? `${row.rate_up}k/${row.rate_down}k`
+      : row.access_up_kbps && row.access_down_kbps ? `${row.access_up_kbps}k/${row.access_down_kbps}k` : '2048k/1024k',
+    group: hotspotAccessProfile(row.max_devices),
+  };
+}
+
+const ACCESS_CODE_ROW = `select ac.username, ac.max_devices, ac.enabled, p.rate_up, p.rate_down, ac.rate_up_kbps, ac.rate_down_kbps,
+            hs.access_up_kbps, hs.access_down_kbps
+       from hotspot_access_codes ac
+       left join plans p on p.id = ac.plan_id
+       left join hotspot_settings hs on hs.tenant_id = ac.tenant_id
+      where ac.tenant_id=$1 and ac.username=$2`;
+
+async function writeAccessMacLogin(c, tenantId, mac, reply) {
+  // A device whose last voucher has run out may still carry that voucher's expiry and time limit: clear them, this login does not expire.
+  await c.query("delete from radcheck where tenant_id=$1 and username=$2 and attribute='Expiration'", [tenantId, mac]);
+  await c.query("delete from radreply where tenant_id=$1 and username=$2 and attribute='Session-Timeout'", [tenantId, mac]);
+  await c.query(
+    `insert into radcheck (tenant_id, username, attribute, op, value) values ($1,$2,'Cleartext-Password',':=',$2)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`, [tenantId, mac]);
+  await c.query(
+    `insert into radreply (tenant_id, username, attribute, op, value) values
+       ($1,$2,'Mikrotik-Rate-Limit',':=',$3), ($1,$2,'Mikrotik-Group',':=',$4)
+     on conflict (tenant_id, username, attribute) do update set value = excluded.value`, [tenantId, mac, reply.rate, reply.group]);
+}
+
+/**
+ * A device that has just signed in with an access code gets a login of its own (its address as user and password), so the router can sign it
+ * in again by itself after it goes quiet. At most Max devices per code have one: the next device keeps typing the code. A device that holds a
+ * running voucher keeps that voucher's login. Returns true when the device now has (or already had) the automatic login.
+ */
+export async function ensureAccessCodeMacLogin(c, tenantId, code, mac) {
+  const m = String(mac ?? '').trim().toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(m)) return false;
+  const { rows: [row] } = await c.query(ACCESS_CODE_ROW, [tenantId, code]);
+  if (!row || !row.enabled) return false;
+
+  const { rows: [have] } = await c.query('select 1 from access_code_auto_macs where tenant_id=$1 and username=$2 and mac=$3', [tenantId, code, m]);
+  if (!have) {
+    // A voucher that is running on this device keeps the device's own login.
+    const { rows: [busy] } = await c.query(
+      "select 1 from vouchers where tenant_id=$1 and upper(mac::text)=$2 and status='in_use' and (expires_at is null or expires_at > now()) limit 1", [tenantId, m]);
+    if (busy) return false;
+    const { rows: [{ n }] } = await c.query('select count(*)::int as n from access_code_auto_macs where tenant_id=$1 and username=$2', [tenantId, code]);
+    // TVs and consoles added to this code count against the same limit.
+    const { rows: [{ n: tvs }] } = await c.query('select count(*)::int as n from access_code_devices where tenant_id=$1 and username=$2', [tenantId, code]);
+    if (n + tvs >= row.max_devices) return false;
+    // One code at a time: the code used last takes the device over from another.
+    await c.query('delete from access_code_auto_macs where tenant_id=$1 and mac=$2 and username<>$3', [tenantId, m, code]);
+    await c.query('insert into access_code_auto_macs (tenant_id, username, mac) values ($1,$2,$3) on conflict do nothing', [tenantId, code, m]);
+  }
+  await writeAccessMacLogin(c, tenantId, m, accessCodeReply(row));
+  return true;
+}
+
+/** Take away the automatic logins of an access code (all of them, or one device), or of every code of the organisation when code is null. */
+export async function dropAccessCodeAutoMacs(c, tenantId, code = null, mac = null) {
+  const { rows } = await c.query(
+    `delete from access_code_auto_macs where tenant_id=$1 and ($2::text is null or username=$2) and ($3::text is null or mac=$3) returning mac`,
+    [tenantId, code, mac ? String(mac).toUpperCase() : null]);
+  const macs = rows.map((r) => r.mac);
+  if (!macs.length) return 0;
+  // Not a login that a running voucher has taken over.
+  const keep = `not exists (select 1 from vouchers v where v.tenant_id=$1 and upper(v.mac::text)=username and v.status='in_use' and (v.expires_at is null or v.expires_at > now()))`;
+  await c.query(`delete from radcheck where tenant_id=$1 and username = any($2::text[]) and ${keep}`, [tenantId, macs]);
+  await c.query(`delete from radreply where tenant_id=$1 and username = any($2::text[]) and ${keep}`, [tenantId, macs]);
+  return macs.length;
+}
+
+/** After a code's speed or Max devices changed: bring its devices' logins in line, and drop the newest ones beyond the new limit. */
+export async function refreshAccessCodeAutoMacs(c, tenantId, code) {
+  const { rows: [row] } = await c.query(ACCESS_CODE_ROW, [tenantId, code]);
+  if (!row) return;
+  const { rows: [{ n: tvs }] } = await c.query('select count(*)::int as n from access_code_devices where tenant_id=$1 and username=$2', [tenantId, code]);
+  const { rows: extra } = await c.query(
+    `select mac from access_code_auto_macs where tenant_id=$1 and username=$2 order by first_seen, mac offset $3`, [tenantId, code, Math.max(0, row.max_devices - tvs)]);
+  for (const e of extra) await dropAccessCodeAutoMacs(c, tenantId, code, e.mac);
+  if (!row.enabled) return;
+  const { rows: kept } = await c.query('select mac from access_code_auto_macs where tenant_id=$1 and username=$2', [tenantId, code]);
+  const reply = accessCodeReply(row);
+  for (const k of kept) {
+    await c.query(
+      `insert into radreply (tenant_id, username, attribute, op, value) values
+         ($1,$2,'Mikrotik-Rate-Limit',':=',$3), ($1,$2,'Mikrotik-Group',':=',$4)
+       on conflict (tenant_id, username, attribute) do update set value = excluded.value`, [tenantId, k.mac, reply.rate, reply.group]);
+  }
+}
+
 
 /** Remove one access code's RADIUS entry — called before its row is deleted. */
 export async function forgetAccessCode(c, tenantId, username) {
+  await dropAccessCodeAutoMacs(c, tenantId, username);
   await c.query('delete from radcheck where tenant_id=$1 and username=$2', [tenantId, username]);
   await c.query('delete from radreply where tenant_id=$1 and username=$2', [tenantId, username]);
 }
