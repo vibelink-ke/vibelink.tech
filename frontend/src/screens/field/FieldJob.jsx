@@ -6,12 +6,13 @@ import { useStore } from '../../state/store';
 import { useField } from './fieldContext';
 import { Btn, Chip, Dot, getAccuratePosition, getPosition, mapsLink, page, panel, resizePhoto, timeAgo } from './fieldKit';
 import AddEquipment from './FieldEquipment';
-import { cachedGet, doOrQueue, useQueue } from './offline';
+import { cachedGet, doOrQueue, queueRemove, useQueue } from './offline';
 
 const KINDS = [
   { kind: 'before', label: 'Before' },
   { kind: 'after', label: 'After (required)' },
   { kind: 'other', label: 'Other' },
+  { kind: 'screenshot', label: 'Screenshot' },   // picked from the phone's gallery, not taken with the camera
 ];
 
 export default function FieldJob() {
@@ -31,7 +32,7 @@ export default function FieldJob() {
   const [stale, setStale] = useState(false);
   const [addingEquipment, setAddingEquipment] = useState(false);
   const [noEquipment, setNoEquipment] = useState(false);
-  const { items: queued } = useQueue();
+  const { items: queued, refresh: refreshQueue } = useQueue();
 
   // The last copy seen when there is no signal.
   const load = useCallback(() => cachedGet(`job:${id}`, () => api.fieldJob(id))
@@ -63,6 +64,21 @@ export default function FieldJob() {
       setBusy('');
     }
   };
+
+  // A photo that came out wrong (blurred, say) can be deleted while the job is open, whether it has been sent or is still waiting on the phone.
+  const removePhoto = async (p) => {
+    if (!window.confirm(`Delete this ${p.kind} photo?`)) return;
+    setBusy(`del-${p.id}`);
+    try { await api.fieldDeletePhoto(id, p.id); store.toast('Photo deleted'); await load(); }
+    catch (e) { store.toast(e.message ?? 'Could not delete the photo'); }
+    finally { setBusy(''); }
+  };
+  const removeWaiting = async (q) => {
+    if (!window.confirm('Delete this photo before it is sent?')) return;
+    await queueRemove(q.id);
+    refreshQueue();
+  };
+  const delBtn = { position: 'absolute', top: 4, right: 4, width: 28, height: 28, borderRadius: 14, border: 'none', background: 'rgba(0,0,0,.65)', color: '#fff', fontSize: 15, lineHeight: '28px', padding: 0, cursor: 'pointer' };
 
   const close = async () => {
     setBusy('close');
@@ -154,13 +170,13 @@ export default function FieldJob() {
 
       <div style={panel}>
         <div style={{ fontWeight: 600 }}>Photos</div>
-        <div style={{ fontSize: 13, color: '#4a524c' }}>Take these with the camera. The job cannot be closed without an “after” photo of the finished work.</div>
+        <div style={{ fontSize: 13, color: '#4a524c' }}>Take these with the camera, or use Screenshot to add one from the phone's gallery (a router or radio screen, for example). Tap ✕ on a photo to delete it, such as one that came out blurred. The job cannot be closed without an “after” photo of the finished work.</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {KINDS.map(({ kind, label }) => (
             <span key={kind} style={{ flex: 1, minWidth: 96, display: 'flex' }}>
               <input
                 ref={(el) => { fileInputs.current[kind] = el; }}
-                type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                type="file" accept="image/*" {...(kind === 'screenshot' ? {} : { capture: 'environment' })} style={{ display: 'none' }}
                 onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; onPhoto(kind, f); }}
               />
               <Btn tone={kind === 'after' && !afterCount ? 'primary' : 'quiet'} style={{ flex: 1 }} busy={busy === `photo-${kind}`}
@@ -174,6 +190,7 @@ export default function FieldJob() {
               <div key={q.id} style={{ position: 'relative' }}>
                 <img src={q.payload.body.dataUrl} alt={q.payload.body.kind} style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8, display: 'block', opacity: 0.7 }} />
                 <span style={{ position: 'absolute', left: 4, bottom: 4 }}><Chip tone="amber">waiting to send</Chip></span>
+                {!resolved && <button type="button" aria-label="Delete this photo" style={delBtn} onClick={() => removeWaiting(q)}>✕</button>}
               </div>
             ))}
             {job.photos.map((p) => (
@@ -181,6 +198,10 @@ export default function FieldJob() {
                 <img src={`/api/field/photos/${p.id}`} alt={p.kind} loading="lazy"
                   style={{ width: '100%', aspectRatio: '1', objectFit: 'cover', borderRadius: 8, display: 'block' }} />
                 <span style={{ position: 'absolute', left: 4, bottom: 4 }}><Chip tone={p.kind === 'after' ? 'green' : 'neutral'}>{p.kind}</Chip></span>
+                {!resolved && p.kind !== 'serial' && (
+                  <button type="button" aria-label="Delete this photo" style={delBtn} disabled={busy === `del-${p.id}`}
+                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); removePhoto(p); }}>✕</button>
+                )}
               </a>
             ))}
           </div>

@@ -19,7 +19,7 @@ const PHOTO_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const PHOTO_MAX_BYTES = 4 * 1024 * 1024;   // the app shrinks photos well below this before sending
 // Readings worse than this (metres) are not trusted: the shift will not start on one and the map ignores them.
 const MAX_ACCURACY_M = 150;
-const KINDS = new Set(['before', 'after', 'other']);   // 'serial' is only ever made by recording equipment
+const KINDS = new Set(['before', 'after', 'other', 'screenshot']);   // 'serial' is only ever made by recording equipment
 
 const num = (v) => (v === null || v === undefined || v === '' ? null : Number(v));
 const validLat = (v) => Number.isFinite(v) && v >= -90 && v <= 90;
@@ -252,6 +252,23 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
        validLat(lat) && validLng(lng) ? lat : null, validLat(lat) && validLng(lng) ? lng : null]);
     await pool.query('update tickets set updated_at=now() where id=$1', [job.id]);
     res.json(p);
+  }));
+
+  // Delete a photo from a job that is still open, for instance one that came out blurred. A closed job keeps its photos as the record, and a
+  // serial-number photo belongs to the equipment it was taken for. The removal is noted on the job so it can be traced.
+  app.delete('/api/field/jobs/:id/photos/:photoId', use, onShift, wrap(async (req, res) => {
+    const job = await jobFor(req, res, req.params.id);
+    if (!job) return;
+    if (job.status === 'resolved') return res.status(409).json({ error: 'This job is closed, so its photos stay as the record.' });
+    const { rows: [gone] } = await pool.query(
+      "delete from ticket_photos where tenant_id=$1 and ticket_id=$2 and id=$3 and kind in ('before','after','other','screenshot') returning kind",
+      [req.tenant.id, job.id, req.params.photoId]);
+    if (!gone) return res.status(404).json({ error: 'That photo is not there, or it belongs to recorded equipment.' });
+    await pool.query(
+      'insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,$3,$4,true)',
+      [req.tenant.id, job.id, req.session.name, `Deleted a ${gone.kind} photo.`]);
+    await pool.query('update tickets set updated_at=now() where id=$1', [job.id]);
+    res.json({ ok: true });
   }));
 
   // Bytes of a photo: the technician on the job, or anyone who may view tickets.

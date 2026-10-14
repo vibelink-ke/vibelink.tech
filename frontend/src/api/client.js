@@ -116,6 +116,7 @@ export const api = {
   fieldStart: (id) => post(`/api/field/jobs/${id}/start`, {}),
   fieldNote: (id, body) => post(`/api/field/jobs/${id}/notes`, { body }),
   fieldPhoto: (id, body) => post(`/api/field/jobs/${id}/photos`, body),
+  fieldDeletePhoto: (id, photoId) => del(`/api/field/jobs/${id}/photos/${photoId}`),
   fieldEquipment: (id, body) => post(`/api/field/jobs/${id}/equipment`, body),
   fieldInventory: () => get('/api/field/inventory'),
   fieldLookup: (body) => post('/api/field/equipment/lookup', body),

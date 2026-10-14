@@ -3470,3 +3470,7 @@ create table if not exists access_code_auto_macs (
   primary key (tenant_id, username, mac)
 );
 create index if not exists access_code_auto_macs_mac on access_code_auto_macs (tenant_id, mac);
+
+-- A technician can attach a screenshot (of a router or radio screen, say) to a job, as a photo of its own kind.
+alter table ticket_photos drop constraint if exists ticket_photos_kind_check;
+alter table ticket_photos add constraint ticket_photos_kind_check check (kind in ('before','after','other','serial','screenshot'));
