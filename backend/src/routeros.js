@@ -671,8 +671,13 @@ export async function applyHotspotServer(conn, {
   // Same reasoning as the DHCP server: matched on our own name, because the
   // interface comes back as an id and a second add fails on the name clash.
   const SERVER = 'hotspot-billing';
-  const server = (await conn.write('/ip/hotspot/print', [`?name=${SERVER}`]))[0];
-  const serverFields = [`=interface=${bridge}`, `=profile=${PROFILE}`,
+  // A hotspot server that is already on this bridge is the one to manage, whatever it is called: RouterOS allows only one per
+  // interface, so looking only for our own name made Configure try to MOVE our server onto a bridge that already had another one,
+  // and the router refused ("hotspot on that interface is already enabled"). Only when the bridge has none is our named server
+  // found, and moved here, or created.
+  const onBridge = (await conn.write('/ip/hotspot/print', [`?interface=${bridge}`]))[0];
+  const server = onBridge ?? (await conn.write('/ip/hotspot/print', [`?name=${SERVER}`]))[0];
+  const serverFields = [...(onBridge ? [] : [`=interface=${bridge}`]), `=profile=${PROFILE}`,
                         `=address-pool=${POOL}`, '=disabled=no'];
   if (server) {
     if (!unchanged(server, serverFields)) {
