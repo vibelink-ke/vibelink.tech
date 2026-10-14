@@ -171,7 +171,8 @@
       "Routers → Login pages: shows which hotspot routers still serve an old login page (read from the router itself) and updates the ones that are behind in one click.",
       "Expenses: a Calendar tab to see and record each day's spending, and a month-by-month grid under Monthly bills to mark which months of each bill are paid, including earlier months.",
       "Monthly bills: a bill can be paid to a shop or person who is not a supplier, and can be marked as paid in hotspot vouchers instead of money.",
-      "Hotspot: a purchase made on the hosted login page now remembers the buyer's phone (the router's page passes it along), so the paid voucher signs that phone back in by itself after it goes quiet."
+      "Hotspot: a purchase made on the hosted login page now remembers the buyer's phone (the router's page passes it along), so the paid voucher signs that phone back in by itself after it goes quiet.",
+      "Router Configure: a setting the router reports as true/false but we write as yes/no was never recognised as already correct, so the hotspot server, firewall and similar rules were re-written on every Configure (and refused on some routers). They are now skipped when already right."
     ]
   }
 ]

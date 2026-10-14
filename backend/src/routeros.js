@@ -303,7 +303,9 @@ function unchanged(row, fields) {
     // A comment with a dash or other non-ASCII character comes back from the router in a different encoding than it was sent in, so
     // compared as-is it never matched and the rule was rewritten on every refresh. Compare the plain-ASCII part only.
     const plain = (x) => String(x).replace(/[^ -~]/g, '');
-    if (key === 'comment' ? plain(row[key]) !== plain(value) : String(row[key]) !== value) return false;
+    // The API answers a switch with true/false but is written with yes/no, so "=disabled=no" never equalled "false" and every run re-wrote the row.
+    const norm = (x) => { const t = String(x).toLowerCase(); return (t === 'yes' || t === 'true') ? 'true' : (t === 'no' || t === 'false') ? 'false' : String(x); };
+    if (key === 'comment' ? plain(row[key]) !== plain(value) : norm(row[key]) !== norm(value)) return false;
   }
   return true;
 }
