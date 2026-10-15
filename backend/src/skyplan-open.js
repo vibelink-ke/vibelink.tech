@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
+import { saveLeadCoverage } from './lead-coverage.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -127,7 +128,10 @@ export function skyplanOpenRouter() {
            from subscribers where tenant_id=$1 and lat is not null and lng is not null`, [t]);
       const { rows: routers } = await pool.query(
         'select id, name, lat::float8 as lat, lng::float8 as lng from routers where tenant_id=$1 and lat is not null and lng is not null', [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, name: req.apiKey.tenant_name });
+      const { rows: leads } = await pool.query(
+        `select id, name, lat::float8 as lat, lng::float8 as lng from leads
+          where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });
@@ -150,6 +154,14 @@ export function skyplanOpenRouter() {
       if (/not a SkyPlan/.test(e?.message)) return res.status(400).json({ error: e.message });
       next(e);
     }
+  });
+
+  /** SkyPlan's answer to "can this lead be served?" for leads it was given. Needs a key with write access. */
+  r.post('/skyplan/lead-feasibility', async (req, res, next) => {
+    try {
+      if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to save.' });
+      res.json({ saved: await saveLeadCoverage(pool, req.apiKey.tenant_id, req.body?.results) });
+    } catch (e) { next(e); }
   });
 
   return r;

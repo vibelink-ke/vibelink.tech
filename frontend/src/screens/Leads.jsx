@@ -8,6 +8,16 @@ import ExportMenu from '../ui/ExportMenu';
 import { Badge, Button, Card, Drawer, Field, Grid, Input, KV, Modal, Screen, Select, Stat, Table, Tabs, Textarea } from '../ui/primitives';
 
 const STAGES = ['new', 'contacted', 'won', 'lost'];
+
+// Whether SkyPlan found a sector that can serve the lead (an estimate from terrain and the access points; a site visit decides).
+const COVERAGE = {
+  serviceable: ['Can serve', 'active'], marginal: ['Marginal', 'pending'], weak: ['Weak signal', 'suspended'], none: ['No coverage', 'suspended'],
+};
+const coverageText = (l) => {
+  const d = l.coverage_detail ?? {};
+  const bits = [d.sector, d.distanceM != null ? `${(d.distanceM / 1000).toFixed(1)} km` : null, d.mbps != null ? `~${d.mbps} Mbps` : null].filter(Boolean);
+  return bits.length ? bits.join(' · ') : (l.coverage === 'none' ? 'No sector reaches this place' : '');
+};
 const CHANNELS = ['manual', 'walk-in', 'referral', 'facebook', 'field visit', 'call'];
 const LOST_REASONS = ['Too expensive', 'No coverage in their area', 'Chose a competitor', 'No answer / unreachable', 'Not ready yet', 'Other'];
 /** Who can be the installer: the technicians, or everyone when the team has none set up as one. */
@@ -586,6 +596,13 @@ export default function Leads() {
                 },
                 { key: 'badge', label: '', render: (l) => <Badge tone={stageTone(l.status)}>{l.status}</Badge> },
                 {
+                  key: 'coverage',
+                  label: 'Coverage',
+                  render: (l) => (l.coverage && COVERAGE[l.coverage]
+                    ? <span title={coverageText(l)}><Badge tone={COVERAGE[l.coverage][1]}>{COVERAGE[l.coverage][0]}</Badge></span>
+                    : <span style={{ color: color.muted }} title="Open the Map (SkyPlan) once and it checks every lead that has a location">—</span>),
+                },
+                {
                   key: 'assignee',
                   label: 'Installer',
                   render: (l) => (
@@ -737,6 +754,9 @@ export default function Leads() {
                   }
                 />
                 <KV k="Stage" v={<Badge tone={stageTone(leadViewing.status)}>{leadViewing.status}</Badge>} />
+                <KV k="Coverage" v={leadViewing.coverage && COVERAGE[leadViewing.coverage]
+                  ? <span><Badge tone={COVERAGE[leadViewing.coverage][1]}>{COVERAGE[leadViewing.coverage][0]}</Badge> <span style={{ color: color.muted, fontSize: 12.5 }}>{coverageText(leadViewing)}{leadViewing.coverage_at ? ` · checked ${new Date(leadViewing.coverage_at).toLocaleDateString('en-KE', { day: 'numeric', month: 'short' })}` : ''}</span></span>
+                  : <span style={{ color: color.muted }}>Not checked yet (needs a location; open the Map once)</span>} />
                 {leadViewing.status === 'lost' && <KV k="Lost because" v={leadViewing.lost_reason ?? 'No reason given'} />}
                 <KV k="First reached" v={leadViewing.first_contacted_at ? new Date(leadViewing.first_contacted_at).toLocaleString('en-KE', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Not yet'} />
                 <KV k="Last activity" v={new Date(leadViewing.last_activity_at ?? leadViewing.created_at).toLocaleDateString('en-KE', { day: '2-digit', month: 'short', year: 'numeric' })} />

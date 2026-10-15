@@ -3474,3 +3474,11 @@ create index if not exists access_code_auto_macs_mac on access_code_auto_macs (t
 -- A technician can attach a screenshot (of a router or radio screen, say) to a job, as a photo of its own kind.
 alter table ticket_photos drop constraint if exists ticket_photos_kind_check;
 alter table ticket_photos add constraint ticket_photos_kind_check check (kind in ('before','after','other','serial','screenshot'));
+
+-- Whether a lead can be served, worked out by SkyPlan from the real network (terrain, the access points and their directions): serviceable |
+-- marginal | weak | none, with the sector, distance and speed it found, and when. An estimate for the sales conversation; a site visit decides.
+alter table leads add column if not exists coverage text;
+alter table leads add column if not exists coverage_detail jsonb;
+alter table leads add column if not exists coverage_at timestamptz;
+alter table leads drop constraint if exists leads_coverage_check;
+alter table leads add constraint leads_coverage_check check (coverage is null or coverage in ('serviceable','marginal','weak','none'));

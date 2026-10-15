@@ -22,15 +22,16 @@ export default function SkyPlanMap() {
   const busy = useRef(false);
   const pending = useRef(null);
   const latest = useRef({});
-  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], canEdit, toast: store.toast, name: store.session?.company };
+  const canLeads = !!store.session?.perms?.['leads.edit'];
+  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], leads: (store.leads ?? []).filter((l) => l.status !== 'won' && l.status !== 'lost'), canLeads, canEdit, toast: store.toast, name: store.session?.company };
   const [status, setStatus] = useState('Loading the network…');
 
   const lastChange = useRef(0);          // when SkyPlan last told us about an edit
   const load = useCallback(async (silent = false) => {
     try {
       const net = await api.network();
-      const { clients, routers, canEdit: edit, name } = latest.current;
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, name: name ?? 'Network' });
+      const { clients, routers, leads, canEdit: edit, name } = latest.current;
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, name: name ?? 'Network' });
       known.current = projectIds(project);
       declined.current = new Set();
       frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, silent: silent === true }, window.location.origin);
@@ -79,6 +80,10 @@ export default function SkyPlanMap() {
       if (!m || typeof m !== 'object') return;
       if (m.type === 'skyplan:ready') load();
       else if (m.type === 'skyplan:changed' && latest.current.canEdit && m.project) { lastChange.current = Date.now(); sync(m.project); }
+      else if (m.type === 'skyplan:leads' && latest.current.canLeads && Array.isArray(m.results)) {
+        // SkyPlan worked out whether the leads on the map can be served: keep it on the leads.
+        api.saveLeadCoverage(m.results).then(() => api.leads()).then((ls) => store.setCollection('leads', ls)).catch(() => {});
+      }
     };
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);

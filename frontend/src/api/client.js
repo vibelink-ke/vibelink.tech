@@ -251,6 +251,7 @@ export const api = {
   createLead: (l) => post('/api/leads', l),
   updateLead: (id, patchBody) => patch(`/api/leads/${id}`, patchBody),
   deleteLead: (id) => del(`/api/leads/${id}`),
+  saveLeadCoverage: (results) => post('/api/leads/coverage', { results }),
   leadNotes: (id) => get(`/api/leads/${id}/notes`),
   addLeadNote: (id, body) => post(`/api/leads/${id}/notes`, { body }),
 

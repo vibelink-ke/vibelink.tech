@@ -4436,6 +4436,12 @@ async function raiseInstallTicket(tenantId, lead, authorName) {
   return t;
 }
 
+/** SkyPlan (inside the Map page) reports whether each lead can be served. */
+app.post('/api/leads/coverage', requirePermission('leads.edit'), wrap(async (req, res) => {
+  const { saveLeadCoverage } = await import('./lead-coverage.js');
+  res.json({ saved: await saveLeadCoverage(pool, req.tenant.id, req.body?.results) });
+}));
+
 app.get('/api/leads', requirePermission('leads.view'), async (req, res) => {
   const { rows } = await pool.query(
     `select l.*, r.name as referrer_name, r.staff_id as referrer_staff_id, st.name as assignee_name, cb.name as created_by_name,

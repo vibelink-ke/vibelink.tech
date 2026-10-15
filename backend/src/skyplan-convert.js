@@ -39,7 +39,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -52,6 +52,11 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
       equipment.push({
         id: idOf(d), kind, model: d.details?.model || d.name,
         ...(kind === 'radio' && num(d.details?.azimuth) !== null ? { azimuth: num(d.details.azimuth) } : {}),
+        // What an access point is for and how it is set up, so SkyPlan can make a sector of it (see its billingSectors.ts).
+        ...(kind === 'radio' ? { role: d.kind } : {}),
+        ...(kind === 'radio' && num(d.details?.frequency) !== null ? { freqMHz: num(d.details.frequency) > 100 ? Math.round(num(d.details.frequency)) : Math.round(num(d.details.frequency) * 1000) } : {}),
+        ...(kind === 'radio' && num(d.details?.beamwidth) !== null ? { beamwidth: num(d.details.beamwidth) } : {}),
+        ...(kind === 'radio' && num(d.details?.range) !== null ? { reachKm: num(d.details.range) } : {}),
         ...(kind === 'switch' && num(d.details?.ports) !== null ? { ports: num(d.details.ports) } : {}),
         ...(d.details?.ip ? { host: d.details.ip } : {}),
       });
@@ -106,6 +111,15 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
     });
   }
 
+  // Sales leads that have a place on the map: SkyPlan checks each one for coverage and reports back (see saveLeadCoverage).
+  let leadCount = 0;
+  for (const l of leads ?? []) {
+    const la = num(l.lat); const ln = num(l.lng);
+    if (!hasPos(la, ln)) continue;
+    subscribers.push({ id: `lead:${l.id}`, name: `Lead · ${l.name}`, lat: la, lon: ln, lead: true });
+    leadCount += 1;
+  }
+
   const project = {
     format: 'skyplan-rf', version: 1, projectName: name,
     sites, links: [], coverages: [], settings: {}, customRadios: [], customAntennas: [],
@@ -115,7 +129,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, name = 'Bi
     project,
     report: {
       sites: sites.length, devices: sites.reduce((a, s) => a + (s.equipment?.length ?? 0), 0),
-      fibreNodes: fiberNodes.length, cables: fiberCables.length, customers: subscribers.length, skippedCables: skipped,
+      fibreNodes: fiberNodes.length, cables: fiberCables.length, customers: subscribers.length - leadCount, leads: leadCount, skippedCables: skipped,
     },
   };
 }
