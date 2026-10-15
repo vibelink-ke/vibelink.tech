@@ -106,7 +106,8 @@ export default function SkyPlanMap() {
     if (Date.now() - lastChange.current < 20000) return;
     load(true);
   }, [load]);
-  const sig = `${(store.clients ?? []).length}:${(store.routers ?? []).length}`;
+  // New customers, customers placed or moved on the map, and routers: any of these brings the map up to date within seconds.
+  const sig = `${(store.clients ?? []).length}:${(store.clients ?? []).reduce((n, c) => n + (c.lat != null && c.lng != null ? 1 : 0), 0)}:${(store.clients ?? []).reduce((n, c) => n + (Number(c.lat) || 0) + (Number(c.lng) || 0), 0).toFixed(5)}:${(store.routers ?? []).length}`;
   const firstSig = useRef(sig);
   useEffect(() => {
     if (firstSig.current === sig) return undefined;
