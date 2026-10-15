@@ -5,8 +5,9 @@
  * group is read as a whole, and the verdict names the shared device first. A link can be "unmanaged" (a plain switch, a radio nobody can log
  * into): nothing can be read from the device itself, so it is judged only from the customers behind it, and the verdict says so.
  */
-export const KINDS = ['radio', 'switch', 'onu', 'other'];
-const KIND_LABEL = { radio: 'radio', switch: 'switch', onu: 'ONU', other: 'link' };
+export const KINDS = ['ap', 'station', 'radio', 'switch', 'onu', 'other'];
+const isRadio = (k) => k === 'ap' || k === 'station' || k === 'radio';
+const KIND_LABEL = { radio: 'radio', ap: 'access point', station: 'station', switch: 'switch', onu: 'ONU', other: 'link' };
 
 /** A customer whose signal is this weak or worse is a poor radio client. */
 export const WEAK_DBM = -75;
@@ -51,13 +52,13 @@ export function judgeLink({ kind = 'radio', managed = true, members = [], worstW
   } else if (n >= 2 && stuck.length >= need) {
     level = 'watch';
     headline = `${stuck.length} of ${n} customers are connected but passing no traffic. Suspect the ${label}.`;
-  } else if (kind === 'radio' && withSignal.length >= 2 && weak.length >= Math.max(2, Math.ceil(withSignal.length * 0.6))) {
+  } else if (isRadio(kind) && withSignal.length >= 2 && weak.length >= Math.max(2, Math.ceil(withSignal.length * 0.6))) {
     level = 'watch';
     headline = `${weak.length} of ${withSignal.length} customers with a reading are at ${WEAK_DBM} dBm or weaker. The sector is weak for most of them.`;
   }
   if (level === 'ok' && offline.length) detail.push(`${offline.length} of ${n} offline, but not enough of them to blame the ${label}.`);
   if (managed === false && level !== 'ok') detail.push('Because it is unmanaged, confirm on site (power, cable, port) before replacing anything.');
-  if (kind === 'radio' && withSignal.length) {
+  if (isRadio(kind) && withSignal.length) {
     const avg = withSignal.reduce((a, m) => a + m.signal, 0) / withSignal.length;
     detail.push(`Signal readings: ${withSignal.length} customers, average ${avg.toFixed(0)} dBm, weakest ${Math.min(...withSignal.map((m) => m.signal))} dBm.`);
   }
@@ -88,7 +89,12 @@ export function checkSteps(kind, managed) {
       ? ['Read the optical power: about -8 to -27 dBm is healthy, and LOS means the fibre is cut.', 'Check how many customers are on that PON port and its load.', 'Check the ONU is online and not in a restart loop.']
       : ['Look at the PON and LOS lights: a red LOS means no light from the fibre.', 'Check the ONU power adapter and socket.', 'Clean and reseat the fibre connector.', 'Ask the upstream provider whether the splitter or the PON port has a fault.'];
   }
-  if (kind === 'radio') {
+  if (kind === 'station') {
+    return managed
+      ? ['Check the station is associated to the access point above it, and its signal and link rate.', 'Look for a new obstruction or a shifted alignment toward that access point.', 'Check its power and the cable to the switch.']
+      : ['Check the station has power and its link light, and reset its PoE injector.', 'Check it is still aimed at the access point above it, and for a new obstruction.', 'Check the cable from the station to the switch for water or damage.'];
+  }
+  if (kind === 'radio' || kind === 'ap') {
     return managed
       ? ['Check the radio is up and see each client\'s signal, CCQ and airtime.', 'Look for interference or a new obstruction; check alignment.', 'One poor client can drag a sector down: test with the weakest one disconnected.']
       : ['Check the radio has power and its link light; reset its PoE injector.', 'Check the alignment and look for a new obstruction or interference.', 'Check the cable from the radio to the injector for water or damage.'];
@@ -259,8 +265,8 @@ export async function createLink(pool, tenantId, b) {
   const at = place(b);
   try {
     const { rows: [r] } = await pool.query(
-      `insert into shared_links (tenant_id, name, kind, managed, location, notes, parent_id, lat, lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
-      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000), parent, at.lat, at.lng]);
+      `insert into shared_links (tenant_id, name, kind, managed, location, notes, parent_id, lat, lng, site_ref) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
+      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000), parent, at.lat, at.lng, text(b?.siteRef, 80)]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);
@@ -278,9 +284,9 @@ export async function updateLink(pool, tenantId, id, b) {
   const at = place(b, cur.lat, cur.lng);
   try {
     const { rows: [r] } = await pool.query(
-      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7, parent_id=$8, lat=$9, lng=$10 where id=$1 and tenant_id=$2 returning *`,
+      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7, parent_id=$8, lat=$9, lng=$10, site_ref=$11 where id=$1 and tenant_id=$2 returning *`,
       [id, tenantId, name, kind, b?.managed === undefined ? cur.managed : b.managed !== false,
-        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000), parent, at.lat, at.lng]);
+        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000), parent, at.lat, at.lng, b?.siteRef === undefined ? cur.site_ref : text(b.siteRef, 80)]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);

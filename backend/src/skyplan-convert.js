@@ -137,7 +137,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
     ...(unplaced?.length ? { unplaced } : {}),
     // The shared radios, switches and ONUs and how each group is doing (Shared links in billing); the customers carry the id of theirs.
     ...(sharedLinks?.length ? { sharedLinks: sharedLinks.map((l) => ({ id: l.id, name: l.name, kind: l.kind, managed: l.managed !== false, level: l.level, headline: l.headline, online: l.online ?? 0, active: l.active ?? 0, drops: l.drops ?? 0,
-      ...(l.parent_id ? { parentId: l.parent_id } : {}), ...(Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)) && l.lat !== null && l.lng !== null ? { lat: Number(l.lat), lon: Number(l.lng) } : {}),
+      ...(l.parent_id ? { parentId: l.parent_id } : {}), ...(l.site_ref ? { siteRef: l.site_ref } : {}), ...(Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)) && l.lat !== null && l.lng !== null ? { lat: Number(l.lat), lon: Number(l.lng) } : {}),
       ...(l.upstream ? { upstream: { id: l.upstream.id, name: l.upstream.name } } : {}) })) } : {}),
   };
   return {

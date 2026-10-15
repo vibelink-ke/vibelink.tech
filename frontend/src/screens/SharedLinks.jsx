@@ -9,7 +9,9 @@ import { Badge, Button, Card, Drawer, Field, Grid, Input, Modal, Screen, Select,
  * the customers', so each link is read as a whole. An unmanaged switch or radio cannot be queried: it is judged from the customers behind it.
  */
 const KINDS = [
-  { value: 'radio', label: 'Radio / sector' },
+  { value: 'ap', label: 'Access point (serves customers)' },
+  { value: 'station', label: 'Station (receives the signal)' },
+  { value: 'radio', label: 'Radio / sector (older)' },
   { value: 'switch', label: 'Switch' },
   { value: 'onu', label: 'Fibre ONU' },
   { value: 'other', label: 'Other' },
@@ -21,7 +23,7 @@ const LEVEL = {
   down: { label: 'Down', tone: 'down' },
   unknown: { label: 'No data', tone: 'default' },
 };
-const BLANK = { name: '', kind: 'radio', managed: true, location: '', notes: '', parent_id: '' };
+const BLANK = { name: '', kind: 'ap', managed: true, location: '', notes: '', parent_id: '' };
 
 export default function SharedLinks() {
   const store = useStore();

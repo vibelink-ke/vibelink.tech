@@ -3543,3 +3543,8 @@ create index if not exists subscribers_shared_link_idx on subscribers (shared_li
 alter table shared_links add column if not exists parent_id uuid references shared_links on delete set null;
 alter table shared_links add column if not exists lat double precision;
 alter table shared_links add column if not exists lng double precision;
+
+-- A radio is either an access point (serves customers) or a station (receives the signal from another radio); site_ref is the SkyPlan site it is on.
+alter table shared_links drop constraint if exists shared_links_kind_check;
+alter table shared_links add constraint shared_links_kind_check check (kind in ('radio','ap','station','switch','onu','other'));
+alter table shared_links add column if not exists site_ref text;
