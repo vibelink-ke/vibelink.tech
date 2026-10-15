@@ -197,7 +197,8 @@
       "Map (SkyPlan): customers now show how they are doing, with a ring: red when offline, amber when their line keeps dropping (3 or more drops in a day) or is connected but passing no traffic, grey when not paid. A small panel counts each group and filters the map to it.",
       "Field app: when closing an install the technician can enter the signal the customer's radio shows (optional). On the Map, SkyPlan compares those readings with what it predicted for the same customers, shows how far off it is, and one click adds the difference as a correction for every customer and lead from then on.",
       "Map (SkyPlan): customers, leads and their health are brought in from billing every time, also when you have unsaved design changes, and a customer placed or moved on the map shows up within seconds.",
-      "Clients: a Router / area filter shows only the customers of one MikroTik (for example Kabarnet) with a count per router, a Group by router option keeps each router's customers together, and each customer's router is shown under their name. The router name now also works in the search and the export."
+      "Clients: a Router / area filter shows only the customers of one MikroTik (for example Kabarnet) with a count per router, a Group by router option keeps each router's customers together, and each customer's router is shown under their name. The router name now also works in the search and the export.",
+      "Map (SkyPlan): click a customer or lead to move them to the right spot, set a customer's access point, or record progress on a lead (mark contacted, add a note, set a follow-up date). It is saved straight into billing with your own permissions. Customers and leads without a place are listed so you can place them by clicking the map."
     ]
   }
 ]
