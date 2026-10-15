@@ -189,7 +189,7 @@
   },
   {
     "date": "2026-10-15",
-    "title": "Hotspot lookup, field photos, leads and fixes",
+    "title": "Find which code a device belongs to",
     "items": [
       "Hotspot dashboard: a Find a device box. Paste a device address from the router's active list (a phone signed in by itself shows as its address there), a phone number or a code, and see which voucher or access code it belongs to, with the customer's phone, plan and expiry."
     ]
