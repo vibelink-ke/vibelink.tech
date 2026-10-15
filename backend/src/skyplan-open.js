@@ -3,6 +3,7 @@ import express from 'express';
 import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
 import { saveLeadCoverage, customerDrops, getCalibration, saveCalibration } from './lead-coverage.js';
+import { moveOnMap, setCustomerAp, updateLeadFromMap } from './skyplan-edit.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -124,7 +125,7 @@ export function skyplanOpenRouter() {
       const t = req.apiKey.tenant_id;
       const { nodes, links } = await loadNetwork(t);
       const { rows: clients } = await pool.query(
-        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm,
+        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm, s.ap_node_id,
                 (exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null
                            and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '1 hour')
                  or exists (select 1 from live_sessions l where l.tenant_id = s.tenant_id and l.username = s.pppoe_user
@@ -134,6 +135,12 @@ export function skyplanOpenRouter() {
            left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
           where s.tenant_id=$1 and s.lat is not null and s.lng is not null`, [t]);
       const drops = await customerDrops(pool, t);
+      // Customers and leads with no place on the map yet: SkyPlan lists them so they can be placed.
+      const { rows: noPlaceC } = await pool.query(
+        'select id, name from subscribers where tenant_id=$1 and (lat is null or lng is null) order by name limit 300', [t]);
+      const { rows: noPlaceL } = await pool.query(
+        "select id, name from leads where tenant_id=$1 and (lat is null or lng is null) and status not in ('won','lost') order by created_at desc limit 300", [t]);
+      const unplaced = [...noPlaceC.map((c) => ({ id: c.id, name: c.name })), ...noPlaceL.map((l) => ({ id: `lead:${l.id}`, name: `Lead · ${l.name}`, lead: true }))];
       const health = {};
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_bad ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
@@ -143,7 +150,7 @@ export function skyplanOpenRouter() {
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });
@@ -174,6 +181,21 @@ export function skyplanOpenRouter() {
       if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to save.' });
       res.json({ saved: await saveLeadCoverage(pool, req.apiKey.tenant_id, req.body?.results) });
     } catch (e) { next(e); }
+  });
+
+  /**
+   * Edits made in SkyPlan: where a customer or lead is, a customer's access point, a lead's progress. One endpoint, one action each.
+   * Needs a key with write access. See skyplan-edit.js for what is checked.
+   */
+  r.post('/skyplan/edit', async (req, res, next) => {
+    try {
+      if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to save.' });
+      const t = req.apiKey.tenant_id; const b = req.body ?? {};
+      if (b.action === 'move') return res.json(await moveOnMap(pool, t, { kind: b.kind, id: b.id, lat: b.lat, lng: b.lng }));
+      if (b.action === 'ap') return res.json(await setCustomerAp(pool, t, { id: b.id, apNodeId: b.apNodeId }));
+      if (b.action === 'lead') return res.json(await updateLeadFromMap(pool, t, `SkyPlan (${req.apiKey.name})`, b));
+      return res.status(400).json({ error: 'Unknown action.' });
+    } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
   });
 
   /** The correction SkyPlan worked out from field readings (dB of extra loss). Needs a key with write access. */

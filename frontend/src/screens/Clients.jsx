@@ -193,6 +193,9 @@ export default function Clients() {
   const pay = useInvoicePay(store);
   const navigate = useNavigate();
   const [filter, setFilter] = useState('all');
+  // Show the customers of one MikroTik (one tower or area, such as Kabarnet) only, and optionally keep each router's customers together.
+  const [routerFilter, setRouterFilter] = useState('all');         // 'all' | a router id | 'none'
+  const [groupByRouter, setGroupByRouter] = useState(false);
   const [checking, setChecking] = useState(false);
   // 'list' or 'calendar'. The list answers "who is next"; the calendar answers
   // "what does this week look like".
@@ -216,7 +219,12 @@ export default function Clients() {
     return () => clearInterval(id);
   }, [soOn]);
 
-  const clients = store.clients ?? [];
+  // The list carries each customer's router id; the name comes from the routers already loaded (so the router filter, the search and the export can use it).
+  const routerNameById = useMemo(() => new Map((store.routers ?? []).map((r) => [r.id, r.name])), [store.routers]);
+  const clients = useMemo(
+    () => (store.clients ?? []).map((c) => (c.router_name || !c.router_id ? c : { ...c, router_name: routerNameById.get(c.router_id) ?? null })),
+    [store.clients, routerNameById],
+  );
 
   // Client rows carry plan_id, not the package name; the plans list is already
   // loaded for the whole app.
@@ -226,18 +234,35 @@ export default function Clients() {
   );
   const planTitle = (line) => planTitleById.get(line.plan_id) ?? line.plan_title ?? null;
 
+  // The routers that have customers, with how many each: the choices for the router/area filter.
+  const routerChoices = useMemo(() => {
+    const m = new Map();
+    let none = 0;
+    for (const c of clients) {
+      if (!c.router_id) { none += 1; continue; }
+      const cur0 = m.get(c.router_id) ?? { id: c.router_id, name: c.router_name || 'Unnamed router', n: 0 };
+      cur0.n += 1;
+      m.set(c.router_id, cur0);
+    }
+    return { list: [...m.values()].sort((a, b) => a.name.localeCompare(b.name)), none };
+  }, [clients]);
+  const inRouter = useMemo(
+    () => (routerFilter === 'all' ? clients : clients.filter((c) => (routerFilter === 'none' ? !c.router_id : c.router_id === routerFilter))),
+    [clients, routerFilter],
+  );
+
   const counts = useMemo(
     () =>
       Object.fromEntries(
-        FILTERS.map((f) => [f.key, f.match ? clients.filter(f.match).length : clients.length])
+        FILTERS.map((f) => [f.key, f.match ? inRouter.filter(f.match).length : inRouter.length])
       ),
-    [clients]
+    [inRouter]
   );
 
   const visible = useMemo(() => {
     const f = FILTERS.find((x) => x.key === filter);
-    return f?.match ? clients.filter(f.match) : clients;
-  }, [clients, filter]);
+    return f?.match ? inRouter.filter(f.match) : inRouter;
+  }, [inRouter, filter]);
 
   // One row per account, not one per line — a customer with several PPPoE
   // connections is one account paying one bill, not several strangers who
@@ -250,11 +275,18 @@ export default function Clients() {
       if (!groups.has(c.account_code)) groups.set(c.account_code, []);
       groups.get(c.account_code).push(c);
     }
-    return [...groups.values()].map((lines) => ({
+    const accounts = [...groups.values()].map((lines) => ({
       primary: lines.find((l) => !l.line_label) ?? lines[0],
       lines,
     }));
-  }, [visible]);
+    // Grouped by router: each router's customers together (routers in name order, those with none last), then by name.
+    if (groupByRouter) {
+      accounts.sort((a, b) => (a.primary.router_name ? 0 : 1) - (b.primary.router_name ? 0 : 1)
+        || String(a.primary.router_name ?? '').localeCompare(String(b.primary.router_name ?? ''))
+        || String(a.primary.name ?? '').localeCompare(String(b.primary.name ?? '')));
+    }
+    return accounts;
+  }, [visible, groupByRouter]);
 
   // Batches of 20 / 50 / 100, and a search over account, name, phone, email and package.
   const accountText = (a) =>
@@ -541,6 +573,27 @@ export default function Clients() {
       )}
 
       {view === 'list' && (
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: color.inkSoft }}>
+          Router / area
+          <select
+            value={routerFilter}
+            onChange={(e) => { setRouterFilter(e.target.value); setSelected(new Set()); }}
+            style={{ padding: '6px 10px', borderRadius: radius.pill, border: `1px solid ${routerFilter === 'all' ? color.line : color.green}`, background: '#fff', fontSize: 13 }}
+          >
+            <option value="all">All routers · {clients.length}</option>
+            {routerChoices.list.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.n}</option>)}
+            {routerChoices.none > 0 && <option value="none">No router set · {routerChoices.none}</option>}
+          </select>
+        </label>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, color: color.inkSoft, cursor: 'pointer' }}>
+          <input type="checkbox" checked={groupByRouter} onChange={(e) => setGroupByRouter(e.target.checked)} />
+          Group by router
+        </label>
+      </div>
+      )}
+
+      {view === 'list' && (
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {FILTERS.map((f) => {
           const on = f.key === filter;
@@ -673,6 +726,7 @@ export default function Clients() {
                       <span onClick={() => navigate(`/clients/${c.id}`)} style={{ fontSize: 13.5, fontWeight: 600, cursor: 'pointer', color: color.green }}>
                         {c.name}
                       </span>
+                      {c.router_name && <div style={{ fontSize: 11.5, color: color.muted }}>{c.router_name}</div>}
                     </td>
                     <td style={{ ...td, fontSize: 13.5, fontWeight: 600 }}>
                       {/* Money actually sitting on the account — pooled per

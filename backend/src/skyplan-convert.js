@@ -39,7 +39,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, calibrationDb, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -50,7 +50,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
       if (!MOUNTABLE[d.kind] || d.details?.tower !== h.id) continue;
       const kind = MOUNTABLE[d.kind];
       equipment.push({
-        id: idOf(d), kind, model: d.details?.model || d.name,
+        id: idOf(d), kind, model: d.details?.model || d.name, nodeId: d.id,
         ...(kind === 'radio' && num(d.details?.azimuth) !== null ? { azimuth: num(d.details.azimuth) } : {}),
         // What an access point is for and how it is set up, so SkyPlan can make a sector of it (see its billingSectors.ts).
         ...(kind === 'radio' ? { role: d.kind } : {}),
@@ -109,6 +109,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
       id: c.id, name: `${c.name}${c.line_label ? ` – ${c.line_label}` : ''}`, lat: la, lon: ln,
       ...(c.mgmt_ip ? { monitor: { host: String(c.mgmt_ip).split('/')[0] } } : {}),
       ...(health?.[c.id] ? { health: health[c.id] } : {}),
+      ...(c.ap_node_id ? { apNodeId: c.ap_node_id } : {}),
       ...(c.cpe_signal_dbm != null && Number.isFinite(Number(c.cpe_signal_dbm)) ? { measuredRxDbm: Number(c.cpe_signal_dbm) } : {}),
     });
   }
@@ -126,6 +127,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
     format: 'skyplan-rf', version: 1, projectName: name,
     sites, links: [], coverages: [], settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
     fiberNodes, fiberCables, subscribers, probes: [],
+    ...(unplaced?.length ? { unplaced } : {}),
   };
   return {
     project,

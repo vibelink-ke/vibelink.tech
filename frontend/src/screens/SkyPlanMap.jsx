@@ -23,14 +23,15 @@ export default function SkyPlanMap() {
   const pending = useRef(null);
   const latest = useRef({});
   const canLeads = !!store.session?.perms?.['leads.edit'];
-  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], leads: (store.leads ?? []).filter((l) => l.status !== 'won' && l.status !== 'lost'), canLeads, canEdit, toast: store.toast, name: store.session?.company };
+  const canCustomers = !!store.session?.perms?.['clients.edit'];
+  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], leads: (store.leads ?? []).filter((l) => l.status !== 'won' && l.status !== 'lost'), canLeads, canCustomers, canEdit, toast: store.toast, name: store.session?.company };
   const [status, setStatus] = useState('Loading the network…');
 
   const lastChange = useRef(0);          // when SkyPlan last told us about an edit
   const load = useCallback(async (silent = false) => {
     try {
       const net = await api.network();
-      const { clients, routers, leads, canEdit: edit, name } = latest.current;
+      const { clients, routers, leads, canEdit: edit, canLeads: editLeads, canCustomers: editCustomers, name } = latest.current;
       // How each customer is doing right now: connected, in good standing, line drops in the last day (colours on the map).
       const drops = await api.customerDrops().catch(() => ({}));
       const calibration = await api.networkCalibration().catch(() => null);
@@ -38,10 +39,15 @@ export default function SkyPlanMap() {
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_state === 'unreachable' ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
       }
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network' });
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network',
+        // Customers and leads with no place on the map yet, so they can be placed from SkyPlan.
+        unplaced: [
+          ...clients.filter((c) => !(Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)) && !(Number(c.lat) === 0 && Number(c.lng) === 0))).slice(0, 300).map((c) => ({ id: c.id, name: c.name })),
+          ...leads.filter((l) => !(Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)) && !(Number(l.lat) === 0 && Number(l.lng) === 0))).slice(0, 300).map((l) => ({ id: `lead:${l.id}`, name: `Lead · ${l.name}`, lead: true })),
+        ] });
       known.current = projectIds(project);
       declined.current = new Set();
-      frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, silent: silent === true }, window.location.origin);
+      frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, can: { customers: !!editCustomers, leads: !!editLeads }, silent: silent === true }, window.location.origin);
       setStatus(`${report.sites} sites · ${report.devices} devices · ${report.fibreNodes} fibre nodes · ${report.cables} cables · ${report.customers} customers${edit ? '' : ' · view only'}`);
     } catch (e) {
       setStatus(`Could not load the network: ${e.message}`);
@@ -87,6 +93,23 @@ export default function SkyPlanMap() {
       if (!m || typeof m !== 'object') return;
       if (m.type === 'skyplan:ready') load();
       else if (m.type === 'skyplan:changed' && latest.current.canEdit && m.project) { lastChange.current = Date.now(); sync(m.project); }
+      else if (m.type === 'skyplan:edit' && m.reqId) {
+        // An edit made in SkyPlan (a place, an access point, a lead's progress): done with this person's own permissions, answered when done.
+        const reply = (ok, error) => frame.current?.contentWindow?.postMessage({ type: 'billing:edit-result', reqId: m.reqId, ok, error }, window.location.origin);
+        const p = m.payload ?? {};
+        let call;
+        if (m.action === 'move') call = api.skyplanMove(p.kind, { id: p.id, lat: p.lat, lng: p.lng });
+        else if (m.action === 'ap') call = api.skyplanCustomerAp({ id: p.id, apNodeId: p.apNodeId ?? null });
+        else if (m.action === 'lead') call = api.skyplanLead(p);
+        else call = Promise.reject(new Error('Unknown change'));
+        call.then(() => {
+          // Keep the rest of billing in step without waiting for the next refresh.
+          if (m.action === 'move' && p.kind === 'customer') store.setCollection('clients', (cs) => cs.map((x) => (x.id === p.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
+          else if (m.action === 'ap') store.setCollection('clients', (cs) => cs.map((x) => (x.id === p.id ? { ...x, ap_node_id: p.apNodeId ?? null } : x)));
+          else api.leads().then((ls) => store.setCollection('leads', ls)).catch(() => {});
+          reply(true);
+        }).catch((err) => reply(false, err.message));
+      }
       else if (m.type === 'skyplan:calibration' && latest.current.canEdit && m.body) {
         api.saveNetworkCalibration(m.body).then(() => latest.current.toast?.('Correction saved')).catch((err) => latest.current.toast?.(`Could not save the correction: ${err.message}`));
       }

@@ -4436,6 +4436,30 @@ async function raiseInstallTicket(tenantId, lead, authorName) {
   return t;
 }
 
+/**
+ * Changes made on the Map (SkyPlan) that land straight in billing: where a customer or lead is, a customer's access point, a lead's
+ * progress. Each needs the same permission as doing it on the Clients or Leads screen. See skyplan-edit.js.
+ */
+const skyplanEdit = (fn) => wrap(async (req, res) => {
+  try { res.json(await fn(req)); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+});
+app.post('/api/skyplan/move/customer', requirePermission('clients.edit'), skyplanEdit(async (req) => {
+  const { moveOnMap } = await import('./skyplan-edit.js');
+  return moveOnMap(pool, req.tenant.id, { kind: 'customer', id: req.body?.id, lat: req.body?.lat, lng: req.body?.lng });
+}));
+app.post('/api/skyplan/move/lead', requirePermission('leads.edit'), skyplanEdit(async (req) => {
+  const { moveOnMap } = await import('./skyplan-edit.js');
+  return moveOnMap(pool, req.tenant.id, { kind: 'lead', id: req.body?.id, lat: req.body?.lat, lng: req.body?.lng });
+}));
+app.post('/api/skyplan/customer-ap', requirePermission('clients.edit'), skyplanEdit(async (req) => {
+  const { setCustomerAp } = await import('./skyplan-edit.js');
+  return setCustomerAp(pool, req.tenant.id, { id: req.body?.id, apNodeId: req.body?.apNodeId });
+}));
+app.post('/api/skyplan/lead', requirePermission('leads.edit'), skyplanEdit(async (req) => {
+  const { updateLeadFromMap } = await import('./skyplan-edit.js');
+  return updateLeadFromMap(pool, req.tenant.id, req.session?.name, req.body ?? {});
+}));
+
 /** The correction SkyPlan works out from field signal readings: read for the Map page, saved when someone applies it. */
 app.get('/api/network/calibration', requirePermission('network.view'), wrap(async (req, res) => {
   const { getCalibration } = await import('./lead-coverage.js');

@@ -196,7 +196,8 @@
       "Leads: each lead that has a location now shows whether it can be served (can serve, marginal, weak signal or no coverage), worked out by SkyPlan from the terrain and your access points, with the sector, distance and expected speed. Open the Map once and it checks every lead.",
       "Map (SkyPlan): customers now show how they are doing, with a ring: red when offline, amber when their line keeps dropping (3 or more drops in a day) or is connected but passing no traffic, grey when not paid. A small panel counts each group and filters the map to it.",
       "Field app: when closing an install the technician can enter the signal the customer's radio shows (optional). On the Map, SkyPlan compares those readings with what it predicted for the same customers, shows how far off it is, and one click adds the difference as a correction for every customer and lead from then on.",
-      "Map (SkyPlan): customers, leads and their health are brought in from billing every time, also when you have unsaved design changes, and a customer placed or moved on the map shows up within seconds."
+      "Map (SkyPlan): customers, leads and their health are brought in from billing every time, also when you have unsaved design changes, and a customer placed or moved on the map shows up within seconds.",
+      "Clients: a Router / area filter shows only the customers of one MikroTik (for example Kabarnet) with a count per router, a Group by router option keeps each router's customers together, and each customer's router is shown under their name. The router name now also works in the search and the export."
     ]
   }
 ]
