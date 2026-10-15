@@ -39,7 +39,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, designItems, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, designItems, sharedLinks, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -110,6 +110,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
       ...(c.mgmt_ip ? { monitor: { host: String(c.mgmt_ip).split('/')[0] } } : {}),
       ...(health?.[c.id] ? { health: health[c.id] } : {}),
       ...(c.ap_node_id ? { apNodeId: c.ap_node_id } : {}),
+      ...(c.shared_link_id ? { linkId: c.shared_link_id } : {}),
       ...(c.cpe_signal_dbm != null && Number.isFinite(Number(c.cpe_signal_dbm)) ? { measuredRxDbm: Number(c.cpe_signal_dbm) } : {}),
     });
   }
@@ -133,6 +134,8 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
     sites, links: designLinks, coverages: designCoverages, settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
     fiberNodes, fiberCables, subscribers, probes: [],
     ...(unplaced?.length ? { unplaced } : {}),
+    // The shared radios, switches and ONUs and how each group is doing (Shared links in billing); the customers carry the id of theirs.
+    ...(sharedLinks?.length ? { sharedLinks: sharedLinks.map((l) => ({ id: l.id, name: l.name, kind: l.kind, managed: l.managed !== false, level: l.level, headline: l.headline, online: l.online ?? 0, active: l.active ?? 0, drops: l.drops ?? 0 })) } : {}),
   };
   return {
     project,

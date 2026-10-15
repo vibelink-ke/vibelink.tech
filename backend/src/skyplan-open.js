@@ -5,6 +5,7 @@ import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js'
 import { saveLeadCoverage, customerDrops, getCalibration, saveCalibration } from './lead-coverage.js';
 import { moveOnMap, setCustomerAp, updateLeadFromMap } from './skyplan-edit.js';
 import { saveDesignItems, loadDesignItems } from './skyplan-items.js';
+import { listLinks } from './shared-links.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -127,7 +128,7 @@ export function skyplanOpenRouter() {
       const t = req.apiKey.tenant_id;
       const { nodes, links } = await loadNetwork(t);
       const { rows: clients } = await pool.query(
-        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm, s.ap_node_id,
+        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm, s.ap_node_id, s.shared_link_id,
                 (exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null
                            and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '1 hour')
                  or exists (select 1 from live_sessions l where l.tenant_id = s.tenant_id and l.username = s.pppoe_user
@@ -152,7 +153,7 @@ export function skyplanOpenRouter() {
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), sharedLinks: await listLinks(pool, t).catch(() => []), calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });
