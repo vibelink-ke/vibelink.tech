@@ -316,6 +316,13 @@ export async function renderServerConfig(serverPrivateKey, port = 51820) {
     `ListenPort = ${port}`,
     `PrivateKey = ${serverPrivateKey}`,
     'Table = off',
+    // Routers and staff reach the server through this interface, never each other. Forwarding is on (the staff VPN needs it), so without
+    // this one organisation's router could open connections to another organisation's routers across the server. Between two peers nothing is
+    // forwarded, and a peer cannot start a connection into the OpenVPN tunnel; what the server or staff start still gets its replies.
+    'PostUp = iptables -C FORWARD -i %i -o %i -j DROP 2>/dev/null || iptables -I FORWARD 1 -i %i -o %i -j DROP || true',
+    'PostUp = iptables -C FORWARD -i %i -o tun0 -m conntrack --ctstate NEW -j DROP 2>/dev/null || iptables -I FORWARD 1 -i %i -o tun0 -m conntrack --ctstate NEW -j DROP || true',
+    'PostDown = iptables -D FORWARD -i %i -o %i -j DROP || true',
+    'PostDown = iptables -D FORWARD -i %i -o tun0 -m conntrack --ctstate NEW -j DROP || true',
     ...injectedPeers.map((p) => {
       // wg set's own preshared-key flag only accepts a file path, not the
       // key inline — /dev/stdin via a plain pipe works in any POSIX sh, no

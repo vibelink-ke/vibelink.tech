@@ -3514,3 +3514,11 @@ create table if not exists skyplan_items (
   updated_at timestamptz not null default now(),
   primary key (tenant_id, kind, ref)
 );
+
+-- Anti-tunnel hardening choices and the addresses allowed to reach a router's management services (API, Winbox, SSH), per organisation.
+create table if not exists security_settings (
+  tenant_id   uuid primary key references tenants on delete cascade,
+  anti_tunnel jsonb not null default '{}',
+  admin_cidrs text[] not null default '{}',
+  updated_at  timestamptz not null default now()
+);

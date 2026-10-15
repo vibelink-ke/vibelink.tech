@@ -3604,3 +3604,180 @@ export async function removeLegacyRules(conn, keys) {
   }
   return { backup: `${name}.rsc`, removed, failed };
 }
+
+
+// ───────────────────────────────────────────────────────────────────────────────
+// Anti-tunnel hardening
+// ───────────────────────────────────────────────────────────────────────────────
+
+/** What is on by default: the rules that cost an honest guest nothing. SNI checking and VPN-port blocking are the tenant's choice. */
+export const ANTI_TUNNEL_DEFAULTS = { dns: true, icmp: true, ipv6: true, sni: false, vpnPorts: false };
+const AT = 'ispAntiTunnel';
+
+/**
+ * The firewall rules wanted for a hotspot network, as plain data (no router needed to test it).
+ *
+ *   dns       the router's DNS is open to guests by necessity (without it the login popup never appears), so a tunnel through it (iodine,
+ *             dnscat, every "free internet" app) is the way out before paying. A tunnel needs long names and a steady stream: ordinary
+ *             lookups are short and few. Long queries are dropped and each guest gets a modest rate. The hotspot sends guests' DNS to its own
+ *             proxy on port 64872, so both 53 and 64872 are matched (matching 53 alone never sees a redirected query).
+ *   icmp      echo to the router itself: small and few, so an ICMP tunnel has nothing to ride.
+ *   ipv6      the hotspot only polices IPv4: an IPv6 address on the guest network would walk straight past the paywall.
+ *   sni       the walled garden lets guests reach a few names. Many of those names share addresses with the whole internet (Cloudflare), so a
+ *             tunnel app can ask for any other site on the same address. Guests before login may then only open 443 connections whose TLS
+ *             name is one of the allowed ones; QUIC and any other port to those addresses are closed.
+ *   vpnPorts  the usual VPN and proxy ports and protocols, closed for guests (a VPN over 443 cannot be told apart and is not stopped).
+ */
+export function antiTunnelRules({ subnet, bridge, hosts = [], options = {} }) {
+  const o = { ...ANTI_TUNNEL_DEFAULTS, ...options };
+  const filter = []; const mangle = []; const ipv6 = [];
+  const add = (label, fields, ignore = []) => filter.push({ label: `${AT} ${label}`, fields, ignore });
+  const src = `=src-address=${subnet}`;
+  if (o.dns) {
+    add('DNS long queries', ['=chain=input', '=protocol=udp', '=dst-port=53,64872', src, '=packet-size=221-65535', '=action=drop']);
+    add('DNS over TCP few connections', ['=chain=input', '=protocol=tcp', '=dst-port=53,64872', src, '=connection-limit=30,32', '=action=drop']);
+    // per guest address, not for everyone together
+    add('DNS per guest rate v1 allow', ['=chain=input', '=protocol=udp', '=dst-port=53,64872', src, '=dst-limit=60,120,src-address/1m', '=action=accept'], ['dst-limit']);
+    add('DNS per guest rate v1 drop', ['=chain=input', '=protocol=udp', '=dst-port=53,64872', src, '=action=drop']);
+  }
+  if (o.icmp) {
+    add('ICMP large', ['=chain=input', '=protocol=icmp', src, '=packet-size=129-65535', '=action=drop']);
+    add('ICMP a few', ['=chain=input', '=protocol=icmp', src, '=limit=20,40:packet', '=action=accept'], ['limit']);
+    add('ICMP the rest', ['=chain=input', '=protocol=icmp', src, '=action=drop']);
+  }
+  if (o.vpnPorts) {
+    add('VPN udp ports', ['=chain=forward', '=protocol=udp', src, '=dst-port=500,1194,1701,4500,51820', '=action=drop']);
+    add('VPN tcp ports', ['=chain=forward', '=protocol=tcp', src, '=dst-port=1080,1194,1723,8388,9001,9030', '=action=drop']);
+    add('VPN GRE', ['=chain=forward', '=protocol=gre', src, '=action=drop']);
+    add('VPN IPsec ESP', ['=chain=forward', '=protocol=ipsec-esp', src, '=action=drop']);
+  }
+  if (o.sni && hosts.length) {
+    for (const h of [...new Set(hosts.map((x) => String(x).trim().toLowerCase()).filter(Boolean))].slice(0, 40)) {
+      mangle.push({ label: `${AT} SNI ok ${h}`, ignore: [],
+        fields: ['=chain=prerouting', '=protocol=tcp', '=dst-port=443', src, '=hotspot=!auth', `=tls-host=${h}`, '=action=mark-connection', '=new-connection-mark=ispSniOk', '=passthrough=no'] });
+    }
+    add('SNI only allowed names on 443', ['=chain=forward', '=protocol=tcp', '=dst-port=443', src, '=hotspot=!auth', '=connection-mark=!ispSniOk', '=tcp-flags=psh', '=action=drop']);
+    add('SNI no other tcp ports', ['=chain=forward', '=protocol=tcp', '=dst-port=!443', src, '=hotspot=!auth', '=action=drop']);
+    add('SNI no udp (QUIC)', ['=chain=forward', '=protocol=udp', src, '=hotspot=!auth', '=action=drop']);
+  }
+  if (o.ipv6 && bridge) ipv6.push({ label: `${AT} IPv6 closed for guests`, ignore: [], fields: ['=chain=forward', `=in-interface=${bridge}`, '=action=drop'] });
+  return { filter, mangle, ipv6 };
+}
+
+/**
+ * Bring one firewall table's anti-tunnel rules to exactly the wanted list: missing ones added at the top (so they run before the rules a
+ * router normally has), changed ones fixed, ones no longer wanted removed. Only rules carrying our own label are ever touched.
+ * `ignore` names a field that RouterOS prints in another form than it is written in, so comparing it would rewrite the rule on every refresh.
+ */
+export async function syncAntiTunnelTable(conn, path, wanted) {
+  const out = { added: 0, updated: 0, removed: 0 };
+  const rows = await conn.write(`${path}/print`, []);
+  const mine = rows.filter((r) => isManaged(r) && String(r.comment ?? '').startsWith(AT));
+  const have = new Map();
+  for (const r of mine) {
+    if (have.has(r.comment)) { await conn.write(`${path}/remove`, [`=.id=${idOf(r)}`]); out.removed += 1; continue; }
+    have.set(r.comment, r);
+  }
+  const keep = new Set();
+  for (const w of wanted) keep.add(managed(w.label));
+  for (const r of mine) {
+    if (!keep.has(r.comment) && have.get(r.comment) === r) {
+      await conn.write(`${path}/remove`, [`=.id=${idOf(r)}`]);
+      out.removed += 1;
+    }
+  }
+  // Added in reverse, each at the top, so the final order is the order of the list.
+  for (const w of [...wanted].reverse()) {
+    const comment = managed(w.label);
+    const fields = [...w.fields, `=comment=${comment}`];
+    const existing = have.get(comment);
+    if (existing) {
+      const compare = fields.filter((f) => !(w.ignore ?? []).some((k) => f.startsWith(`=${k}=`)));
+      if (!unchanged(existing, compare)) {
+        await conn.write(`${path}/set`, [`=.id=${idOf(existing)}`, ...fields]);
+        out.updated += 1;
+      }
+    } else {
+      await conn.write(`${path}/add`, rows.length ? [...fields, '=place-before=0'] : fields);
+      out.added += 1;
+    }
+  }
+  return out;
+}
+
+/** Apply the anti-tunnel rules for a hotspot network. Never leaves a half-built SNI check behind: the name marks go in first and the rule that depends on them is dropped if they cannot. */
+export async function applyAntiTunnel(conn, { subnet, bridge, hosts = [], options = {} }) {
+  const want = antiTunnelRules({ subnet, bridge, hosts, options });
+  const total = { added: 0, updated: 0, removed: 0, notes: [] };
+  const sum = (r) => { total.added += r.added; total.updated += r.updated; total.removed += r.removed; };
+  try {
+    sum(await syncAntiTunnelTable(conn, '/ip/firewall/mangle', want.mangle));
+  } catch (e) {
+    // This RouterOS cannot match the TLS name: do not build the rule that drops everything not marked.
+    total.notes.push(`SNI checking skipped: this router did not accept it (${e.message})`);
+    want.filter = want.filter.filter((r) => !r.label.includes('SNI'));
+    await syncAntiTunnelTable(conn, '/ip/firewall/mangle', []).catch(() => {});
+  }
+  sum(await syncAntiTunnelTable(conn, '/ip/firewall/filter', want.filter));
+  try {
+    sum(await syncAntiTunnelTable(conn, '/ipv6/firewall/filter', want.ipv6));
+  } catch {
+    if (want.ipv6.length) total.notes.push('IPv6 is not installed on this router, so there is nothing to close');
+  }
+  return total;
+}
+
+// ── closing the router's own management doors ──────────────────────────────────
+
+const MGMT_LOCK = ['api', 'api-ssl', 'winbox', 'ssh'];
+const MGMT_OFF = ['telnet', 'ftp', 'www', 'www-ssl'];
+
+/** What the router's management services are now, and what they would become. Changes nothing. */
+export async function managementPlan(conn, { allow }) {
+  const services = await conn.write('/ip/service/print', []);
+  const addrs = allow.join(',');
+  return services.filter((s) => MGMT_LOCK.includes(s.name) || MGMT_OFF.includes(s.name)).map((s) => {
+    const lock = MGMT_LOCK.includes(s.name);
+    return {
+      name: s.name, port: s.port, id: idOf(s),
+      wasDisabled: String(s.disabled) === 'true', wasAddress: String(s.address ?? ''),
+      // A service that is switched off stays off: locking never turns one on. The ones nobody needs are switched off.
+      willDisable: lock ? String(s.disabled) === 'true' : true, willAddress: lock ? addrs : '',
+      changes: lock ? String(s.address ?? '') !== addrs : String(s.disabled) !== 'true',
+    };
+  });
+}
+
+/**
+ * Restrict who may reach the router's management services (API, Winbox, SSH) to the tunnel and the owner's own addresses, and switch off
+ * the ones nobody needs (telnet, ftp, the web pages). A scheduler on the router undoes all of it after a few minutes unless billing
+ * reconnects through the new rules and cancels it, so a mistake in the address list cannot lock anyone out.
+ */
+export async function lockManagement(conn, { allow, revertMinutes = 5 }) {
+  const plan = await managementPlan(conn, { allow });
+  const restore = plan.map((p) => `/ip service set [find name=${p.name}] address="${p.wasAddress}" disabled=${p.wasDisabled ? 'yes' : 'no'}`).join('; ');
+  const clock = (await conn.write('/system/clock/print', []))[0] ?? {};
+  const [hh, mm, ss] = String(clock.time ?? '00:00:00').split(':').map((x) => Number(x) || 0);
+  const at = ((hh * 3600 + mm * 60 + ss + revertMinutes * 60) % 86400);
+  const hhmmss = [Math.floor(at / 3600), Math.floor((at % 3600) / 60), at % 60].map((x) => String(x).padStart(2, '0')).join(':');
+  for (const old of await conn.write('/system/scheduler/print', ['?name=ispMgmtRevert'])) {
+    await conn.write('/system/scheduler/remove', [`=.id=${idOf(old)}`]).catch(() => {});
+  }
+  await cmd(conn, 'safety revert', '/system/scheduler/add', [
+    '=name=ispMgmtRevert', `=start-time=${hhmmss}`, '=interval=1d', '=policy=read,write,policy,test',
+    `=on-event=${restore}; /system scheduler remove [find name=ispMgmtRevert]`,
+    `=comment=${managed('undoes the management lock unless billing confirms it')}`,
+  ]);
+  for (const p of plan) {
+    if (!p.changes) continue;
+    await cmd(conn, `lock ${p.name}`, '/ip/service/set', [`=.id=${p.id}`, `=address=${p.willAddress}`, `=disabled=${p.willDisable ? 'yes' : 'no'}`]);
+  }
+  return { plan, revertAt: hhmmss };
+}
+
+/** Billing got back in through the new rules: the safety revert is no longer wanted. */
+export async function confirmManagementLock(conn) {
+  for (const old of await conn.write('/system/scheduler/print', ['?name=ispMgmtRevert'])) {
+    await conn.write('/system/scheduler/remove', [`=.id=${idOf(old)}`]);
+  }
+}

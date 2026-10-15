@@ -52,6 +52,7 @@ export const DEFAULT_PERMISSIONS = {
   'network.edit': { owner: true, cashier: false, technician: true,  support: false, sales: false },
   // API keys for SkyPlan: whoever holds one can read (and, if made so, change) the whole network design, so it is the owner's.
   'apikeys.manage': { owner: true, cashier: false, technician: false, support: false, sales: false },
+  'security.manage': { owner: true, cashier: false, technician: false, support: false, sales: false },
   // SmartOLT: seeing the ONUs, and acting on them (reboot, enable/disable, authorise, connecting the account).
   'smartolt.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'smartolt.manage': { owner: true, cashier: false, technician: true,  support: false, sales: false },
@@ -242,6 +243,7 @@ export const PERMISSION_META = [
   { key: 'network.view', page: 'Map', action: 'View the network drawn on the map' },
   { key: 'network.edit', page: 'Map', action: 'Draw / edit the network (fibre and wireless)' },
   { key: 'apikeys.manage', page: 'Settings', action: 'Make and revoke API keys (SkyPlan)' },
+  { key: 'security.manage', page: 'Settings', action: 'Anti-tunnel protection and closing routers\' management access' },
   { key: 'smartolt.view', page: 'SmartOLT', action: 'View ONUs and their status' },
   { key: 'smartolt.manage', page: 'SmartOLT', action: 'Connect, reboot, enable/disable, link and authorise ONUs' },
   { key: 'tr069.view', page: 'TR-069', action: 'View customer devices and their status' },

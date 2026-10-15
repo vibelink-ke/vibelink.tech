@@ -4481,6 +4481,79 @@ app.post('/api/network/calibration', requirePermission('network.edit'), wrap(asy
   try { res.json(await saveCalibration(pool, req.tenant.id, req.body)); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
 }));
 
+/**
+ * Anti-tunnel hardening (security.manage): which protections the hotspot routers carry against getting out without paying (DNS and ICMP tunnels,
+ * IPv6, SNI tricks on the walled garden, VPN ports), and which addresses may reach a router's own management services. Saved here, applied to
+ * every hotspot router by the next Configure (this triggers one).
+ */
+const CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(\/(\d|[12]\d|3[0-2]))?$/;
+const TUNNEL_SUPERNET = () => process.env.TUNNEL_SUPERNET || '10.50.0.0/16';
+async function securityFor(tenantId) {
+  const { rows: [r] } = await pool.query('select anti_tunnel, admin_cidrs from security_settings where tenant_id=$1', [tenantId]);
+  return { options: r?.anti_tunnel ?? {}, adminCidrs: r?.admin_cidrs ?? [] };
+}
+app.get('/api/security/anti-tunnel', requirePermission('security.manage'), wrap(async (req, res) => {
+  const { ANTI_TUNNEL_DEFAULTS } = await import('./routeros.js');
+  const s = await securityFor(req.tenant.id);
+  res.json({ options: { ...ANTI_TUNNEL_DEFAULTS, ...s.options }, adminCidrs: s.adminCidrs, tunnel: TUNNEL_SUPERNET() });
+}));
+app.put('/api/security/anti-tunnel', requirePermission('security.manage'), wrap(async (req, res) => {
+  const { ANTI_TUNNEL_DEFAULTS } = await import('./routeros.js');
+  const src = req.body?.options ?? {};
+  const options = {};
+  for (const k of Object.keys(ANTI_TUNNEL_DEFAULTS)) options[k] = typeof src[k] === 'boolean' ? src[k] : ANTI_TUNNEL_DEFAULTS[k];
+  const cidrs = (Array.isArray(req.body?.adminCidrs) ? req.body.adminCidrs : []).map((x) => String(x).trim()).filter(Boolean);
+  const bad = cidrs.find((c) => !CIDR.test(c) || c.split('/')[0].split('.').some((o) => Number(o) > 255));
+  if (bad) return res.status(400).json({ error: `"${bad}" is not an address (for example 41.90.1.5 or 41.90.1.0/24).` });
+  if (cidrs.length > 20) return res.status(400).json({ error: 'At most 20 addresses.' });
+  if (cidrs.includes('0.0.0.0/0') || cidrs.some((c) => c.endsWith('/0'))) return res.status(400).json({ error: 'That would allow everyone. Give your own address.' });
+  await pool.query(
+    `insert into security_settings (tenant_id, anti_tunnel, admin_cidrs) values ($1,$2,$3)
+     on conflict (tenant_id) do update set anti_tunnel = excluded.anti_tunnel, admin_cidrs = excluded.admin_cidrs, updated_at = now()`,
+    [req.tenant.id, JSON.stringify(options), cidrs]);
+  repushHotspotConfigToAllRouters(req.tenant.id);
+  res.json({ options, adminCidrs: cidrs });
+}));
+
+/**
+ * Close a router's management services (API, Winbox, SSH) to everyone except the tunnel and the owner's own addresses. {apply:false} only
+ * shows what would change. Applied, the router undoes it by itself after a few minutes unless billing gets back in through the new rules
+ * and cancels that, so a wrong address list cannot lock anyone out.
+ */
+app.post('/api/routers/:id/management', requirePermission('security.manage'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  const { rows: [r] } = await pool.query('select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  const host = String(r.host).split('/')[0];
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) return res.status(428).json({ error: 'Configure this router first.', needsAdmin: true });
+  const s = await securityFor(req.tenant.id);
+  const allow = [TUNNEL_SUPERNET(), ...s.adminCidrs];
+  let conn;
+  try {
+    conn = await step('connect', () => ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password }));
+    if (req.body?.apply !== true) {
+      return res.json({ applied: false, allow, plan: await step('read the services', () => ros.managementPlan(conn, { allow })) });
+    }
+    const out = await step('lock the services', () => ros.lockManagement(conn, { allow }), 30000);
+    ros.close(conn); conn = null;
+    // Back in through the new rules? Only then is the safety undo cancelled.
+    let again;
+    try {
+      again = await ros.connect({ host, port: r.api_port ?? 8728, user: login.user, password: login.password });
+      await ros.confirmManagementLock(again);
+    } catch (e) {
+      return res.status(502).json({ error: `The router was closed to everything except ${allow.join(', ')}, and billing could not get back in (${e.message}). It will undo this by itself at ${out.revertAt} (router time).`, plan: out.plan });
+    } finally { if (again) ros.close(again); }
+    res.json({ applied: true, allow, plan: out.plan });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, host, r.api_port ?? 8728)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 /** Line drops per customer in the last day, for the health colours on the Map. */
 app.get('/api/customers/drops', requirePermission('clients.view'), wrap(async (req, res) => {
   const { customerDrops } = await import('./lead-coverage.js');
@@ -6705,6 +6778,20 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
     done.push(ttl.created
       ? 'anti-sharing TTL rule added'
       : 'anti-sharing TTL rule already in place');
+
+    // Protection against getting out without paying (DNS and ICMP tunnels, IPv6, SNI tricks on the walled garden, VPN ports): the choices are
+    // under Settings → Security. Not fatal: the hotspot works without it.
+    try {
+      const { rows: [sec] } = await pool.query('select anti_tunnel from security_settings where tenant_id=$1', [tenantId]);
+      const guestNet = opts?.hotspotNetwork ?? hs?.hotspot_network ?? '10.5.50.0/24';
+      const tun = await tryStep('anti-tunnel rules', () => ros.applyAntiTunnel(conn, {
+        subnet: guestNet, bridge: bridge.bridge, hosts: gardenHosts, options: sec?.anti_tunnel ?? {},
+      }), 40000);
+      done.push(`anti-tunnel rules: ${tun.added} added, ${tun.updated} fixed, ${tun.removed} removed`);
+      for (const n of tun.notes) done.push(n);
+    } catch (e) {
+      done.push(`anti-tunnel rules not applied (${e.message})`);
+    }
 
     await pool.query(
       `update routers set autoconfig_last_at=now(), autoconfig_last_ok=true,

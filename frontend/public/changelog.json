@@ -204,5 +204,12 @@
       "Payments → Reconcile statement: a pasted M-Pesa message now reads the account correctly (it used to take the date along with it, such as '21318 on 15', so the payment could not be matched).",
       "Map (SkyPlan): wireless links and sectors drawn in SkyPlan are now saved into billing and shown on its Map (a wireless link between the two towers, an access point with its direction, beam and reach), and the whole design comes back as drawn on any computer that connects to billing."
     ]
+  },
+  {
+    "date": "2026-10-16",
+    "title": "Security settings",
+    "items": [
+      "Settings → Security: anti-tunnel protection for hotspot routers (DNS and ping tunnels, IPv6, website-name check, VPN ports), and closing a router's API, Winbox and SSH to the tunnel and your own addresses with an automatic safety undo"
+    ]
   }
 ]
