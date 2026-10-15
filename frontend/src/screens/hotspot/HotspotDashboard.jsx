@@ -7,6 +7,20 @@ import { Button, Card, Empty, Grid, Input, Stat, Table } from '../../ui/primitiv
 export default function HotspotDashboard() {
   const store = useStore();
   const [checking, setChecking] = useState(false);
+  // Everyone connected right now, matched to the code behind each device address.
+  const [onlineList, setOnlineList] = useState(null);
+  const [onlineFilter, setOnlineFilter] = useState('');
+  const loadOnline = () => api.hotspotOnline().then(setOnlineList).catch(() => setOnlineList((l) => l ?? []));
+  useEffect(() => {
+    loadOnline();
+    const id = setInterval(() => { if (!document.hidden) loadOnline(); }, 30000);
+    return () => clearInterval(id);
+  }, []);
+  const shownOnline = (onlineList ?? []).filter((r) => {
+    const q = onlineFilter.trim().toLowerCase();
+    if (!q) return true;
+    return [r.code, r.signed_in_as, r.phone, r.plan, r.label, r.ip, r.router].some((x) => x && String(x).toLowerCase().includes(q));
+  });
   // Find who a device address, phone or code belongs to (the router's active list shows an auto signed-in phone by its address).
   const [finder, setFinder] = useState('');
   const [found, setFound] = useState([]);
@@ -109,27 +123,32 @@ export default function HotspotDashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, alignItems: 'start' }}>
         <Card
           title="Live sessions"
-          subtitle="Vouchers actually connected on the router right now"
+          subtitle="Everyone connected on the router right now, with the code behind each device address"
           actions={
-            <Button size="sm" onClick={checkOnline} disabled={checking}
+            <Button size="sm" onClick={async () => { await checkOnline(); loadOnline(); }} disabled={checking}
               title="Ask each router who is connected right now">
               {checking ? 'Asking routers…' : 'Refresh'}
             </Button>
           }
         >
+          <div style={{ marginBottom: 10 }}>
+            <Input value={onlineFilter} onChange={(e) => setOnlineFilter(e.target.value)} placeholder={`Search ${(onlineList ?? []).length} connected: code, device address, phone`} />
+          </div>
           <Table
-            rowKey={(v) => v.id}
-            empty="Nobody connected right now"
-            rows={online}
+            rowKey={(r) => `${r.signed_in_as}-${r.ip}`}
+            empty={onlineList === null ? 'Loading…' : 'Nobody connected right now'}
+            rows={shownOnline}
             columns={[
-              { key: 'code', label: 'Code', render: (v) => <span style={{ fontFamily: font.mono }}>{v.code}</span> },
-              { key: 'phone', label: 'Phone' },
-              { key: 'data_used_mb', label: 'Used', align: 'right', render: (v) => `${v.data_used_mb ?? 0} MB` },
-              {
-                key: 'expires_at',
-                label: 'Expires',
-                render: (v) => (v.expires_at ? new Date(v.expires_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }) : '—'),
-              },
+              { key: 'code', label: 'Code', render: (r) => (r.code
+                ? <span style={{ fontFamily: font.mono, fontWeight: 700 }}>{r.code}</span>
+                : <span style={{ color: color.muted }}>not matched</span>) },
+              { key: 'kind', label: 'Type', render: (r) => (r.kind ? `${r.kind}${r.label ? ' · ' + r.label : ''}` : '—') },
+              { key: 'via', label: 'Signed in as', render: (r) => (r.by_address
+                ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.signed_in_as}</span>
+                : <span style={{ color: color.muted }}>typed the code</span>) },
+              { key: 'phone', label: 'Phone / plan', render: (r) => [r.phone, r.plan].filter(Boolean).join(' · ') || '—' },
+              { key: 'ip', label: 'Address', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.ip ?? '—'}</span> },
+              { key: 'expires_at', label: 'Expires', render: (r) => (r.expires_at ? new Date(r.expires_at).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }) : '—') },
             ]}
           />
         </Card>

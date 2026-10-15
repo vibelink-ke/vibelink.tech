@@ -135,6 +135,7 @@ export const api = {
   refreshPlatformOrgBalance: () => post('/api/platform/org-balance/refresh', {}),
   hotspotRevenue: (period) => get(`/api/hotspot/revenue?period=${encodeURIComponent(period)}`),
   hotspotToday: () => get('/api/hotspot/today'),
+  hotspotOnline: () => get('/api/hotspot/online'),
   hotspotFind: (q) => get(`/api/hotspot/find?q=${encodeURIComponent(q)}`),
   unmatchedPayments: () => get('/api/payments/unmatched'),
   matchPayment: (id, subscriberId) => post(`/api/payments/${id}/match`, { subscriberId }),

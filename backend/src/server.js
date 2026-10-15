@@ -11574,6 +11574,66 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
  * active list under that address, not under the code, and RouterOS gives no way to show the code there. Paste the address (or part of one) here
  * and get the voucher or access code it belongs to, with the customer's phone, plan and expiry.
  */
+/**
+ * Everyone connected on the hotspot routers right now, with the code behind each one. A phone the router signed in by its device address
+ * appears in the router's own list under that address; here each one is matched back to the voucher or access code it belongs to, so a
+ * support call can find its customer without looking addresses up one at a time. Fed by the same router read the presence sync does.
+ */
+app.get('/api/hotspot/online', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const t = req.tenant.id;
+  const { rows: sessions } = await pool.query(
+    `select ls.username, host(ls.address) as ip, r.name as router, ls.seen_at
+       from live_sessions ls left join routers r on r.id = ls.router_id
+      where ls.tenant_id=$1 and ls.service='hotspot' and ls.seen_at > now() - interval '3 minutes'
+      order by ls.seen_at desc limit 1000`, [t]);
+  const isMac = (u) => /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/i.test(u);
+  const macs = [...new Set(sessions.filter((s) => isMac(s.username)).map((s) => s.username.toUpperCase()))];
+  const typed = [...new Set(sessions.filter((s) => !isMac(s.username)).map((s) => s.username))];
+
+  const voucherCols = `v.code, v.status, v.expires_at, v.phone, p.title as plan`;
+  const byCode = new Map();
+  const byMac = new Map();
+  const put = (map, key, info, overwrite = false) => { if (overwrite || !map.has(key)) map.set(key, info); };
+
+  if (typed.length) {
+    const { rows: vs } = await pool.query(
+      `select ${voucherCols} from vouchers v left join plans p on p.id = v.plan_id where v.tenant_id=$1 and v.code = any($2::text[])`, [t, typed]);
+    for (const v of vs) put(byCode, v.code, { kind: 'Voucher', code: v.code, phone: v.phone, plan: v.plan, expires_at: v.expires_at });
+    const { rows: acs } = await pool.query(
+      'select username, label from hotspot_access_codes where tenant_id=$1 and username = any($2::text[])', [t, typed]);
+    for (const a of acs) put(byCode, a.username, { kind: 'Access code', code: a.username, label: a.label });
+  }
+  if (macs.length) {
+    // A running voucher first, then the devices added to a voucher, then access codes (remembered, locked, TV / console).
+    const { rows: vm } = await pool.query(
+      `select upper(v.mac::text) as mac, ${voucherCols} from vouchers v left join plans p on p.id = v.plan_id
+        where v.tenant_id=$1 and upper(v.mac::text) = any($2::text[]) and v.status = 'in_use' order by v.created_at`, [t, macs]);
+    for (const v of vm) put(byMac, v.mac, { kind: 'Voucher', code: v.code, phone: v.phone, plan: v.plan, expires_at: v.expires_at }, true);
+    const { rows: vd } = await pool.query(
+      `select upper(d.mac::text) as mac, ${voucherCols} from voucher_devices d join vouchers v on v.id = d.voucher_id left join plans p on p.id = v.plan_id
+        where v.tenant_id=$1 and upper(d.mac::text) = any($2::text[]) and v.status = 'in_use' order by d.added_at`, [t, macs]);
+    for (const v of vd) put(byMac, v.mac, { kind: 'Voucher', code: v.code, phone: v.phone, plan: v.plan, expires_at: v.expires_at });
+    const { rows: am } = await pool.query(
+      `select m.mac, ac.username, ac.label from (
+          select tenant_id, username, upper(mac) as mac from access_code_auto_macs
+          union select tenant_id, username, upper(mac) from hotspot_access_code_macs
+          union select tenant_id, username, upper(mac) from access_code_devices) m
+        join hotspot_access_codes ac on ac.tenant_id = m.tenant_id and ac.username = m.username
+        where m.tenant_id=$1 and m.mac = any($2::text[])`, [t, macs]);
+    for (const a of am) put(byMac, a.mac, { kind: 'Access code', code: a.username, label: a.label });
+  }
+
+  res.json(sessions.map((s) => {
+    const mac = isMac(s.username);
+    const info = mac ? byMac.get(s.username.toUpperCase()) : byCode.get(s.username);
+    return {
+      signed_in_as: s.username, by_address: mac, ip: s.ip, router: s.router, seen_at: s.seen_at,
+      code: info?.code ?? (mac ? null : s.username), kind: info?.kind ?? null, label: info?.label ?? null,
+      phone: info?.phone ?? null, plan: info?.plan ?? null, expires_at: info?.expires_at ?? null,
+    };
+  }));
+}));
+
 app.get('/api/hotspot/find', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const q = String(req.query.q ?? '').trim();
   if (q.length < 3) return res.json([]);
