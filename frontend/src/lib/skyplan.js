@@ -36,7 +36,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, calibrationDb, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -106,6 +106,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
       id: c.id, name: `${c.name}${c.line_label ? ` – ${c.line_label}` : ''}`, lat: la, lon: ln,
       ...(c.mgmt_ip ? { monitor: { host: String(c.mgmt_ip).split('/')[0] } } : {}),
       ...(health?.[c.id] ? { health: health[c.id] } : {}),
+      ...(c.cpe_signal_dbm != null && Number.isFinite(Number(c.cpe_signal_dbm)) ? { measuredRxDbm: Number(c.cpe_signal_dbm) } : {}),
     });
   }
 
@@ -120,7 +121,7 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
 
   const project = {
     format: 'skyplan-rf', version: 1, projectName: name,
-    sites, links: [], coverages: [], settings: {}, customRadios: [], customAntennas: [],
+    sites, links: [], coverages: [], settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
     fiberNodes, fiberCables, subscribers, probes: [],
   };
   return {

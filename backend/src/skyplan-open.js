@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
-import { saveLeadCoverage, customerDrops } from './lead-coverage.js';
+import { saveLeadCoverage, customerDrops, getCalibration, saveCalibration } from './lead-coverage.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -124,7 +124,7 @@ export function skyplanOpenRouter() {
       const t = req.apiKey.tenant_id;
       const { nodes, links } = await loadNetwork(t);
       const { rows: clients } = await pool.query(
-        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status,
+        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm,
                 (exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null
                            and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '1 hour')
                  or exists (select 1 from live_sessions l where l.tenant_id = s.tenant_id and l.username = s.pppoe_user
@@ -143,7 +143,7 @@ export function skyplanOpenRouter() {
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });
@@ -174,6 +174,14 @@ export function skyplanOpenRouter() {
       if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to save.' });
       res.json({ saved: await saveLeadCoverage(pool, req.apiKey.tenant_id, req.body?.results) });
     } catch (e) { next(e); }
+  });
+
+  /** The correction SkyPlan worked out from field readings (dB of extra loss). Needs a key with write access. */
+  r.post('/skyplan/calibration', async (req, res, next) => {
+    try {
+      if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to save.' });
+      res.json(await saveCalibration(pool, req.apiKey.tenant_id, req.body));
+    } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
   });
 
   return r;

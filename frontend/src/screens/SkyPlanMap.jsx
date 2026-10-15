@@ -33,11 +33,12 @@ export default function SkyPlanMap() {
       const { clients, routers, leads, canEdit: edit, name } = latest.current;
       // How each customer is doing right now: connected, in good standing, line drops in the last day (colours on the map).
       const drops = await api.customerDrops().catch(() => ({}));
+      const calibration = await api.networkCalibration().catch(() => null);
       const health = {};
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_state === 'unreachable' ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
       }
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, name: name ?? 'Network' });
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network' });
       known.current = projectIds(project);
       declined.current = new Set();
       frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, silent: silent === true }, window.location.origin);
@@ -86,6 +87,9 @@ export default function SkyPlanMap() {
       if (!m || typeof m !== 'object') return;
       if (m.type === 'skyplan:ready') load();
       else if (m.type === 'skyplan:changed' && latest.current.canEdit && m.project) { lastChange.current = Date.now(); sync(m.project); }
+      else if (m.type === 'skyplan:calibration' && latest.current.canEdit && m.body) {
+        api.saveNetworkCalibration(m.body).then(() => latest.current.toast?.('Correction saved')).catch((err) => latest.current.toast?.(`Could not save the correction: ${err.message}`));
+      }
       else if (m.type === 'skyplan:leads' && latest.current.canLeads && Array.isArray(m.results)) {
         // SkyPlan worked out whether the leads on the map can be served: keep it on the leads.
         api.saveLeadCoverage(m.results).then(() => api.leads()).then((ls) => store.setCollection('leads', ls)).catch(() => {});

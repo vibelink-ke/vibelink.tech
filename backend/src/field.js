@@ -326,6 +326,17 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       await pool.query('update subscribers set lat=$3, lng=$4 where tenant_id=$1 and id=$2',
         [req.tenant.id, job.subscriber_id, lat, lng]);
     }
+    // The signal read at the customer's radio, if the technician entered one (optional). A reading typed without its minus sign is taken as negative.
+    if (req.body?.signalDbm !== undefined && req.body.signalDbm !== null && req.body.signalDbm !== '') {
+      let sig = num(req.body.signalDbm);
+      if (Number.isFinite(sig) && sig > 0) sig = -sig;
+      if (!Number.isFinite(sig) || sig < -100 || sig > -20) {
+        return res.status(400).json({ error: 'The signal reading must be between -100 and -20 dBm (for example -62).' });
+      }
+      if (job.subscriber_id) {
+        await pool.query('update subscribers set cpe_signal_dbm=$3, cpe_signal_at=now() where tenant_id=$1 and id=$2', [req.tenant.id, job.subscriber_id, sig]);
+      }
+    }
     const note = String(req.body?.note ?? '').trim();
     if (note) {
       await pool.query(

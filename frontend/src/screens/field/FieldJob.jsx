@@ -26,6 +26,7 @@ export default function FieldJob() {
   const [note, setNote] = useState('');
   const [closing, setClosing] = useState(false);
   const [closeNote, setCloseNote] = useState('');
+  const [signal, setSignal] = useState('');
   const [saveLoc, setSaveLoc] = useState(true);
   const [showPass, setShowPass] = useState(false);
   const fileInputs = useRef({});
@@ -97,6 +98,7 @@ export default function FieldJob() {
         lat: p?.lat, lng: p?.lng, accuracy: p?.accuracy,
         saveLocation: !!(p && (saveLoc || (job.kind === 'install' && job.customer_id))),
         noEquipment: noEquipment || undefined,
+        signalDbm: signal.trim() ? Number(signal) : undefined,
       } });
       store.toast(r.queued ? 'Saved on the phone — the job closes when the signal returns' : 'Job closed');
       loadMe();
@@ -271,6 +273,14 @@ export default function FieldJob() {
             <>
               <textarea value={closeNote} onChange={(e) => setCloseNote(e.target.value)} rows={3} placeholder="Summary of the work (optional)"
                 style={{ width: '100%', boxSizing: 'border-box', borderRadius: 10, border: `1px solid ${color.line}`, padding: 10, fontSize: 15, fontFamily: 'inherit' }} />
+              {install && job.customer_id && (
+                <label style={{ display: 'grid', gap: 4, fontSize: 13.5 }}>
+                  <span>Signal at the customer's radio (dBm), optional</span>
+                  <input type="number" inputMode="decimal" step="1" value={signal} onChange={(e) => setSignal(e.target.value)} placeholder="e.g. -62"
+                    style={{ width: '100%', boxSizing: 'border-box', borderRadius: 10, border: `1px solid ${color.line}`, padding: 10, fontSize: 15, fontFamily: 'inherit' }} />
+                  <span style={{ fontSize: 12, color: color.muted }}>What the radio's own screen shows. It helps check the planning figures against real installs.</span>
+                </label>
+              )}
               {install && job.customer_id && (
                 <div style={{ fontSize: 13.5, color: '#4a524c' }}>
                   Closing saves where you are standing as this customer's location, so stay at the install. The job cannot be closed without it.

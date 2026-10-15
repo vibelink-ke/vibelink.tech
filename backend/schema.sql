@@ -3482,3 +3482,18 @@ alter table leads add column if not exists coverage_detail jsonb;
 alter table leads add column if not exists coverage_at timestamptz;
 alter table leads drop constraint if exists leads_coverage_check;
 alter table leads add constraint leads_coverage_check check (coverage is null or coverage in ('serviceable','marginal','weak','none'));
+
+-- The signal a technician read at the customer's radio when the install was finished (dBm), so SkyPlan can compare it with what it predicted.
+alter table subscribers add column if not exists cpe_signal_dbm numeric(6,1);
+alter table subscribers add column if not exists cpe_signal_at timestamptz;
+alter table subscribers drop constraint if exists subscribers_cpe_signal_check;
+alter table subscribers add constraint subscribers_cpe_signal_check check (cpe_signal_dbm is null or (cpe_signal_dbm between -100 and -20));
+-- The correction SkyPlan worked out from those readings (dB of extra loss to add to its predictions), one per organisation.
+create table if not exists skyplan_calibration (
+  tenant_id     uuid primary key references tenants on delete cascade,
+  correction_db numeric(5,1) not null default 0,
+  samples       int not null default 0,
+  rms_db        numeric(5,1),
+  updated_at    timestamptz not null default now(),
+  constraint skyplan_calibration_range check (correction_db between -30 and 30)
+);

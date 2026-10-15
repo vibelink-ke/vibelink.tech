@@ -32,3 +32,23 @@ export async function customerDrops(pool, tenantId) {
       group by s.id`, [tenantId]);
   return Object.fromEntries(rows.map((r) => [r.id, r.n]));
 }
+
+/** The correction SkyPlan last worked out for this organisation (0 when none). */
+export async function getCalibration(pool, tenantId) {
+  const { rows: [r] } = await pool.query(
+    'select correction_db::float8 as correction_db, samples, rms_db::float8 as rms_db, updated_at from skyplan_calibration where tenant_id=$1', [tenantId]);
+  return r ?? { correction_db: 0, samples: 0, rms_db: null, updated_at: null };
+}
+
+/** Keep a correction from SkyPlan: checked and limited to +/-30 dB, because it arrives from a browser or a key. */
+export async function saveCalibration(pool, tenantId, body) {
+  const db = Number(body?.correctionDb);
+  if (!Number.isFinite(db) || Math.abs(db) > 30) throw Object.assign(new Error('The correction must be between -30 and 30 dB.'), { status: 400 });
+  const samples = Math.max(0, Math.min(100000, Math.round(Number(body?.samples) || 0)));
+  const rms = Number.isFinite(Number(body?.rmsDb)) ? Math.max(0, Math.min(99, Number(body.rmsDb))) : null;
+  await pool.query(
+    `insert into skyplan_calibration (tenant_id, correction_db, samples, rms_db) values ($1,$2,$3,$4)
+     on conflict (tenant_id) do update set correction_db = excluded.correction_db, samples = excluded.samples, rms_db = excluded.rms_db, updated_at = now()`,
+    [tenantId, Math.round(db * 10) / 10, samples, rms]);
+  return { ok: true };
+}

@@ -4436,6 +4436,16 @@ async function raiseInstallTicket(tenantId, lead, authorName) {
   return t;
 }
 
+/** The correction SkyPlan works out from field signal readings: read for the Map page, saved when someone applies it. */
+app.get('/api/network/calibration', requirePermission('network.view'), wrap(async (req, res) => {
+  const { getCalibration } = await import('./lead-coverage.js');
+  res.json(await getCalibration(pool, req.tenant.id));
+}));
+app.post('/api/network/calibration', requirePermission('network.edit'), wrap(async (req, res) => {
+  const { saveCalibration } = await import('./lead-coverage.js');
+  try { res.json(await saveCalibration(pool, req.tenant.id, req.body)); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+}));
+
 /** Line drops per customer in the last day, for the health colours on the Map. */
 app.get('/api/customers/drops', requirePermission('clients.view'), wrap(async (req, res) => {
   const { customerDrops } = await import('./lead-coverage.js');
