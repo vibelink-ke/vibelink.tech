@@ -46,7 +46,7 @@ export default function SkyPlanMap() {
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_state === 'unreachable' ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
       }
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients: clientsL, routers, leads, health, designItems, sharedLinks, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network',
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients: clientsL, routers, routerList: latest.current.routers, leads, health, designItems, sharedLinks, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network',
         // Customers and leads with no place on the map yet, so they can be placed from SkyPlan.
         unplaced: [
           ...clients.filter((c) => !(Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)) && !(Number(c.lat) === 0 && Number(c.lng) === 0))).slice(0, 300).map((c) => ({ id: c.id, name: c.name })),

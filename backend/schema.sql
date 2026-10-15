@@ -3548,3 +3548,16 @@ alter table shared_links add column if not exists lng double precision;
 alter table shared_links drop constraint if exists shared_links_kind_check;
 alter table shared_links add constraint shared_links_kind_check check (kind in ('radio','ap','station','switch','onu','other'));
 alter table shared_links add column if not exists site_ref text;
+
+-- A device (radio, switch, ONU) with an address: what it is, and whether it answers a ping from the router it is locked to.
+alter table shared_links add column if not exists ip text;
+alter table shared_links add column if not exists mac text;
+alter table shared_links add column if not exists model text;
+alter table shared_links add column if not exists freq_mhz integer;
+alter table shared_links add column if not exists ssid text;
+alter table shared_links add column if not exists ping_router_id uuid references routers on delete set null;
+alter table shared_links add column if not exists ping_ok boolean;
+alter table shared_links add column if not exists ping_ms numeric(8,1);
+alter table shared_links add column if not exists ping_at timestamptz;
+alter table shared_links add column if not exists ping_fails integer not null default 0;
+alter table shared_links add column if not exists down_since timestamptz;

@@ -154,10 +154,11 @@ export function skyplanOpenRouter() {
       }
       const { rows: routers } = await pool.query(
         'select id, name, lat::float8 as lat, lng::float8 as lng from routers where tenant_id=$1 and lat is not null and lng is not null', [t]);
+      const { rows: routerList } = await pool.query('select id, name from routers where tenant_id=$1 order by name', [t]);
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), sharedLinks, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), sharedLinks, routerList, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });

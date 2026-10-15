@@ -121,6 +121,8 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('syncRouterQueues', syncRouterQueuesJob));
   // Every 10 minutes: which online PPPoE lines are connected but passing nothing and not answering (online, no internet).
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
+  // Every 2 minutes: is each radio, switch or ONU with an address answering a ping from the router it is locked to?
+  cron.schedule('*/2 * * * *', safely('checkLinkDevices', checkLinkDevices));
   // Every 10 minutes: remind the customer and the technician about a booked visit in the next few hours.
   cron.schedule('*/10 * * * *', safely('sendVisitReminders', sendVisitReminders));
   // Every 5 minutes: add what each PPPoE session has moved since the last pass to the client's daily usage.
@@ -2115,6 +2117,65 @@ async function accumulateUsage() {
      where c.acctuniqueid <> '__start__'
        and (not exists (select 1 from radacct r where r.acctuniqueid = c.acctuniqueid)
             or exists (select 1 from radacct r where r.acctuniqueid = c.acctuniqueid and r.acctstoptime < now() - interval '2 days'))`);
+}
+
+/**
+ * Is each radio, switch or ONU that has an address alive? Pinged from the router it is locked to (or the organisation's only router). Two
+ * misses in a row mark it down (one lost round is not a fault), one answer marks it up. A router that cannot be reached leaves the device
+ * as it was: a router problem is not the radio's fault.
+ */
+let linkDevicesRunning = false;
+async function checkLinkDevices() {
+  if (linkDevicesRunning) return;
+  linkDevicesRunning = true;
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const { pingRouterFor } = await import('./shared-links.js');
+    const { rows: links } = await pool.query(
+      `select l.id, l.tenant_id, l.ip, l.ping_router_id from shared_links l
+        where l.ip is not null and l.tenant_id in (${enabledTenants})`, ['checkLinkDevices']);
+    if (!links.length) return;
+    const { rows: routers } = await pool.query(
+      `select id, tenant_id, name, host, api_port, status, service_user, service_password_enc,
+              (service_user is not null and service_password_enc is not null) as has_creds
+         from routers where tenant_id = any($1::uuid[])`, [[...new Set(links.map((l) => l.tenant_id))]]);
+    const byRouter = new Map();
+    for (const l of links) {
+      const r = pingRouterFor(l, routers.filter((x) => x.tenant_id === l.tenant_id));
+      if (!r || !r.has_creds || r.status !== 'up') continue;
+      if (!byRouter.has(r.id)) byRouter.set(r.id, { router: r, links: [] });
+      byRouter.get(r.id).links.push(l);
+    }
+    for (const { router, links: mine } of byRouter.values()) {
+      let conn;
+      try {
+        conn = await ros.connect({
+          host: String(router.host).split('/')[0], port: router.api_port ?? 8728,
+          user: router.service_user, password: secrets.decrypt(router.service_password_enc), timeoutSec: 8,
+        });
+        for (const l of mine.slice(0, 60)) {
+          const ping = await ros.pingHost(conn, l.ip, 3).catch(() => null);
+          if (!ping) continue;                                  // the router could not do the ping: no answer either way
+          const ok = ping.received > 0;
+          await pool.query(
+            `update shared_links set
+                ping_fails = case when $2 then 0 else ping_fails + 1 end,
+                ping_ok = case when $2 then true when ping_fails + 1 >= 2 then false else ping_ok end,
+                down_since = case when $2 then null when ping_ok is false then down_since when ping_fails + 1 >= 2 then now() else down_since end,
+                ping_ms = case when $2 then $3 else ping_ms end,
+                ping_at = now()
+              where id = $1`, [l.id, ok, ping.avgMs]);
+        }
+      } catch (e) {
+        console.warn('checkLinkDevices:', router.name, '-', e.message);
+      } finally {
+        if (conn) ros.close(conn);
+      }
+    }
+  } finally {
+    linkDevicesRunning = false;
+  }
 }
 
 /**

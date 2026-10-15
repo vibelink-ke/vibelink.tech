@@ -39,7 +39,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, designItems, sharedLinks, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, designItems, sharedLinks, routerList, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -135,9 +135,14 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
     sites, links: designLinks, coverages: designCoverages, settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
     fiberNodes, fiberCables, subscribers, probes: [],
     ...(unplaced?.length ? { unplaced } : {}),
+    // Every router (placed or not) by name, so a radio can be locked to the one that pings it.
+    ...(routerList?.length ? { billingRouters: routerList.map((r) => ({ id: r.id, name: r.name })) } : {}),
     // The shared radios, switches and ONUs and how each group is doing (Shared links in billing); the customers carry the id of theirs.
     ...(sharedLinks?.length ? { sharedLinks: sharedLinks.map((l) => ({ id: l.id, name: l.name, kind: l.kind, managed: l.managed !== false, level: l.level, headline: l.headline, online: l.online ?? 0, active: l.active ?? 0, drops: l.drops ?? 0,
-      ...(l.parent_id ? { parentId: l.parent_id } : {}), ...(l.site_ref ? { siteRef: l.site_ref } : {}), ...(Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)) && l.lat !== null && l.lng !== null ? { lat: Number(l.lat), lon: Number(l.lng) } : {}),
+      ...(l.parent_id ? { parentId: l.parent_id } : {}), ...(l.site_ref ? { siteRef: l.site_ref } : {}),
+      ...(l.ip ? { ip: l.ip } : {}), ...(l.mac ? { mac: l.mac } : {}), ...(l.model ? { model: l.model } : {}), ...(l.ssid ? { ssid: l.ssid } : {}), ...(l.freq_mhz ? { freqMHz: Number(l.freq_mhz) } : {}),
+      ...(l.ip ? { ping: { ok: l.ping_ok ?? null, ms: l.ping_ms != null ? Number(l.ping_ms) : null, at: l.ping_at ?? null, router: l.ping_router ?? null } } : {}),
+      ...(l.ping_router_id ? { pingRouterId: l.ping_router_id } : {}), ...(Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)) && l.lat !== null && l.lng !== null ? { lat: Number(l.lat), lon: Number(l.lng) } : {}),
       ...(l.upstream ? { upstream: { id: l.upstream.id, name: l.upstream.name } } : {}) })) } : {}),
   };
   return {

@@ -22,7 +22,7 @@ const live = (m) => m.status === 'active' || m.status === 'grace';
  * Returns { level: ok | watch | down | unknown, headline, detail[], outliers[], steps[] }.
  * A fault is called shared only when most of the group shows it (at least 2 customers and 60%), so one bad customer is never blamed on the link.
  */
-export function judgeLink({ kind = 'radio', managed = true, members = [], worstWindow = null }) {
+function judgeMembers({ kind = 'radio', managed = true, members = [], worstWindow = null }) {
   const label = KIND_LABEL[kind] ?? 'link';
   const active = members.filter(live);
   const n = active.length;
@@ -75,6 +75,50 @@ export function judgeLink({ kind = 'radio', managed = true, members = [], worstW
       ].filter(Boolean).join(', '),
     }));
   return { level, headline, detail, outliers: level === 'ok' ? outliers : outliers.slice(0, 50), steps: level === 'ok' ? [] : steps };
+}
+
+/** A ping older than this is not trusted: the device is then read from its customers alone. */
+export const PING_FRESH_MINUTES = 10;
+
+/** The router a device is pinged from: the one it is locked to, or the organisation's only router when there is just one. */
+export function pingRouterFor(link, routers) {
+  if (link.ping_router_id) return routers.find((r) => r.id === link.ping_router_id) ?? null;
+  const usable = routers.filter((r) => r.has_creds);
+  return usable.length === 1 ? usable[0] : null;
+}
+
+/**
+ * Read a link from its customers AND from whether the device itself answers a ping (from the router it is locked to). A device that does not
+ * answer is down whatever its customers say, and the customers behind it are not blamed. A device that answers is powered and reachable, so when
+ * its customers are still bad the fault is behind it (its ports or the radios under it) or at the customers.
+ *   device  { ip, ok, ms, at, router, since } where `at` is when it was last pinged; null when it has no address
+ */
+export function judgeLink({ kind = 'radio', managed = true, members = [], worstWindow = null, device = null }) {
+  const base = judgeMembers({ kind, managed, members, worstWindow });
+  if (!device?.ip) return base;
+  const label = KIND_LABEL[kind] ?? 'link';
+  const fresh = device.at && Date.now() - new Date(device.at).getTime() < PING_FRESH_MINUTES * 60000 && device.ok !== null && device.ok !== undefined;
+  if (!fresh) {
+    const why = !device.router ? 'No router is chosen to ping it from, so it is judged only from its customers.' : 'Not pinged recently (the router may be down), so it is judged only from its customers.';
+    return { ...base, detail: [...base.detail, why] };
+  }
+  if (device.ok === false) {
+    const since = device.since ? ` since ${new Date(device.since).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}` : '';
+    return {
+      level: 'down',
+      headline: `The ${label} (${device.ip}) does not answer a ping from ${device.router}${since}. Suspect its power or its link, not the customers behind it.`,
+      detail: base.level === 'ok' || base.level === 'unknown' ? [] : [`Its customers agree: ${base.headline}`],
+      outliers: [], steps: checkSteps(kind, managed),
+    };
+  }
+  const answers = `The ${label} answers a ping from ${device.router}${device.ms != null ? ` (${Number(device.ms).toFixed(0)} ms)` : ''}, so it is powered and reachable.`;
+  if (base.level === 'unknown') return { ...base, level: 'ok', headline: `${answers} No customers are behind it yet.`, detail: [] };
+  if (base.level === 'down' || base.level === 'watch') {
+    // The device answers, so it is not the one to blame: say so instead of pointing at it.
+    const headline = base.headline.replace(/(Suspect|That points at) the [^.]*?(, not (at )?the customers\.|\.)/, `The ${label} itself answers a ping, so look behind it (its ports or the radios under it) or at the customers.`);
+    return { ...base, headline, detail: [answers, ...base.detail] };
+  }
+  return { ...base, detail: [answers, ...base.detail] };
 }
 
 /** What to do on site, by what kind of device it is and whether it can be logged into. */
@@ -174,7 +218,7 @@ const BAD = new Set(['down', 'watch']);
  *   members  customers, each with shared_link_id (the device they plug into)
  *   events   [{ id, link, bucket }] line drops, bucket = which few-minute window
  */
-export function judgeTree({ links, members, events = [] }) {
+export function judgeTree({ links, members, events = [], devices = new Map() }) {
   const sub = subtreeOf(links);
   const byId = new Map(links.map((l) => [l.id, l]));
   const verdicts = new Map(); const counts = new Map();
@@ -185,7 +229,7 @@ export function judgeTree({ links, members, events = [] }) {
     for (const e of events) if (ids.has(e.link)) { if (!buckets.has(e.bucket)) buckets.set(e.bucket, new Set()); buckets.get(e.bucket).add(e.id); }
     let worst = null;
     for (const [b, set] of buckets) if (!worst || set.size > worst.n || (set.size === worst.n && b > worst.b)) worst = { n: set.size, b };
-    verdicts.set(l.id, judgeLink({ kind: l.kind, managed: l.managed, members: mine, worstWindow: worst ? { n: worst.n, at: new Date(worst.b * SAME_TIME_MINUTES * 60000) } : null }));
+    verdicts.set(l.id, judgeLink({ kind: l.kind, managed: l.managed, members: mine, worstWindow: worst ? { n: worst.n, at: new Date(worst.b * SAME_TIME_MINUTES * 60000) } : null, device: devices.get(l.id) ?? null }));
     counts.set(l.id, mine);
   }
   const upstream = new Map();
@@ -203,17 +247,25 @@ export function judgeTree({ links, members, events = [] }) {
 
 /** Everything about every link, worked out once. */
 async function compute(pool, tenantId) {
-  const [{ rows: links }, members, events] = await Promise.all([
+  const [{ rows: links }, members, events, { rows: routers }] = await Promise.all([
     pool.query('select * from shared_links where tenant_id=$1 order by name', [tenantId]),
     memberRows(pool, tenantId),
     dropEvents(pool, tenantId),
+    pool.query('select id, name, (service_user is not null and service_password_enc is not null) as has_creds from routers where tenant_id=$1', [tenantId]),
   ]);
-  const t = judgeTree({ links, members, events });
+  const devices = new Map();
+  const viaOf = new Map();
+  for (const l of links) {
+    const r = pingRouterFor(l, routers);
+    viaOf.set(l.id, r?.name ?? null);
+    if (l.ip) devices.set(l.id, { ip: l.ip, ok: l.ping_ok, ms: l.ping_ms, at: l.ping_at, since: l.down_since, router: r?.name ?? null });
+  }
+  const t = judgeTree({ links, members, events, devices });
   const list = links.map((l) => {
     const v = t.verdicts.get(l.id); const up = t.upstream.get(l.id);
     const all = t.members.get(l.id); const act = all.filter(live);
     return {
-      ...l, level: v.level,
+      ...l, ping_router: viaOf.get(l.id) ?? null, level: v.level,
       headline: up ? `${v.headline} ${up.sameCustomers ? `The same customers are behind ${up.name}, so check both.` : `${up.name}, above it, shows the same fault: likely the cause.`}` : v.headline,
       upstream: up ?? null,
       customers: all.length, active: act.length, online: act.filter((m) => m.online).length,
@@ -273,16 +325,46 @@ function place(b, curLat = null, curLng = null) {
   return { lat: la, lng: ln };
 }
 
+const IPV4 = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const MAC = /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i;
+
+/**
+ * What a device is: its address, MAC, model, frequency and network name, and the router it is pinged from. Each is kept only when sent (so a
+ * change of name never wipes them), checked, and the router must be this organisation's own.
+ */
+async function deviceFields(pool, tenantId, b, cur = {}) {
+  const has = (k) => b && Object.prototype.hasOwnProperty.call(b, k);
+  const ip = has('ip') ? text(b.ip, 45) : cur.ip ?? null;
+  if (ip && (!IPV4.test(ip) || ip === '0.0.0.0' || ip.startsWith('127.'))) throw bad('The address must look like 10.20.30.40.');
+  const macRaw = has('mac') ? text(b.mac, 17) : cur.mac ?? null;
+  if (macRaw && !MAC.test(macRaw)) throw bad('The MAC address must look like aa:bb:cc:dd:ee:ff.');
+  const f = has('freqMhz') ? (b.freqMhz === null || b.freqMhz === '' ? null : Math.round(Number(b.freqMhz))) : cur.freq_mhz ?? null;
+  if (f !== null && !(Number.isFinite(f) && f >= 100 && f <= 100000)) throw bad('The frequency is in MHz, for example 5180.');
+  let router = has('pingRouterId') ? (b.pingRouterId || null) : cur.ping_router_id ?? null;
+  if (router) {
+    if (!UUID.test(String(router))) throw bad('That is not a router.');
+    const { rowCount } = await pool.query('select 1 from routers where tenant_id=$1 and id=$2', [tenantId, router]);
+    if (!rowCount) throw bad('No such router to ping from.');
+  }
+  return {
+    ip, mac: macRaw ? macRaw.toLowerCase().replace(/-/g, ':') : null, freq_mhz: f, router,
+    model: has('model') ? text(b.model, 60) : cur.model ?? null, ssid: has('ssid') ? text(b.ssid, 40) : cur.ssid ?? null,
+    // a changed address is not the one last pinged
+    reset: ip !== (cur.ip ?? null) || router !== (cur.ping_router_id ?? null),
+  };
+}
+
 export async function createLink(pool, tenantId, b) {
   const name = text(b?.name, 80);
   if (!name) throw bad('Give the link a name, for example "Mlima mast sector 1".');
   const kind = KINDS.includes(b?.kind) ? b.kind : 'radio';
   const parent = await checkParent(pool, tenantId, null, b?.parentId);
   const at = place(b);
+  const d = await deviceFields(pool, tenantId, b);
   try {
     const { rows: [r] } = await pool.query(
-      `insert into shared_links (tenant_id, name, kind, managed, location, notes, parent_id, lat, lng, site_ref) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning *`,
-      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000), parent, at.lat, at.lng, text(b?.siteRef, 80)]);
+      `insert into shared_links (tenant_id, name, kind, managed, location, notes, parent_id, lat, lng, site_ref, ip, mac, model, freq_mhz, ssid, ping_router_id) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) returning *`,
+      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000), parent, at.lat, at.lng, text(b?.siteRef, 80), d.ip, d.mac, d.model, d.freq_mhz, d.ssid, d.router]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);
@@ -298,11 +380,16 @@ export async function updateLink(pool, tenantId, id, b) {
   const kind = b?.kind === undefined ? cur.kind : (KINDS.includes(b.kind) ? b.kind : cur.kind);
   const parent = b && 'parentId' in b ? await checkParent(pool, tenantId, id, b.parentId) : cur.parent_id;
   const at = place(b, cur.lat, cur.lng);
+  const d = await deviceFields(pool, tenantId, b, cur);
   try {
     const { rows: [r] } = await pool.query(
-      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7, parent_id=$8, lat=$9, lng=$10, site_ref=$11 where id=$1 and tenant_id=$2 returning *`,
+      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7, parent_id=$8, lat=$9, lng=$10, site_ref=$11,
+              ip=$12, mac=$13, model=$14, freq_mhz=$15, ssid=$16, ping_router_id=$17,
+              ping_ok = case when $18 then null else ping_ok end, ping_fails = case when $18 then 0 else ping_fails end,
+              ping_at = case when $18 then null else ping_at end, down_since = case when $18 then null else down_since end
+        where id=$1 and tenant_id=$2 returning *`,
       [id, tenantId, name, kind, b?.managed === undefined ? cur.managed : b.managed !== false,
-        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000), parent, at.lat, at.lng, b?.siteRef === undefined ? cur.site_ref : text(b.siteRef, 80)]);
+        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000), parent, at.lat, at.lng, b?.siteRef === undefined ? cur.site_ref : text(b.siteRef, 80), d.ip, d.mac, d.model, d.freq_mhz, d.ssid, d.router, d.reset]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);

@@ -23,7 +23,9 @@ const LEVEL = {
   down: { label: 'Down', tone: 'down' },
   unknown: { label: 'No data', tone: 'default' },
 };
-const BLANK = { name: '', kind: 'ap', managed: true, location: '', notes: '', parent_id: '' };
+const BLANK = { name: '', kind: 'ap', managed: true, location: '', notes: '', parent_id: '', ip: '', mac: '', model: '', freq_mhz: '', ssid: '', ping_router_id: '' };
+const isRadio = (k) => k === 'ap' || k === 'station' || k === 'radio';
+const pingText = (l) => (!l.ip ? '' : l.ping_ok === true ? `answers${l.ping_ms != null ? ` ${Number(l.ping_ms).toFixed(0)} ms` : ''}` : l.ping_ok === false ? 'no answer' : (l.ping_router ? 'waiting for a ping' : 'no router chosen'));
 
 export default function SharedLinks() {
   const store = useStore();
@@ -49,7 +51,9 @@ export default function SharedLinks() {
   const saveLink = async () => {
     setBusy(true);
     try {
-      const body = { name: edit.name, kind: edit.kind, managed: edit.managed, location: edit.location, notes: edit.notes, parentId: edit.parent_id || null };
+      const body = { name: edit.name, kind: edit.kind, managed: edit.managed, location: edit.location, notes: edit.notes, parentId: edit.parent_id || null,
+        ip: (edit.ip || '').trim() || null, mac: (edit.mac || '').trim() || null, model: (edit.model || '').trim() || null, ssid: (edit.ssid || '').trim() || null,
+        freqMhz: edit.freq_mhz === '' || edit.freq_mhz == null ? null : Number(edit.freq_mhz), pingRouterId: edit.ping_router_id || null };
       const out = edit.id ? await api.updateSharedLink(edit.id, body) : await api.createSharedLink(body);
       setEdit(null);
       await refresh();
@@ -91,6 +95,7 @@ export default function SharedLinks() {
           columns={[
             { key: 'name', label: 'Link', render: (l) => <span><b>{l.name}</b>{l.location ? <span style={{ color: color.muted }}> · {l.location}</span> : null}</span> },
             { key: 'kind', label: 'Type', render: (l) => <span>{kindLabel(l.kind)}{l.managed ? '' : <span style={{ color: color.muted }}> · unmanaged</span>}</span> },
+            { key: 'ip', label: 'Address', render: (l) => (l.ip ? <span><span style={{ fontFamily: font.mono, fontSize: 12 }}>{l.ip}</span> <span style={{ color: l.ping_ok === false ? color.rust : color.muted, fontSize: 12 }}>{pingText(l)}</span></span> : '—') },
             { key: 'parent', label: 'Fed from', render: (l) => (l.parent_id ? (links.find((x) => x.id === l.parent_id)?.name ?? '—') : '—') },
             { key: 'level', label: 'State', render: (l) => <Badge tone={LEVEL[l.level].tone}>{LEVEL[l.level].label}</Badge> },
             { key: 'customers', label: 'Online', render: (l) => (l.active ? `${l.online} of ${l.active}` : '—') },
@@ -117,6 +122,15 @@ export default function SharedLinks() {
           <div style={{ display: 'grid', gap: 14 }}>
             <Verdict v={detail.verdict} />
             {detail.parent_name && <div style={{ fontSize: 13, color: color.inkSoft }}>Fed from <b>{detail.parent_name}</b></div>}
+            {(detail.ip || detail.model || detail.mac || detail.ssid || detail.freq_mhz) && (
+              <div style={{ fontSize: 13, color: color.inkSoft, display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                {detail.ip && <span>Address <b style={{ fontFamily: font.mono }}>{detail.ip}</b> <span style={{ color: detail.ping_ok === false ? color.rust : color.muted }}>({pingText(detail)}{detail.ping_router ? `, from ${detail.ping_router}` : ''})</span></span>}
+                {detail.model && <span>Model <b>{detail.model}</b></span>}
+                {detail.freq_mhz && <span>Frequency <b>{detail.freq_mhz} MHz</b></span>}
+                {detail.ssid && <span>Network name <b>{detail.ssid}</b></span>}
+                {detail.mac && <span>MAC <b style={{ fontFamily: font.mono }}>{detail.mac}</b></span>}
+              </div>
+            )}
             {detail.children?.length > 0 && (
               <div style={{ fontSize: 13 }}>
                 <b>Feeds</b>{' '}
@@ -171,6 +185,23 @@ export default function SharedLinks() {
                 value={edit.parent_id ?? ''} onChange={(e) => setEdit({ ...edit, parent_id: e.target.value })}
               />
             </Field>
+            <Field label="Address (IP)" hint="Billing pings it every 2 minutes from the router chosen below. No answer twice in a row marks it down.">
+              <Input value={edit.ip ?? ''} onChange={(e) => setEdit({ ...edit, ip: e.target.value })} placeholder="10.20.30.40" style={{ fontFamily: font.mono }} />
+            </Field>
+            <Field label="Ping it from" hint="The router that can reach it. If you have only one router it is used by itself.">
+              <Select
+                options={[{ value: '', label: '(the only router, if there is just one)' }, ...(store.routers ?? []).map((r) => ({ value: r.id, label: r.name }))]}
+                value={edit.ping_router_id ?? ''} onChange={(e) => setEdit({ ...edit, ping_router_id: e.target.value })}
+              />
+            </Field>
+            <Field label="Model"><Input value={edit.model ?? ''} onChange={(e) => setEdit({ ...edit, model: e.target.value })} placeholder="Ubiquiti Rocket 5AC, or TP-Link switch" /></Field>
+            {isRadio(edit.kind) && (
+              <Grid min={150} gap={10}>
+                <Field label="Frequency (MHz)"><Input type="number" value={edit.freq_mhz ?? ''} onChange={(e) => setEdit({ ...edit, freq_mhz: e.target.value })} placeholder="5180" /></Field>
+                <Field label="Network name (SSID)"><Input value={edit.ssid ?? ''} onChange={(e) => setEdit({ ...edit, ssid: e.target.value })} /></Field>
+              </Grid>
+            )}
+            <Field label="MAC address"><Input value={edit.mac ?? ''} onChange={(e) => setEdit({ ...edit, mac: e.target.value })} placeholder="aa:bb:cc:dd:ee:ff" style={{ fontFamily: font.mono }} /></Field>
             <Field label="Location"><Input value={edit.location ?? ''} onChange={(e) => setEdit({ ...edit, location: e.target.value })} placeholder="Site, pole or building" /></Field>
             <Field label="Notes"><Textarea rows={3} value={edit.notes ?? ''} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} placeholder="Model, power source, who to call" /></Field>
           </div>
