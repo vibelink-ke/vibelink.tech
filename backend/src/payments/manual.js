@@ -46,12 +46,15 @@ export function parseMpesaSms(body) {
   const amount = body.match(new RegExp(MONEY))?.[1];
   if (!code || !amount) return null;
   const from = body.match(/from\s+([A-Z' ]+?)\s+(\d{9,12})/i);
-  const account = body.match(/(?:for account|acc(?:ount)?\.?)\s*([A-Za-z0-9\- ]{3,20})/i)?.[1];
+  // "for account 21318 on 15/10/26 at 7:31 PM" and "Account Number F-12345 New balance...": the account is only what comes right after the
+  // words, so it stops where the date, "New balance" or an amount begins.
+  const account = body.match(/(?:for account(?: number)?|account(?: number)?|acc\.?)\s*(?:number\s*)?([A-Za-z0-9\- ]{3,20})/i)?.[1]
+    ?.replace(/\s+(?:on|new|ksh|balance|transaction|confirmed)\b.*$/i, '');
   return {
     ref: code,
     amount: Number(amount.replace(/,/g, '')),
     name: from?.[1]?.trim() ?? null,
     phone: from?.[2] ? from[2].replace(/^0/, '254') : null,
-    rawAccount: account?.trim() ?? null
+    rawAccount: account?.trim() || null
   };
 }
