@@ -146,6 +146,32 @@ export async function settleStaffCommissionsForPayout(payoutId) {
  * target = { type:'subscriber', id } | { type:'hotspot', planId, mac, routerId? } | null (=> matcher)
  */
 export async function applyPayment(tenantId, tx) {
+  try {
+    return await applyPaymentOnce(tenantId, tx);
+  } catch (e) {
+    // Applying it failed, and everything it did was rolled back, so the payment itself would be gone from billing even though M-Pesa
+    // already told the customer it went through. Keep it, as an unmatched payment with the reason, so a person can see it and apply it.
+    console.error('applyPayment failed; keeping the payment for a person:', tx?.provider, tx?.ref, e?.stack ?? e);
+    const parked = await parkPayment(tenantId, tx, e).catch((pe) => { console.error('could not keep the payment', tx?.ref, pe.message); return null; });
+    if (!parked) throw e;
+    return { paymentId: parked, unmatched: true, parked: true };
+  }
+}
+
+async function parkPayment(tenantId, tx, err) {
+  return withTenant(tenantId, async (c) => {
+    const { rows: [r] } = await c.query(
+      `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, payer_name, raw_account, payload, status)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,'unmatched')
+       on conflict (tenant_id, provider, provider_ref) do nothing
+       returning id`,
+      [tenantId, tx.provider, tx.ref, tx.amount, tx.phone, tx.name, tx.rawAccount,
+        { ...(tx.payload ?? {}), applyError: String(err?.message ?? err).slice(0, 300) }]);
+    return r?.id ?? null;
+  });
+}
+
+async function applyPaymentOnce(tenantId, tx) {
   return withTenant(tenantId, async (c) => {
     const ins = await c.query(
       `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, payer_name, raw_account, payload)
@@ -351,9 +377,21 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
    * credit/expires_at up to the same standard.
    */
   const { rows: [sub] } = await c.query(
-    'select s.*, coalesce(s.custom_price, p.price) as price, p.duration_min from subscribers s join plans p on p.id=s.plan_id where s.id=$1 for update of s',
+    'select s.*, coalesce(s.custom_price, p.price) as price, p.duration_min from subscribers s left join plans p on p.id=s.plan_id where s.id=$1 for update of s',
     [subId]
   );
+  if (!sub) throw new Error('That customer no longer exists.');
+  // No package set (or the package was deleted): there is nothing to buy time with, but the payment is real. It goes to the customer's
+  // balance, to be used once a package is chosen. (An inner join to plans here used to find no row at all, and the whole payment was lost.)
+  if (sub.duration_min == null) {
+    const { rows: [w] } = await c.query(
+      `insert into account_wallets (tenant_id, account_code, balance) values ($1,$2,$3)
+       on conflict (tenant_id, account_code) do update set balance = account_wallets.balance + $3, updated_at = now()
+       returning balance`,
+      [tenantId, sub.account_code, amount]);
+    await c.query("update payments set status='applied', subscriber_id=$2, service=$3, applied_at=now() where id=$1", [paymentId, subId, sub.service ?? 'pppoe']);
+    return { expires: sub.expires_at ?? new Date(), partial: true, balance: Number(w.balance), debtCleared: 0, noPackage: true };
+  }
   // A specific invoice — the portal's own "pay this invoice" flow, or the
   // staff STK push when raised against one — wins over the usual "earliest
   // due" default; it must still belong to this subscriber and still be

@@ -199,7 +199,8 @@
       "Map (SkyPlan): customers, leads and their health are brought in from billing every time, also when you have unsaved design changes, and a customer placed or moved on the map shows up within seconds.",
       "Clients: a Router / area filter shows only the customers of one MikroTik (for example Kabarnet) with a count per router, a Group by router option keeps each router's customers together, and each customer's router is shown under their name. The router name now also works in the search and the export.",
       "Map (SkyPlan): click a customer or lead to move them to the right spot, set a customer's access point, or record progress on a lead (mark contacted, add a note, set a follow-up date). It is saved straight into billing with your own permissions. Customers and leads without a place are listed so you can place them by clicking the map.",
-      "Settings → Templates → When to remind customers: choose which days before a line expires the reminder text goes out, any of 7, 3 and 1 days. Until you choose, nothing changes (a text every day in the last 3 days)."
+      "Settings → Templates → When to remind customers: choose which days before a line expires the reminder text goes out, any of 7, 3 and 1 days. Until you choose, nothing changes (a text every day in the last 3 days).",
+      "Payments: a payment for a customer who has no package set is no longer lost. It goes to their balance. And if any payment fails to apply for another reason, it is now kept as an unmatched payment (with the reason) for a person to apply, instead of disappearing."
     ]
   }
 ]
