@@ -4456,6 +4456,14 @@ app.post('/api/skyplan/customer-ap', requirePermission('clients.edit'), skyplanE
   const { setCustomerAp } = await import('./skyplan-edit.js');
   return setCustomerAp(pool, req.tenant.id, { id: req.body?.id, apNodeId: req.body?.apNodeId });
 }));
+app.post('/api/skyplan/link', requirePermission('links.manage'), skyplanEdit(async (req) => {
+  const { editSharedLink } = await import('./skyplan-edit.js');
+  return editSharedLink(pool, req.tenant.id, req.body ?? {});
+}));
+app.post('/api/skyplan/link-members', requirePermission('links.manage'), skyplanEdit(async (req) => {
+  const { setLinkMembers } = await import('./skyplan-edit.js');
+  return setLinkMembers(pool, req.tenant.id, req.body ?? {});
+}));
 app.post('/api/skyplan/lead', requirePermission('leads.edit'), skyplanEdit(async (req) => {
   const { updateLeadFromMap } = await import('./skyplan-edit.js');
   return updateLeadFromMap(pool, req.tenant.id, req.session?.name, req.body ?? {});

@@ -24,14 +24,15 @@ export default function SkyPlanMap() {
   const latest = useRef({});
   const canLeads = !!store.session?.perms?.['leads.edit'];
   const canCustomers = !!store.session?.perms?.['clients.edit'];
-  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], leads: (store.leads ?? []).filter((l) => l.status !== 'won' && l.status !== 'lost'), canLeads, canCustomers, canEdit, toast: store.toast, name: store.session?.company };
+  const canLinks = !!store.session?.perms?.['links.manage'];
+  latest.current = { clients: store.clients ?? [], routers: store.routers ?? [], leads: (store.leads ?? []).filter((l) => l.status !== 'won' && l.status !== 'lost'), canLeads, canCustomers, canLinks, canEdit, toast: store.toast, name: store.session?.company };
   const [status, setStatus] = useState('Loading the network…');
 
   const lastChange = useRef(0);          // when SkyPlan last told us about an edit
   const load = useCallback(async (silent = false) => {
     try {
       const net = await api.network();
-      const { clients, routers, leads, canEdit: edit, canLeads: editLeads, canCustomers: editCustomers, name } = latest.current;
+      const { clients, routers, leads, canEdit: edit, canLeads: editLeads, canCustomers: editCustomers, canLinks: editLinks, name } = latest.current;
       // How each customer is doing right now: connected, in good standing, line drops in the last day (colours on the map).
       const drops = await api.customerDrops().catch(() => ({}));
       const calibration = await api.networkCalibration().catch(() => null);
@@ -49,7 +50,7 @@ export default function SkyPlanMap() {
         ] });
       known.current = projectIds(project);
       declined.current = new Set();
-      frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, can: { customers: !!editCustomers, leads: !!editLeads }, silent: silent === true }, window.location.origin);
+      frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, can: { customers: !!editCustomers, leads: !!editLeads, links: !!editLinks }, silent: silent === true }, window.location.origin);
       setStatus(`${report.sites} sites · ${report.devices} devices · ${report.fibreNodes} fibre nodes · ${report.cables} cables · ${report.customers} customers${edit ? '' : ' · view only'}`);
     } catch (e) {
       setStatus(`Could not load the network: ${e.message}`);
@@ -97,19 +98,26 @@ export default function SkyPlanMap() {
       else if (m.type === 'skyplan:changed' && latest.current.canEdit && m.project) { lastChange.current = Date.now(); sync(m.project); }
       else if (m.type === 'skyplan:edit' && m.reqId) {
         // An edit made in SkyPlan (a place, an access point, a lead's progress): done with this person's own permissions, answered when done.
-        const reply = (ok, error) => frame.current?.contentWindow?.postMessage({ type: 'billing:edit-result', reqId: m.reqId, ok, error }, window.location.origin);
+        const reply = (ok, error, result) => frame.current?.contentWindow?.postMessage({ type: 'billing:edit-result', reqId: m.reqId, ok, error, result }, window.location.origin);
         const p = m.payload ?? {};
         let call;
         if (m.action === 'move') call = api.skyplanMove(p.kind, { id: p.id, lat: p.lat, lng: p.lng });
         else if (m.action === 'ap') call = api.skyplanCustomerAp({ id: p.id, apNodeId: p.apNodeId ?? null });
         else if (m.action === 'lead') call = api.skyplanLead(p);
+        else if (m.action === 'link') call = api.skyplanLink(p);
+        else if (m.action === 'linkMembers') call = api.skyplanLinkMembers(p);
         else call = Promise.reject(new Error('Unknown change'));
-        call.then(() => {
+        call.then((result) => {
           // Keep the rest of billing in step without waiting for the next refresh.
           if (m.action === 'move' && p.kind === 'customer') store.setCollection('clients', (cs) => cs.map((x) => (x.id === p.id ? { ...x, lat: p.lat, lng: p.lng } : x)));
           else if (m.action === 'ap') store.setCollection('clients', (cs) => cs.map((x) => (x.id === p.id ? { ...x, ap_node_id: p.apNodeId ?? null } : x)));
+          else if (m.action === 'link' || m.action === 'linkMembers') {
+            // The groups changed: the verdicts and the customers' links come back fresh, and the Clients list is brought in step.
+            api.subscribers().then((cs) => store.setCollection('clients', () => cs)).catch(() => {});
+            setTimeout(() => load(true), 300);
+          }
           else api.leads().then((ls) => store.setCollection('leads', ls)).catch(() => {});
-          reply(true);
+          reply(true, undefined, result);
         }).catch((err) => reply(false, err.message));
       }
       else if (m.type === 'skyplan:calibration' && latest.current.canEdit && m.body) {

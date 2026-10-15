@@ -3,7 +3,7 @@ import express from 'express';
 import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
 import { saveLeadCoverage, customerDrops, getCalibration, saveCalibration } from './lead-coverage.js';
-import { moveOnMap, setCustomerAp, updateLeadFromMap } from './skyplan-edit.js';
+import { moveOnMap, setCustomerAp, updateLeadFromMap, editSharedLink, setLinkMembers } from './skyplan-edit.js';
 import { saveDesignItems, loadDesignItems } from './skyplan-items.js';
 import { listLinks } from './shared-links.js';
 
@@ -197,6 +197,8 @@ export function skyplanOpenRouter() {
       if (b.action === 'move') return res.json(await moveOnMap(pool, t, { kind: b.kind, id: b.id, lat: b.lat, lng: b.lng }));
       if (b.action === 'ap') return res.json(await setCustomerAp(pool, t, { id: b.id, apNodeId: b.apNodeId }));
       if (b.action === 'lead') return res.json(await updateLeadFromMap(pool, t, `SkyPlan (${req.apiKey.name})`, b));
+      if (b.action === 'link') return res.json(await editSharedLink(pool, t, b));
+      if (b.action === 'linkMembers') return res.json(await setLinkMembers(pool, t, b));
       return res.status(400).json({ error: 'Unknown action.' });
     } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
   });

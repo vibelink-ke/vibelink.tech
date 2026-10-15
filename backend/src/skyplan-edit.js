@@ -60,3 +60,29 @@ export async function updateLeadFromMap(pool, tenantId, author, { id, markContac
       where tenant_id=$1 and id=$2`, [tenantId, id, due]);
   return { ok: true };
 }
+
+/** Make, change or delete a shared link (a radio, switch or ONU several customers share). Same checks as the Shared links page. */
+export async function editSharedLink(pool, tenantId, b) {
+  const { createLink, updateLink, deleteLink } = await import('./shared-links.js');
+  if (b?.op === 'create') return { link: await createLink(pool, tenantId, b) };
+  if (!UUID.test(String(b?.id ?? ''))) throw fail(400, 'That is not a shared link.');
+  if (b.op === 'update') {
+    const link = await updateLink(pool, tenantId, b.id, b);
+    if (!link) throw fail(404, 'No such shared link.');
+    return { link };
+  }
+  if (b.op === 'delete') {
+    if (!(await deleteLink(pool, tenantId, b.id))) throw fail(404, 'No such shared link.');
+    return { ok: true };
+  }
+  throw fail(400, 'op must be create, update or delete.');
+}
+
+/** Put customers on a shared link, or take them off it. */
+export async function setLinkMembers(pool, tenantId, b) {
+  const { setMembers } = await import('./shared-links.js');
+  if (!UUID.test(String(b?.id ?? ''))) throw fail(400, 'That is not a shared link.');
+  const r = await setMembers(pool, tenantId, b.id, { add: b.add, remove: b.remove });
+  if (!r) throw fail(404, 'No such shared link.');
+  return r;
+}

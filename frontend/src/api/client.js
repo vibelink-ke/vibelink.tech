@@ -257,6 +257,8 @@ export const api = {
   skyplanMove: (kind, body) => post(`/api/skyplan/move/${kind === 'lead' ? 'lead' : 'customer'}`, body),
   skyplanCustomerAp: (body) => post('/api/skyplan/customer-ap', body),
   skyplanLead: (body) => post('/api/skyplan/lead', body),
+  skyplanLink: (body) => post('/api/skyplan/link', body),
+  skyplanLinkMembers: (body) => post('/api/skyplan/link-members', body),
   networkCalibration: () => get('/api/network/calibration'),
   sharedLinks: () => get('/api/shared-links'),
   sharedLink: (id) => get(`/api/shared-links/${id}`),
