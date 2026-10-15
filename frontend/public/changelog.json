@@ -186,5 +186,12 @@
       "Field app: a technician can delete a photo (for example a blurred one) while the job is open, and can add a screenshot from the phone's gallery to a job.",
       "Leads: a lead that still shows as New moves to Contacted by itself as soon as someone adds a note to it or sets a follow-up date, so contacted leads no longer look new."
     ]
+  },
+  {
+    "date": "2026-10-15",
+    "title": "Hotspot lookup, field photos, leads and fixes",
+    "items": [
+      "Hotspot dashboard: a Find a device box. Paste a device address from the router's active list (a phone signed in by itself shows as its address there), a phone number or a code, and see which voucher or access code it belongs to, with the customer's phone, plan and expiry."
+    ]
   }
 ]

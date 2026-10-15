@@ -11569,6 +11569,39 @@ app.get('/api/hotspot/revenue', wrap(async (req, res) => {
  * before a single day is out. Real count/sum queries, no cap, bucketed by
  * Nairobi midnight the same way GET /api/dashboard/collections is.
  */
+/**
+ * Who is behind a device address, a phone number or a code, for support. A phone the router signed in by its address shows up in the router's
+ * active list under that address, not under the code, and RouterOS gives no way to show the code there. Paste the address (or part of one) here
+ * and get the voucher or access code it belongs to, with the customer's phone, plan and expiry.
+ */
+app.get('/api/hotspot/find', requirePermission('hotspot.view'), wrap(async (req, res) => {
+  const q = String(req.query.q ?? '').trim();
+  if (q.length < 3) return res.json([]);
+  const like = `%${q.replace(/[\\%_]/g, '\\$&')}%`;
+  const t = req.tenant.id;
+  const { rows: vouchers } = await pool.query(
+    `select 'voucher' as kind, v.code, null::text as label, v.status, v.expires_at, v.phone, p.title as plan,
+            concat_ws(', ', upper(v.mac::text), (select string_agg(upper(d.mac::text), ', ') from voucher_devices d where d.voucher_id = v.id and d.mac is distinct from v.mac)) as devices
+       from vouchers v left join plans p on p.id = v.plan_id
+      where v.tenant_id=$1 and (v.code ilike $2 or v.phone ilike $2 or v.mac::text ilike $2
+            or exists (select 1 from voucher_devices d where d.voucher_id = v.id and d.mac::text ilike $2))
+      order by v.created_at desc limit 20`, [t, like]);
+  const { rows: codes } = await pool.query(
+    `select 'access code' as kind, ac.username as code, ac.label, case when ac.enabled then 'active' else 'off' end as status, null::timestamptz as expires_at,
+            null::text as phone, null::text as plan,
+            (select string_agg(m.mac || ' (' || m.how || ')', ', ') from (
+               select mac, 'remembered' as how from access_code_auto_macs where tenant_id = ac.tenant_id and username = ac.username
+               union select mac, 'locked' from hotspot_access_code_macs where tenant_id = ac.tenant_id and username = ac.username
+               union select mac, 'TV / console' from access_code_devices where tenant_id = ac.tenant_id and username = ac.username) m) as devices
+       from hotspot_access_codes ac
+      where ac.tenant_id=$1 and (ac.username ilike $2 or ac.label ilike $2
+            or exists (select 1 from access_code_auto_macs a where a.tenant_id = ac.tenant_id and a.username = ac.username and a.mac ilike $2)
+            or exists (select 1 from hotspot_access_code_macs a where a.tenant_id = ac.tenant_id and a.username = ac.username and a.mac ilike $2)
+            or exists (select 1 from access_code_devices a where a.tenant_id = ac.tenant_id and a.username = ac.username and a.mac ilike $2))
+      order by ac.username limit 20`, [t, like]);
+  res.json([...codes, ...vouchers]);
+}));
+
 app.get('/api/hotspot/today', requirePermission('hotspot.view'), wrap(async (req, res) => {
   const now = new Date();
   const todayStart = nairobiMidnight(now, 0);

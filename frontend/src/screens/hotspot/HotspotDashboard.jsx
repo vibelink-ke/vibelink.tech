@@ -2,11 +2,24 @@ import React, { useEffect, useState } from 'react';
 import { color, font, kes, cur } from '../../theme/tokens';
 import { useStore } from '../../state/store';
 import { api } from '../../api/client';
-import { Button, Card, Empty, Grid, Stat, Table } from '../../ui/primitives';
+import { Button, Card, Empty, Grid, Input, Stat, Table } from '../../ui/primitives';
 
 export default function HotspotDashboard() {
   const store = useStore();
   const [checking, setChecking] = useState(false);
+  // Find who a device address, phone or code belongs to (the router's active list shows an auto signed-in phone by its address).
+  const [finder, setFinder] = useState('');
+  const [found, setFound] = useState([]);
+  const [finding, setFinding] = useState(false);
+  useEffect(() => {
+    const q = finder.trim();
+    if (q.length < 3) { setFound([]); return undefined; }
+    setFinding(true);
+    const id = setTimeout(() => {
+      api.hotspotFind(q).then((r) => setFound(r)).catch(() => setFound([])).finally(() => setFinding(false));
+    }, 350);
+    return () => clearTimeout(id);
+  }, [finder]);
   const vouchers = store.vouchers ?? [];
   // "in_use" means the code is activated and not yet expired — a customer
   // entitled to be connected, not proof that they are. /api/vouchers now
@@ -64,6 +77,26 @@ export default function HotspotDashboard() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <Card title="Find a device" subtitle="Paste a device address from the router (for example one shown in its Active list), a phone number or a code">
+        <Input value={finder} onChange={(e) => setFinder(e.target.value)} placeholder="e.g. 72:10:FF:34:7A:B1, 0712…, or a code" />
+        {finder.trim().length >= 3 && (
+          <div style={{ marginTop: 10 }}>
+            <Table
+              rowKey={(r) => `${r.kind}-${r.code}`}
+              empty={finding ? 'Looking…' : 'Nothing found for that'}
+              rows={found}
+              columns={[
+                { key: 'code', label: 'Code', render: (r) => <span style={{ fontFamily: font.mono, fontWeight: 700 }}>{r.code}</span> },
+                { key: 'kind', label: 'Type', render: (r) => (r.kind === 'access code' ? `Access code${r.label ? ' · ' + r.label : ''}` : 'Voucher') },
+                { key: 'devices', label: 'Device(s)', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.devices || '—'}</span> },
+                { key: 'status', label: 'Status', render: (r) => `${r.status}${r.expires_at ? ' · until ' + new Date(r.expires_at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}` },
+                { key: 'phone', label: 'Phone / plan', render: (r) => [r.phone, r.plan].filter(Boolean).join(' · ') || '—' },
+              ]}
+            />
+          </div>
+        )}
+      </Card>
+
       <Grid min={200} gap={14}>
         <Stat label="Online now" value={online.length} hint="actually connected right now" />
         <Stat label="Active codes" value={inUse.length} hint="paid & valid, online or not" />
