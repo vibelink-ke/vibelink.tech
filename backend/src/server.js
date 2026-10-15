@@ -4554,6 +4554,42 @@ app.post('/api/routers/:id/management', requirePermission('security.manage'), wr
   }
 }));
 
+/**
+ * Shared links: the radio, switch or ONU several customers share, read as a group (see shared-links.js). Viewing is links.view; making,
+ * editing, deleting and putting customers on a link is links.manage.
+ */
+app.get('/api/shared-links', requirePermission('links.view'), wrap(async (req, res) => {
+  const { listLinks } = await import('./shared-links.js');
+  res.json(await listLinks(pool, req.tenant.id));
+}));
+app.get('/api/shared-links/:id', requirePermission('links.view'), wrap(async (req, res) => {
+  const { linkDetail } = await import('./shared-links.js');
+  const d = await linkDetail(pool, req.tenant.id, req.params.id);
+  if (!d) return res.status(404).json({ error: 'No such link' });
+  res.json(d);
+}));
+app.post('/api/shared-links', requirePermission('links.manage'), wrap(async (req, res) => {
+  const { createLink } = await import('./shared-links.js');
+  res.status(201).json(await createLink(pool, req.tenant.id, req.body));
+}));
+app.patch('/api/shared-links/:id', requirePermission('links.manage'), wrap(async (req, res) => {
+  const { updateLink } = await import('./shared-links.js');
+  const r = await updateLink(pool, req.tenant.id, req.params.id, req.body);
+  if (!r) return res.status(404).json({ error: 'No such link' });
+  res.json(r);
+}));
+app.delete('/api/shared-links/:id', requirePermission('links.manage'), wrap(async (req, res) => {
+  const { deleteLink } = await import('./shared-links.js');
+  if (!(await deleteLink(pool, req.tenant.id, req.params.id))) return res.status(404).json({ error: 'No such link' });
+  res.json({ ok: true });
+}));
+app.put('/api/shared-links/:id/members', requirePermission('links.manage'), wrap(async (req, res) => {
+  const { setMembers } = await import('./shared-links.js');
+  const r = await setMembers(pool, req.tenant.id, req.params.id, req.body ?? {});
+  if (!r) return res.status(404).json({ error: 'No such link' });
+  res.json(r);
+}));
+
 /** Line drops per customer in the last day, for the health colours on the Map. */
 app.get('/api/customers/drops', requirePermission('clients.view'), wrap(async (req, res) => {
   const { customerDrops } = await import('./lead-coverage.js');

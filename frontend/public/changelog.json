@@ -209,7 +209,9 @@
     "date": "2026-10-16",
     "title": "Security settings",
     "items": [
-      "Settings → Security: anti-tunnel protection for hotspot routers (DNS and ping tunnels, IPv6, website-name check, VPN ports), and closing a router's API, Winbox and SSH to the tunnel and your own addresses with an automatic safety undo"
+      "Settings → Security: anti-tunnel protection for hotspot routers (DNS and ping tunnels, IPv6, website-name check, VPN ports), and closing a router's API, Winbox and SSH to the tunnel and your own addresses with an automatic safety undo",
+      "Settings → Security: anti-tunnel protection for hotspot routers (DNS and ping tunnels, IPv6, website-name check, VPN ports), and closing a router's API, Winbox and SSH to the tunnel and your own addresses with an automatic safety undo",
+      "New Shared links page: group the customers behind one radio, switch or ONU, and see at a glance whether a fault is the shared device's or one customer's, including unmanaged switches that are judged from the customers behind them"
     ]
   }
 ]

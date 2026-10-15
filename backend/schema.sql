@@ -3522,3 +3522,19 @@ create table if not exists security_settings (
   admin_cidrs text[] not null default '{}',
   updated_at  timestamptz not null default now()
 );
+
+-- Shared links: the radio, switch or ONU several customers get their service through, so a fault can be told apart from one customer's own.
+-- managed = false for a plain switch or a radio nobody can log into: it is then judged only from the customers behind it.
+create table if not exists shared_links (
+  id         uuid primary key default gen_random_uuid(),
+  tenant_id  uuid not null references tenants on delete cascade,
+  name       text not null,
+  kind       text not null default 'radio' check (kind in ('radio','switch','onu','other')),
+  managed    boolean not null default true,
+  location   text,
+  notes      text,
+  created_at timestamptz not null default now(),
+  unique (tenant_id, name)
+);
+alter table subscribers add column if not exists shared_link_id uuid references shared_links on delete set null;
+create index if not exists subscribers_shared_link_idx on subscribers (shared_link_id) where shared_link_id is not null;

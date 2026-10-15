@@ -62,6 +62,7 @@ const Work = lazy(() => import('./screens/Work'));
 const Messaging = lazy(() => import('./screens/Messaging'));
 const LiveSupport = lazy(() => import('./screens/LiveSupport'));
 const Outages = lazy(() => import('./screens/Outages'));
+const SharedLinks = lazy(() => import('./screens/SharedLinks'));
 const Sla = lazy(() => import('./screens/Sla'));
 const KnowledgeBase = lazy(() => import('./screens/KnowledgeBase'));
 const Inventory = lazy(() => import('./screens/Inventory'));
@@ -323,6 +324,7 @@ export default function App() {
             <Route path="/clients/:id" element={<ClientDetail />} />
             <Route path="/hotspot/*" element={<Hotspot />} />
             <Route path="/networks" element={<Networks />} />
+            <Route path="/shared-links" element={<SharedLinks />} />
             <Route path="/tariffs" element={<Tariffs />} />
             <Route path="/fair-use" element={<Fup />} />
             <Route path="/routers" element={<Routers />} />

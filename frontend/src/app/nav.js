@@ -10,6 +10,7 @@ export const NAV_SECTIONS = [
       { to: '/clients', label: 'Clients', count: (s) => s.clients.length },
       { to: '/hotspot', label: 'Hotspot', count: (s) => s.vouchers.length },
       { to: '/networks', label: 'Networks' },
+      { to: '/shared-links', label: 'Shared links', perm: 'links.view' },
       // Only for tenants who have connected SmartOLT — plus whoever may set it up.
       { to: '/smartolt', label: 'SmartOLT', perm: 'smartolt.view', feature: 'smartolt', setupPerm: 'smartolt.manage' },
       { to: '/tr069', label: 'TR-069 devices', perm: 'tr069.view' },
