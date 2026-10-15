@@ -94,12 +94,17 @@ export default function Templates() {
   const [sms, setSms] = useState({});
   const [smsBusy, setSmsBusy] = useState(false);
 
+  // Which days before expiry the reminder goes out: undefined = loading, null = the original schedule, or a list of 7 / 3 / 1.
+  const [reminderDays, setReminderDays] = useState(undefined);
+  const [remBusy, setRemBusy] = useState(false);
+
   const [emailDefaults, setEmailDefaults] = useState(null);
   const [emailPlaceholders, setEmailPlaceholders] = useState([]);
   const [emails, setEmails] = useState({});
   const [emailBusy, setEmailBusy] = useState(false);
 
   useEffect(() => {
+    api.reminderSettings().then((d) => setReminderDays(d.days ?? null)).catch(() => setReminderDays(null));
     api.smsTemplates()
       .then((d) => {
         setSmsDefaults(d.defaults ?? {});
@@ -140,6 +145,18 @@ export default function Templates() {
     }
   };
 
+  const saveReminders = async () => {
+    setRemBusy(true);
+    try {
+      await api.saveReminderSettings(reminderDays);
+      store.toast('Reminder days saved');
+    } catch (e) {
+      store.toast(`Could not save: ${e.message}`);
+    } finally {
+      setRemBusy(false);
+    }
+  };
+
   const saveEmails = async () => {
     setEmailBusy(true);
     try {
@@ -161,6 +178,48 @@ export default function Templates() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <Card
+        title="When to remind customers"
+        subtitle="Choose how many days before a line expires the reminder text goes out"
+        actions={<Button variant="primary" onClick={saveReminders} disabled={remBusy || reminderDays === undefined}>{remBusy ? 'Saving…' : 'Save reminder days'}</Button>}
+      >
+        {reminderDays === undefined ? (
+          <div style={{ fontSize: 13, color: color.muted }}>Loading…</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5, cursor: 'pointer' }}>
+              <input type="checkbox" checked={reminderDays !== null} onChange={(e) => setReminderDays(e.target.checked ? [3, 1] : null)} />
+              Choose the days myself
+            </label>
+            {reminderDays === null ? (
+              <span style={{ fontSize: 12.5, color: color.muted }}>
+                Now: a text every day in the last 3 days before expiry. Tick the box to pick exact days instead.
+              </span>
+            ) : (
+              <>
+                <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+                  {[7, 3, 1].map((d) => (
+                    <label key={d} style={{ display: 'flex', gap: 7, alignItems: 'center', fontSize: 14, cursor: 'pointer' }}>
+                      <input
+                        type="checkbox"
+                        checked={reminderDays.includes(d)}
+                        onChange={(e) => setReminderDays((cur) => (e.target.checked ? [...cur, d].sort((a, b) => b - a) : cur.filter((x) => x !== d)))}
+                      />
+                      {d} day{d === 1 ? '' : 's'} before
+                    </label>
+                  ))}
+                </div>
+                <span style={{ fontSize: 12.5, color: color.muted }}>
+                  {reminderDays.length
+                    ? `A text goes out at 9 am on the ${reminderDays.map((d) => `${d}-day`).join(', ')} mark before each line expires (counted by date). Wording is under SMS templates below.`
+                    : 'Nothing is ticked, so no expiry reminders will be sent.'}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+      </Card>
+
       <Card
         title="SMS templates"
         subtitle="What each automatic text actually says — the tags below fill in per recipient"

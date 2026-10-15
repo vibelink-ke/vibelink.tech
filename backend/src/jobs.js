@@ -846,9 +846,12 @@ async function autoCharge() {
 async function remind() {
   const { rows } = await pool.query(`
     select s.tenant_id, s.name, s.phone, s.account_code, s.expires_at, s.service, s.router_id, s.connection_type
-    from subscribers s
-    where s.status='active' and s.expires_at between now() and now() + interval '3 days'
-      and s.tenant_id in (${enabledTenants})`, ['remind']);
+    from subscribers s join tenants t on t.id = s.tenant_id
+    where s.status='active' and s.expires_at between now() and now() + interval '8 days'
+      and s.tenant_id in (${enabledTenants})
+      -- The days the organisation chose (7, 3 and/or 1 days before the date the line expires), or, if it never chose, every day in the last 3.
+      and (case when t.reminder_days is null then s.expires_at <= now() + interval '3 days'
+                else ((s.expires_at at time zone 'Africa/Nairobi')::date - (now() at time zone 'Africa/Nairobi')::date) = any(t.reminder_days) end)`, ['remind']);
   // orgVars is a tenant-wide lookup (paybill numbers, company name) — cached per
   // run so a tenant with hundreds of subscribers due this batch doesn't re-query
   // its gateways once per subscriber.

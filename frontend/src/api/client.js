@@ -97,6 +97,8 @@ export const api = {
   eotm: (period) => get(`/api/team/eotm?period=${period}`),
   smsPlaceholders: () => get('/api/sms/placeholders'),
   smsTemplates: () => get('/api/sms/templates'),
+  reminderSettings: () => get('/api/reminders/settings'),
+  saveReminderSettings: (days) => put('/api/reminders/settings', { days }),
   saveSmsTemplates: (templates) => put('/api/sms/templates', { templates }),
   changeAccountCode: (id, accountCode) => post(`/api/subscribers/${id}/account-code`, { accountCode }),
   compensateSubscribers: (ids, days) => post('/api/subscribers/compensate', { ids, days }),

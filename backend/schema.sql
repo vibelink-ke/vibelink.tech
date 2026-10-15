@@ -3497,3 +3497,8 @@ create table if not exists skyplan_calibration (
   updated_at    timestamptz not null default now(),
   constraint skyplan_calibration_range check (correction_db between -30 and 30)
 );
+
+-- Which days before a line expires the reminder SMS goes out: any of 7, 3 and 1. Null keeps the original behaviour (every day in the last 3 days).
+alter table tenants add column if not exists reminder_days int[];
+alter table tenants drop constraint if exists tenants_reminder_days_check;
+alter table tenants add constraint tenants_reminder_days_check check (reminder_days is null or reminder_days <@ array[7,3,1]);

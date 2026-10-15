@@ -13901,6 +13901,23 @@ app.post('/api/sms/bulk', requirePermission('messaging.send_bulk'), wrap(async (
  * us shipping a release. The defaults stay as the fallback for anything they
  * have not overridden.
  */
+/** Which days before expiry the reminder SMS goes out (7, 3 and/or 1). null = the original schedule: every day in the last 3. */
+app.get('/api/reminders/settings', wrap(async (req, res) => {
+  const { rows: [t] } = await pool.query('select reminder_days from tenants where id=$1', [req.tenant.id]);
+  res.json({ days: t?.reminder_days ?? null });
+}));
+app.put('/api/reminders/settings', requirePermission('settings.edit'), wrap(async (req, res) => {
+  const raw = req.body?.days;
+  let days = null;
+  if (raw !== null && raw !== undefined) {
+    if (!Array.isArray(raw)) return res.status(400).json({ error: 'days must be a list' });
+    days = [...new Set(raw.map(Number))].filter((d) => [7, 3, 1].includes(d)).sort((a, b) => b - a);
+    if (days.length !== new Set(raw.map(Number)).size) return res.status(400).json({ error: 'Choose from 7, 3 and 1 days.' });
+  }
+  await pool.query('update tenants set reminder_days=$2 where id=$1', [req.tenant.id, days]);
+  res.json({ days });
+}));
+
 app.get('/api/sms/templates', wrap(async (req, res) => {
   const { DEFAULTS, PLACEHOLDERS } = await import('./sms.js');
   const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [req.tenant.id]);
@@ -15552,7 +15569,7 @@ const AUTOMATION_JOBS = [
   { job: 'expireAndSuspend', name: 'Expire & suspend', cron: '*/5 * * * *', detail: 'Grace → walled garden → expired, and expires stale vouchers' },
   { job: 'generateInvoices', name: 'Generate invoices', cron: '0 6 * * *', detail: 'Raises an invoice 3 days before a line expires' },
   { job: 'autoCharge', name: 'Auto-charge', cron: '0 8,12,18 * * *', detail: 'Fires STK for every account with a saved mandate' },
-  { job: 'remind', name: 'Payment reminders', cron: '0 9 * * *', detail: 'SMS to anyone expiring within 3 days' },
+  { job: 'remind', name: 'Payment reminders', cron: '0 9 * * *', detail: 'SMS before a line expires: every day of the last 3 by default, or the days chosen under Settings → Templates (7, 3, 1)' },
   { job: 'enforceFup', name: 'Fair-use enforcement', cron: '*/15 * * * *', detail: 'Totals session bytes against each cap, warns, then throttles' },
   { job: 'watchdog', name: 'Router watchdog', cron: '*/1 * * * *', detail: 'Pings every NAS and flags the ones that stop answering' },
   { job: 'ownerBrief', name: 'Owner brief', cron: '0 20 * * *', detail: 'Evening SMS: collected, new clients, routers down' },
