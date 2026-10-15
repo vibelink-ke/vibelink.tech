@@ -4436,6 +4436,12 @@ async function raiseInstallTicket(tenantId, lead, authorName) {
   return t;
 }
 
+/** Line drops per customer in the last day, for the health colours on the Map. */
+app.get('/api/customers/drops', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { customerDrops } = await import('./lead-coverage.js');
+  res.json(await customerDrops(pool, req.tenant.id));
+}));
+
 /** SkyPlan (inside the Map page) reports whether each lead can be served. */
 app.post('/api/leads/coverage', requirePermission('leads.edit'), wrap(async (req, res) => {
   const { saveLeadCoverage } = await import('./lead-coverage.js');

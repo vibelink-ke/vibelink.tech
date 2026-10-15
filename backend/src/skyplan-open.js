@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
-import { saveLeadCoverage } from './lead-coverage.js';
+import { saveLeadCoverage, customerDrops } from './lead-coverage.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -124,14 +124,26 @@ export function skyplanOpenRouter() {
       const t = req.apiKey.tenant_id;
       const { nodes, links } = await loadNetwork(t);
       const { rows: clients } = await pool.query(
-        `select id, name, line_label, lat::float8 as lat, lng::float8 as lng, host(mgmt_ip) as mgmt_ip
-           from subscribers where tenant_id=$1 and lat is not null and lng is not null`, [t]);
+        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status,
+                (exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null
+                           and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '1 hour')
+                 or exists (select 1 from live_sessions l where l.tenant_id = s.tenant_id and l.username = s.pppoe_user
+                              and l.seen_at > now() - interval '3 minutes')) as online,
+                (lh.checked_at > now() - interval '30 minutes' and lh.state = 'unreachable') as line_bad
+           from subscribers s
+           left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
+          where s.tenant_id=$1 and s.lat is not null and s.lng is not null`, [t]);
+      const drops = await customerDrops(pool, t);
+      const health = {};
+      for (const c of clients) {
+        health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_bad ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
+      }
       const { rows: routers } = await pool.query(
         'select id, name, lat::float8 as lat, lng::float8 as lng from routers where tenant_id=$1 and lat is not null and lng is not null', [t]);
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });

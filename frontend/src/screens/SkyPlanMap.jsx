@@ -31,7 +31,13 @@ export default function SkyPlanMap() {
     try {
       const net = await api.network();
       const { clients, routers, leads, canEdit: edit, name } = latest.current;
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, name: name ?? 'Network' });
+      // How each customer is doing right now: connected, in good standing, line drops in the last day (colours on the map).
+      const drops = await api.customerDrops().catch(() => ({}));
+      const health = {};
+      for (const c of clients) {
+        health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_state === 'unreachable' ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
+      }
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, name: name ?? 'Network' });
       known.current = projectIds(project);
       declined.current = new Set();
       frame.current?.contentWindow?.postMessage({ type: 'billing:load', project, canEdit: edit, silent: silent === true }, window.location.origin);

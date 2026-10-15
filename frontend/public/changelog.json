@@ -193,7 +193,8 @@
     "items": [
       "Hotspot dashboard: a Find a device box. Paste a device address from the router's active list (a phone signed in by itself shows as its address there), a phone number or a code, and see which voucher or access code it belongs to, with the customer's phone, plan and expiry.",
       "Hotspot dashboard → Live sessions now lists everyone connected on the router with the code behind each device address (phones the system signed in by themselves included), with a search box for finding one among many.",
-      "Leads: each lead that has a location now shows whether it can be served (can serve, marginal, weak signal or no coverage), worked out by SkyPlan from the terrain and your access points, with the sector, distance and expected speed. Open the Map once and it checks every lead."
+      "Leads: each lead that has a location now shows whether it can be served (can serve, marginal, weak signal or no coverage), worked out by SkyPlan from the terrain and your access points, with the sector, distance and expected speed. Open the Map once and it checks every lead.",
+      "Map (SkyPlan): customers now show how they are doing, with a ring: red when offline, amber when their line keeps dropping (3 or more drops in a day) or is connected but passing no traffic, grey when not paid. A small panel counts each group and filters the map to it."
     ]
   }
 ]

@@ -22,3 +22,13 @@ export async function saveLeadCoverage(pool, tenantId, results) {
   }
   return saved;
 }
+
+/** Line drops (the router lost the customer or their service) in the last 24 hours, per customer. */
+export async function customerDrops(pool, tenantId) {
+  const { rows } = await pool.query(
+    `select s.id, count(*)::int as n
+       from radacct a join subscribers s on s.tenant_id = $1 and s.pppoe_user = a.username
+      where a.acctstoptime > now() - interval '24 hours' and a.acctterminatecause in ('Lost-Carrier', 'Lost-Service')
+      group by s.id`, [tenantId]);
+  return Object.fromEntries(rows.map((r) => [r.id, r.n]));
+}
