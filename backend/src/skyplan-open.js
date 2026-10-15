@@ -145,6 +145,10 @@ export function skyplanOpenRouter() {
         "select id, name from leads where tenant_id=$1 and (lat is null or lng is null) and status not in ('won','lost') order by created_at desc limit 300", [t]);
       const unplaced = [...noPlaceC.map((c) => ({ id: c.id, name: c.name })), ...noPlaceL.map((l) => ({ id: `lead:${l.id}`, name: `Lead · ${l.name}`, lead: true }))];
       const health = {};
+      const sharedLinks = await listLinks(pool, t).catch(() => []);
+      const linkOf = new Map();
+      for (const l of sharedLinks) for (const id of l.memberIds ?? []) linkOf.set(id, l.id);
+      for (const c of clients) c.shared_link_id = linkOf.get(c.id) ?? c.shared_link_id ?? null;
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_bad ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
       }
@@ -153,7 +157,7 @@ export function skyplanOpenRouter() {
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), sharedLinks: await listLinks(pool, t).catch(() => []), calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), sharedLinks, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });
@@ -168,8 +172,9 @@ export function skyplanOpenRouter() {
       const project = req.body?.project;
       const t = req.apiKey.tenant_id;
       const net = await loadNetwork(t);
+      const known = new Set((Array.isArray(req.body?.knownIds) ? req.body.knownIds : []).slice(0, 20000).map(String));
       const result = await importSkyPlanProject(project, net, storeFor(t), {
-        includePlanned: !!req.body?.includePlanned, moveExisting: !!req.body?.moveExisting,
+        includePlanned: !!req.body?.includePlanned, moveExisting: !!req.body?.moveExisting, known,
       });
       res.json(result);
     } catch (e) {
@@ -201,6 +206,34 @@ export function skyplanOpenRouter() {
       if (b.action === 'linkMembers') return res.json(await setLinkMembers(pool, t, b));
       return res.status(400).json({ error: 'Unknown action.' });
     } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); next(e); }
+  });
+
+  /**
+   * Remove from billing what the person deleted in SkyPlan (after SkyPlan asked them): towers, equipment, fibre nodes, cables and wireless links
+   * by their SkyPlan id. Only this ISP's own, at most 500 at a time. Needs a key with write access.
+   */
+  r.post('/skyplan/delete', async (req, res, next) => {
+    try {
+      if (!req.apiKey.can_write) return res.status(403).json({ error: 'This key can only read. Make a key with write access to delete.' });
+      const t = req.apiKey.tenant_id;
+      const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(String).filter((x) => x && x.length <= 80).slice(0, 500);
+      if (!ids.length) return res.json(req.body?.dryRun ? { nodes: [], links: [] } : { nodes: 0, links: 0 });
+      const { rows: nodes } = await pool.query(
+        "select id, name from network_nodes where tenant_id=$1 and (details->>'skyplan' = any($2::text[]) or id::text = any($2::text[]))", [t, ids]);
+      if (req.body?.dryRun) {
+        const { rows: ls } = await pool.query(
+          "select id, label from network_links where tenant_id=$1 and kind in ('fibre','wireless') and (details->>'skyplan' = any($2::text[]) or id::text = any($2::text[]))", [t, ids]);
+        return res.json({ nodes: nodes.map((n) => ({ id: n.id, name: n.name })), links: ls.map((l) => ({ id: l.id, name: l.label })) });
+      }
+      let links = 0;
+      for (const n of nodes) {
+        links += (await pool.query('delete from network_links where tenant_id=$1 and (from_ref=$2 or to_ref=$2)', [t, `n:${n.id}`])).rowCount;
+      }
+      links += (await pool.query(
+        "delete from network_links where tenant_id=$1 and kind in ('fibre','wireless') and (details->>'skyplan' = any($2::text[]) or id::text = any($2::text[]))", [t, ids])).rowCount;
+      const del = nodes.length ? (await pool.query('delete from network_nodes where tenant_id=$1 and id = any($2::uuid[])', [t, nodes.map((n) => n.id)])).rowCount : 0;
+      res.json({ nodes: del, links });
+    } catch (e) { next(e); }
   });
 
   /** The correction SkyPlan worked out from field readings (dB of extra loss). Needs a key with write access. */

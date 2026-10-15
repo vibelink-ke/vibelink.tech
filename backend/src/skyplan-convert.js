@@ -153,10 +153,15 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
  * Read a SkyPlan project into Map nodes and cables. Returns what it did; nothing is deleted, and an item that already
  * exists is renamed (and its SkyPlan id remembered) but never moved.
  */
-export async function importSkyPlanProject(project, { nodes, links }, api, { includePlanned = false, moveExisting = false, onProgress } = {}) {
+export async function importSkyPlanProject(project, { nodes, links }, api, { includePlanned = false, moveExisting = false, onProgress, known } = {}) {
   if (project?.format !== 'skyplan-rf' || !Array.isArray(project.sites)) throw new Error('That is not a SkyPlan RF project file.');
   const keep = (x) => includePlanned || !x.lifecycle || x.lifecycle === 'active';
-  const out = { created: 0, updated: 0, skipped: 0 };
+  const out = { created: 0, updated: 0, skipped: 0, gone: [] };
+  // Ids billing handed over earlier (`known`) that billing no longer has were deleted there: they are not made again, and are reported so the
+  // caller can drop them from SkyPlan. Without this a stale copy of the design brought deleted towers, cables and sectors back on every save.
+  const wasHanded = (id) => !!known && (typeof known.has === 'function' ? known.has(id) : false);
+  const goneSet = new Set();
+  const deletedThere = (id, present) => { if (!present && wasHanded(id)) { goneSet.add(id); out.gone.push(id); return true; } return false; };
 
   const have = new Map();
   for (const n of nodes) { have.set(n.id, n); if (n.details?.skyplan) have.set(n.details.skyplan, n); }
@@ -177,6 +182,7 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
       out.updated += 1;
       return existing.id;
     }
+    if (deletedThere(spId, false)) return null;
     const made = await api.createNetNode({ kind, name, lat, lng: lon, details: str({ ...details, skyplan: spId }), watchRouterId: null });
     idMap.set(spId, made.id);
     have.set(spId, { ...made, details: { skyplan: spId } });
@@ -190,6 +196,7 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
     steps.push(async () => {
       const hostId = await upsert(s.id, s.kind === 'pole' ? 'pole' : 'tower', s.name, s.lat, s.lon,
         { height: s.maxHeight, note: s.notes, ...stage(s) });
+      if (!hostId) { out.skipped += 1; return; }   // deleted in billing: its equipment goes with it
       for (const d of s.equipment ?? []) {
         if (d.kind === 'router' || d.kind === 'other') { out.skipped += 1; continue; }   // routers belong to billing's own list
         const kind = d.kind === 'switch' ? 'switch' : d.kind === 'power' ? 'power' : 'ap';
@@ -208,6 +215,7 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
       const a = idMap.get(c.aId); const b = idMap.get(c.bId);
       if (!a || !b || a === b) { out.skipped += 1; return; }
       const existing = haveLinks.get(c.id);
+      if (!existing && deletedThere(c.id, false)) return;
       const interior = (c.path ?? []).slice(1, -1).map((p) => [Number(p[0]), Number(p[1])]);
       if (existing) {
         await api.updateNetLink(existing.id, { label: c.name, ...(moveExisting ? { path: interior } : {}), details: str({ ...(existing.details ?? {}), cores: c.fibers, skyplan: c.id }) });
@@ -242,6 +250,7 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
       if (!a || !b || a === b) { out.skipped += 1; return; }
       const details = str({ frequency: l.freqMHz ? l.freqMHz / 1000 : undefined, signal: l.measuredRxDbm, skyplan: l.id, ...stage(l) });
       const existing = haveLinks.get(l.id);
+      if (!existing && deletedThere(l.id, false)) return;
       if (existing) {
         await api.updateNetLink(existing.id, { label: l.name, details: str({ ...(existing.details ?? {}), ...details }) });
         out.updated += 1;
@@ -263,7 +272,8 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
   // The whole of each link and sector is kept as well (what billing's map cannot hold), so the design comes back as drawn.
   if (typeof api.saveDesignItems === 'function') {
     out.items = await api.saveDesignItems({
-      links: (project.links ?? []).filter(keep), coverages: (project.coverages ?? []).filter(keep),
+      links: (project.links ?? []).filter((l) => keep(l) && !goneSet.has(l.id) && !goneSet.has(l.aId) && !goneSet.has(l.bId)),
+      coverages: (project.coverages ?? []).filter((c) => keep(c) && !goneSet.has(c.id) && !goneSet.has(c.siteId)),
       mirror: includePlanned && (project.sites ?? []).length > 0,
     });
   }

@@ -38,11 +38,15 @@ export default function SkyPlanMap() {
       const calibration = await api.networkCalibration().catch(() => null);
       const designItems = await api.skyplanItems().catch(() => ({ links: [], coverages: [] }));
       const sharedLinks = await api.sharedLinks().catch(() => []);
+      // A customer's link also comes from the access point they are assigned to, which the list already worked out.
+      const linkOf = new Map();
+      for (const l of sharedLinks) for (const id of l.memberIds ?? []) linkOf.set(id, l.id);
+      const clientsL = clients.map((c) => ({ ...c, shared_link_id: linkOf.get(c.id) ?? c.shared_link_id ?? null }));
       const health = {};
       for (const c of clients) {
         health[c.id] = { online: !!c.online, status: c.status ?? 'active', ...(c.line_state === 'unreachable' ? { line: 'bad' } : {}), drops24: drops[c.id] ?? 0 };
       }
-      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients, routers, leads, health, designItems, sharedLinks, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network',
+      const { project, report } = buildSkyPlanProject({ nodes: net.nodes, links: net.links, clients: clientsL, routers, leads, health, designItems, sharedLinks, calibrationDb: calibration?.correction_db ?? 0, name: name ?? 'Network',
         // Customers and leads with no place on the map yet, so they can be placed from SkyPlan.
         unplaced: [
           ...clients.filter((c) => !(Number.isFinite(Number(c.lat)) && Number.isFinite(Number(c.lng)) && !(Number(c.lat) === 0 && Number(c.lng) === 0))).slice(0, 300).map((c) => ({ id: c.id, name: c.name })),
@@ -63,7 +67,7 @@ export default function SkyPlanMap() {
     setStatus('Saving…');
     try {
       const net = await api.network();
-      await importSkyPlanProject(project, net, api, { includePlanned: true, moveExisting: true });
+      const result = await importSkyPlanProject(project, net, api, { includePlanned: true, moveExisting: true, known: known.current });
       const fresh = await api.network();
       const gone = findRemoved(project, fresh, known.current);
       const nodes = gone.nodes.filter((n) => !declined.current.has(n.id));
@@ -79,6 +83,8 @@ export default function SkyPlanMap() {
         }
       }
       for (const id of projectIds(project)) known.current.add(id);
+      // Billing had already deleted these: they were not made again, and SkyPlan is reloaded without them.
+      if (result?.gone?.length) { for (const id of result.gone) known.current.delete(id); setTimeout(() => load(true), 300); }
       setStatus(`Saved ${new Date().toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}`);
     } catch (e) {
       setStatus('Not saved');
@@ -87,7 +93,7 @@ export default function SkyPlanMap() {
       busy.current = false;
       if (pending.current) { const next = pending.current; pending.current = null; sync(next); }
     }
-  }, []);
+  }, [load]);
 
   useEffect(() => {
     const onMessage = (e) => {

@@ -135,7 +135,7 @@ export default function SharedLinks() {
                 rows={detail.members}
                 columns={[
                   { key: 'name', label: 'Customer', render: (m) => <span><b>{m.name}</b><span style={{ color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}> {m.account_code}</span></span> },
-                  { key: 'via', label: 'On', render: (m) => (m.direct ? 'this device' : (m.via ?? '—')) },
+                  { key: 'via', label: 'On', render: (m) => `${m.direct ? 'this device' : (m.via ?? '—')}${m.via_ap ? ' (by access point)' : ''}` },
                   { key: 'status', label: 'Account', render: (m) => <Badge>{m.status}</Badge> },
                   { key: 'online', label: 'Line', render: (m) => (!m.pppoe_user ? '—' : m.online ? <Badge tone={m.line_state === 'unreachable' ? 'pending' : 'active'}>{m.line_state === 'unreachable' ? 'no traffic' : 'online'}</Badge> : <Badge tone="down">offline</Badge>) },
                   { key: 'drops', label: 'Drops', render: (m) => m.drops || '—' },

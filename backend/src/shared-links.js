@@ -104,10 +104,23 @@ export function checkSteps(kind, managed) {
 
 const DROPS = `('Lost-Carrier', 'Lost-Service')`;
 
+/**
+ * A radio link made from a SkyPlan site also carries every customer assigned (on their account) to an access point at that site, so the
+ * customers do not have to be put on it one by one. A customer put on a link by hand stays on that link.
+ */
+const AP_LINKS = `with ap_link as (
+  select distinct on (n.id) n.id as node_id, l.id as link_id
+    from shared_links l
+    join network_nodes h on h.tenant_id = l.tenant_id and (h.id::text = l.site_ref or h.details->>'skyplan' = l.site_ref)
+    join network_nodes n on n.tenant_id = h.tenant_id and n.kind in ('ap', 'ptp', 'station') and (n.id = h.id or n.details->>'tower' = h.id::text)
+   where l.tenant_id = $1 and l.site_ref is not null and l.kind in ('ap', 'radio')
+   order by n.id, l.created_at)`;
+
 /** Customers on links with what is needed to judge them: online now, drops in the last day, last signal reading, line health. */
 async function memberRows(pool, tenantId) {
   const { rows } = await pool.query(
-    `select s.id, s.name, s.account_code, s.phone, s.status, s.pppoe_user, s.shared_link_id,
+    `${AP_LINKS}
+     select s.id, s.name, s.account_code, s.phone, s.status, s.pppoe_user, coalesce(s.shared_link_id, al.link_id) as shared_link_id, (s.shared_link_id is null) as via_ap,
             s.cpe_signal_dbm::float8 as signal,
             exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null) as online,
             (select count(*)::int from radacct a where a.username = s.pppoe_user and a.acctstoptime > now() - interval '24 hours'
@@ -115,7 +128,8 @@ async function memberRows(pool, tenantId) {
             lh.state as line_state
        from subscribers s
        left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
-      where s.tenant_id = $1 and s.shared_link_id is not null
+       left join ap_link al on al.node_id = s.ap_node_id
+      where s.tenant_id = $1 and (s.shared_link_id is not null or al.link_id is not null)
       order by s.name`, [tenantId]);
   return rows;
 }
@@ -124,9 +138,11 @@ async function memberRows(pool, tenantId) {
 async function dropEvents(pool, tenantId) {
   const secs = SAME_TIME_MINUTES * 60;
   const { rows } = await pool.query(
-    `select s.id, s.shared_link_id as link, floor(extract(epoch from a.acctstoptime) / ${secs})::bigint as bucket
-       from radacct a join subscribers s on s.tenant_id = $1 and s.pppoe_user = a.username and s.shared_link_id is not null
-      where a.acctstoptime > now() - interval '24 hours' and a.acctterminatecause in ${DROPS}
+    `${AP_LINKS}
+     select s.id, coalesce(s.shared_link_id, al.link_id) as link, floor(extract(epoch from a.acctstoptime) / ${secs})::bigint as bucket
+       from radacct a join subscribers s on s.tenant_id = $1 and s.pppoe_user = a.username
+       left join ap_link al on al.node_id = s.ap_node_id
+      where coalesce(s.shared_link_id, al.link_id) is not null and a.acctstoptime > now() - interval '24 hours' and a.acctterminatecause in ${DROPS}
       group by 1, 2, 3`, [tenantId]);
   return rows.map((r) => ({ id: r.id, link: r.link, bucket: Number(r.bucket) }));
 }
