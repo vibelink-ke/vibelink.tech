@@ -39,7 +39,7 @@ const metres = (a, b) => {
 };
 
 /** What goes into the SkyPlan project file, plus a short report of what was left out. */
-export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, name = 'Billing network' }) {
+export function buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb, designItems, name = 'Billing network' }) {
   const placed = nodes.filter((n) => hasPos(Number(n.lat), Number(n.lng)));
   const byId = new Map(placed.map((n) => [n.id, n]));
 
@@ -123,9 +123,14 @@ export function buildSkyPlanProject({ nodes, links, clients, routers, leads, hea
     leadCount += 1;
   }
 
+  // Wireless links and sectors drawn in SkyPlan and kept whole (skyplan-items.js): only those whose sites are still in the network.
+  const siteIds = new Set(sites.map((x) => x.id));
+  const designLinks = (designItems?.links ?? []).filter((l) => siteIds.has(l.aId) && siteIds.has(l.bId));
+  const designCoverages = (designItems?.coverages ?? []).filter((c) => siteIds.has(c.siteId));
+
   const project = {
     format: 'skyplan-rf', version: 1, projectName: name,
-    sites, links: [], coverages: [], settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
+    sites, links: designLinks, coverages: designCoverages, settings: Number.isFinite(Number(calibrationDb)) && Number(calibrationDb) !== 0 ? { calibrationDb: Number(calibrationDb) } : {}, customRadios: [], customAntennas: [],
     fiberNodes, fiberCables, subscribers, probes: [],
     ...(unplaced?.length ? { unplaced } : {}),
   };
@@ -208,6 +213,39 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
     });
   }
 
+  // Sectors: an access point on its tower with a direction, a beam and a reach, so billing's map draws it. An access point billing already has
+  // under this id keeps its model.
+  for (const cv of project.coverages ?? []) {
+    if (!keep(cv)) { out.skipped += 1; continue; }
+    steps.push(async () => {
+      const host = (project.sites ?? []).find((s) => s.id === cv.siteId);
+      const hostNode = host && idMap.get(host.id);
+      if (!hostNode) { out.skipped += 1; return; }
+      const meta = cv.meta ?? {};
+      await upsert(cv.id, 'ap', cv.name, host.lat, host.lon, {
+        tower: hostNode, ...(have.get(cv.id) ? {} : { model: meta.model }), frequency: cv.freqMHz ? cv.freqMHz / 1000 : undefined,
+        azimuth: cv.azimuth, beamwidth: meta.beamwidth, range: cv.radiusKm, ...stage(cv),
+      });
+    });
+  }
+  // Wireless links between two sites: a wireless link on billing's map between the two towers.
+  for (const l of project.links ?? []) {
+    if (!keep(l)) { out.skipped += 1; continue; }
+    steps.push(async () => {
+      const a = idMap.get(l.aId); const b = idMap.get(l.bId);
+      if (!a || !b || a === b) { out.skipped += 1; return; }
+      const details = str({ frequency: l.freqMHz ? l.freqMHz / 1000 : undefined, signal: l.measuredRxDbm, skyplan: l.id, ...stage(l) });
+      const existing = haveLinks.get(l.id);
+      if (existing) {
+        await api.updateNetLink(existing.id, { label: l.name, details: str({ ...(existing.details ?? {}), ...details }) });
+        out.updated += 1;
+        return;
+      }
+      await api.createNetLink({ kind: 'wireless', from: `n:${a}`, to: `n:${b}`, path: [], label: l.name, details });
+      out.created += 1;
+    });
+  }
+
   // Sites, then fibre nodes, then cables (a cable needs both of its ends) — one at a time so the server is never flooded.
   const ordered = steps;
   let done = 0;
@@ -215,6 +253,13 @@ export async function importSkyPlanProject(project, { nodes, links }, api, { inc
     await run();
     done += 1;
     onProgress?.(done, ordered.length);
+  }
+  // The whole of each link and sector is kept as well (what billing's map cannot hold), so the design comes back as drawn.
+  if (typeof api.saveDesignItems === 'function') {
+    out.items = await api.saveDesignItems({
+      links: (project.links ?? []).filter(keep), coverages: (project.coverages ?? []).filter(keep),
+      mirror: includePlanned && (project.sites ?? []).length > 0,
+    });
   }
   return out;
 }
@@ -225,6 +270,8 @@ export function projectIds(project) {
   for (const s of project.sites ?? []) { ids.add(s.id); for (const d of s.equipment ?? []) ids.add(d.id); }
   for (const n of project.fiberNodes ?? []) ids.add(n.id);
   for (const c of project.fiberCables ?? []) ids.add(c.id);
+  for (const l of project.links ?? []) ids.add(l.id);
+  for (const c of project.coverages ?? []) ids.add(c.id);
   return ids;
 }
 
@@ -236,6 +283,6 @@ export function findRemoved(project, { nodes, links }, known) {
   const ids = projectIds(project);
   return {
     nodes: nodes.filter((n) => known.has(idOf(n)) && !ids.has(idOf(n))),
-    links: links.filter((l) => l.kind === 'fibre' && known.has(idOf(l)) && !ids.has(idOf(l))),
+    links: links.filter((l) => ['fibre', 'wireless'].includes(l.kind) && known.has(idOf(l)) && !ids.has(idOf(l))),
   };
 }

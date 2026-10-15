@@ -115,6 +115,7 @@ app.use('/api/expenses/:id/receipt', express.json({ limit: '8mb' }));
 app.use('/api/field/jobs/:id/photos', express.json({ limit: '8mb' }));
 // A whole network design saved from SkyPlan.
 app.use('/api/open', express.json({ limit: '25mb' }));
+app.use('/api/skyplan/items', express.json({ limit: '8mb' }));
 app.use(express.json({ verify: (req, _res, buf) => { req.rawBody = buf; } }));
 app.use('/api', auditTap);
 
@@ -4458,6 +4459,16 @@ app.post('/api/skyplan/customer-ap', requirePermission('clients.edit'), skyplanE
 app.post('/api/skyplan/lead', requirePermission('leads.edit'), skyplanEdit(async (req) => {
   const { updateLeadFromMap } = await import('./skyplan-edit.js');
   return updateLeadFromMap(pool, req.tenant.id, req.session?.name, req.body ?? {});
+}));
+
+/** The wireless links and sectors of the SkyPlan design, kept whole (see skyplan-items.js): read for the Map page, saved by its save. */
+app.get('/api/skyplan/items', requirePermission('network.view'), wrap(async (req, res) => {
+  const { loadDesignItems } = await import('./skyplan-items.js');
+  res.json(await loadDesignItems(pool, req.tenant.id));
+}));
+app.post('/api/skyplan/items', requirePermission('network.edit'), wrap(async (req, res) => {
+  const { saveDesignItems } = await import('./skyplan-items.js');
+  res.json(await saveDesignItems(pool, req.tenant.id, req.body ?? {}));
 }));
 
 /** The correction SkyPlan works out from field signal readings: read for the Map page, saved when someone applies it. */

@@ -4,6 +4,7 @@ import { pool } from './db.js';
 import { buildSkyPlanProject, importSkyPlanProject } from './skyplan-convert.js';
 import { saveLeadCoverage, customerDrops, getCalibration, saveCalibration } from './lead-coverage.js';
 import { moveOnMap, setCustomerAp, updateLeadFromMap } from './skyplan-edit.js';
+import { saveDesignItems, loadDesignItems } from './skyplan-items.js';
 
 /**
  * The API SkyPlan uses to read and save this ISP's live network, with an API key instead of a sign-in (mounted at /api/open,
@@ -63,6 +64,7 @@ function storeFor(tenantId) {
       if (!sets.length) return;
       await pool.query(`update network_nodes set ${sets.join(', ')} where tenant_id=$1 and id=$2`, [tenantId, id, ...vals]);
     },
+    saveDesignItems: (items) => saveDesignItems(pool, tenantId, items),
     async createNetLink({ kind, from, to, path, label, details: d }) {
       const { rows: [l] } = await pool.query(
         `insert into network_links (tenant_id, kind, from_ref, to_ref, path, label, details) values ($1,$2,$3,$4,$5,$6,$7)
@@ -150,7 +152,7 @@ export function skyplanOpenRouter() {
       const { rows: leads } = await pool.query(
         `select id, name, lat::float8 as lat, lng::float8 as lng from leads
           where tenant_id=$1 and lat is not null and lng is not null and status not in ('won','lost')`, [t]);
-      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
+      const { project, report } = buildSkyPlanProject({ nodes, links, clients, routers, leads, health, unplaced, designItems: await loadDesignItems(pool, t), calibrationDb: (await getCalibration(pool, t)).correction_db, name: req.apiKey.tenant_name });
       res.json({ isp: req.apiKey.tenant_name, canWrite: req.apiKey.can_write, project, report });
     } catch (e) { next(e); }
   });

@@ -3502,3 +3502,15 @@ create table if not exists skyplan_calibration (
 alter table tenants add column if not exists reminder_days int[];
 alter table tenants drop constraint if exists tenants_reminder_days_check;
 alter table tenants add constraint tenants_reminder_days_check check (reminder_days is null or reminder_days <@ array[7,3,1]);
+
+-- Wireless links and sectors of a SkyPlan design, kept whole (radios, antennas, heights, power) so the design comes back exactly as drawn on any
+-- computer that connects to billing. Their map side (a wireless link between two towers, an access point with a direction and reach) is made as
+-- ordinary network items. See skyplan-items.js.
+create table if not exists skyplan_items (
+  tenant_id  uuid not null references tenants on delete cascade,
+  kind       text not null check (kind in ('link','coverage')),
+  ref        text not null,
+  data       jsonb not null,
+  updated_at timestamptz not null default now(),
+  primary key (tenant_id, kind, ref)
+);
