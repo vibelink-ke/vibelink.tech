@@ -3538,3 +3538,8 @@ create table if not exists shared_links (
 );
 alter table subscribers add column if not exists shared_link_id uuid references shared_links on delete set null;
 create index if not exists subscribers_shared_link_idx on subscribers (shared_link_id) where shared_link_id is not null;
+
+-- A shared link can be fed from another (a switch from the receiving radio, a radio from the switch) and can sit on the map (the building or mast it is on).
+alter table shared_links add column if not exists parent_id uuid references shared_links on delete set null;
+alter table shared_links add column if not exists lat double precision;
+alter table shared_links add column if not exists lng double precision;

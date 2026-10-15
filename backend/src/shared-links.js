@@ -99,7 +99,7 @@ export function checkSteps(kind, managed) {
 const DROPS = `('Lost-Carrier', 'Lost-Service')`;
 
 /** Customers on links with what is needed to judge them: online now, drops in the last day, last signal reading, line health. */
-async function memberRows(pool, tenantId, linkId = null) {
+async function memberRows(pool, tenantId) {
   const { rows } = await pool.query(
     `select s.id, s.name, s.account_code, s.phone, s.status, s.pppoe_user, s.shared_link_id,
             s.cpe_signal_dbm::float8 as signal,
@@ -109,68 +109,158 @@ async function memberRows(pool, tenantId, linkId = null) {
             lh.state as line_state
        from subscribers s
        left join line_health lh on lh.tenant_id = s.tenant_id and lh.pppoe_user = s.pppoe_user
-      where s.tenant_id = $1 and s.shared_link_id is not null and ($2::uuid is null or s.shared_link_id = $2)
-      order by s.name`, [tenantId, linkId]);
+      where s.tenant_id = $1 and s.shared_link_id is not null
+      order by s.name`, [tenantId]);
   return rows;
 }
 
-/** For each link, the most customers that lost their line inside one few-minute window in the last day, and when. */
-async function worstWindows(pool, tenantId, linkId = null) {
+/** Every customer line lost in the last day, with the few-minute window it fell in (a window is a number of seconds since 1970 divided by its length). */
+async function dropEvents(pool, tenantId) {
   const secs = SAME_TIME_MINUTES * 60;
   const { rows } = await pool.query(
-    `select link, n, bucket as at from (
-        select s.shared_link_id as link,
-               to_timestamp(floor(extract(epoch from a.acctstoptime) / ${secs}) * ${secs}) as bucket,
-               count(distinct s.id)::int as n,
-               row_number() over (partition by s.shared_link_id order by count(distinct s.id) desc, max(a.acctstoptime) desc) as rk
-          from radacct a join subscribers s on s.tenant_id = $1 and s.pppoe_user = a.username and s.shared_link_id is not null
-         where a.acctstoptime > now() - interval '24 hours' and a.acctterminatecause in ${DROPS}
-           and ($2::uuid is null or s.shared_link_id = $2)
-         group by 1, 2) w
-      where rk = 1`, [tenantId, linkId]);
-  return new Map(rows.map((r) => [r.link, { n: r.n, at: r.at }]));
+    `select s.id, s.shared_link_id as link, floor(extract(epoch from a.acctstoptime) / ${secs})::bigint as bucket
+       from radacct a join subscribers s on s.tenant_id = $1 and s.pppoe_user = a.username and s.shared_link_id is not null
+      where a.acctstoptime > now() - interval '24 hours' and a.acctterminatecause in ${DROPS}
+      group by 1, 2, 3`, [tenantId]);
+  return rows.map((r) => ({ id: r.id, link: r.link, bucket: Number(r.bucket) }));
 }
 
-const brief = (v) => ({ level: v.level, headline: v.headline });
+/**
+ * For each link, the links at and below it (a switch carries the radios hung off it and their customers). Links are fed from one other link
+ * at most, so this is a forest; a loop (which saving refuses) cannot make it run forever.
+ */
+export function subtreeOf(links) {
+  const kids = new Map();
+  for (const l of links) if (l.parent_id) { if (!kids.has(l.parent_id)) kids.set(l.parent_id, []); kids.get(l.parent_id).push(l.id); }
+  const out = new Map();
+  for (const l of links) {
+    const seen = new Set([l.id]);
+    const stack = [l.id];
+    while (stack.length) for (const k of kids.get(stack.pop()) ?? []) if (!seen.has(k)) { seen.add(k); stack.push(k); }
+    out.set(l.id, seen);
+  }
+  return out;
+}
 
-/** Every link with its verdict, for the list. */
-export async function listLinks(pool, tenantId) {
-  const [{ rows: links }, members, windows] = await Promise.all([
+const BAD = new Set(['down', 'watch']);
+
+/**
+ * Read every link from the customers at and below it, then say where a shared fault really is. A fault that shows on a switch AND on the
+ * radios under it is the switch's (or the uplink above it): the highest link that shows it is blamed, the ones below it are marked "upstream".
+ * A radio that is bad while the switch above it is fine is that radio's own fault.
+ *   links    [{ id, name, kind, managed, parent_id }]
+ *   members  customers, each with shared_link_id (the device they plug into)
+ *   events   [{ id, link, bucket }] line drops, bucket = which few-minute window
+ */
+export function judgeTree({ links, members, events = [] }) {
+  const sub = subtreeOf(links);
+  const byId = new Map(links.map((l) => [l.id, l]));
+  const verdicts = new Map(); const counts = new Map();
+  for (const l of links) {
+    const ids = sub.get(l.id);
+    const mine = members.filter((m) => ids.has(m.shared_link_id));
+    const buckets = new Map();
+    for (const e of events) if (ids.has(e.link)) { if (!buckets.has(e.bucket)) buckets.set(e.bucket, new Set()); buckets.get(e.bucket).add(e.id); }
+    let worst = null;
+    for (const [b, set] of buckets) if (!worst || set.size > worst.n || (set.size === worst.n && b > worst.b)) worst = { n: set.size, b };
+    verdicts.set(l.id, judgeLink({ kind: l.kind, managed: l.managed, members: mine, worstWindow: worst ? { n: worst.n, at: new Date(worst.b * SAME_TIME_MINUTES * 60000) } : null }));
+    counts.set(l.id, mine);
+  }
+  const upstream = new Map();
+  for (const l of links) {
+    if (!BAD.has(verdicts.get(l.id).level)) continue;
+    let top = null; let cur = byId.get(l.parent_id); let guard = 0;
+    while (cur && guard++ < 10) { if (BAD.has(verdicts.get(cur.id).level)) top = cur; cur = byId.get(cur.parent_id); }
+    if (top) {
+      const mine = counts.get(l.id).filter(live).length; const theirs = counts.get(top.id).filter(live).length;
+      upstream.set(l.id, { id: top.id, name: top.name, sameCustomers: mine === theirs });
+    }
+  }
+  return { verdicts, upstream, members: counts };
+}
+
+/** Everything about every link, worked out once. */
+async function compute(pool, tenantId) {
+  const [{ rows: links }, members, events] = await Promise.all([
     pool.query('select * from shared_links where tenant_id=$1 order by name', [tenantId]),
     memberRows(pool, tenantId),
-    worstWindows(pool, tenantId),
+    dropEvents(pool, tenantId),
   ]);
-  return links.map((l) => {
-    const mine = members.filter((m) => m.shared_link_id === l.id);
-    const verdict = judgeLink({ kind: l.kind, managed: l.managed, members: mine, worstWindow: windows.get(l.id) });
-    const act = mine.filter(live);
+  const t = judgeTree({ links, members, events });
+  const list = links.map((l) => {
+    const v = t.verdicts.get(l.id); const up = t.upstream.get(l.id);
+    const all = t.members.get(l.id); const act = all.filter(live);
     return {
-      ...l, ...brief(verdict),
-      customers: mine.length, active: act.length, online: act.filter((m) => m.online).length,
-      drops: mine.reduce((a, m) => a + m.drops, 0), memberIds: mine.map((m) => m.id),
+      ...l, level: v.level,
+      headline: up ? `${v.headline} ${up.sameCustomers ? `The same customers are behind ${up.name}, so check both.` : `${up.name}, above it, shows the same fault: likely the cause.`}` : v.headline,
+      upstream: up ?? null,
+      customers: all.length, active: act.length, online: act.filter((m) => m.online).length,
+      drops: all.reduce((x, m) => x + m.drops, 0),
+      memberIds: members.filter((m) => m.shared_link_id === l.id).map((m) => m.id),
     };
   });
+  return { links, list, ...t };
 }
 
-/** One link, its customers and its full verdict. */
+/** Every link with its verdict, for the list. */
+export async function listLinks(pool, tenantId) { return (await compute(pool, tenantId)).list; }
+
+/** One link: its customers (including those on the links below it), the links below it, and its full verdict. */
 export async function linkDetail(pool, tenantId, id) {
-  const { rows: [l] } = await pool.query('select * from shared_links where id=$1 and tenant_id=$2', [id, tenantId]);
-  if (!l) return null;
-  const [members, windows] = await Promise.all([memberRows(pool, tenantId, id), worstWindows(pool, tenantId, id)]);
-  return { ...l, members, verdict: judgeLink({ kind: l.kind, managed: l.managed, members, worstWindow: windows.get(id) }) };
+  const c = await compute(pool, tenantId);
+  const me = c.list.find((x) => x.id === id);
+  if (!me) return null;
+  const names = new Map(c.links.map((x) => [x.id, x.name]));
+  const { memberIds, ...link } = me;
+  return {
+    ...link, parent_name: me.parent_id ? names.get(me.parent_id) ?? null : null,
+    members: c.members.get(id).map((m) => ({ ...m, via: names.get(m.shared_link_id) ?? null, direct: m.shared_link_id === id })),
+    children: c.list.filter((x) => x.parent_id === id).map((x) => ({ id: x.id, name: x.name, kind: x.kind, managed: x.managed, level: x.level, active: x.active, online: x.online })),
+    verdict: { ...c.verdicts.get(id), headline: me.headline },
+  };
 }
 
 const text = (v, max) => { const s = String(v ?? '').trim(); return s ? s.slice(0, max) : null; };
 const bad = (m) => Object.assign(new Error(m), { status: 400 });
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const coord = (v, max) => { const n = Number(v); return v !== null && v !== '' && v !== undefined && Number.isFinite(n) && Math.abs(n) <= max ? n : null; };
+
+/** The link this one is fed from (a switch is fed from a receiving radio, a radio from a switch): checked to be this organisation's, and never a loop. */
+async function checkParent(pool, tenantId, selfId, parentId) {
+  if (!parentId) return null;
+  if (!UUID.test(String(parentId))) throw bad('That is not a link.');
+  if (parentId === selfId) throw bad('A link cannot be fed from itself.');
+  const { rows } = await pool.query('select id, parent_id from shared_links where tenant_id=$1', [tenantId]);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  if (!byId.has(parentId)) throw bad('No such link to be fed from.');
+  let cur = parentId; let depth = 0;
+  while (cur) {
+    if (selfId && cur === selfId) throw bad('That would make a loop: the link above is already fed from this one.');
+    cur = byId.get(cur)?.parent_id;
+    if (++depth > 8) throw bad('Links are nested too deeply.');
+  }
+  return parentId;
+}
+
+/** A place on the map for the device (the building or mast it is on), or none. Both numbers or neither. */
+function place(b, curLat = null, curLng = null) {
+  if (!('lat' in (b ?? {})) && !('lng' in (b ?? {}))) return { lat: curLat, lng: curLng };
+  const la = coord(b.lat, 90); const ln = coord(b.lng, 180);
+  if (la === null || ln === null) return { lat: null, lng: null };
+  if (la === 0 && ln === 0) throw bad('That is not a place on the map.');
+  return { lat: la, lng: ln };
+}
 
 export async function createLink(pool, tenantId, b) {
   const name = text(b?.name, 80);
   if (!name) throw bad('Give the link a name, for example "Mlima mast sector 1".');
   const kind = KINDS.includes(b?.kind) ? b.kind : 'radio';
+  const parent = await checkParent(pool, tenantId, null, b?.parentId);
+  const at = place(b);
   try {
     const { rows: [r] } = await pool.query(
-      `insert into shared_links (tenant_id, name, kind, managed, location, notes) values ($1,$2,$3,$4,$5,$6) returning *`,
-      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000)]);
+      `insert into shared_links (tenant_id, name, kind, managed, location, notes, parent_id, lat, lng) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning *`,
+      [tenantId, name, kind, b?.managed !== false, text(b?.location, 120), text(b?.notes, 1000), parent, at.lat, at.lng]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);
@@ -184,11 +274,13 @@ export async function updateLink(pool, tenantId, id, b) {
   const name = b?.name === undefined ? cur.name : text(b.name, 80);
   if (!name) throw bad('Give the link a name.');
   const kind = b?.kind === undefined ? cur.kind : (KINDS.includes(b.kind) ? b.kind : cur.kind);
+  const parent = b && 'parentId' in b ? await checkParent(pool, tenantId, id, b.parentId) : cur.parent_id;
+  const at = place(b, cur.lat, cur.lng);
   try {
     const { rows: [r] } = await pool.query(
-      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7 where id=$1 and tenant_id=$2 returning *`,
+      `update shared_links set name=$3, kind=$4, managed=$5, location=$6, notes=$7, parent_id=$8, lat=$9, lng=$10 where id=$1 and tenant_id=$2 returning *`,
       [id, tenantId, name, kind, b?.managed === undefined ? cur.managed : b.managed !== false,
-        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000)]);
+        b?.location === undefined ? cur.location : text(b.location, 120), b?.notes === undefined ? cur.notes : text(b.notes, 1000), parent, at.lat, at.lng]);
     return r;
   } catch (e) {
     if (e.code === '23505') throw bad(`There is already a link called "${name}".`);

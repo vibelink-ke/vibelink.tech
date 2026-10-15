@@ -128,7 +128,7 @@ export function skyplanOpenRouter() {
       const t = req.apiKey.tenant_id;
       const { nodes, links } = await loadNetwork(t);
       const { rows: clients } = await pool.query(
-        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm, s.ap_node_id, s.shared_link_id,
+        `select s.id, s.name, s.line_label, s.lat::float8 as lat, s.lng::float8 as lng, host(s.mgmt_ip) as mgmt_ip, s.status, s.cpe_signal_dbm::float8 as cpe_signal_dbm, s.ap_node_id, s.shared_link_id, s.account_code, s.phone,
                 (exists (select 1 from radacct a where a.username = s.pppoe_user and a.acctstoptime is null
                            and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '1 hour')
                  or exists (select 1 from live_sessions l where l.tenant_id = s.tenant_id and l.username = s.pppoe_user

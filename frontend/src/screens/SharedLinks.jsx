@@ -21,7 +21,7 @@ const LEVEL = {
   down: { label: 'Down', tone: 'down' },
   unknown: { label: 'No data', tone: 'default' },
 };
-const BLANK = { name: '', kind: 'radio', managed: true, location: '', notes: '' };
+const BLANK = { name: '', kind: 'radio', managed: true, location: '', notes: '', parent_id: '' };
 
 export default function SharedLinks() {
   const store = useStore();
@@ -47,7 +47,7 @@ export default function SharedLinks() {
   const saveLink = async () => {
     setBusy(true);
     try {
-      const body = { name: edit.name, kind: edit.kind, managed: edit.managed, location: edit.location, notes: edit.notes };
+      const body = { name: edit.name, kind: edit.kind, managed: edit.managed, location: edit.location, notes: edit.notes, parentId: edit.parent_id || null };
       const out = edit.id ? await api.updateSharedLink(edit.id, body) : await api.createSharedLink(body);
       setEdit(null);
       await refresh();
@@ -65,7 +65,7 @@ export default function SharedLinks() {
     catch (e) { store.toast(`Could not change: ${e.message}`); }
   };
 
-  const worst = (links ?? []).filter((l) => l.level === 'down' || l.level === 'watch');
+  const worst = (links ?? []).filter((l) => (l.level === 'down' || l.level === 'watch') && !l.upstream);
 
   return (
     <Screen
@@ -75,7 +75,7 @@ export default function SharedLinks() {
     >
       <Grid min={200} gap={14}>
         <Stat label="Links" value={links?.length ?? '…'} hint="shared devices" />
-        <Stat label="Needing a look" value={worst.length} tone={worst.length ? color.rust : undefined} hint="down or watch" />
+        <Stat label="Needing a look" value={worst.length} tone={worst.length ? color.rust : undefined} hint="the cause, not the ones it takes down" />
         <Stat label="Customers grouped" value={(links ?? []).reduce((a, l) => a + l.customers, 0)} hint="on a shared link" />
         <Stat label="Unmanaged" value={(links ?? []).filter((l) => !l.managed).length} hint="judged from customers only" />
       </Grid>
@@ -89,6 +89,7 @@ export default function SharedLinks() {
           columns={[
             { key: 'name', label: 'Link', render: (l) => <span><b>{l.name}</b>{l.location ? <span style={{ color: color.muted }}> · {l.location}</span> : null}</span> },
             { key: 'kind', label: 'Type', render: (l) => <span>{kindLabel(l.kind)}{l.managed ? '' : <span style={{ color: color.muted }}> · unmanaged</span>}</span> },
+            { key: 'parent', label: 'Fed from', render: (l) => (l.parent_id ? (links.find((x) => x.id === l.parent_id)?.name ?? '—') : '—') },
             { key: 'level', label: 'State', render: (l) => <Badge tone={LEVEL[l.level].tone}>{LEVEL[l.level].label}</Badge> },
             { key: 'customers', label: 'Online', render: (l) => (l.active ? `${l.online} of ${l.active}` : '—') },
             { key: 'drops', label: 'Drops (24h)', render: (l) => l.drops },
@@ -113,6 +114,13 @@ export default function SharedLinks() {
         {!detail ? <div style={{ color: color.muted }}>Loading…</div> : (
           <div style={{ display: 'grid', gap: 14 }}>
             <Verdict v={detail.verdict} />
+            {detail.parent_name && <div style={{ fontSize: 13, color: color.inkSoft }}>Fed from <b>{detail.parent_name}</b></div>}
+            {detail.children?.length > 0 && (
+              <div style={{ fontSize: 13 }}>
+                <b>Feeds</b>{' '}
+                {detail.children.map((c) => <span key={c.id} style={{ marginRight: 10 }}>{c.name} <Badge tone={LEVEL[c.level].tone}>{LEVEL[c.level].label}</Badge></span>)}
+              </div>
+            )}
             {detail.notes && <div style={{ fontSize: 13, color: color.inkSoft, whiteSpace: 'pre-wrap' }}>{detail.notes}</div>}
             <Card
               title={`Customers (${detail.members.length})`}
@@ -125,6 +133,7 @@ export default function SharedLinks() {
                 rows={detail.members}
                 columns={[
                   { key: 'name', label: 'Customer', render: (m) => <span><b>{m.name}</b><span style={{ color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}> {m.account_code}</span></span> },
+                  { key: 'via', label: 'On', render: (m) => (m.direct ? 'this device' : (m.via ?? '—')) },
                   { key: 'status', label: 'Account', render: (m) => <Badge>{m.status}</Badge> },
                   { key: 'online', label: 'Line', render: (m) => (!m.pppoe_user ? '—' : m.online ? <Badge tone={m.line_state === 'unreachable' ? 'pending' : 'active'}>{m.line_state === 'unreachable' ? 'no traffic' : 'online'}</Badge> : <Badge tone="down">offline</Badge>) },
                   { key: 'drops', label: 'Drops', render: (m) => m.drops || '—' },
@@ -154,6 +163,12 @@ export default function SharedLinks() {
               label="Unmanaged (cannot be logged into)"
               detail="A plain switch or a radio nobody can see inside. Billing can't read it, so it is judged only from the customers behind it."
             />
+            <Field label="Fed from" hint="The link upstream of this one: a switch is fed from the radio that receives the signal, and a radio from the switch.">
+              <Select
+                options={[{ value: '', label: 'Nothing (the first device)' }, ...(links ?? []).filter((x) => x.id !== edit.id).map((x) => ({ value: x.id, label: x.name }))]}
+                value={edit.parent_id ?? ''} onChange={(e) => setEdit({ ...edit, parent_id: e.target.value })}
+              />
+            </Field>
             <Field label="Location"><Input value={edit.location ?? ''} onChange={(e) => setEdit({ ...edit, location: e.target.value })} placeholder="Site, pole or building" /></Field>
             <Field label="Notes"><Textarea rows={3} value={edit.notes ?? ''} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} placeholder="Model, power source, who to call" /></Field>
           </div>

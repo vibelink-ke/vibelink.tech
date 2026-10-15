@@ -215,7 +215,9 @@
       "New Shared links page: group the customers behind one radio, switch or ONU, and see at a glance whether a fault is the shared device's or one customer's, including unmanaged switches that are judged from the customers behind them",
       "SkyPlan map: shared links panel showing each radio, switch or ONU with its health; tap one to see only its customers and a line from each",
       "SkyPlan map: shared links panel showing each radio, switch or ONU with its health; tap one to see only its customers and a line from each",
-      "SkyPlan: make and edit shared links from the map: add a switch, radio or ONU (managed or unmanaged), then click customers to put them on it"
+      "SkyPlan: make and edit shared links from the map: add a switch, radio or ONU (managed or unmanaged), then click customers to put them on it",
+      "SkyPlan: make and edit shared links from the map: add a switch, radio or ONU (managed or unmanaged), then click customers to put them on it",
+      "Shared links can be fed from one another (receiving radio → switch → more radios), sit on a building or mast on the SkyPlan map, and a fault shows at the highest device that has it; customers can be searched on the map"
     ]
   }
 ]
