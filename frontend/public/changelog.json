@@ -225,7 +225,9 @@
       "Things deleted in billing no longer come back from SkyPlan, and things deleted in SkyPlan can be removed from billing (it asks first); shared links also count customers assigned to the access point at their site",
       "Shared links: radios, switches and ONUs get an address, model and frequency, are pinged every 2 minutes from the router they are locked to, and show Down when they stop answering; they are listed in SkyPlan's Network tab and their customers are evaluated automatically",
       "Shared links: radios, switches and ONUs get an address, model and frequency, are pinged every 2 minutes from the router they are locked to, and show Down when they stop answering; they are listed in SkyPlan's Network tab and their customers are evaluated automatically",
-      "Shared links: customers are put on a switch, station or fibre ONU only (a customer with their own dish stays on their access point), and customers are evaluated automatically unless their device is failing its ping"
+      "Shared links: customers are put on a switch, station or fibre ONU only (a customer with their own dish stays on their access point), and customers are evaluated automatically unless their device is failing its ping",
+      "Shared links: customers are put on a switch, station or fibre ONU only (a customer with their own dish stays on their access point), and customers are evaluated automatically unless their device is failing its ping",
+      "Client edit: 'Served by radio' now lists every radio on the map (access points, point-to-point radios and stations), and there is a new 'Connects through' choice for a customer who shares a switch, station or ONU"
     ]
   }
 ]

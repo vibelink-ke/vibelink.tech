@@ -10752,7 +10752,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'mgmt_ip'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'mgmt_ip', 'shared_link_id'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -10839,6 +10839,16 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
       if (!rowCount) return res.status(400).json({ error: 'That access point is not on your map.' });
     }
     req.body.ap_node_id = v;
+  }
+  if ('shared_link_id' in req.body) {
+    // The switch, station or ONU a customer connects through. Not an access point: a customer with their own dish is not sharing.
+    const v = req.body.shared_link_id || null;
+    if (v !== null) {
+      const { rows: [l] } = await pool.query('select kind from shared_links where id=$1 and tenant_id=$2', [v, req.tenant.id]).catch(() => ({ rows: [] }));
+      if (!l) return res.status(400).json({ error: 'That is not one of your shared links.' });
+      if (l.kind === 'ap' || l.kind === 'radio') return res.status(400).json({ error: 'Customers are put on a switch, a station or a fibre ONU. A customer with their own dish connects to the access point above instead.' });
+    }
+    req.body.shared_link_id = v;
   }
 
   // A price agreed for this customer alone. Empty clears it, back to the plan's own price.

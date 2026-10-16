@@ -209,7 +209,11 @@ export default function ClientDetail() {
   const [infoBusy, setInfoBusy] = useState(false);
   // Access points drawn on the map, for choosing which radio serves this customer (needs map access; silent without).
   const [aps, setAps] = useState([]);
-  useEffect(() => { api.network().then((n) => setAps((n.nodes ?? []).filter((x) => x.kind === 'ap'))).catch(() => {}); }, []);
+  // Every radio on the map a customer can be served by: access points, point-to-point radios and stations (not only "ap").
+  useEffect(() => { api.network().then((n) => setAps((n.nodes ?? []).filter((x) => ['ap', 'ptp', 'station'].includes(x.kind)))).catch(() => {}); }, []);
+  // Shared switches, stations and ONUs (Shared links), for the customers who connect through one instead of having their own dish.
+  const [sharedLinks, setSharedLinks] = useState([]);
+  useEffect(() => { api.sharedLinks().then((l) => setSharedLinks(l ?? [])).catch(() => {}); }, []);
   const [tagDraft, setTagDraft] = useState('');
   const [portalPassword, setPortalPassword] = useState(undefined);   // undefined = not fetched yet
 
@@ -663,6 +667,7 @@ export default function ClientDetail() {
       const orig = clients.find((c) => c.id === editing.id) ?? {};
       if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
       if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
+      if ((editing.shared_link_id || null) !== (orig.shared_link_id ?? null)) patch.shared_link_id = editing.shared_link_id || null;
       if ((editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null) !== (orig.mgmt_ip ? String(orig.mgmt_ip).split('/')[0] : null)) patch.mgmt_ip = editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null;
     }
     try {
@@ -1713,7 +1718,16 @@ export default function ClientDetail() {
                 <Select
                   value={editing.ap_node_id ?? ''}
                   onChange={(e) => setEditing((v) => ({ ...v, ap_node_id: e.target.value }))}
-                  options={[{ value: '', label: 'Not set' }, ...aps.map((a) => ({ value: a.id, label: a.name }))]}
+                  options={[{ value: '', label: 'Not set' }, ...aps.map((a) => ({ value: a.id, label: `${a.name}${a.kind === 'ap' ? '' : a.kind === 'station' ? ' (station)' : ' (point-to-point)'}` }))]}
+                />
+              </Field>
+            )}
+            {sharedLinks.some((l) => l.kind !== 'ap' && l.kind !== 'radio') && (
+              <Field label="Connects through" hint="Only if this customer shares a switch, a station or an ONU with others (not for a customer with their own dish). Set up under Shared links.">
+                <Select
+                  value={editing.shared_link_id ?? ''}
+                  onChange={(e) => setEditing((v) => ({ ...v, shared_link_id: e.target.value }))}
+                  options={[{ value: '', label: 'Nothing (their own dish)' }, ...sharedLinks.filter((l) => (l.kind !== 'ap' && l.kind !== 'radio') || l.id === editing.shared_link_id).map((l) => ({ value: l.id, label: `${l.name} (${l.kind === 'ap' ? 'access point' : l.kind === 'onu' ? 'ONU' : l.kind})` }))]}
                 />
               </Field>
             )}
