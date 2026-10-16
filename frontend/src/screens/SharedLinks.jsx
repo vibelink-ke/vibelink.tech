@@ -24,6 +24,7 @@ const LEVEL = {
   unknown: { label: 'No data', tone: 'default' },
 };
 const BLANK = { name: '', kind: 'ap', managed: true, location: '', notes: '', parent_id: '', ip: '', mac: '', model: '', freq_mhz: '', ssid: '', ping_router_id: '' };
+const canHold = (k) => k !== 'ap' && k !== 'radio';
 const isRadio = (k) => k === 'ap' || k === 'station' || k === 'radio';
 const pingText = (l) => (!l.ip ? '' : l.ping_ok === true ? `answers${l.ping_ms != null ? ` ${Number(l.ping_ms).toFixed(0)} ms` : ''}` : l.ping_ok === false ? 'no answer' : (l.ping_router ? 'waiting for a ping' : 'no router chosen'));
 
@@ -140,12 +141,12 @@ export default function SharedLinks() {
             {detail.notes && <div style={{ fontSize: 13, color: color.inkSoft, whiteSpace: 'pre-wrap' }}>{detail.notes}</div>}
             <Card
               title={`Customers (${detail.members.length})`}
-              actions={can('links.manage') && <Button size="sm" onClick={() => setAdding(true)}>+ Add customers</Button>}
+              actions={can('links.manage') && canHold(detail.kind) && <Button size="sm" onClick={() => setAdding(true)}>+ Add customers</Button>}
               pad={0}
             >
               <Table
                 rowKey={(m) => m.id}
-                empty="No customers on this link yet"
+                empty={canHold(detail.kind) ? 'No customers on this link yet' : 'Customers with their own dish connect to this access point by their account assignment, not by being added here.'}
                 rows={detail.members}
                 columns={[
                   { key: 'name', label: 'Customer', render: (m) => <span><b>{m.name}</b><span style={{ color: color.muted, fontFamily: font.mono, fontSize: 11.5 }}> {m.account_code}</span></span> },

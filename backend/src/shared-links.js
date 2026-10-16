@@ -6,6 +6,8 @@
  * into): nothing can be read from the device itself, so it is judged only from the customers behind it, and the verdict says so.
  */
 export const KINDS = ['ap', 'station', 'radio', 'switch', 'onu', 'other'];
+/** Customers are added to these. An access point (or the older "radio") is not shared: its customers each have their own dish. */
+export const canHoldCustomers = (k) => k !== 'ap' && k !== 'radio';
 const isRadio = (k) => k === 'ap' || k === 'station' || k === 'radio';
 const KIND_LABEL = { radio: 'radio', ap: 'access point', station: 'station', switch: 'switch', onu: 'ONU', other: 'link' };
 
@@ -404,8 +406,13 @@ export async function deleteLink(pool, tenantId, id) {
 
 /** Put customers on a link (a customer sits on one link; adding moves them) or take them off it. Only this organisation's customers. */
 export async function setMembers(pool, tenantId, id, { add = [], remove = [] }) {
-  const { rows: [l] } = await pool.query('select id from shared_links where id=$1 and tenant_id=$2', [id, tenantId]);
+  const { rows: [l] } = await pool.query('select id, kind from shared_links where id=$1 and tenant_id=$2', [id, tenantId]);
   if (!l) return null;
+  // A customer with their own dish connects to the access point by their own assignment, so an access point is not something customers are
+  // added to: they go on the switch or station they share (or a fibre ONU).
+  if ((Array.isArray(add) ? add : []).length && !canHoldCustomers(l.kind)) {
+    throw bad('Customers are put on a switch, a station or a fibre ONU. A customer with their own dish connects to the access point by their account assignment, not here.');
+  }
   const ids = (a) => (Array.isArray(a) ? a : []).map(String).filter((x) => /^[0-9a-f-]{36}$/i.test(x)).slice(0, 500);
   let added = 0; let removed = 0;
   if (ids(add).length) added = (await pool.query('update subscribers set shared_link_id=$1 where tenant_id=$2 and id = any($3::uuid[])', [id, tenantId, ids(add)])).rowCount;
