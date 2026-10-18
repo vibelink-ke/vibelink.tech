@@ -27,25 +27,27 @@ export default function RouterChaining() {
   const [adding, setAdding] = useState(null);
   const [show, setShow] = useState('watched');
   const [scans, setScans] = useState([]);
-  const [seen, setSeen] = useState(null);          // what the last scan saw, port by port
+  const [seenId, setSeenId] = useState(null);      // the router whose last scan is shown below, port by port
   const routers = (store.routers ?? []).filter((r) => r.role === 'hotspot' || r.role === 'both' || !r.role);
 
   const load = useCallback(() => Promise.all([api.chainedRouters().then(setRows), api.chainingScans().then(setScans).catch(() => {})]).catch((e) => store.toast(`Could not load: ${e.message}`)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []);
-  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);
+  // every minute, and every 3 seconds while a scan is running so its progress shows
+  const anyRunning = scans.some((x) => x.running);
+  useEffect(() => { load(); const t = setInterval(load, anyRunning ? 3000 : 60000); return () => clearInterval(t); }, [load, anyRunning]);
   useEffect(() => { if (!scanRouter && routers[0]) setScanRouter(routers[0].id); }, [routers, scanRouter]);
 
-  const scan = async () => {
+  // A scan runs in the background and can take minutes on a big router: start it, then watch its progress in the Routers table.
+  const startScan = async (routerId) => {
     setScanning(true);
     try {
-      const r = await api.scanChaining({ routerId: scanRouter });
-      setSeen(r);
-      const side = r.lan?.length ? ` Looked at the LAN side (${r.lan.join(', ')})${r.uplink?.length ? `, skipped the uplink (${r.uplink.join(', ')})` : ''}.` : (r.uplink?.length ? ` Skipped the uplink (${r.uplink.join(', ')}).` : '');
-      store.toast((r.added ? `Found ${r.added} new chained router${r.added === 1 ? '' : 's'}. Watching ${r.watched}.` : `Nothing new. Watching ${r.watched}.`) + (r.cleaned ? ` Removed ${r.cleaned} that were on the uplink.` : '') + side);
-      await load();
-    } catch (e) { store.toast(`Could not scan: ${e.message}`); } finally { setScanning(false); }
+      const r = await api.scanChaining({ routerId });
+      setSeenId(routerId);
+      store.toast(r.started ? 'Scanning in the background. Its progress shows in the Routers table; you can leave this page.' : 'That router is already being scanned.');
+    } catch (e) { store.toast(`Could not scan: ${e.message}`); } finally { setScanning(false); await load(); }
   };
+  const scan = () => startScan(scanRouter);
   const change = async (c, body, done) => {
     try { await api.updateChainedRouter(c.id, body); await load(); if (done) store.toast(done); } catch (e) { store.toast(`Could not change: ${e.message}`); }
   };
@@ -62,6 +64,8 @@ export default function RouterChaining() {
     catch (e) { store.toast(`Could not add: ${e.message}`); }
   };
 
+  const seenRow = scans.find((x) => x.id === seenId);
+  const seen = seenRow?.report ? { router: seenRow.name, routerId: seenRow.id, seen: seenRow.report.seen ?? [], hostsRead: seenRow.report.hostsRead ?? seenRow.hosts, hotspotOn: seenRow.report.hotspotOn } : null;
   const all = rows ?? [];
   const watched = all.filter((c) => !c.ignored);
   const shown = show === 'onu' ? watched.filter((c) => c.kind === 'onu') : show === 'router' ? watched.filter((c) => c.kind !== 'onu') : show === 'ignored' ? all.filter((c) => c.ignored) : show === 'down' ? watched.filter((c) => c.status === 'down') : show === 'check' ? watched.filter((c) => c.confidence === 'likely') : watched;
@@ -81,7 +85,7 @@ export default function RouterChaining() {
         actions={can && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Select style={{ width: 180 }} value={scanRouter} onChange={(e) => setScanRouter(e.target.value)} options={routers.map((r) => ({ value: r.id, label: r.name }))} />
-            <Button size="sm" onClick={scan} disabled={scanning || !scanRouter}>{scanning ? 'Scanning…' : 'Scan now'}</Button>
+            <Button size="sm" onClick={scan} disabled={scanning || !scanRouter || scans.find((x) => x.id === scanRouter)?.running}>{scanning || scans.find((x) => x.id === scanRouter)?.running ? 'Scanning…' : 'Scan now'}</Button>
             <Button size="sm" onClick={() => setAdding({ routerId: scanRouter, mac: '', name: '', kind: 'router' })}>+ Add by MAC</Button>
           </div>
         )}
@@ -128,9 +132,14 @@ export default function RouterChaining() {
             { key: 'name', label: 'Router', render: (x) => <span><b>{x.name}</b><span style={{ color: color.muted }}> · {x.role}</span></span> },
             { key: 'status', label: 'State', render: (x) => <Badge tone={x.status === 'up' ? 'active' : 'down'}>{x.status}</Badge> },
             { key: 'devices', label: 'Chained devices', render: (x) => x.devices },
-            { key: 'last', label: 'Last scan', render: (x) => (x.at ? ago(x.at) : 'not yet') },
+            { key: 'last', label: 'Last scan', render: (x) => (x.running ? <Badge tone="pending">scanning…</Badge> : (x.at ? ago(x.at) : 'not yet')) },
             { key: 'note', label: 'What it did', render: (x) => <span style={{ fontSize: 12.5, color: x.ok === false ? color.rust : color.inkSoft }}>{x.note || (x.at ? '' : 'Waiting for the next pass.')}</span> },
-            { key: 'act', label: '', align: 'right', render: (x) => can && <Button size="sm" onClick={async () => { setScanRouter(x.id); setScanning(true); try { const r = await api.scanChaining({ routerId: x.id }); setSeen(r); await load(); } catch (e) { store.toast(`Could not scan: ${e.message}`); await load(); } finally { setScanning(false); } }} disabled={scanning}>Scan now</Button> },
+            { key: 'act', label: '', align: 'right', render: (x) => (
+              <span style={{ display: 'inline-flex', gap: 6 }}>
+                {x.report && <Button size="sm" onClick={() => setSeenId(x.id)}>What it saw</Button>}
+                {can && <Button size="sm" onClick={() => startScan(x.id)} disabled={scanning || x.running}>{x.running ? 'Scanning…' : 'Scan now'}</Button>}
+              </span>
+            ) },
           ]}
         />
       </Card>

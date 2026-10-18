@@ -12,7 +12,7 @@
  * Reading a router is read-only. Nothing here changes a router.
  */
 import { pool, enabledTenants } from './db.js';
-import { makerOf, maybeOnuVendorOf, onuVendorOf, sameDevice, vendorOf } from './router-ouis.js';
+import { FAMILY_SPAN, makerOf, maybeOnuVendorOf, onuVendorOf, sameDevice, vendorOf } from './router-ouis.js';
 
 export const OFFLINE_MINUTES = 3;
 const PINGS_PER_ROUTER = 20;
@@ -102,12 +102,37 @@ export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], 
   return { wan, lanBridges: lan.size ? lan : null };
 }
 
+const MAX_PORT_HOSTS = 100000;    // a safety stop only: a port is read however many devices it carries (a big hotspot takes minutes over a slow tunnel, and that is allowed)
+const OR_CHUNK = 28;              // MACs asked for in one query
+
+/** The MACs of one router's own interfaces: this one and the few either side of it (the label address may not be the one the bridge sees). */
+function familyOf(mac) {
+  const h = String(mac).replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  if (h.length !== 12) return [normMac(mac)];
+  const base = parseInt(h.slice(6), 16);
+  const out = [];
+  for (let d = -FAMILY_SPAN; d <= FAMILY_SPAN; d += 1) {
+    const n = base + d;
+    if (n < 0 || n > 0xffffff) continue;
+    const t = n.toString(16).toUpperCase().padStart(6, '0');
+    out.push(`${h.slice(0, 2)}:${h.slice(2, 4)}:${h.slice(4, 6)}:${t.slice(0, 2)}:${t.slice(2, 4)}:${t.slice(4, 6)}`);
+  }
+  return out;
+}
+
+/** "field is A or B or C" as a RouterOS API query. */
+const orQuery = (field, values) => [...values.map((v) => `?${field}=${v}`), ...(values.length > 1 ? [`?#${'|'.repeat(values.length - 1)}`] : [])];
+
 /**
- * What one router can tell us: the MACs on its bridge, who holds a lease, which interfaces are wired, and which side is the LAN.
- * A busy router has thousands of hosts and leases, and a slow tunnel makes reading them all the slowest thing billing does, so this asks for less:
- * the small tables first (they say which bridge is the hotspot's), then only that bridge's hosts and only the bound leases, and only the fields used.
+ * What one router can tell us: the MACs on its cable ports, who holds a lease, which interfaces are wired, and which side is the LAN.
+ * A busy hotspot router has thousands of hosts and leases, and over a slow tunnel reading them all is slower than any deadline, so none of the big
+ * tables is read whole: the small tables first (they say which bridge is the hotspot's and which ports are cables), then one cable port at a time,
+ * counted first so progress can say how many there are, then only the leases of the MACs found and of the routers already being watched, asked for by
+ * MAC. It takes as long as it takes: nothing is skipped for being big.
+ *   opts.watchMacs  the MACs of chained routers already known, looked up directly
+ *   opts.progress   called with a sentence about what is being read now (shown on the screen while the scan runs)
  */
-export async function chainSnapshot(conn, trace = null) {
+export async function chainSnapshot(conn, trace = null, opts = {}) {
   // `trace` names the calls still waiting, so a read that times out can say which one it was stuck on.
   const track = (label, p) => { trace?.add(label); return p.finally(() => trace?.delete(label)); };
   const soft = (path, query = []) => track(`${path} ${query.filter((q) => q.startsWith('?')).join(' ')}`.trim(), conn.write(path, query).catch(() => []));
@@ -127,24 +152,59 @@ export async function chainSnapshot(conn, trace = null) {
   ]);
   const ifaceRows = [...ether, ...bridges, ...vlanIfaces, ...pppoeOut];
   const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts });
+  const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
+
+  // the cable ports of the LAN side, and for each how many devices are on it
   const HOST_FIELDS = '=.proplist=mac-address,on-interface,bridge,local,age';
-  let hostRows = [];
-  if (scope.lanBridges) {
-    for (const b of scope.lanBridges) hostRows.push(...await track(`/interface/bridge/host/print ?bridge=${b}`, conn.write('/interface/bridge/host/print', [`?bridge=${b}`, HOST_FIELDS])));
-  } else {
-    hostRows = await track('/interface/bridge/host/print', conn.write('/interface/bridge/host/print', [HOST_FIELDS]));
+  const HOSTS = '/interface/bridge/host/print';
+  const lanPorts = bridgePorts
+    .map((b) => ({ port: String(b.interface ?? ''), bridge: String(b.bridge ?? '') }))
+    .filter((b) => b.port && wired.has(b.port) && !scope.wan.has(b.port) && !scope.wan.has(b.bridge) && (!scope.lanBridges || scope.lanBridges.has(b.bridge)));
+  const hostRows = []; const bigPorts = [];
+  const say = (t) => { try { opts.progress?.(t); } catch { /* progress is only a courtesy */ } };
+  say(`Found ${lanPorts.length} cable port${lanPorts.length === 1 ? '' : 's'} on the hotspot side. Counting the devices on each…`);
+  let portNo = 0;
+  for (const { port, bridge } of lanPorts) {
+    portNo += 1;
+    const q = [`?bridge=${bridge}`, `?on-interface=${port}`];
+    let n = null;
+    try {
+      const c = await track(`${HOSTS} count ${port}`, conn.write(HOSTS, ['=count-only=', ...q]));
+      n = Number(Array.isArray(c) ? c[0]?.ret : c?.ret);
+    } catch { n = null; }
+    if (Number.isFinite(n) && n > MAX_PORT_HOSTS) { bigPorts.push({ port, bridge, count: n }); continue; }
+    say(`Reading ${port} (${portNo} of ${lanPorts.length})${Number.isFinite(n) ? `: ${n} device${n === 1 ? '' : 's'}` : ''}…`);
+    hostRows.push(...await track(`${HOSTS} ${port}`, conn.write(HOSTS, [...q, HOST_FIELDS])));
   }
-  const leaseRows = await soft('/ip/dhcp-server/lease/print', ['?status=bound', '=.proplist=mac-address,active-mac-address,address,active-address,host-name,class-id,last-seen']);
-  const hosts = hostRows.map((r) => ({
-    mac: normMac(r['mac-address']), port: String(r['on-interface'] ?? ''), bridge: String(r.bridge ?? ''), local: String(r.local) === 'true',
-    ageSec: parseRosAge(r.age),
-  })).filter((h) => h.mac && h.port);
+
+  // routers already watched, asked for by MAC (and the few addresses either side), wherever they are: a router on a skipped port is still seen
+  const watch = [...new Set((opts.watchMacs ?? []).flatMap(familyOf))];
+  if (watch.length) say(`Looking up the ${opts.watchMacs.length} router${opts.watchMacs.length === 1 ? '' : 's'} already watched…`);
+  for (let i = 0; i < watch.length; i += OR_CHUNK) {
+    hostRows.push(...await track(`${HOSTS} by MAC`, conn.write(HOSTS, [...orQuery('mac-address', watch.slice(i, i + OR_CHUNK)), HOST_FIELDS])));
+  }
+
+  const hosts = [];
+  const seenHost = new Set();
+  for (const r of hostRows) {
+    const h = { mac: normMac(r['mac-address']), port: String(r['on-interface'] ?? ''), bridge: String(r.bridge ?? ''), local: String(r.local) === 'true', ageSec: parseRosAge(r.age) };
+    const key = `${h.mac}|${h.port}`;
+    if (h.mac && h.port && !seenHost.has(key)) { seenHost.add(key); hosts.push(h); }
+  }
+
+  // leases: only those of the MACs just read
+  const LEASE_FIELDS = '=.proplist=mac-address,active-mac-address,address,active-address,host-name,class-id,last-seen';
+  const want = [...new Set([...hosts.map((h) => h.mac), ...watch])];
+  say(`Reading the names of ${want.length} device${want.length === 1 ? '' : 's'}…`);
+  const leaseRows = [];
+  for (let i = 0; i < want.length; i += OR_CHUNK) {
+    leaseRows.push(...await soft('/ip/dhcp-server/lease/print', [...orQuery('mac-address', want.slice(i, i + OR_CHUNK)), LEASE_FIELDS]));
+  }
   const leases = leaseRows.map((r) => ({
     mac: normMac(r['active-mac-address'] || r['mac-address']), address: String(r['active-address'] || r.address || ''),
     hostname: String(r['host-name'] ?? ''), classId: String(r['class-id'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
-  const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
-  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean) };
+  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
 }
 
 /**
@@ -155,7 +215,7 @@ export async function chainSnapshot(conn, trace = null) {
  * lists those devices so a router that gives nothing away can be added by hand.
  * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router, candidates }] }.
  */
-export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null }) {
+export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null, bigPorts = [] }) {
   const lease = new Map(leases.map((l) => [l.mac, l]));
   const ports = new Map();
   for (const h of hosts) {
@@ -201,6 +261,9 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
     row.verdict = makers.length ? `${what} found (by its MAC: ${makers.join(', ')})`
       : routers.some((c) => c.named || c.onuNamed) ? `${what} found (by its name)` : `${what} found (by its DHCP signature)`;
   }
+  for (const b of bigPorts) {
+    report.push({ port: b.port, bridge: b.bridge, devices: b.count, router: null, candidates: [], verdict: `${b.count} devices: too many to be one router (a switch or an access-point trunk), so not read` });
+  }
   return { found, report };
 }
 
@@ -231,7 +294,7 @@ export const aliveFromSnapshot = (mac, snap) => presence(mac, snap).alive;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const label = (c) => c.name || c.hostname || c.mac;
 
-export const READ_DEADLINE_SECONDS = 60;
+export const READ_DEADLINE_SECONDS = 900;     // a scan runs in the background and may take minutes on a big router; this is only a stop for one that never ends
 
 /** Run one router's pass with a deadline: when it passes, the connection is closed and the pass fails with a message that says what happened. */
 export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS) {
@@ -240,19 +303,25 @@ export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS
     timer = setTimeout(() => {
       try { if (r.conn) ros.close(r.conn); } catch { /* it is going anyway */ }
       const waiting = r.trace && r.trace.size ? ` while waiting for ${[...r.trace].join(', ')}` : '';
-      reject(new Error(`Timed out after ${seconds} seconds reading the router${waiting}: that table is very large, or the tunnel to it is slow`));
+      reject(new Error(`Gave up after ${seconds >= 120 ? `${Math.round(seconds / 60)} minutes` : `${seconds} seconds`} reading the router${waiting}: that table is very large, or the tunnel to it is very slow`));
     }, seconds * 1000);
   });
   try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
 }
 
-/** What the last scan of a router did (shown under Routers on the screen). */
-async function recordScan(r, { ok = true, note = '', hosts = 0, found = 0, watched = 0 }) {
+/** What the last scan of a router did (shown under Routers on the screen), and how far a running one has got. */
+async function recordScan(r, { ok = true, note = '', hosts = 0, found = 0, watched = 0, running = false, starting = false, report = null }) {
   try {
     await pool.query(
-      `insert into chained_scans (router_id, tenant_id, at, ok, note, hosts, found, watched) values ($1,$2, now(), $3,$4,$5,$6,$7)
-       on conflict (router_id) do update set at = now(), ok = excluded.ok, note = excluded.note, hosts = excluded.hosts, found = excluded.found, watched = excluded.watched`,
-      [r.id, r.tenant_id, ok, String(note).slice(0, 300), hosts, found, watched]);
+      `insert into chained_scans (router_id, tenant_id, at, ok, note, hosts, found, watched, running, started_at, report)
+       values ($1,$2, now(), $3,$4,$5,$6,$7,$8, case when $9 then now() end, $10)
+       on conflict (router_id) do update set at = now(), ok = excluded.ok, note = excluded.note, running = excluded.running,
+         hosts = case when excluded.running then chained_scans.hosts else excluded.hosts end,
+         found = case when excluded.running then chained_scans.found else excluded.found end,
+         watched = case when excluded.running then chained_scans.watched else excluded.watched end,
+         started_at = case when $9 then now() else chained_scans.started_at end,
+         report = coalesce(excluded.report, chained_scans.report)`,
+      [r.id, r.tenant_id, ok, String(note).slice(0, 300), hosts, found, watched, running, starting, report ? JSON.stringify(report) : null]);
   } catch { /* the screen just shows no scan yet */ }
 }
 
@@ -266,7 +335,9 @@ async function pass(r, { ros, secrets, notify }) {
     });
     r.conn = conn;                                   // so a read that hangs can be cut off from outside (see withDeadline)
     r.trace = new Set();
-    const snap = await chainSnapshot(conn, r.trace);
+    const { rows: watching } = await pool.query('select mac from chained_routers where tenant_id=$1 and router_id=$2 and not ignored limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
+    await recordScan(r, { running: true, starting: true, note: 'Connected. Reading the router…' });
+    const snap = await chainSnapshot(conn, r.trace, { watchMacs: watching.map((x) => x.mac), progress: (t) => { void recordScan(r, { running: true, note: t }); } });
 
     // ── learn: new chained routers are added by their MAC ──
     const analysis = analysePorts(snap);
@@ -351,7 +422,8 @@ async function pass(r, { ros, secrets, notify }) {
     }
     await recordScan(r, {
       ok: true, hosts: snap.hosts.length, found: found.length, watched: byMac.size,
-      note: `${snap.lanBridges ? `Looked at the hotspot bridge (${[...snap.lanBridges].join(', ')})` : 'Looked at every bridge except the uplink'}${uplink.length ? `, skipped the uplink (${uplink.join(', ')})` : ''}. ${learn ? '' : 'No hotspot on this router, so not looking for new ones. '}Read ${snap.hosts.length} device addresses.`,
+      report: { seen: analysis.report.slice(0, 80), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink },
+      note: `${snap.lanBridges ? `Looked at the hotspot bridge (${[...snap.lanBridges].join(', ')})` : 'Looked at every bridge except the uplink'}${uplink.length ? `, skipped the uplink (${uplink.join(', ')})` : ''}. ${learn ? '' : 'No hotspot on this router, so not looking for new ones. '}Read ${snap.hosts.length} device addresses.${snap.bigPorts?.length ? ` Skipped ${snap.bigPorts.map((b) => `${b.port} (${b.count} devices)`).join(', ')}: too many devices to be one router.` : ''}`,
     });
     return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
       routerId: r.id, seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
@@ -361,28 +433,47 @@ async function pass(r, { ros, secrets, notify }) {
 }
 
 /** The scheduled job: every hotspot router that is up. A router that is down says nothing about what is behind it, so those are "unknown". */
+const inFlight = new Map();          // router id -> when its scan started
+const MAX_PARALLEL = 4;
+
+/** Start one router's scan in the background. False when it is already running. */
+function launch(r, deps) {
+  if (inFlight.has(r.id)) return false;
+  inFlight.set(r.id, Date.now());
+  void recordScan(r, { running: true, starting: true, note: 'Starting…' });
+  (async () => {
+    try { await withDeadline(r, deps.ros, pass(r, deps)); } catch (e) {
+      console.warn('watchChainedRouters:', r.name, '-', e.message);
+      await recordScan(r, { ok: false, note: e.message.startsWith('Gave up') ? e.message : `Could not read the router: ${e.message}` });
+    } finally { inFlight.delete(r.id); }
+  })();
+  return true;
+}
+
 export async function watchChainedRouters({ notify }) {
   const { rows: routers } = await pool.query(
-    `select id, tenant_id, name, host, api_port, role, status, service_user, service_password_enc
-       from routers where tenant_id in (${enabledTenants})`, ['watchChainedRouters']);
+    `select r.id, r.tenant_id, r.name, r.host, r.api_port, r.role, r.status, r.service_user, r.service_password_enc
+       from routers r left join chained_scans s on s.router_id = r.id
+      where r.tenant_id in (${enabledTenants})
+      order by coalesce(s.at, 'epoch') asc`, ['watchChainedRouters']);          // the one scanned longest ago first, so a slow router cannot starve the rest
   await pool.query(
     `update chained_routers c set status='unknown', ping_fails=0
        from routers r where r.id = c.router_id and r.status <> 'up' and c.status <> 'unknown'`);
+  // a scan the server lost track of (it restarted while one ran) is not running any more
+  await pool.query(`update chained_scans set running = false, ok = false, note = 'The scan was interrupted (the server restarted).' where running and router_id <> all($1::uuid[])`, [[...inFlight.keys()]]);
   if (!routers.length) return;
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
-  const todo = async (r) => {
-    if (r.status !== 'up') { await recordScan(r, { ok: false, note: 'The router is down, so it was skipped.' }); return; }
-    if (!r.service_user || !r.service_password_enc) { await recordScan(r, { ok: false, note: 'No login is stored for this router, so billing cannot read it.' }); return; }
-    try { await withDeadline(r, ros, pass(r, { ros, secrets, notify })); } catch (e) {
-      console.warn('watchChainedRouters:', r.name, '-', e.message);
-      await recordScan(r, { ok: false, note: e.message.startsWith('Timed out') ? e.message : `Could not read the router: ${e.message}` });
-    }
-  };
-  for (let i = 0; i < routers.length; i += 3) await Promise.all(routers.slice(i, i + 3).map(todo));
+  for (const r of routers) {
+    if (inFlight.has(r.id)) continue;
+    if (r.status !== 'up') { await recordScan(r, { ok: false, note: 'The router is down, so it was skipped.' }); continue; }
+    if (!r.service_user || !r.service_password_enc) { await recordScan(r, { ok: false, note: 'No login is stored for this router, so billing cannot read it.' }); continue; }
+    if (inFlight.size >= MAX_PARALLEL) break;
+    launch(r, { ros, secrets, notify });
+  }
 }
 
-/** Look at one router now (the Scan button): learn and check it once, without telling anyone. */
+/** The Scan button: start a scan of one router now, in the background, without telling anyone. It can take minutes; the screen shows how far it has got. */
 export async function scanRouter(tenantId, routerId) {
   const { rows: [r] } = await pool.query(
     `select id, tenant_id, name, host, api_port, role, service_user, service_password_enc, status
@@ -395,16 +486,14 @@ export async function scanRouter(tenantId, routerId) {
   }
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
-  try { return await withDeadline(r, ros, pass(r, { ros, secrets, notify: async () => {} })); } catch (e) {
-    await recordScan(r, { ok: false, note: `Could not read the router: ${e.message}` });
-    throw e;
-  }
+  const started = launch(r, { ros, secrets, notify: async () => {} });
+  return { started, running: true };
 }
 
 /** Every router with what its last scan did, so one that is skipped or failing says why. */
 export async function listScans(tenantId) {
   const { rows } = await pool.query(
-    `select r.id, r.name, r.role, r.status, s.at, s.ok, s.note, s.hosts, s.found, s.watched,
+    `select r.id, r.name, r.role, r.status, s.at, s.ok, s.note, s.hosts, s.found, s.watched, coalesce(s.running, false) as running, s.started_at, s.report,
             (select count(*)::int from chained_routers c where c.router_id = r.id and not c.ignored) as devices
        from routers r left join chained_scans s on s.router_id = r.id
       where r.tenant_id = $1 order by r.name`, [tenantId]);

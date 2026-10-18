@@ -3601,3 +3601,8 @@ create table if not exists chained_scans (
   found     integer not null default 0,
   watched   integer not null default 0
 );
+
+-- A scan runs in the background and may take minutes on a big router: it says so while it runs, and keeps what it saw.
+alter table chained_scans add column if not exists running boolean not null default false;
+alter table chained_scans add column if not exists started_at timestamptz;
+alter table chained_scans add column if not exists report jsonb;
