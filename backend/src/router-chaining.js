@@ -107,10 +107,16 @@ export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], 
  * A busy router has thousands of hosts and leases, and a slow tunnel makes reading them all the slowest thing billing does, so this asks for less:
  * the small tables first (they say which bridge is the hotspot's), then only that bridge's hosts and only the bound leases, and only the fields used.
  */
-export async function chainSnapshot(conn) {
-  const soft = (path, query = []) => conn.write(path, query).catch(() => []);
-  const [ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
-    conn.write('/interface/print', ['=.proplist=name,type,comment']),
+export async function chainSnapshot(conn, trace = null) {
+  // `trace` names the calls still waiting, so a read that times out can say which one it was stuck on.
+  const track = (label, p) => { trace?.add(label); return p.finally(() => trace?.delete(label)); };
+  const soft = (path, query = []) => track(`${path} ${query.filter((q) => q.startsWith('?')).join(' ')}`.trim(), conn.write(path, query).catch(() => []));
+  // Only the interface types that matter: cable ports (the only place a chained router plugs in), bridges, VLANs and PPPoE clients (uplinks).
+  // A bare /interface/print on a PPPoE router also lists every customer's dynamic session interface, which is thousands of rows.
+  const IFACE = (type) => soft('/interface/print', [`?type=${type}`, '=.proplist=name,type,comment']);
+  const [ether, bridges, vlanIfaces, pppoeOut, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
+    track('/interface/print ?type=ether', conn.write('/interface/print', ['?type=ether', '=.proplist=name,type,comment'])),
+    IFACE('bridge'), IFACE('vlan'), IFACE('pppoe-out'),
     soft('/ip/hotspot/print', ['=.proplist=interface']),
     soft('/interface/list/member/print', ['=.proplist=list,interface']),
     soft('/ip/route/print', ['?dst-address=0.0.0.0/0', '=.proplist=gateway,immediate-gw,gateway-status,active,disabled']),
@@ -119,13 +125,14 @@ export async function chainSnapshot(conn) {
     soft('/interface/vlan/print', ['=.proplist=name,interface']),
     soft('/interface/bridge/port/print', ['=.proplist=interface,bridge']),
   ]);
+  const ifaceRows = [...ether, ...bridges, ...vlanIfaces, ...pppoeOut];
   const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts });
   const HOST_FIELDS = '=.proplist=mac-address,on-interface,bridge,local,age';
   let hostRows = [];
   if (scope.lanBridges) {
-    for (const b of scope.lanBridges) hostRows.push(...await conn.write('/interface/bridge/host/print', [`?bridge=${b}`, HOST_FIELDS]));
+    for (const b of scope.lanBridges) hostRows.push(...await track(`/interface/bridge/host/print ?bridge=${b}`, conn.write('/interface/bridge/host/print', [`?bridge=${b}`, HOST_FIELDS])));
   } else {
-    hostRows = await conn.write('/interface/bridge/host/print', [HOST_FIELDS]);
+    hostRows = await track('/interface/bridge/host/print', conn.write('/interface/bridge/host/print', [HOST_FIELDS]));
   }
   const leaseRows = await soft('/ip/dhcp-server/lease/print', ['?status=bound', '=.proplist=mac-address,active-mac-address,address,active-address,host-name,class-id,last-seen']);
   const hosts = hostRows.map((r) => ({
@@ -232,7 +239,8 @@ export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS
   const deadline = new Promise((_, reject) => {
     timer = setTimeout(() => {
       try { if (r.conn) ros.close(r.conn); } catch { /* it is going anyway */ }
-      reject(new Error(`Timed out after ${seconds} seconds reading the router: it has very large tables, or the tunnel to it is slow`));
+      const waiting = r.trace && r.trace.size ? ` while waiting for ${[...r.trace].join(', ')}` : '';
+      reject(new Error(`Timed out after ${seconds} seconds reading the router${waiting}: that table is very large, or the tunnel to it is slow`));
     }, seconds * 1000);
   });
   try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
@@ -257,7 +265,8 @@ async function pass(r, { ros, secrets, notify }) {
       user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8,
     });
     r.conn = conn;                                   // so a read that hangs can be cut off from outside (see withDeadline)
-    const snap = await chainSnapshot(conn);
+    r.trace = new Set();
+    const snap = await chainSnapshot(conn, r.trace);
 
     // ── learn: new chained routers are added by their MAC ──
     const analysis = analysePorts(snap);
