@@ -230,7 +230,8 @@
       "Router chaining: Scan now shows what it saw on each port and why it picked or skipped it, and finds a router that has only phones behind it even when it has no name or lease",
       "Router chaining adds only devices that identify themselves as routers (by name or DHCP signature), never customers' phones or laptops; other devices on a port are listed in the scan with an Add as router button",
       "Router chaining recognises a router by its maker's MAC prefix (Tenda today) and treats the addresses of one router's interfaces, a few apart, as the same router, so a label MAC still matches the one the bridge sees",
-      "Router chaining also finds and watches fibre units (ONU/ONT of xPON, GPON and EPON networks) plugged into hotspot ports, by their model name or maker's MAC, with a Type column, Routers and ONUs filters, and Add as ONU"
+      "Router chaining also finds and watches fibre units (ONU/ONT of xPON, GPON and EPON networks) plugged into hotspot ports, by their model name or maker's MAC, with a Type column, Routers and ONUs filters, and Add as ONU",
+      "Router chaining now knows the MAC prefixes of 1,599 router and gateway registrations (TP-Link, D-Link, Netgear, Ubiquiti, MikroTik, Sagemcom, Netis, Mercusys and many more) and 338 fibre-unit ones (FiberHome, V-SOL, Nokia, DZS, Calix…), built from the IEEE registry; cameras, plugs and phones that carry a router maker's prefix are not taken for routers"
     ]
   }
 ]

@@ -17,14 +17,26 @@ const file = process.argv[2];
 if (!file) { console.error('Usage: node scripts/build-router-ouis.mjs path/to/oui.csv'); process.exit(2); }
 
 const ONU_MAKERS = [
-  [/v-?sol/i, 'V-SOL'], [/fiberhome|fiber home/i, 'FiberHome'], [/bdcom/i, 'BDCOM'], [/shanghai bell/i, 'Nokia'],
-  [/dasan zhone|\bdzs\b|zhone/i, 'DZS'], [/calix/i, 'Calix'], [/syrotech/i, 'Syrotech'],
+  [/v-?solution|\bv-?sol\b/i, 'V-SOL'], [/fiberhome/i, 'FiberHome'], [/^(nokia|alcatel-lucent) shanghai bell/i, 'Nokia'],
+  [/zhone|dasan/i, 'DZS'], [/calix/i, 'Calix'], [/syrotech/i, 'Syrotech'], [/utstarcom/i, 'UTStarcom'], [/alphion|optilink/i, 'Alphion/Optilink'],
+  [/hisense broadband/i, 'Hisense Broadband'],
 ];
+// Makers whose business is routers, gateways, access points and extenders (consumer, ISP and WISP). Patterns are anchored where a looser one
+// matches other companies (D-Link also matched BroadLink and AdLink, "arris" matched Harris, "ip-com" matched Clipcomm). Makers that also sell phones
+// and laptops (Huawei, ZTE, Xiaomi, ASUS, Samsung, Lenovo…) are deliberately left out: their prefix says nothing about what a device is.
 const MAKERS = [
   [/tenda/i, 'Tenda'], [/tp-?link/i, 'TP-Link'], [/mercusys/i, 'Mercusys'], [/\bnetis\b/i, 'Netis'], [/totolink|zioncom/i, 'Totolink'],
-  [/d-?link/i, 'D-Link'], [/cudy/i, 'Cudy'], [/ruijie/i, 'Ruijie'], [/wavlink/i, 'Wavlink'], [/comfast/i, 'Comfast'],
+  [/\bd-link\b/i, 'D-Link'], [/cudy/i, 'Cudy'], [/ruijie/i, 'Ruijie'], [/wavlink/i, 'Wavlink'], [/comfast/i, 'Comfast'],
   [/keenetic|zyxel/i, 'Keenetic/Zyxel'], [/mikrotik|routerboard/i, 'MikroTik'], [/ubiquiti/i, 'Ubiquiti'], [/engenius/i, 'EnGenius'],
   [/linksys/i, 'Linksys'], [/netgear/i, 'Netgear'], [/edimax/i, 'Edimax'], [/tenbay/i, 'Tenbay'], [/lb-?link|shenzhen bilian/i, 'LB-Link'],
+  [/buffalo/i, 'Buffalo'], [/belkin/i, 'Belkin'], [/draytek/i, 'DrayTek'], [/peplink|pepwave/i, 'Peplink'], [/cambium/i, 'Cambium'],
+  [/mimosa/i, 'Mimosa'], [/ruckus/i, 'Ruckus'], [/cisco meraki/i, 'Meraki'], [/sagemcom/i, 'Sagemcom'], [/arcadyan/i, 'Arcadyan'],
+  [/sercomm/i, 'Sercomm'], [/technicolor/i, 'Technicolor'], [/askey/i, 'Askey'], [/hitron/i, 'Hitron'], [/^ubee/i, 'Ubee'],
+  [/^arris\b/i, 'Arris'], [/netcomm/i, 'NetComm'], [/billion electric/i, 'Billion'], [/trendnet/i, 'TRENDnet'], [/gl technologies/i, 'GL.iNet'],
+  [/\bip-com\b/i, 'IP-COM'], [/shenzhen fast technologies|shenzhen mercury communication/i, 'Fast/Mercury'], [/phicomm/i, 'Phicomm'],
+  [/amped wireless/i, 'Amped'], [/digisol/i, 'Digisol'], [/nexxt solutions/i, 'Nexxt'], [/^avm (gmbh|audiovisuelles)/i, 'AVM'],
+  [/^lancom systems/i, 'LANCOM'], [/teltonika networks/i, 'Teltonika'], [/robustel/i, 'Robustel'], [/cradlepoint/i, 'Cradlepoint'],
+  [/inhand/i, 'InHand'], [/actiontec/i, 'Actiontec'], [/gemtek/i, 'Gemtek'], [/green ?packet/i, 'Green Packet'],
 ];
 
 /** One CSV line, honouring double quotes. */

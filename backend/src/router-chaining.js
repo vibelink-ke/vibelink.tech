@@ -24,6 +24,13 @@ const MAX_PER_ROUTER = 500;
 const EXTENDER_NAME = /tenda|tp-?link|^tl-|mercusys|^mw\d|repeater|extender|access.?point|\bmesh\b|ruijie|totolink|d-?link|netis|wavlink|cudy|mikrotik|ubnt|unifi|^ap[-_ ]?\d|^cpe/i;
 /** Model names optical units (xPON/GPON/EPON ONT/ONU) call themselves: Huawei HG8xxx/EchoLife, ZTE ZXHN/F6xx, FiberHome AN5xxx, V-SOL, and the plain words. */
 const ONU_NAME = /echolife|^hg8\d{2,3}|^hs8\d{3}|zxhn|^f(4|6)\d{2}[a-z]?\d?$|fiberhome|^an5\d{3}|v-?sol|\b(gpon|epon|xpon|xgs-?pon|onu|ont)\b|^xz\d{3}|^g-0\d{2}/i;
+/**
+ * What a customer's own devices call themselves, or send in their DHCP request. Makers of routers (TP-Link, D-Link, Ubiquiti…) also make cameras,
+ * plugs and bulbs, and a prefix alone would take one of those behind an extender for a router: a device that says it is one of these is never taken
+ * for a router, whatever its prefix.
+ */
+const CLIENT_NAME = /(?:^|[^a-z0-9])(?:tapo|kasa|cam|camera|plug|bulb|switchbot|iphone|ipad|android|galaxy|redmi|desktop|laptop|macbook|tv|printer|phone|oppo|tecno|infinix|itel|vivo|realme|pc)(?:[^a-z0-9]|$)/i;
+const CLIENT_DHCP = /^android|^msft/i;
 /** What embedded router firmware (BusyBox udhcp) puts in its DHCP request: phones send "android-dhcp", Windows "MSFT", iPhones nothing. */
 const EMBEDDED_DHCP = /^udhcp|busybox/i;
 
@@ -151,11 +158,11 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
-      return { mac, hostname, classId, ip: l?.address || null, vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
+      return { mac, hostname, classId, ip: l?.address || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
-    for (const d of all.filter((x) => x.named || x.embedded || x.vendor || x.onuNamed || x.onuVendor).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+    for (const d of all.filter((x) => !x.client && (x.named || x.embedded || x.vendor || x.onuNamed || x.onuVendor)).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
       if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
     }
     if (!routers.length) {
