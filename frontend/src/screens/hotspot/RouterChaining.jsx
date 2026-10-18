@@ -37,7 +37,8 @@ export default function RouterChaining() {
     setScanning(true);
     try {
       const r = await api.scanChaining({ routerId: scanRouter });
-      store.toast(r.added ? `Found ${r.added} new chained router${r.added === 1 ? '' : 's'}. Watching ${r.watched}.` : `Nothing new. Watching ${r.watched}.`);
+      const side = r.lan?.length ? ` Looked at the LAN side (${r.lan.join(', ')})${r.uplink?.length ? `, skipped the uplink (${r.uplink.join(', ')})` : ''}.` : (r.uplink?.length ? ` Skipped the uplink (${r.uplink.join(', ')}).` : '');
+      store.toast((r.added ? `Found ${r.added} new chained router${r.added === 1 ? '' : 's'}. Watching ${r.watched}.` : `Nothing new. Watching ${r.watched}.`) + (r.cleaned ? ` Removed ${r.cleaned} that were on the uplink.` : '') + side);
       await load();
     } catch (e) { store.toast(`Could not scan: ${e.message}`); } finally { setScanning(false); }
   };

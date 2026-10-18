@@ -225,7 +225,8 @@
     "date": "2026-10-18",
     "title": "Router chaining monitor",
     "items": [
-      "Hotspot → Router chaining: routers plugged into a hotspot router's ports to extend the signal (Tenda and the like) are found by their MAC automatically and watched; two misses in a row mark one down, and you get one message however many went down together"
+      "Hotspot → Router chaining: routers plugged into a hotspot router's ports to extend the signal (Tenda and the like) are found by their MAC automatically and watched; two misses in a row mark one down, and you get one message however many went down together",
+      "Router chaining now scans only the LAN side (the hotspot's own bridge) and skips the uplink and WAN ports; anything an earlier scan wrongly picked up on an uplink port is removed"
     ]
   }
 ]

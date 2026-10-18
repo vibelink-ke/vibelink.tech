@@ -41,15 +41,69 @@ export function parseRosAge(v) {
   return hit ? total : Infinity;
 }
 
-/** What one router can tell us: the MACs on its bridge, who holds a lease, and which interfaces are wired. */
+const WAN_NAME = /\b(wan|uplink|upstream|internet)\b|^wan/i;
+
+/** The interface names a RouterOS value mentions ("10.0.0.1%ether1", "10.0.0.1 reachable via ether1"). */
+function namesIn(value, known) {
+  const v = String(value ?? '');
+  return [...known].filter((n) => new RegExp('(^|[^A-Za-z0-9_-])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '($|[^A-Za-z0-9_-])').test(v));
+}
+
+/**
+ * Which side is the LAN. A chained router hangs off the hotspot's own bridge; the port facing the fibre, the ISP or the internet is not a place
+ * to look for one (whatever is on it is upstream, not something plugged in to extend the signal).
+ *   wan        the ports and bridges that face the uplink: members of a WAN interface list, the interface the default route leaves by, DHCP and
+ *              PPPoE clients, and anything named or commented wan / uplink / upstream / internet. A WAN bridge or VLAN counts for its ports too.
+ *   lanBridges the bridges the hotspot runs on (null when it cannot be told: then every bridge that is not WAN counts).
+ */
+export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], dhcpClients = [], pppoe = [], vlans = [], bridgePorts = [] }) {
+  const known = new Set(ifaces.map((i) => String(i.name)));
+  const vlanParent = new Map(vlans.map((v) => [String(v.name), String(v.interface ?? '')]));
+  const portsOf = new Map();
+  for (const b of bridgePorts) {
+    const br = String(b.bridge ?? ''); const port = String(b.interface ?? '');
+    if (!br || !port) continue;
+    if (!portsOf.has(br)) portsOf.set(br, new Set());
+    portsOf.get(br).add(port);
+  }
+  const wan = new Set();
+  const addWan = (name, depth = 0) => {
+    if (!name || wan.has(name) || depth > 4) return;
+    wan.add(name);
+    if (vlanParent.has(name)) addWan(vlanParent.get(name), depth + 1);                    // a WAN VLAN: its parent port faces the uplink too
+    for (const p of portsOf.get(name) ?? []) addWan(p, depth + 1);                        // a WAN bridge: so do its ports
+  };
+  for (const m of lists) if (WAN_NAME.test(String(m.list ?? ''))) addWan(String(m.interface ?? ''));
+  for (const r of routes) {
+    if (String(r.active) === 'false' || String(r.disabled) === 'true') continue;
+    for (const n of [...namesIn(r['immediate-gw'], known), ...namesIn(r['gateway-status'], known), ...namesIn(r.gateway, known)]) addWan(n);
+  }
+  for (const d of dhcpClients) addWan(String(d.interface ?? ''));
+  for (const c of pppoe) addWan(String(c.interface ?? ''));
+  for (const i of ifaces) if (WAN_NAME.test(`${i.name ?? ''} ${i.comment ?? ''}`)) addWan(String(i.name));
+
+  const lan = new Set();
+  for (const h of hotspots) {
+    let n = String(h.interface ?? '');
+    for (let d = 0; n && d < 4 && vlanParent.has(n); d += 1) n = vlanParent.get(n) ?? '';        // a hotspot on a VLAN runs over the bridge under it
+    if (n && portsOf.has(n) && !wan.has(n)) lan.add(n);
+  }
+  return { wan, lanBridges: lan.size ? lan : null };
+}
+
+/** What one router can tell us: the MACs on its bridge, who holds a lease, which interfaces are wired, and which side is the LAN. */
 export async function chainSnapshot(conn) {
-  const [hostRows, leaseRows, ifaceRows] = await Promise.all([
+  const soft = (path, query = []) => conn.write(path, query).catch(() => []);
+  const [hostRows, leaseRows, ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
     conn.write('/interface/bridge/host/print', []),
-    conn.write('/ip/dhcp-server/lease/print', []).catch(() => []),
+    soft('/ip/dhcp-server/lease/print'),
     conn.write('/interface/print', []),
+    soft('/ip/hotspot/print'), soft('/interface/list/member/print'), soft('/ip/route/print', ['?dst-address=0.0.0.0/0']),
+    soft('/ip/dhcp-client/print'), soft('/interface/pppoe-client/print'), soft('/interface/vlan/print'), soft('/interface/bridge/port/print'),
   ]);
+  const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts });
   const hosts = hostRows.map((r) => ({
-    mac: normMac(r['mac-address']), port: String(r['on-interface'] ?? ''), local: String(r.local) === 'true',
+    mac: normMac(r['mac-address']), port: String(r['on-interface'] ?? ''), bridge: String(r.bridge ?? ''), local: String(r.local) === 'true',
     ageSec: parseRosAge(r.age),
   })).filter((h) => h.mac && h.port);
   const leases = leaseRows.map((r) => ({
@@ -57,7 +111,7 @@ export async function chainSnapshot(conn) {
     hostname: String(r['host-name'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
   const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
-  return { hosts, leases, wired };
+  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges };
 }
 
 /**
@@ -66,11 +120,13 @@ export async function chainSnapshot(conn) {
  * holds a lease. A lone device only counts when it names itself like a router, so a laptop on a cable is not taken for one.
  * Returns [{ mac, port, behind, ip, hostname, confidence: 'high' | 'likely' }].
  */
-export function detectChained({ hosts, leases, wired }) {
+export function detectChained({ hosts, leases, wired, wan = new Set(), lanBridges = null }) {
   const lease = new Map(leases.map((l) => [l.mac, l]));
   const byPort = new Map();
   for (const h of hosts) {
     if (h.local || !wired.has(h.port) || !MAC.test(h.mac) || multicast(h.mac)) continue;
+    if (wan.has(h.port) || (h.bridge && wan.has(h.bridge))) continue;                    // the uplink side: upstream, not a router plugged in to extend the signal
+    if (lanBridges && h.bridge && !lanBridges.has(h.bridge)) continue;                  // not the hotspot's own bridge
     if (!byPort.has(h.port)) byPort.set(h.port, new Set());
     byPort.get(h.port).add(h.mac);
   }
@@ -117,6 +173,12 @@ async function pass(r, { ros, secrets, notify }) {
 
     // ── learn: new chained routers are added by their MAC ──
     const found = detectChained(snap);
+    const uplink = [...snap.wan];
+    let cleaned = 0;
+    if (uplink.length) {
+      cleaned = (await pool.query(
+        `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and port = any($3::text[])`, [r.tenant_id, r.id, uplink])).rowCount;
+    }
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
     let added = 0;
@@ -179,7 +241,7 @@ async function pass(r, { ros, secrets, notify }) {
     if (recovered.length) {
       await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained routers on ${r.name} are back.`, opts);
     }
-    return { added, watched: byMac.size, down: downNow.length };
+    return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink };
   } finally {
     if (conn) ros.close(conn);
   }
