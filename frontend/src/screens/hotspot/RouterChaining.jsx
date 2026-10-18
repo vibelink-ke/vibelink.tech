@@ -9,6 +9,7 @@ import { Badge, Button, Card, Field, Grid, Input, Modal, Select, Stat, Table } f
  * Ethernet ports, or into each other, to extend the signal. Billing finds each one by its MAC on the bridge, adds it here by itself, and watches
  * it: present is up, two misses in a row is down and the owner is told (one message however many went down together).
  */
+const KIND_LABEL = { router: 'Router', onu: 'ONU' };
 const STATUS_TONE = { up: 'active', down: 'down', unknown: 'default' };
 const FOUND = { high: { label: 'Found', tone: 'active' }, likely: { label: 'Check', tone: 'pending' }, manual: { label: 'Added by hand', tone: 'default' } };
 const ago = (d) => {
@@ -56,13 +57,13 @@ export default function RouterChaining() {
     try { await api.deleteChainedRouter(c.id); await load(); } catch (e) { store.toast(`Could not remove: ${e.message}`); }
   };
   const addManual = async () => {
-    try { await api.addChainedRouter({ routerId: adding.routerId, mac: adding.mac, name: adding.name }); setAdding(null); await load(); store.toast('Added. It is checked on the next pass.'); }
+    try { await api.addChainedRouter({ routerId: adding.routerId, mac: adding.mac, name: adding.name, kind: adding.kind }); setAdding(null); await load(); store.toast('Added. It is checked on the next pass.'); }
     catch (e) { store.toast(`Could not add: ${e.message}`); }
   };
 
   const all = rows ?? [];
   const watched = all.filter((c) => !c.ignored);
-  const shown = show === 'ignored' ? all.filter((c) => c.ignored) : show === 'down' ? watched.filter((c) => c.status === 'down') : show === 'check' ? watched.filter((c) => c.confidence === 'likely') : watched;
+  const shown = show === 'onu' ? watched.filter((c) => c.kind === 'onu') : show === 'router' ? watched.filter((c) => c.kind !== 'onu') : show === 'ignored' ? all.filter((c) => c.ignored) : show === 'down' ? watched.filter((c) => c.status === 'down') : show === 'check' ? watched.filter((c) => c.confidence === 'likely') : watched;
 
   return (
     <div style={{ display: 'grid', gap: 14 }}>
@@ -75,17 +76,17 @@ export default function RouterChaining() {
 
       <Card
         title="Router chaining"
-        subtitle="Routers plugged into the hotspot's Ethernet ports to extend the signal are found by their MAC and watched. Nothing to set up: a new one appears here within a few minutes of being plugged in."
+        subtitle="Routers and fibre units (ONU/ONT of an xPON, GPON or EPON network) plugged into the hotspot's Ethernet ports are found by their MAC and watched. Nothing to set up: a new one appears here within a few minutes of being plugged in."
         actions={can && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Select style={{ width: 180 }} value={scanRouter} onChange={(e) => setScanRouter(e.target.value)} options={routers.map((r) => ({ value: r.id, label: r.name }))} />
             <Button size="sm" onClick={scan} disabled={scanning || !scanRouter}>{scanning ? 'Scanning…' : 'Scan now'}</Button>
-            <Button size="sm" onClick={() => setAdding({ routerId: scanRouter, mac: '', name: '' })}>+ Add by MAC</Button>
+            <Button size="sm" onClick={() => setAdding({ routerId: scanRouter, mac: '', name: '', kind: 'router' })}>+ Add by MAC</Button>
           </div>
         )}
       >
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          {[['watched', 'Watched'], ['down', 'Down'], ['check', 'To check'], ['ignored', 'Ignored']].map(([k, l]) => (
+          {[['watched', 'Watched'], ['router', 'Routers'], ['onu', 'ONUs'], ['down', 'Down'], ['check', 'To check'], ['ignored', 'Ignored']].map(([k, l]) => (
             <Button key={k} size="sm" variant={show === k ? 'primary' : 'default'} onClick={() => setShow(k)}>{l}</Button>
           ))}
         </div>
@@ -95,6 +96,7 @@ export default function RouterChaining() {
           rows={shown}
           columns={[
             { key: 'name', label: 'Router', render: (c) => <span><b>{c.name || c.hostname || 'Unnamed router'}</b>{c.hostname && c.name ? <span style={{ color: color.muted }}> · {c.hostname}</span> : null}</span> },
+            { key: 'kind', label: 'Type', render: (c) => <Badge>{KIND_LABEL[c.kind] ?? 'Router'}</Badge> },
             { key: 'mac', label: 'MAC', render: (c) => <span><span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.mac}</span>{c.vendor ? <span style={{ color: color.muted, fontSize: 12 }}> · {c.vendor}</span> : null}</span> },
             { key: 'where', label: 'Plugged into', render: (c) => <span>{c.router_name}{c.port ? <span style={{ color: color.muted }}> · {c.port}</span> : null}</span> },
             { key: 'behind', label: 'Devices behind', render: (c) => c.behind || '—' },
@@ -138,10 +140,12 @@ export default function RouterChaining() {
                           <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
                             <span style={{ fontFamily: font.mono, fontSize: 12 }}>{d.mac}</span>
                             <span style={{ color: color.muted, flex: 1 }}>{[d.vendor, d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}</span>
-                            <Button size="sm" onClick={async () => {
-                              try { await api.addChainedRouter({ routerId: seen.routerId, mac: d.mac, name: d.hostname || '' }); await load(); store.toast('Added as a router. It is watched from the next pass.'); }
-                              catch (e) { store.toast(`Could not add: ${e.message}`); }
-                            }}>Add as router</Button>
+                            {[['router', 'Add as router'], ['onu', 'Add as ONU']].map(([kind, text]) => (
+                              <Button key={kind} size="sm" onClick={async () => {
+                                try { await api.addChainedRouter({ routerId: seen.routerId, mac: d.mac, name: d.hostname || '', kind }); await load(); store.toast(`Added as ${kind === 'onu' ? 'an ONU' : 'a router'}. It is watched from the next pass.`); }
+                                catch (e) { store.toast(`Could not add: ${e.message}`); }
+                              }}>{text}</Button>
+                            ))}
                           </div>
                         ))}
                       </div>
@@ -163,7 +167,8 @@ export default function RouterChaining() {
         {adding && (
           <div style={{ display: 'grid', gap: 12 }}>
             <Field label="Plugged into router"><Select options={routers.map((r) => ({ value: r.id, label: r.name }))} value={adding.routerId} onChange={(e) => setAdding({ ...adding, routerId: e.target.value })} /></Field>
-            <Field label="MAC address" hint="Printed on the router's label."><Input value={adding.mac} onChange={(e) => setAdding({ ...adding, mac: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} autoFocus /></Field>
+            <Field label="Type"><Select options={[{ value: 'router', label: 'Router or extender' }, { value: 'onu', label: 'Fibre unit (ONU/ONT)' }]} value={adding.kind} onChange={(e) => setAdding({ ...adding, kind: e.target.value })} /></Field>
+            <Field label="MAC address" hint="Printed on the label."><Input value={adding.mac} onChange={(e) => setAdding({ ...adding, mac: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} autoFocus /></Field>
             <Field label="Name"><Input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} placeholder="Shop 4 extender" /></Field>
           </div>
         )}

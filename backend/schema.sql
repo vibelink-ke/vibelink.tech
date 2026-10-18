@@ -3585,3 +3585,6 @@ create table if not exists chained_routers (
   unique (tenant_id, mac)
 );
 create index if not exists chained_routers_router on chained_routers (router_id);
+
+-- A chained device is a router/extender or an optical unit (ONU/ONT of an xPON/GPON/EPON network).
+alter table chained_routers add column if not exists kind text not null default 'router' check (kind in ('router','onu'));

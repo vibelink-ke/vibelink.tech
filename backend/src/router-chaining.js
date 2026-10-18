@@ -12,7 +12,7 @@
  * Reading a router is read-only. Nothing here changes a router.
  */
 import { pool, enabledTenants } from './db.js';
-import { sameDevice, vendorOf } from './router-ouis.js';
+import { makerOf, onuVendorOf, sameDevice, vendorOf } from './router-ouis.js';
 
 export const OFFLINE_MINUTES = 3;
 const FRESH_SECONDS = 180;            // a MAC seen on the bridge this recently is alive (RouterOS ages entries out after ~5 minutes)
@@ -22,6 +22,8 @@ const MAX_PER_ROUTER = 500;
 
 /** Names an extender gives itself when it asks for an address. */
 const EXTENDER_NAME = /tenda|tp-?link|^tl-|mercusys|^mw\d|repeater|extender|access.?point|\bmesh\b|ruijie|totolink|d-?link|netis|wavlink|cudy|mikrotik|ubnt|unifi|^ap[-_ ]?\d|^cpe/i;
+/** Model names optical units (xPON/GPON/EPON ONT/ONU) call themselves: Huawei HG8xxx/EchoLife, ZTE ZXHN/F6xx, FiberHome AN5xxx, V-SOL, and the plain words. */
+const ONU_NAME = /echolife|^hg8\d{2,3}|^hs8\d{3}|zxhn|^f(4|6)\d{2}[a-z]?\d?$|fiberhome|^an5\d{3}|v-?sol|\b(gpon|epon|xpon|xgs-?pon|onu|ont)\b|^xz\d{3}|^g-0\d{2}/i;
 /** What embedded router firmware (BusyBox udhcp) puts in its DHCP request: phones send "android-dhcp", Windows "MSFT", iPhones nothing. */
 const EMBEDDED_DHCP = /^udhcp|busybox/i;
 
@@ -149,11 +151,11 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
-      return { mac, hostname, classId, ip: l?.address || null, vendor: vendorOf(mac), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
+      return { mac, hostname, classId, ip: l?.address || null, vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
-    for (const d of all.filter((x) => x.named || x.embedded || x.vendor).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+    for (const d of all.filter((x) => x.named || x.embedded || x.vendor || x.onuNamed || x.onuVendor).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
       if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
     }
     if (!routers.length) {
@@ -163,10 +165,13 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
         .map((d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor }));
       continue;
     }
-    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor, confidence: 'high' });
+    const kindOf = (c) => (c.onuNamed || c.onuVendor ? 'onu' : 'router');
+    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor, kind: kindOf(c), confidence: 'high' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
-    row.verdict = routers.some((c) => c.vendor) ? `Router found (by its MAC: ${[...new Set(routers.map((c) => c.vendor).filter(Boolean))].join(', ')})`
-      : routers.some((c) => c.named) ? 'Router found (by its name)' : 'Router found (by its DHCP signature)';
+    const what = [...new Set(routers.map((c) => (kindOf(c) === 'onu' ? 'ONU' : 'Router')))].join(' and ');
+    const makers = [...new Set(routers.map((c) => c.vendor ?? c.onuVendor).filter(Boolean))];
+    row.verdict = makers.length ? `${what} found (by its MAC: ${makers.join(', ')})`
+      : routers.some((c) => c.named || c.onuNamed) ? `${what} found (by its name)` : `${what} found (by its DHCP signature)`;
   }
   return { found, report };
 }
@@ -175,7 +180,7 @@ export const detectChained = (snap) => analysePorts(snap).found;
 
 /** The list with each router's maker (from the prefix of its MAC). */
 export async function listChained(tenantId) {
-  return (await listChainedRaw(tenantId)).map((c) => ({ ...c, vendor: vendorOf(c.mac) }));
+  return (await listChainedRaw(tenantId)).map((c) => ({ ...c, vendor: makerOf(c.mac) }));
 }
 
 /** Is a chained router alive right now: on the bridge recently, or leased recently. */
@@ -216,17 +221,18 @@ async function pass(r, { ros, secrets, notify }) {
       const have = byMac.get(f.mac);
       if (have) {
         await pool.query(
-          `update chained_routers set port=$2, behind=$3, ip=coalesce($4, ip), hostname=coalesce(nullif($5,''), hostname) where id=$1`,
-          [have.id, f.port, f.behind, f.ip, f.hostname]);
+          `update chained_routers set port=$2, behind=$3, ip=coalesce($4, ip), hostname=coalesce(nullif($5,''), hostname),
+                  kind = case when confidence = 'manual' then kind else $6 end where id=$1`,
+          [have.id, f.port, f.behind, f.ip, f.hostname, f.kind]);
         continue;
       }
       if (added >= MAX_NEW_PER_PASS) break;
       const { rows: [made] } = await pool.query(
-        `insert into chained_routers (tenant_id, router_id, mac, ip, hostname, port, behind, confidence, status, last_seen)
-         values ($1,$2,$3,$4,$5,$6,$7,$8,'up', now())
+        `insert into chained_routers (tenant_id, router_id, mac, ip, hostname, port, behind, confidence, status, last_seen, kind)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,'up', now(), $9)
          on conflict (tenant_id, mac) do update set router_id = excluded.router_id, port = excluded.port, behind = excluded.behind
          returning *`,
-        [r.tenant_id, r.id, f.mac, f.ip, f.hostname || null, f.port, f.behind, f.confidence]);
+        [r.tenant_id, r.id, f.mac, f.ip, f.hostname || null, f.port, f.behind, f.confidence, f.kind]);
       added += 1;
       if (made) byMac.set(made.mac, made);
     }
@@ -260,16 +266,17 @@ async function pass(r, { ros, secrets, notify }) {
     }
 
     // ── tell the owner: one message however many went down together ──
-    const opts = { url: '/hotspot/chaining', title: 'Chained router' };
+    const opts = { url: '/hotspot/chaining', title: 'Chained device' };
+    const noun = (list) => (list.every((c) => c.kind === 'onu') ? 'ONU' : list.every((c) => c.kind !== 'onu') ? 'router' : 'device');
     if (downNow.length) {
       const names = downNow.slice(0, 6).map(label).join(', ');
       const ports = [...new Set(downNow.map((c) => c.port).filter(Boolean))];
       await notify(r.tenant_id, downNow.length === 1
-        ? `${label(downNow[0])} (${downNow[0].mac}), a router chained to ${r.name}${downNow[0].port ? ` on ${downNow[0].port}` : ''}, has stopped answering. About ${downNow[0].behind} device${downNow[0].behind === 1 ? '' : 's'} were behind it.`
-        : `${downNow.length} routers chained to ${r.name} have stopped answering${ports.length === 1 ? ` (all on ${ports[0]}: check that cable or switch first)` : ''}: ${names}${downNow.length > 6 ? ', …' : ''}.`, opts);
+        ? `${label(downNow[0])} (${downNow[0].mac}), ${noun(downNow) === 'ONU' ? 'an' : 'a'} ${noun(downNow)} chained to ${r.name}${downNow[0].port ? ` on ${downNow[0].port}` : ''}, has stopped answering. About ${downNow[0].behind} device${downNow[0].behind === 1 ? '' : 's'} were behind it.`
+        : `${downNow.length} ${noun(downNow)}s chained to ${r.name} have stopped answering${ports.length === 1 ? ` (all on ${ports[0]}: check that cable or switch first)` : ''}: ${names}${downNow.length > 6 ? ', …' : ''}.`, opts);
     }
     if (recovered.length) {
-      await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained routers on ${r.name} are back.`, opts);
+      await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained ${noun(recovered)}s on ${r.name} are back.`, opts);
     }
     return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
       routerId: r.id, seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
@@ -325,14 +332,14 @@ const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const text = (v, max) => { const s = String(v ?? '').trim(); return s ? s.slice(0, max) : null; };
 
 /** Add one by hand (a chained router the scan cannot tell apart). */
-export async function addChained(tenantId, { routerId, mac, name }) {
+export async function addChained(tenantId, { routerId, mac, name, kind }) {
   if (!validMac(mac)) throw bad('The MAC address must look like AA:BB:CC:DD:EE:FF.');
   const { rows: [r] } = await pool.query('select id from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
   if (!r) throw bad('Choose the router it hangs off.');
   try {
     const { rows: [c] } = await pool.query(
-      `insert into chained_routers (tenant_id, router_id, mac, name, confidence, status) values ($1,$2,$3,$4,'manual','unknown') returning *`,
-      [tenantId, routerId, normMac(mac), text(name, 80)]);
+      `insert into chained_routers (tenant_id, router_id, mac, name, confidence, status, kind) values ($1,$2,$3,$4,'manual','unknown',$5) returning *`,
+      [tenantId, routerId, normMac(mac), text(name, 80), kind === 'onu' ? 'onu' : 'router']);
     return c;
   } catch (e) {
     if (e.code === '23505') throw bad('That MAC is already in the list.', 409);

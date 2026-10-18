@@ -16,6 +16,10 @@ import { fileURLToPath } from 'node:url';
 const file = process.argv[2];
 if (!file) { console.error('Usage: node scripts/build-router-ouis.mjs path/to/oui.csv'); process.exit(2); }
 
+const ONU_MAKERS = [
+  [/v-?sol/i, 'V-SOL'], [/fiberhome|fiber home/i, 'FiberHome'], [/bdcom/i, 'BDCOM'], [/shanghai bell/i, 'Nokia'],
+  [/dasan zhone|\bdzs\b|zhone/i, 'DZS'], [/calix/i, 'Calix'], [/syrotech/i, 'Syrotech'],
+];
 const MAKERS = [
   [/tenda/i, 'Tenda'], [/tp-?link/i, 'TP-Link'], [/mercusys/i, 'Mercusys'], [/\bnetis\b/i, 'Netis'], [/totolink|zioncom/i, 'Totolink'],
   [/d-?link/i, 'D-Link'], [/cudy/i, 'Cudy'], [/ruijie/i, 'Ruijie'], [/wavlink/i, 'Wavlink'], [/comfast/i, 'Comfast'],
@@ -35,7 +39,7 @@ function cells(line) {
   return out;
 }
 
-const out = {};
+const out = {}; const onu = {};
 let seen = 0;
 for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(1)) {
   if (!line.trim()) continue;
@@ -44,10 +48,14 @@ for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(1)) {
   seen += 1;
   const hit = MAKERS.find(([re]) => re.test(org));
   if (hit) out[assignment.toUpperCase()] = hit[1];
+  else {
+    const o = ONU_MAKERS.find(([re]) => re.test(org));
+    if (o) onu[assignment.toUpperCase()] = o[1];
+  }
 }
 const target = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'router-ouis.generated.json');
-fs.writeFileSync(target, `${JSON.stringify(out, null, 0)}\n`);
+fs.writeFileSync(target, `${JSON.stringify({ router: out, onu }, null, 0)}\n`);
 const byMaker = {};
-for (const v of Object.values(out)) byMaker[v] = (byMaker[v] ?? 0) + 1;
-console.log(`${seen} MA-L assignments read, ${Object.keys(out).length} are router makers:`, byMaker);
+for (const v of [...Object.values(out), ...Object.values(onu)]) byMaker[v] = (byMaker[v] ?? 0) + 1;
+console.log(`${seen} MA-L assignments read: ${Object.keys(out).length} router prefixes, ${Object.keys(onu).length} optical-unit (ONU/ONT) prefixes:`, byMaker);
 console.log('written to', target);
