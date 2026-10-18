@@ -165,7 +165,7 @@ export default function RouterChaining() {
                         {x.candidates.map((d) => (
                           <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
                             <span style={{ fontFamily: font.mono, fontSize: 12 }}>{d.mac}</span>
-                            <span style={{ color: color.muted, flex: 1 }}>{[d.vendor, d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}</span>
+                            <span style={{ color: color.muted, flex: 1 }}>{[d.vendor, d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}{d.note ? <span style={{ display: 'block', fontSize: 11.5, color: '#8a6d1d' }}>{d.note}</span> : null}</span>
                             {[['router', 'Add as router'], ['onu', 'Add as ONU']].map(([kind, text]) => (
                               <Button key={kind} size="sm" onClick={async () => {
                                 try { await api.addChainedRouter({ routerId: seen.routerId, mac: d.mac, name: d.hostname || '', kind }); await load(); store.toast(`Added as ${kind === 'onu' ? 'an ONU' : 'a router'}. It is watched from the next pass.`); }

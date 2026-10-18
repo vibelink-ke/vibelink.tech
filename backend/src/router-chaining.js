@@ -215,7 +215,21 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
     mac: normMac(r['active-mac-address'] || r['mac-address']), address: String(r['active-address'] || r.address || ''),
     hostname: String(r['host-name'] ?? ''), classId: String(r['class-id'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
-  return { hosts, leases, wired, wan: scope.wan, pppPorts: scope.ppp, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
+  // A device with an address on the hotspot's own bridge is on the hotspot. A PPPoE customer's router has none there (its traffic rides inside the
+  // PPPoE session), and neither does a bridged extender that says nothing: so for a MAC that has a router maker's prefix and no lease, the ARP table says
+  // which it is. Asked by MAC, for those MACs only.
+  const leaseMacs = new Set(leases.map((l) => l.mac));
+  const arpWant = [...new Set(hosts.filter((h) => !leaseMacs.has(h.mac) && (vendorOf(h.mac) || onuVendorOf(h.mac) || maybeOnuVendorOf(h.mac))).map((h) => h.mac))];
+  const arp = new Map();
+  if (arpWant.length) say(`Checking which of ${arpWant.length} router-maker device${arpWant.length === 1 ? '' : 's'} have an address on the hotspot…`);
+  for (let i = 0; i < arpWant.length; i += OR_CHUNK) {
+    const rows = await soft('/ip/arp/print', [...orQuery('mac-address', arpWant.slice(i, i + OR_CHUNK)), '=.proplist=mac-address,address,interface']);
+    for (const row of rows) {
+      const onLan = !scope.lanBridges || scope.lanBridges.has(String(row.interface ?? ''));
+      if (onLan && row.address) arp.set(normMac(row['mac-address']), String(row.address));
+    }
+  }
+  return { hosts, leases, arp, wired, wan: scope.wan, pppPorts: scope.ppp, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
 }
 
 /**
@@ -226,7 +240,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
  * lists those devices so a router that gives nothing away can be added by hand.
  * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router, candidates }] }.
  */
-export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null, bigPorts = [], pppPorts = new Set(), pppMacs = new Set() }) {
+export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null, bigPorts = [], pppPorts = new Set(), pppMacs = new Set(), arp = new Map() }) {
   const isPpp = (mac) => pppMacs.has(mac) || [...pppMacs].some((m) => sameDevice(m, mac));
   const lease = new Map(leases.map((l) => [l.mac, l]));
   const ports = new Map();
@@ -253,23 +267,32 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
-      return { mac, hostname, classId, ip: l?.address || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
+      const onLan = !!l || arp.has(mac);                                    // an address on the hotspot's bridge
+      return { mac, hostname, classId, onLan, ip: l?.address || arp.get(mac) || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
-    for (const d of all.filter((x) => !x.client && (x.named || x.embedded || x.vendor || x.onuNamed || x.onuVendor || (x.maybeVendor && !x.hostname))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+    // A router says what it is in its own words (name, DHCP signature: both come with a lease), or has a router maker's prefix AND an address on the hotspot.
+    // A prefix with no address on the hotspot is seen only at layer 2: where PPPoE customers share the bridge that is as likely a customer's router as an extender.
+    const asCandidate = (d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor ?? d.onuVendor ?? (d.maybeVendor ? `${d.maybeVendor} (could be an xPON router or a phone)` : null), note: (d.vendor || d.onuVendor || (d.maybeVendor && !d.hostname)) && !d.onLan ? "no address on the hotspot: maybe a PPPoE customer's router" : '' });
+    const strong = (x) => x.named || x.embedded || x.onuNamed;
+    const byPrefix = (x) => x.vendor || x.onuVendor || (x.maybeVendor && !x.hostname);
+    for (const d of all.filter((x) => !x.client && (strong(x) || (byPrefix(x) && x.onLan))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
       if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
     }
     if (!routers.length) {
-      row.verdict = p.macs.size === 1 ? 'One device, not identifying itself as a router' : `${p.macs.size} devices, none identifies itself as a router`;
+      const l2 = all.filter((x) => !x.client && byPrefix(x) && !x.onLan);
+      row.verdict = l2.length ? `${l2.length} device${l2.length === 1 ? '' : 's'} with a router maker's prefix but no address on the hotspot: not added (could be a PPPoE customer's router)`
+        : p.macs.size === 1 ? 'One device, not identifying itself as a router' : `${p.macs.size} devices, none identifies itself as a router`;
       // For adding one by hand: the devices with a real (not private) MAC first, since a router's own address is never a phone's private one.
       row.candidates = all.sort((a, b) => Number(universal(b.mac)) - Number(universal(a.mac)) || (a.mac < b.mac ? -1 : 1)).slice(0, 8)
-        .map((d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor ?? d.onuVendor ?? (d.maybeVendor ? `${d.maybeVendor} (could be an xPON router or a phone)` : null) }));
+        .map(asCandidate);
       continue;
     }
     const kindOf = (c) => (c.onuNamed || c.onuVendor || (c.maybeVendor && !c.named && !c.vendor) ? 'onu' : 'router');
     for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: 'high' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
+    row.candidates = all.filter((x) => !x.client && byPrefix(x) && !x.onLan && !routers.some((r2) => r2.mac === x.mac)).slice(0, 8).map(asCandidate);
     const what = [...new Set(routers.map((c) => (kindOf(c) === 'onu' ? 'ONU' : 'Router')))].join(' and ');
     const makers = [...new Set(routers.map((c) => c.vendor ?? c.onuVendor ?? c.maybeVendor).filter(Boolean))];
     row.verdict = makers.length ? `${what} found (by its MAC: ${makers.join(', ')})`
@@ -392,6 +415,11 @@ async function pass(r, { ros, secrets, notify }) {
     cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence = 'likely'`, [r.tenant_id, r.id])).rowCount;
     if (pppMacs.size) {
       cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and mac = any($3::text[])`, [r.tenant_id, r.id, [...pppMacs]])).rowCount;
+    }
+    if (learn) {
+      cleaned += (await pool.query(
+        `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and ip is null and coalesce(hostname,'') = '' and mac <> all($3::text[])`,
+        [r.tenant_id, r.id, found.map((f) => f.mac)])).rowCount;
     }
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
