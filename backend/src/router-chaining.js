@@ -15,7 +15,6 @@ import { pool, enabledTenants } from './db.js';
 import { makerOf, onuVendorOf, sameDevice, vendorOf } from './router-ouis.js';
 
 export const OFFLINE_MINUTES = 3;
-const FRESH_SECONDS = 180;            // a MAC seen on the bridge this recently is alive (RouterOS ages entries out after ~5 minutes)
 const PINGS_PER_ROUTER = 20;
 const MAX_NEW_PER_PASS = 200;
 const MAX_PER_ROUTER = 500;
@@ -191,15 +190,34 @@ export async function listChained(tenantId) {
 }
 
 /** Is a chained router alive right now: on the bridge recently, or leased recently. */
-export function aliveFromSnapshot(mac, snap) {
-  // The address on a router's label is one of its interfaces; the bridge may see another (the LAN one). Same prefix and a few apart is the same router.
+/**
+ * Is a chained router there right now, and what showed it. Being listed on the bridge at all is enough: RouterOS drops a MAC from its host table by
+ * itself after the ageing time (5 minutes by default), so "listed" already means "seen recently", and an extender with nobody connected can be quiet
+ * for minutes (asking for "seen in the last 3 minutes" marked online routers down). A lease renewed in the last 15 minutes counts too.
+ * The address on a router's label is one of its interfaces and the bridge may see another: same prefix and a few apart is the same router.
+ */
+export function presence(mac, snap) {
   const same = (x) => x === mac || sameDevice(x, mac);
-  if (snap.hosts.some((x) => same(x.mac) && x.ageSec <= FRESH_SECONDS)) return true;
-  return snap.leases.some((x) => same(x.mac) && x.seenSec <= FRESH_SECONDS);
+  const h = snap.hosts.find((x) => same(x.mac));
+  if (h) return { alive: true, why: `seen on the bridge (${h.port}${Number.isFinite(h.ageSec) ? `, ${h.ageSec}s ago` : ''})` };
+  const l = snap.leases.find((x) => same(x.mac) && x.seenSec <= 900);
+  if (l) return { alive: true, why: 'its DHCP lease was renewed recently' };
+  return { alive: false, why: 'not on the bridge and no recent lease' };
 }
+export const aliveFromSnapshot = (mac, snap) => presence(mac, snap).alive;
 
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const label = (c) => c.name || c.hostname || c.mac;
+
+/** What the last scan of a router did (shown under Routers on the screen). */
+async function recordScan(r, { ok = true, note = '', hosts = 0, found = 0, watched = 0 }) {
+  try {
+    await pool.query(
+      `insert into chained_scans (router_id, tenant_id, at, ok, note, hosts, found, watched) values ($1,$2, now(), $3,$4,$5,$6,$7)
+       on conflict (router_id) do update set at = now(), ok = excluded.ok, note = excluded.note, hosts = excluded.hosts, found = excluded.found, watched = excluded.watched`,
+      [r.id, r.tenant_id, ok, String(note).slice(0, 300), hosts, found, watched]);
+  } catch { /* the screen just shows no scan yet */ }
+}
 
 /** One router: learn the chained routers behind it, then check each. */
 async function pass(r, { ros, secrets, notify }) {
@@ -213,7 +231,10 @@ async function pass(r, { ros, secrets, notify }) {
 
     // ── learn: new chained routers are added by their MAC ──
     const analysis = analysePorts(snap);
-    const found = analysis.found;
+    // A router with no hotspot on it has no guest bridge to find extenders on; one whose hotspot could not be read (a PPPoE-only router has none) is
+    // looked at only when its role says it has one.
+    const learn = snap.hotspotOn.length > 0 || r.role !== 'pppoe';
+    const found = learn ? analysis.found : [];
     const uplink = [...snap.wan];
     let cleaned = 0;
     if (uplink.length) {
@@ -249,22 +270,26 @@ async function pass(r, { ros, secrets, notify }) {
     let pings = 0;
     for (const c of byMac.values()) {
       if (c.ignored || c.router_id !== r.id) continue;
-      let alive = aliveFromSnapshot(c.mac, snap);
+      const seen = presence(c.mac, snap);
+      let alive = seen.alive;
+      let why = seen.why;
       const ip = c.ip && IPV4.test(c.ip) ? c.ip : null;
       if (!alive && ip && pings < PINGS_PER_ROUTER) {
         pings += 1;
         const res = await ros.pingHost(conn, ip, 2).catch(() => null);
         if (res === null) continue;                          // the router could not ping: no answer either way
         alive = res.received > 0;
+        why = alive ? 'not on the bridge, but it answered a ping' : 'not on the bridge, no recent lease, and it did not answer a ping';
       }
+      if (!alive && !ip) why += ' (no address to ping)';
       if (alive) {
-        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false where id=$1`, [c.id]);
+        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false, note=$2 where id=$1`, [c.id, why]);
         if (c.offline_notified) recovered.push(c);
         continue;
       }
       const fails = Number(c.ping_fails) + 1;
-      if (fails < 2) { await pool.query('update chained_routers set ping_fails=$2 where id=$1', [c.id, fails]); continue; }
-      await pool.query(`update chained_routers set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()) where id=$1`, [c.id, fails]);
+      if (fails < 2) { await pool.query('update chained_routers set ping_fails=$2, note=$3 where id=$1', [c.id, fails, `${why} (missed once)`]); continue; }
+      await pool.query(`update chained_routers set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()), note=$3 where id=$1`, [c.id, fails, why]);
       const since = c.offline_since ? new Date(c.offline_since) : new Date();
       if (!c.offline_notified && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
         await pool.query('update chained_routers set offline_notified=true where id=$1', [c.id]);
@@ -285,6 +310,10 @@ async function pass(r, { ros, secrets, notify }) {
     if (recovered.length) {
       await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained ${noun(recovered)}s on ${r.name} are back.`, opts);
     }
+    await recordScan(r, {
+      ok: true, hosts: snap.hosts.length, found: found.length, watched: byMac.size,
+      note: `${snap.lanBridges ? `Looked at the hotspot bridge (${[...snap.lanBridges].join(', ')})` : 'Looked at every bridge except the uplink'}${uplink.length ? `, skipped the uplink (${uplink.join(', ')})` : ''}. ${learn ? '' : 'No hotspot on this router, so not looking for new ones. '}Read ${snap.hosts.length} device addresses.`,
+    });
     return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
       routerId: r.id, seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
   } finally {
@@ -295,10 +324,8 @@ async function pass(r, { ros, secrets, notify }) {
 /** The scheduled job: every hotspot router that is up. A router that is down says nothing about what is behind it, so those are "unknown". */
 export async function watchChainedRouters({ notify }) {
   const { rows: routers } = await pool.query(
-    `select id, tenant_id, name, host, api_port, service_user, service_password_enc
-       from routers
-      where role in ('hotspot','both') and status = 'up' and service_user is not null and service_password_enc is not null
-        and tenant_id in (${enabledTenants})`, ['watchChainedRouters']);
+    `select id, tenant_id, name, host, api_port, role, status, service_user, service_password_enc
+       from routers where tenant_id in (${enabledTenants})`, ['watchChainedRouters']);
   await pool.query(
     `update chained_routers c set status='unknown', ping_fails=0
        from routers r where r.id = c.router_id and r.status <> 'up' and c.status <> 'unknown'`);
@@ -306,22 +333,42 @@ export async function watchChainedRouters({ notify }) {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
   for (const r of routers) {
-    try { await pass(r, { ros, secrets, notify }); } catch (e) { console.warn('watchChainedRouters:', r.name, '-', e.message); }
+    if (r.status !== 'up') { await recordScan(r, { ok: false, note: 'The router is down, so it was skipped.' }); continue; }
+    if (!r.service_user || !r.service_password_enc) { await recordScan(r, { ok: false, note: 'No login is stored for this router, so billing cannot read it.' }); continue; }
+    try { await pass(r, { ros, secrets, notify }); } catch (e) {
+      console.warn('watchChainedRouters:', r.name, '-', e.message);
+      await recordScan(r, { ok: false, note: `Could not read the router: ${e.message}` });
+    }
   }
 }
 
 /** Look at one router now (the Scan button): learn and check it once, without telling anyone. */
 export async function scanRouter(tenantId, routerId) {
   const { rows: [r] } = await pool.query(
-    `select id, tenant_id, name, host, api_port, service_user, service_password_enc, status
+    `select id, tenant_id, name, host, api_port, role, service_user, service_password_enc, status
        from routers where id=$1 and tenant_id=$2`, [routerId, tenantId]);
   if (!r) throw Object.assign(new Error('No such router'), { status: 404 });
   if (r.status !== 'up' || !r.service_user || !r.service_password_enc) {
-    throw Object.assign(new Error('That router is not reachable right now, so it cannot be scanned.'), { status: 409 });
+    const why = r.status !== 'up' ? 'The router is down, so it cannot be scanned.' : 'No login is stored for this router, so billing cannot read it.';
+    await recordScan(r, { ok: false, note: why });
+    throw Object.assign(new Error(why), { status: 409 });
   }
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
-  return pass(r, { ros, secrets, notify: async () => {} });
+  try { return await pass(r, { ros, secrets, notify: async () => {} }); } catch (e) {
+    await recordScan(r, { ok: false, note: `Could not read the router: ${e.message}` });
+    throw e;
+  }
+}
+
+/** Every router with what its last scan did, so one that is skipped or failing says why. */
+export async function listScans(tenantId) {
+  const { rows } = await pool.query(
+    `select r.id, r.name, r.role, r.status, s.at, s.ok, s.note, s.hosts, s.found, s.watched,
+            (select count(*)::int from chained_routers c where c.router_id = r.id and not c.ignored) as devices
+       from routers r left join chained_scans s on s.router_id = r.id
+      where r.tenant_id = $1 order by r.name`, [tenantId]);
+  return rows;
 }
 
 // ── what the screen and the API use ──

@@ -233,5 +233,12 @@
       "Router chaining also finds and watches fibre units (ONU/ONT of xPON, GPON and EPON networks) plugged into hotspot ports, by their model name or maker's MAC, with a Type column, Routers and ONUs filters, and Add as ONU",
       "Router chaining now knows the MAC prefixes of 1,599 router and gateway registrations (TP-Link, D-Link, Netgear, Ubiquiti, MikroTik, Sagemcom, Netis, Mercusys and many more) and 338 fibre-unit ones (FiberHome, V-SOL, Nokia, DZS, Calix…), built from the IEEE registry; cameras, plugs and phones that carry a router maker's prefix are not taken for routers"
     ]
+  },
+  {
+    "date": "2026-10-19",
+    "title": "Router chaining monitor",
+    "items": [
+      "Router chaining: a router counts as up while it is listed on the bridge (no more false 'down' for quiet extenders), each device shows why it is up or down, every router is scanned whatever its role, and a Routers table says what the last scan of each one did"
+    ]
   }
 ]

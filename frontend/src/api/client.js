@@ -261,6 +261,7 @@ export const api = {
   skyplanLinkMembers: (body) => post('/api/skyplan/link-members', body),
   networkCalibration: () => get('/api/network/calibration'),
   chainedRouters: () => get('/api/router-chaining'),
+  chainingScans: () => get('/api/router-chaining/scans'),
   scanChaining: (body) => post('/api/router-chaining/scan', body),
   addChainedRouter: (body) => post('/api/router-chaining', body),
   updateChainedRouter: (id, body) => patch(`/api/router-chaining/${id}`, body),

@@ -4570,6 +4570,7 @@ const chainRoute = (fn, status = 200) => wrap(async (req, res) => {
   try { res.status(status).json(await fn(req)); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
 });
 app.get('/api/router-chaining', requirePermission('chaining.view'), chainRoute(async (req) => (await import('./router-chaining.js')).listChained(req.tenant.id)));
+app.get('/api/router-chaining/scans', requirePermission('chaining.view'), chainRoute(async (req) => (await import('./router-chaining.js')).listScans(req.tenant.id)));
 app.post('/api/router-chaining/scan', requirePermission('chaining.manage'), chainRoute(async (req) => (await import('./router-chaining.js')).scanRouter(req.tenant.id, req.body?.routerId)));
 app.post('/api/router-chaining', requirePermission('chaining.manage'), chainRoute(async (req) => (await import('./router-chaining.js')).addChained(req.tenant.id, req.body ?? {}), 201));
 app.patch('/api/router-chaining/:id', requirePermission('chaining.manage'), chainRoute(async (req) => {

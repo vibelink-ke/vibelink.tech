@@ -3588,3 +3588,16 @@ create index if not exists chained_routers_router on chained_routers (router_id)
 
 -- A chained device is a router/extender or an optical unit (ONU/ONT of an xPON/GPON/EPON network).
 alter table chained_routers add column if not exists kind text not null default 'router' check (kind in ('router','onu'));
+
+-- Why a chained device is up or down (what the last check saw), and what the last scan of each router did.
+alter table chained_routers add column if not exists note text;
+create table if not exists chained_scans (
+  router_id uuid primary key references routers on delete cascade,
+  tenant_id uuid not null references tenants on delete cascade,
+  at        timestamptz not null default now(),
+  ok        boolean not null default true,
+  note      text,
+  hosts     integer not null default 0,
+  found     integer not null default 0,
+  watched   integer not null default 0
+);

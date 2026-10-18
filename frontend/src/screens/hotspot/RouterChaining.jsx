@@ -26,10 +26,11 @@ export default function RouterChaining() {
   const [scanRouter, setScanRouter] = useState('');
   const [adding, setAdding] = useState(null);
   const [show, setShow] = useState('watched');
+  const [scans, setScans] = useState([]);
   const [seen, setSeen] = useState(null);          // what the last scan saw, port by port
   const routers = (store.routers ?? []).filter((r) => r.role === 'hotspot' || r.role === 'both' || !r.role);
 
-  const load = useCallback(() => api.chainedRouters().then(setRows).catch((e) => store.toast(`Could not load: ${e.message}`)),
+  const load = useCallback(() => Promise.all([api.chainedRouters().then(setRows), api.chainingScans().then(setScans).catch(() => {})]).catch((e) => store.toast(`Could not load: ${e.message}`)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []);
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);
@@ -101,7 +102,7 @@ export default function RouterChaining() {
             { key: 'where', label: 'Plugged into', render: (c) => <span>{c.router_name}{c.port ? <span style={{ color: color.muted }}> · {c.port}</span> : null}</span> },
             { key: 'behind', label: 'Devices behind', render: (c) => c.behind || '—' },
             { key: 'ip', label: 'Address', render: (c) => (c.ip ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.ip}</span> : '—') },
-            { key: 'status', label: 'State', render: (c) => (c.ignored ? <Badge>ignored</Badge> : <Badge tone={STATUS_TONE[c.status] ?? 'default'}>{c.status}</Badge>) },
+            { key: 'status', label: 'State', render: (c) => (c.ignored ? <Badge>ignored</Badge> : <span><Badge tone={STATUS_TONE[c.status] ?? 'default'}>{c.status}</Badge>{c.note ? <div style={{ fontSize: 11.5, color: color.muted, marginTop: 3, maxWidth: 240 }}>{c.note}</div> : null}</span>) },
             { key: 'seen', label: 'Last seen', render: (c) => (c.status === 'down' && c.offline_since ? `down ${ago(c.offline_since)}` : ago(c.last_seen)) },
             { key: 'found', label: 'Found', render: (c) => <Badge tone={FOUND[c.confidence]?.tone}>{FOUND[c.confidence]?.label ?? c.confidence}</Badge> },
             { key: 'act', label: '', align: 'right', render: (c) => can && (
@@ -116,6 +117,22 @@ export default function RouterChaining() {
         <p style={{ margin: '12px 0 0', fontSize: 12.5, color: color.muted }}>
           "Found" means the router named itself like one (Tenda, TP-Link…). "Check" means it was picked by behaviour: a router-looking device carrying a group of others on one port. If it is something else, press Ignore. Up means seen on the bridge or answering in the last 3 minutes. Two misses in a row mark it down and you get one message, however many went down together.
         </p>
+      </Card>
+
+      <Card title="Routers" subtitle="Every router is read every 2 minutes. If one shows no devices, its line here says why.">
+        <Table
+          rowKey={(x) => x.id}
+          empty="No routers."
+          rows={scans}
+          columns={[
+            { key: 'name', label: 'Router', render: (x) => <span><b>{x.name}</b><span style={{ color: color.muted }}> · {x.role}</span></span> },
+            { key: 'status', label: 'State', render: (x) => <Badge tone={x.status === 'up' ? 'active' : 'down'}>{x.status}</Badge> },
+            { key: 'devices', label: 'Chained devices', render: (x) => x.devices },
+            { key: 'last', label: 'Last scan', render: (x) => (x.at ? ago(x.at) : 'not yet') },
+            { key: 'note', label: 'What it did', render: (x) => <span style={{ fontSize: 12.5, color: x.ok === false ? color.rust : color.inkSoft }}>{x.note || (x.at ? '' : 'Waiting for the next pass.')}</span> },
+            { key: 'act', label: '', align: 'right', render: (x) => can && <Button size="sm" onClick={async () => { setScanRouter(x.id); setScanning(true); try { const r = await api.scanChaining({ routerId: x.id }); setSeen(r); await load(); } catch (e) { store.toast(`Could not scan: ${e.message}`); await load(); } finally { setScanning(false); } }} disabled={scanning}>Scan now</Button> },
+          ]}
+        />
       </Card>
 
       {seen && (
