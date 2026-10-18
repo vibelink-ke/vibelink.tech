@@ -12,6 +12,7 @@
  * Reading a router is read-only. Nothing here changes a router.
  */
 import { pool, enabledTenants } from './db.js';
+import { sameDevice, vendorOf } from './router-ouis.js';
 
 export const OFFLINE_MINUTES = 3;
 const FRESH_SECONDS = 180;            // a MAC seen on the bridge this recently is alive (RouterOS ages entries out after ~5 minutes)
@@ -148,31 +149,41 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
-      return { mac, hostname, classId, ip: l?.address || null, named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
+      return { mac, hostname, classId, ip: l?.address || null, vendor: vendorOf(mac), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
     });
-    const routers = all.filter((d) => d.named || d.embedded);
+    // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
+    const routers = [];
+    for (const d of all.filter((x) => x.named || x.embedded || x.vendor).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+      if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
+    }
     if (!routers.length) {
       row.verdict = p.macs.size === 1 ? 'One device, not identifying itself as a router' : `${p.macs.size} devices, none identifies itself as a router`;
       // For adding one by hand: the devices with a real (not private) MAC first, since a router's own address is never a phone's private one.
       row.candidates = all.sort((a, b) => Number(universal(b.mac)) - Number(universal(a.mac)) || (a.mac < b.mac ? -1 : 1)).slice(0, 8)
-        .map((d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip }));
+        .map((d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor }));
       continue;
     }
-    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, confidence: 'high' });
+    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor, confidence: 'high' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
-    row.verdict = routers.some((c) => c.named) ? 'Router found (by its name)' : 'Router found (by its DHCP signature)';
+    row.verdict = routers.some((c) => c.vendor) ? `Router found (by its MAC: ${[...new Set(routers.map((c) => c.vendor).filter(Boolean))].join(', ')})`
+      : routers.some((c) => c.named) ? 'Router found (by its name)' : 'Router found (by its DHCP signature)';
   }
   return { found, report };
 }
 
 export const detectChained = (snap) => analysePorts(snap).found;
 
+/** The list with each router's maker (from the prefix of its MAC). */
+export async function listChained(tenantId) {
+  return (await listChainedRaw(tenantId)).map((c) => ({ ...c, vendor: vendorOf(c.mac) }));
+}
+
 /** Is a chained router alive right now: on the bridge recently, or leased recently. */
 export function aliveFromSnapshot(mac, snap) {
-  const h = snap.hosts.find((x) => x.mac === mac);
-  if (h && h.ageSec <= FRESH_SECONDS) return true;
-  const l = snap.leases.find((x) => x.mac === mac);
-  return !!(l && l.seenSec <= FRESH_SECONDS);
+  // The address on a router's label is one of its interfaces; the bridge may see another (the LAN one). Same prefix and a few apart is the same router.
+  const same = (x) => x === mac || sameDevice(x, mac);
+  if (snap.hosts.some((x) => same(x.mac) && x.ageSec <= FRESH_SECONDS)) return true;
+  return snap.leases.some((x) => same(x.mac) && x.seenSec <= FRESH_SECONDS);
 }
 
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
@@ -301,7 +312,7 @@ export async function scanRouter(tenantId, routerId) {
 
 // ── what the screen and the API use ──
 
-export async function listChained(tenantId) {
+export async function listChainedRaw(tenantId) {
   const { rows } = await pool.query(
     `select c.*, r.name as router_name
        from chained_routers c join routers r on r.id = c.router_id

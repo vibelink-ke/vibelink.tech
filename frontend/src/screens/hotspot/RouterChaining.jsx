@@ -95,7 +95,7 @@ export default function RouterChaining() {
           rows={shown}
           columns={[
             { key: 'name', label: 'Router', render: (c) => <span><b>{c.name || c.hostname || 'Unnamed router'}</b>{c.hostname && c.name ? <span style={{ color: color.muted }}> · {c.hostname}</span> : null}</span> },
-            { key: 'mac', label: 'MAC', render: (c) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.mac}</span> },
+            { key: 'mac', label: 'MAC', render: (c) => <span><span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.mac}</span>{c.vendor ? <span style={{ color: color.muted, fontSize: 12 }}> · {c.vendor}</span> : null}</span> },
             { key: 'where', label: 'Plugged into', render: (c) => <span>{c.router_name}{c.port ? <span style={{ color: color.muted }}> · {c.port}</span> : null}</span> },
             { key: 'behind', label: 'Devices behind', render: (c) => c.behind || '—' },
             { key: 'ip', label: 'Address', render: (c) => (c.ip ? <span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.ip}</span> : '—') },
@@ -137,7 +137,7 @@ export default function RouterChaining() {
                         {x.candidates.map((d) => (
                           <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
                             <span style={{ fontFamily: font.mono, fontSize: 12 }}>{d.mac}</span>
-                            <span style={{ color: color.muted, flex: 1 }}>{[d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}</span>
+                            <span style={{ color: color.muted, flex: 1 }}>{[d.vendor, d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}</span>
                             <Button size="sm" onClick={async () => {
                               try { await api.addChainedRouter({ routerId: seen.routerId, mac: d.mac, name: d.hostname || '' }); await load(); store.toast('Added as a router. It is watched from the next pass.'); }
                               catch (e) { store.toast(`Could not add: ${e.message}`); }
