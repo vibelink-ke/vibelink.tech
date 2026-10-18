@@ -24,6 +24,9 @@ const ONU_MAKERS = [
 // Makers whose business is routers, gateways, access points and extenders (consumer, ISP and WISP). Patterns are anchored where a looser one
 // matches other companies (D-Link also matched BroadLink and AdLink, "arris" matched Harris, "ip-com" matched Clipcomm). Makers that also sell phones
 // and laptops (Huawei, ZTE, Xiaomi, ASUS, Samsung, Lenovo…) are deliberately left out: their prefix says nothing about what a device is.
+// Makers of most xPON routers that also sold phones (Huawei Technologies, ZTE): a prefix alone is not enough, so these are kept apart and the scan asks
+// for more. Huawei Device Co. (the consumer-phone arm) is not here.
+const MAYBE_MAKERS = [[/^huawei technologies/i, 'Huawei'], [/^zte corporation/i, 'ZTE']];
 const MAKERS = [
   [/tenda/i, 'Tenda'], [/tp-?link/i, 'TP-Link'], [/mercusys/i, 'Mercusys'], [/\bnetis\b/i, 'Netis'], [/totolink|zioncom/i, 'Totolink'],
   [/\bd-link\b/i, 'D-Link'], [/cudy/i, 'Cudy'], [/ruijie/i, 'Ruijie'], [/wavlink/i, 'Wavlink'], [/comfast/i, 'Comfast'],
@@ -51,7 +54,7 @@ function cells(line) {
   return out;
 }
 
-const out = {}; const onu = {};
+const out = {}; const onu = {}; const maybe = {};
 let seen = 0;
 for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(1)) {
   if (!line.trim()) continue;
@@ -63,11 +66,15 @@ for (const line of fs.readFileSync(file, 'utf8').split(/\r?\n/).slice(1)) {
   else {
     const o = ONU_MAKERS.find(([re]) => re.test(org));
     if (o) onu[assignment.toUpperCase()] = o[1];
+    else {
+      const m = MAYBE_MAKERS.find(([re]) => re.test(org));
+      if (m) maybe[assignment.toUpperCase()] = m[1];
+    }
   }
 }
 const target = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'router-ouis.generated.json');
-fs.writeFileSync(target, `${JSON.stringify({ router: out, onu }, null, 0)}\n`);
+fs.writeFileSync(target, `${JSON.stringify({ router: out, onu, maybe }, null, 0)}\n`);
 const byMaker = {};
-for (const v of [...Object.values(out), ...Object.values(onu)]) byMaker[v] = (byMaker[v] ?? 0) + 1;
-console.log(`${seen} MA-L assignments read: ${Object.keys(out).length} router prefixes, ${Object.keys(onu).length} optical-unit (ONU/ONT) prefixes:`, byMaker);
+for (const v of [...Object.values(out), ...Object.values(onu), ...Object.values(maybe)]) byMaker[v] = (byMaker[v] ?? 0) + 1;
+console.log(`${seen} MA-L assignments read: ${Object.keys(out).length} router prefixes, ${Object.keys(onu).length} optical-unit (ONU/ONT) prefixes, ${Object.keys(maybe).length} Huawei/ZTE prefixes (xPON routers, but also phones):`, byMaker);
 console.log('written to', target);

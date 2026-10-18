@@ -21,8 +21,8 @@ const BASE = {
 function readGenerated() {
   try {
     const j = JSON.parse(fs.readFileSync(new URL('./router-ouis.generated.json', import.meta.url), 'utf8'));
-    return j && (j.router || j.onu) ? { router: j.router ?? {}, onu: j.onu ?? {} } : { router: j ?? {}, onu: {} };
-  } catch { return { router: {}, onu: {} }; }
+    return j && (j.router || j.onu) ? { router: j.router ?? {}, onu: j.onu ?? {}, maybe: j.maybe ?? {} } : { router: j ?? {}, onu: {}, maybe: {} };
+  } catch { return { router: {}, onu: {}, maybe: {} }; }
 }
 const GENERATED = readGenerated();
 
@@ -30,6 +30,8 @@ export const ROUTER_OUIS = { ...GENERATED.router, ...BASE };
 /** Makers of optical units for xPON/GPON/EPON networks whose prefix says only that (V-SOL, FiberHome, BDCOM…). Huawei and ZTE are not here: they
  *  also make phones, so their ONTs are told apart by name (HG8145V5, ZXHN F670…), never by prefix. */
 export const ONU_OUIS = { ...GENERATED.onu };
+/** Huawei and ZTE: they make most xPON routers and also phones, so the prefix is only a hint (see maybeOnuVendorOf). */
+export const ONU_MAYBE = { ...GENERATED.maybe };
 
 const hex = (mac) => String(mac ?? '').replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
 
@@ -38,8 +40,10 @@ export const vendorOf = (mac) => ROUTER_OUIS[hex(mac).slice(0, 6)] ?? null;
 
 /** The maker of an optical unit (ONU/ONT), from the prefix of its MAC. */
 export const onuVendorOf = (mac) => ONU_OUIS[hex(mac).slice(0, 6)] ?? null;
+/** Huawei or ZTE, whose prefix is on xPON routers and on phones alike. */
+export const maybeOnuVendorOf = (mac) => ONU_MAYBE[hex(mac).slice(0, 6)] ?? null;
 /** The maker, router or optical unit. */
-export const makerOf = (mac) => vendorOf(mac) ?? onuVendorOf(mac);
+export const makerOf = (mac) => vendorOf(mac) ?? onuVendorOf(mac) ?? maybeOnuVendorOf(mac);
 
 /** How far apart (in the last 24 bits) one router's own interfaces are. */
 export const FAMILY_SPAN = 3;

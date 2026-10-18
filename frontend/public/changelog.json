@@ -239,7 +239,8 @@
     "title": "Router chaining monitor",
     "items": [
       "Router chaining: a router counts as up while it is listed on the bridge (no more false 'down' for quiet extenders), each device shows why it is up or down, every router is scanned whatever its role, and a Routers table says what the last scan of each one did",
-      "Router chaining reads big routers faster (only the hotspot bridge, only the fields it needs), gives each router 60 seconds and reads three at a time, so one slow router can no longer stall the rest; a router that times out says so in the Routers table"
+      "Router chaining reads big routers faster (only the hotspot bridge, only the fields it needs), gives each router 60 seconds and reads three at a time, so one slow router can no longer stall the rest; a router that times out says so in the Routers table",
+      "Router chaining now finds xPON/GPON routers that send no name: a Huawei or ZTE device with no phone-like name is taken as an ONU, and model names with underscores or prefixes (HG8145V5, F670L, ZXHN, FiberHome HG6xxx, ZTE-ONT_1234) are recognised"
     ]
   }
 ]
