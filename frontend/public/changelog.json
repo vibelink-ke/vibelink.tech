@@ -244,7 +244,8 @@
       "Router chaining no longer reads a PPPoE router's thousands of session interfaces (only cable ports, bridges, VLANs and PPPoE clients), and a timeout now names the call it was waiting on",
       "Router chaining scans big routers however long it takes: it runs in the background reading one cable port at a time (no more timeouts on a large hotspot), shows live progress in the Routers table, and keeps what each scan saw under What it saw",
       "Router chaining never picks PPPoE customers' devices: MACs with an active PPP session or a locked MAC on a PPP secret are left out, ports where a PPPoE server runs are skipped, and any an earlier scan added are removed",
-      "Router chaining on a bridge shared with PPPoE: a router is added only when it names itself or has an address on the hotspot, so a PPPoE customer's router (which has none there) is no longer picked by its maker's prefix; such devices are offered with an Add button instead"
+      "Router chaining on a bridge shared with PPPoE: a router is added only when it names itself or has an address on the hotspot, so a PPPoE customer's router (which has none there) is no longer picked by its maker's prefix; such devices are offered with an Add button instead",
+      "Router chaining: routers with a maker's prefix are added again even with no address on the hotspot (marked Check), and nothing is deleted for lacking an address; this restores the bridged routers the last update removed"
     ]
   }
 ]

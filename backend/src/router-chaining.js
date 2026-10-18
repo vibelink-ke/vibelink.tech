@@ -272,12 +272,13 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
-    // A router says what it is in its own words (name, DHCP signature: both come with a lease), or has a router maker's prefix AND an address on the hotspot.
-    // A prefix with no address on the hotspot is seen only at layer 2: where PPPoE customers share the bridge that is as likely a customer's router as an extender.
+    // A router says what it is in its own words (name, DHCP signature: both come with a lease), or has a router maker's prefix. A prefix with no address on
+    // the hotspot is seen only at layer 2 (a bridged extender looks exactly so, and so can a PPPoE customer's router where PPPoE shares the bridge): it is
+    // added and marked "Check", never silently left out.
     const asCandidate = (d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor ?? d.onuVendor ?? (d.maybeVendor ? `${d.maybeVendor} (could be an xPON router or a phone)` : null), note: (d.vendor || d.onuVendor || (d.maybeVendor && !d.hostname)) && !d.onLan ? "no address on the hotspot: maybe a PPPoE customer's router" : '' });
     const strong = (x) => x.named || x.embedded || x.onuNamed;
     const byPrefix = (x) => x.vendor || x.onuVendor || (x.maybeVendor && !x.hostname);
-    for (const d of all.filter((x) => !x.client && (strong(x) || (byPrefix(x) && x.onLan))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+    for (const d of all.filter((x) => !x.client && (strong(x) || byPrefix(x))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
       if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
     }
     if (!routers.length) {
@@ -290,12 +291,13 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
       continue;
     }
     const kindOf = (c) => (c.onuNamed || c.onuVendor || (c.maybeVendor && !c.named && !c.vendor) ? 'onu' : 'router');
-    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: 'high' });
+    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: strong(c) || c.onLan ? 'high' : 'likely' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
     row.candidates = all.filter((x) => !x.client && byPrefix(x) && !x.onLan && !routers.some((r2) => r2.mac === x.mac)).slice(0, 8).map(asCandidate);
     const what = [...new Set(routers.map((c) => (kindOf(c) === 'onu' ? 'ONU' : 'Router')))].join(' and ');
     const makers = [...new Set(routers.map((c) => c.vendor ?? c.onuVendor ?? c.maybeVendor).filter(Boolean))];
-    row.verdict = makers.length ? `${what} found (by its MAC: ${makers.join(', ')})`
+    const unsure = routers.filter((c) => !(strong(c) || c.onLan)).length;
+    row.verdict = makers.length ? `${what} found (by its MAC: ${makers.join(', ')}${unsure ? `; ${unsure === routers.length ? 'no address' : `${unsure} with no address`} on the hotspot, so check ${unsure === 1 ? 'it is' : 'they are'} not a PPPoE customer's` : ''})`
       : routers.some((c) => c.named || c.onuNamed) ? `${what} found (by its name)` : `${what} found (by its DHCP signature)`;
   }
   for (const b of bigPorts) {
@@ -412,14 +414,8 @@ async function pass(r, { ros, secrets, notify }) {
       cleaned = (await pool.query(
         `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and port = any($3::text[])`, [r.tenant_id, r.id, uplink])).rowCount;
     }
-    cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence = 'likely'`, [r.tenant_id, r.id])).rowCount;
     if (pppMacs.size) {
       cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and mac = any($3::text[])`, [r.tenant_id, r.id, [...pppMacs]])).rowCount;
-    }
-    if (learn) {
-      cleaned += (await pool.query(
-        `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and ip is null and coalesce(hostname,'') = '' and mac <> all($3::text[])`,
-        [r.tenant_id, r.id, found.map((f) => f.mac)])).rowCount;
     }
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
