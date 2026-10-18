@@ -20,7 +20,9 @@ const MAX_NEW_PER_PASS = 200;
 const MAX_PER_ROUTER = 500;
 
 /** Names an extender gives itself when it asks for an address. */
-const EXTENDER_NAME = /tenda|tp-?link|^tl-|mercusys|^mw\d|repeater|extender|\bap\b|access.?point|router|mesh|ruijie|totolink|d-?link|netis|wavlink|cudy|\bwifi\b|wlan/i;
+const EXTENDER_NAME = /tenda|tp-?link|^tl-|mercusys|^mw\d|repeater|extender|access.?point|\bmesh\b|ruijie|totolink|d-?link|netis|wavlink|cudy|mikrotik|ubnt|unifi|^ap[-_ ]?\d|^cpe/i;
+/** What embedded router firmware (BusyBox udhcp) puts in its DHCP request: phones send "android-dhcp", Windows "MSFT", iPhones nothing. */
+const EMBEDDED_DHCP = /^udhcp|busybox/i;
 
 export const normMac = (m) => String(m ?? '').trim().toUpperCase().replace(/-/g, ':');
 const MAC = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/;
@@ -108,18 +110,19 @@ export async function chainSnapshot(conn) {
   })).filter((h) => h.mac && h.port);
   const leases = leaseRows.map((r) => ({
     mac: normMac(r['active-mac-address'] || r['mac-address']), address: String(r['active-address'] || r.address || ''),
-    hostname: String(r['host-name'] ?? ''), seenSec: parseRosAge(r['last-seen']),
+    hostname: String(r['host-name'] ?? ''), classId: String(r['class-id'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
   const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
   return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean) };
 }
 
 /**
- * Go through each port of the snapshot, say what was decided about it, and pick the chained routers. On each wired port of the hotspot's
- * bridge (never an uplink), a router is a device that names itself like one (Tenda, TP-Link…) — every such device, so extenders chained one behind
- * the other are all found — or, failing a name, the one device with a real (not private) MAC where the rest of the port is phones using private
- * MACs, or where it also holds a lease. A lone device only counts when it names itself like a router, so a laptop on a cable is not taken for one.
- * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router }] }.
+ * Go through each port of the snapshot, say what was decided about it, and pick the chained routers. Only a device that identifies itself as a
+ * router is added by itself: it names itself like one (Tenda, TP-Link, "extender"…), or its DHCP request carries the signature embedded router
+ * firmware sends (BusyBox "udhcp"), which phones and laptops do not. Every such device on a port is found, so extenders chained one behind the
+ * other are all picked up. Anything else on the port is a customer's device as far as billing can tell, so it is never added by itself: the scan
+ * lists those devices so a router that gives nothing away can be added by hand.
+ * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router, candidates }] }.
  */
 export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null }) {
   const lease = new Map(leases.map((l) => [l.mac, l]));
@@ -138,29 +141,26 @@ export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges
   }
   const found = []; const report = [];
   for (const p of ports.values()) {
-    const row = { port: p.port, bridge: p.bridge, devices: p.macs.size, verdict: p.skip, router: null };
+    const row = { port: p.port, bridge: p.bridge, devices: p.macs.size, verdict: p.skip, router: null, candidates: [] };
     report.push(row);
     if (p.skip) continue;
-    const scored = [...p.macs].map((mac) => {
+    const all = [...p.macs].map((mac) => {
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
-      const hint = EXTENDER_NAME.test(hostname);
-      const score = (hint ? 4 : 0) + (universal(mac) ? 1 : -3) + (l?.address ? 1 : 0);
-      return { mac, hostname, ip: l?.address || null, hint, score };
-    }).sort((a, b) => b.score - a.score || (a.mac < b.mac ? -1 : 1));
-    const top = scored[0];
-    const othersPrivate = scored.length > 1 && scored.slice(1).every((s) => !universal(s.mac));
-    const need = p.macs.size >= 3 ? 2 : 3;
-    const picked = top.hint || (p.macs.size >= 2 && universal(top.mac) && (othersPrivate || top.score >= need));
-    if (!picked) {
-      row.verdict = p.macs.size === 1 ? 'One device, not named like a router' : `${p.macs.size} devices, none looks like a router`;
+      const classId = l?.classId ?? '';
+      return { mac, hostname, classId, ip: l?.address || null, named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId) };
+    });
+    const routers = all.filter((d) => d.named || d.embedded);
+    if (!routers.length) {
+      row.verdict = p.macs.size === 1 ? 'One device, not identifying itself as a router' : `${p.macs.size} devices, none identifies itself as a router`;
+      // For adding one by hand: the devices with a real (not private) MAC first, since a router's own address is never a phone's private one.
+      row.candidates = all.sort((a, b) => Number(universal(b.mac)) - Number(universal(a.mac)) || (a.mac < b.mac ? -1 : 1)).slice(0, 8)
+        .map((d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip }));
       continue;
     }
-    const hinted = scored.filter((s) => s.hint);
-    const chosen = hinted.length ? hinted : [top];
-    for (const c of chosen) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - 1, ip: c.ip, hostname: c.hostname, confidence: c.hint ? 'high' : 'likely' });
-    row.router = chosen.map((c) => c.hostname || c.mac).join(', ');
-    row.verdict = hinted.length ? 'Router found (by its name)' : 'Router found (by behaviour: check it)';
+    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, confidence: 'high' });
+    row.router = routers.map((c) => c.hostname || c.mac).join(', ');
+    row.verdict = routers.some((c) => c.named) ? 'Router found (by its name)' : 'Router found (by its DHCP signature)';
   }
   return { found, report };
 }
@@ -197,6 +197,7 @@ async function pass(r, { ros, secrets, notify }) {
       cleaned = (await pool.query(
         `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and port = any($3::text[])`, [r.tenant_id, r.id, uplink])).rowCount;
     }
+    cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence = 'likely'`, [r.tenant_id, r.id])).rowCount;
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
     let added = 0;
@@ -260,7 +261,7 @@ async function pass(r, { ros, secrets, notify }) {
       await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained routers on ${r.name} are back.`, opts);
     }
     return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
-      seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
+      routerId: r.id, seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
   } finally {
     if (conn) ros.close(conn);
   }

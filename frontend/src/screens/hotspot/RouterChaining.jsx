@@ -126,7 +126,29 @@ export default function RouterChaining() {
               { key: 'port', label: 'Port', render: (x) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{x.port}</span> },
               { key: 'bridge', label: 'Bridge', render: (x) => x.bridge || '—' },
               { key: 'devices', label: 'Devices seen', render: (x) => x.devices },
-              { key: 'verdict', label: 'Decided', render: (x) => <span style={{ color: x.router ? color.green : color.muted }}>{x.verdict}{x.router ? `: ${x.router}` : ''}</span> },
+              {
+                key: 'verdict', label: 'Decided',
+                render: (x) => (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <span style={{ color: x.router ? color.green : color.muted }}>{x.verdict}{x.router ? `: ${x.router}` : ''}</span>
+                    {can && x.candidates?.length > 0 && (
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <span style={{ fontSize: 12, color: color.muted }}>Is one of these a router? Nothing here is added by itself.</span>
+                        {x.candidates.map((d) => (
+                          <div key={d.mac} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+                            <span style={{ fontFamily: font.mono, fontSize: 12 }}>{d.mac}</span>
+                            <span style={{ color: color.muted, flex: 1 }}>{[d.hostname, d.ip].filter(Boolean).join(' · ') || 'no name'}</span>
+                            <Button size="sm" onClick={async () => {
+                              try { await api.addChainedRouter({ routerId: seen.routerId, mac: d.mac, name: d.hostname || '' }); await load(); store.toast('Added as a router. It is watched from the next pass.'); }
+                              catch (e) { store.toast(`Could not add: ${e.message}`); }
+                            }}>Add as router</Button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
             ]}
           />
         </Card>
