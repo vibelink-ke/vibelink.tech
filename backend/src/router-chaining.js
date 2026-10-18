@@ -67,7 +67,7 @@ function namesIn(value, known) {
  *              PPPoE clients, and anything named or commented wan / uplink / upstream / internet. A WAN bridge or VLAN counts for its ports too.
  *   lanBridges the bridges the hotspot runs on (null when it cannot be told: then every bridge that is not WAN counts).
  */
-export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], dhcpClients = [], pppoe = [], vlans = [], bridgePorts = [] }) {
+export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], dhcpClients = [], pppoe = [], vlans = [], bridgePorts = [], pppoeServers = [] }) {
   const known = new Set(ifaces.map((i) => String(i.name)));
   const vlanParent = new Map(vlans.map((v) => [String(v.name), String(v.interface ?? '')]));
   const portsOf = new Map();
@@ -99,7 +99,17 @@ export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], 
     for (let d = 0; n && d < 4 && vlanParent.has(n); d += 1) n = vlanParent.get(n) ?? '';        // a hotspot on a VLAN runs over the bridge under it
     if (n && portsOf.has(n) && !wan.has(n)) lan.add(n);
   }
-  return { wan, lanBridges: lan.size ? lan : null };
+  // Where a PPPoE server listens, the devices are PPPoE customers, not routers plugged in to extend the hotspot: such a port (or every port of such a
+  // bridge) is not the hotspot's LAN, unless it is the hotspot's own bridge (then only the MACs of PPP sessions can be told apart: see pppSetFor).
+  const ppp = new Set();
+  const addPpp = (name, depth = 0) => {
+    if (!name || ppp.has(name) || lan.has(name) || depth > 4) return;
+    ppp.add(name);
+    if (vlanParent.has(name)) addPpp(vlanParent.get(name), depth + 1);
+    for (const p of portsOf.get(name) ?? []) addPpp(p, depth + 1);
+  };
+  for (const sv of pppoeServers) addPpp(String(sv.interface ?? ''));
+  return { wan, lanBridges: lan.size ? lan : null, ppp };
 }
 
 const MAX_PORT_HOSTS = 100000;    // a safety stop only: a port is read however many devices it carries (a big hotspot takes minutes over a slow tunnel, and that is allowed)
@@ -139,7 +149,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   // Only the interface types that matter: cable ports (the only place a chained router plugs in), bridges, VLANs and PPPoE clients (uplinks).
   // A bare /interface/print on a PPPoE router also lists every customer's dynamic session interface, which is thousands of rows.
   const IFACE = (type) => soft('/interface/print', [`?type=${type}`, '=.proplist=name,type,comment']);
-  const [ether, bridges, vlanIfaces, pppoeOut, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
+  const [ether, bridges, vlanIfaces, pppoeOut, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts, pppoeServers] = await Promise.all([
     track('/interface/print ?type=ether', conn.write('/interface/print', ['?type=ether', '=.proplist=name,type,comment'])),
     IFACE('bridge'), IFACE('vlan'), IFACE('pppoe-out'),
     soft('/ip/hotspot/print', ['=.proplist=interface']),
@@ -149,9 +159,10 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
     soft('/interface/pppoe-client/print', ['=.proplist=interface']),
     soft('/interface/vlan/print', ['=.proplist=name,interface']),
     soft('/interface/bridge/port/print', ['=.proplist=interface,bridge']),
+    soft('/interface/pppoe-server/server/print', ['=.proplist=interface']),
   ]);
   const ifaceRows = [...ether, ...bridges, ...vlanIfaces, ...pppoeOut];
-  const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts });
+  const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts, pppoeServers });
   const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
 
   // the cable ports of the LAN side, and for each how many devices are on it
@@ -159,7 +170,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   const HOSTS = '/interface/bridge/host/print';
   const lanPorts = bridgePorts
     .map((b) => ({ port: String(b.interface ?? ''), bridge: String(b.bridge ?? '') }))
-    .filter((b) => b.port && wired.has(b.port) && !scope.wan.has(b.port) && !scope.wan.has(b.bridge) && (!scope.lanBridges || scope.lanBridges.has(b.bridge)));
+    .filter((b) => b.port && wired.has(b.port) && !scope.wan.has(b.port) && !scope.wan.has(b.bridge) && !scope.ppp.has(b.port) && !scope.ppp.has(b.bridge) && (!scope.lanBridges || scope.lanBridges.has(b.bridge)));
   const hostRows = []; const bigPorts = [];
   const say = (t) => { try { opts.progress?.(t); } catch { /* progress is only a courtesy */ } };
   say(`Found ${lanPorts.length} cable port${lanPorts.length === 1 ? '' : 's'} on the hotspot side. Counting the devices on each…`);
@@ -204,7 +215,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
     mac: normMac(r['active-mac-address'] || r['mac-address']), address: String(r['active-address'] || r.address || ''),
     hostname: String(r['host-name'] ?? ''), classId: String(r['class-id'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
-  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
+  return { hosts, leases, wired, wan: scope.wan, pppPorts: scope.ppp, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
 }
 
 /**
@@ -215,15 +226,18 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
  * lists those devices so a router that gives nothing away can be added by hand.
  * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router, candidates }] }.
  */
-export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null, bigPorts = [] }) {
+export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null, bigPorts = [], pppPorts = new Set(), pppMacs = new Set() }) {
+  const isPpp = (mac) => pppMacs.has(mac) || [...pppMacs].some((m) => sameDevice(m, mac));
   const lease = new Map(leases.map((l) => [l.mac, l]));
   const ports = new Map();
   for (const h of hosts) {
     if (h.local || !MAC.test(h.mac) || multicast(h.mac)) continue;
+    if (pppMacs.size && isPpp(h.mac)) continue;                                           // a PPPoE customer's router: a customer, never a chained router
     let p = ports.get(h.port);
     if (!p) {
       p = { port: h.port, bridge: h.bridge || '', macs: new Set(), skip: null };
-      if (wan.has(h.port) || (h.bridge && wan.has(h.bridge))) p.skip = 'Uplink: skipped';              // upstream, not a router plugged in to extend the signal
+      if (wan.has(h.port) || (h.bridge && wan.has(h.bridge))) p.skip = 'Uplink: skipped';
+      else if (pppPorts.has(h.port) || (h.bridge && pppPorts.has(h.bridge))) p.skip = 'PPPoE service port: skipped';              // upstream, not a router plugged in to extend the signal
       else if (lanBridges && h.bridge && !lanBridges.has(h.bridge)) p.skip = 'Not the hotspot bridge: skipped';
       else if (!wired.has(h.port)) p.skip = 'Not a cable port (wireless or virtual): skipped';
       ports.set(h.port, p);
@@ -309,6 +323,26 @@ export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS
   try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
 }
 
+/**
+ * Which of these MACs belong to PPPoE customers. Asked by MAC (a PPPoE router has thousands of sessions, so the lists are never read whole): the
+ * caller-id of an active session, the caller-id locked on a PPP secret (a customer who is offline now), and a PPPoE server's own client entries.
+ */
+export async function pppSetFor(conn, macs) {
+  const list = [...new Set(macs.filter(Boolean))];
+  const out = new Set();
+  const ask = async (path, field) => {
+    for (let i = 0; i < list.length; i += OR_CHUNK) {
+      const rows = await conn.write(path, [...orQuery(field, list.slice(i, i + OR_CHUNK)), `=.proplist=${field}`]).catch(() => []);
+      for (const row of rows ?? []) { const m = normMac(row[field]); if (m) out.add(m); }
+    }
+  };
+  if (!list.length) return out;
+  await ask('/ppp/active/print', 'caller-id');
+  await ask('/ppp/secret/print', 'caller-id');
+  await ask('/interface/pppoe-server/print', 'remote-address');
+  return out;
+}
+
 /** What the last scan of a router did (shown under Routers on the screen), and how far a running one has got. */
 async function recordScan(r, { ok = true, note = '', hosts = 0, found = 0, watched = 0, running = false, starting = false, report = null }) {
   try {
@@ -340,7 +374,11 @@ async function pass(r, { ros, secrets, notify }) {
     const snap = await chainSnapshot(conn, r.trace, { watchMacs: watching.map((x) => x.mac), progress: (t) => { void recordScan(r, { running: true, note: t }); } });
 
     // ── learn: new chained routers are added by their MAC ──
-    const analysis = analysePorts(snap);
+    let analysis = analysePorts(snap);
+    const suspects = [...analysis.found.map((f) => f.mac), ...analysis.report.flatMap((x) => x.candidates.map((c) => c.mac)), ...watching.map((x) => x.mac)];
+    void recordScan(r, { running: true, note: 'Leaving out PPPoE customers…' });
+    const pppMacs = await pppSetFor(conn, suspects);
+    if (pppMacs.size) analysis = analysePorts({ ...snap, pppMacs });
     // A router with no hotspot on it has no guest bridge to find extenders on; one whose hotspot could not be read (a PPPoE-only router has none) is
     // looked at only when its role says it has one.
     const learn = snap.hotspotOn.length > 0 || r.role !== 'pppoe';
@@ -352,6 +390,9 @@ async function pass(r, { ros, secrets, notify }) {
         `delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and port = any($3::text[])`, [r.tenant_id, r.id, uplink])).rowCount;
     }
     cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence = 'likely'`, [r.tenant_id, r.id])).rowCount;
+    if (pppMacs.size) {
+      cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and mac = any($3::text[])`, [r.tenant_id, r.id, [...pppMacs]])).rowCount;
+    }
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
     let added = 0;
@@ -423,7 +464,7 @@ async function pass(r, { ros, secrets, notify }) {
     await recordScan(r, {
       ok: true, hosts: snap.hosts.length, found: found.length, watched: byMac.size,
       report: { seen: analysis.report.slice(0, 80), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink },
-      note: `${snap.lanBridges ? `Looked at the hotspot bridge (${[...snap.lanBridges].join(', ')})` : 'Looked at every bridge except the uplink'}${uplink.length ? `, skipped the uplink (${uplink.join(', ')})` : ''}. ${learn ? '' : 'No hotspot on this router, so not looking for new ones. '}Read ${snap.hosts.length} device addresses.${snap.bigPorts?.length ? ` Skipped ${snap.bigPorts.map((b) => `${b.port} (${b.count} devices)`).join(', ')}: too many devices to be one router.` : ''}`,
+      note: `${snap.lanBridges ? `Looked at the hotspot bridge (${[...snap.lanBridges].join(', ')})` : 'Looked at every bridge except the uplink'}${uplink.length ? `, skipped the uplink (${uplink.join(', ')})` : ''}. ${learn ? '' : 'No hotspot on this router, so not looking for new ones. '}Read ${snap.hosts.length} device addresses.${pppMacs.size ? ` Left out ${pppMacs.size} PPPoE customer device${pppMacs.size === 1 ? '' : 's'}.` : ''}${snap.pppPorts?.size ? ` Skipped the PPPoE service port${snap.pppPorts.size === 1 ? '' : 's'} (${[...snap.pppPorts].join(', ')}).` : ''}${snap.bigPorts?.length ? ` Skipped ${snap.bigPorts.map((b) => `${b.port} (${b.count} devices)`).join(', ')}: too many devices to be one router.` : ''}`,
     });
     return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
       routerId: r.id, seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };

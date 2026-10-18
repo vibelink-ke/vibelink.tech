@@ -242,7 +242,8 @@
       "Router chaining reads big routers faster (only the hotspot bridge, only the fields it needs), gives each router 60 seconds and reads three at a time, so one slow router can no longer stall the rest; a router that times out says so in the Routers table",
       "Router chaining now finds xPON/GPON routers that send no name: a Huawei or ZTE device with no phone-like name is taken as an ONU, and model names with underscores or prefixes (HG8145V5, F670L, ZXHN, FiberHome HG6xxx, ZTE-ONT_1234) are recognised",
       "Router chaining no longer reads a PPPoE router's thousands of session interfaces (only cable ports, bridges, VLANs and PPPoE clients), and a timeout now names the call it was waiting on",
-      "Router chaining scans big routers however long it takes: it runs in the background reading one cable port at a time (no more timeouts on a large hotspot), shows live progress in the Routers table, and keeps what each scan saw under What it saw"
+      "Router chaining scans big routers however long it takes: it runs in the background reading one cable port at a time (no more timeouts on a large hotspot), shows live progress in the Routers table, and keeps what each scan saw under What it saw",
+      "Router chaining never picks PPPoE customers' devices: MACs with an active PPP session or a locked MAC on a PPP secret are left out, ports where a PPPoE server runs are skipped, and any an earlier scan added are removed"
     ]
   }
 ]
