@@ -102,17 +102,32 @@ export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], 
   return { wan, lanBridges: lan.size ? lan : null };
 }
 
-/** What one router can tell us: the MACs on its bridge, who holds a lease, which interfaces are wired, and which side is the LAN. */
+/**
+ * What one router can tell us: the MACs on its bridge, who holds a lease, which interfaces are wired, and which side is the LAN.
+ * A busy router has thousands of hosts and leases, and a slow tunnel makes reading them all the slowest thing billing does, so this asks for less:
+ * the small tables first (they say which bridge is the hotspot's), then only that bridge's hosts and only the bound leases, and only the fields used.
+ */
 export async function chainSnapshot(conn) {
   const soft = (path, query = []) => conn.write(path, query).catch(() => []);
-  const [hostRows, leaseRows, ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
-    conn.write('/interface/bridge/host/print', []),
-    soft('/ip/dhcp-server/lease/print'),
-    conn.write('/interface/print', []),
-    soft('/ip/hotspot/print'), soft('/interface/list/member/print'), soft('/ip/route/print', ['?dst-address=0.0.0.0/0']),
-    soft('/ip/dhcp-client/print'), soft('/interface/pppoe-client/print'), soft('/interface/vlan/print'), soft('/interface/bridge/port/print'),
+  const [ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts] = await Promise.all([
+    conn.write('/interface/print', ['=.proplist=name,type,comment']),
+    soft('/ip/hotspot/print', ['=.proplist=interface']),
+    soft('/interface/list/member/print', ['=.proplist=list,interface']),
+    soft('/ip/route/print', ['?dst-address=0.0.0.0/0', '=.proplist=gateway,immediate-gw,gateway-status,active,disabled']),
+    soft('/ip/dhcp-client/print', ['=.proplist=interface']),
+    soft('/interface/pppoe-client/print', ['=.proplist=interface']),
+    soft('/interface/vlan/print', ['=.proplist=name,interface']),
+    soft('/interface/bridge/port/print', ['=.proplist=interface,bridge']),
   ]);
   const scope = lanScope({ ifaces: ifaceRows, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts });
+  const HOST_FIELDS = '=.proplist=mac-address,on-interface,bridge,local,age';
+  let hostRows = [];
+  if (scope.lanBridges) {
+    for (const b of scope.lanBridges) hostRows.push(...await conn.write('/interface/bridge/host/print', [`?bridge=${b}`, HOST_FIELDS]));
+  } else {
+    hostRows = await conn.write('/interface/bridge/host/print', [HOST_FIELDS]);
+  }
+  const leaseRows = await soft('/ip/dhcp-server/lease/print', ['?status=bound', '=.proplist=mac-address,active-mac-address,address,active-address,host-name,class-id,last-seen']);
   const hosts = hostRows.map((r) => ({
     mac: normMac(r['mac-address']), port: String(r['on-interface'] ?? ''), bridge: String(r.bridge ?? ''), local: String(r.local) === 'true',
     ageSec: parseRosAge(r.age),
@@ -209,6 +224,20 @@ export const aliveFromSnapshot = (mac, snap) => presence(mac, snap).alive;
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/;
 const label = (c) => c.name || c.hostname || c.mac;
 
+export const READ_DEADLINE_SECONDS = 60;
+
+/** Run one router's pass with a deadline: when it passes, the connection is closed and the pass fails with a message that says what happened. */
+export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS) {
+  let timer;
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      try { if (r.conn) ros.close(r.conn); } catch { /* it is going anyway */ }
+      reject(new Error(`Timed out after ${seconds} seconds reading the router: it has very large tables, or the tunnel to it is slow`));
+    }, seconds * 1000);
+  });
+  try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
+}
+
 /** What the last scan of a router did (shown under Routers on the screen). */
 async function recordScan(r, { ok = true, note = '', hosts = 0, found = 0, watched = 0 }) {
   try {
@@ -227,6 +256,7 @@ async function pass(r, { ros, secrets, notify }) {
       host: String(r.host).split('/')[0], port: r.api_port ?? 8728,
       user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8,
     });
+    r.conn = conn;                                   // so a read that hangs can be cut off from outside (see withDeadline)
     const snap = await chainSnapshot(conn);
 
     // ── learn: new chained routers are added by their MAC ──
@@ -332,14 +362,15 @@ export async function watchChainedRouters({ notify }) {
   if (!routers.length) return;
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
-  for (const r of routers) {
-    if (r.status !== 'up') { await recordScan(r, { ok: false, note: 'The router is down, so it was skipped.' }); continue; }
-    if (!r.service_user || !r.service_password_enc) { await recordScan(r, { ok: false, note: 'No login is stored for this router, so billing cannot read it.' }); continue; }
-    try { await pass(r, { ros, secrets, notify }); } catch (e) {
+  const todo = async (r) => {
+    if (r.status !== 'up') { await recordScan(r, { ok: false, note: 'The router is down, so it was skipped.' }); return; }
+    if (!r.service_user || !r.service_password_enc) { await recordScan(r, { ok: false, note: 'No login is stored for this router, so billing cannot read it.' }); return; }
+    try { await withDeadline(r, ros, pass(r, { ros, secrets, notify })); } catch (e) {
       console.warn('watchChainedRouters:', r.name, '-', e.message);
-      await recordScan(r, { ok: false, note: `Could not read the router: ${e.message}` });
+      await recordScan(r, { ok: false, note: e.message.startsWith('Timed out') ? e.message : `Could not read the router: ${e.message}` });
     }
-  }
+  };
+  for (let i = 0; i < routers.length; i += 3) await Promise.all(routers.slice(i, i + 3).map(todo));
 }
 
 /** Look at one router now (the Scan button): learn and check it once, without telling anyone. */
@@ -355,7 +386,7 @@ export async function scanRouter(tenantId, routerId) {
   }
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');
-  try { return await pass(r, { ros, secrets, notify: async () => {} }); } catch (e) {
+  try { return await withDeadline(r, ros, pass(r, { ros, secrets, notify: async () => {} })); } catch (e) {
     await recordScan(r, { ok: false, note: `Could not read the router: ${e.message}` });
     throw e;
   }
