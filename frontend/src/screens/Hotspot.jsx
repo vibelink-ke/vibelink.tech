@@ -9,6 +9,7 @@ import PortalDesign from './hotspot/PortalDesign';
 import HotspotRevenue from './hotspot/HotspotRevenue';
 import HotspotSettings from './hotspot/HotspotSettings';
 import Loyalty from './hotspot/Loyalty';
+import RouterChaining from './hotspot/RouterChaining';
 import { useStore } from '../state/store';
 
 /**
@@ -29,6 +30,7 @@ const TABS = [
   { to: '/hotspot/design', label: 'Portal design' },
   { to: '/hotspot/revenue', label: 'Revenue' },
   { to: '/hotspot/loyalty', label: 'Loyalty', perm: 'loyalty.view' },
+  { to: '/hotspot/chaining', label: 'Router chaining', perm: 'chaining.view' },
   { to: '/hotspot/settings', label: 'Settings' },
 ];
 
@@ -86,6 +88,7 @@ export default function Hotspot() {
         <Route path="revenue" element={<HotspotRevenue />} />
         <Route path="settings" element={<HotspotSettings />} />
         <Route path="loyalty" element={<Loyalty />} />
+        <Route path="chaining" element={<RouterChaining />} />
         {/* Absolute for the same reason the tabs above are: this is what
             recovers a URL already stuck on a bad relative path like
             /hotspot/plans/plans, and a relative "" here is exactly as

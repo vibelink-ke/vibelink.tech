@@ -54,6 +54,8 @@ export const DEFAULT_PERMISSIONS = {
   'apikeys.manage': { owner: true, cashier: false, technician: false, support: false, sales: false },
   'security.manage': { owner: true, cashier: false, technician: false, support: false, sales: false },
   'links.view':      { owner: true, cashier: false, technician: true,  support: true,  sales: false },
+  'chaining.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
+  'chaining.manage': { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'links.manage':    { owner: true, cashier: false, technician: true,  support: false, sales: false },
   // SmartOLT: seeing the ONUs, and acting on them (reboot, enable/disable, authorise, connecting the account).
   'smartolt.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -245,6 +247,8 @@ export const PERMISSION_META = [
   { key: 'network.view', page: 'Map', action: 'View the network drawn on the map' },
   { key: 'network.edit', page: 'Map', action: 'Draw / edit the network (fibre and wireless)' },
   { key: 'apikeys.manage', page: 'Settings', action: 'Make and revoke API keys (SkyPlan)' },
+  { key: 'chaining.view', page: 'Router chaining', action: 'View' },
+  { key: 'chaining.manage', page: 'Router chaining', action: 'Scan, add, rename, ignore and remove chained routers' },
   { key: 'links.view', page: 'Shared links', action: 'View' },
   { key: 'links.manage', page: 'Shared links', action: 'Add, edit and delete links, and put customers on them' },
   { key: 'security.manage', page: 'Settings', action: 'Anti-tunnel protection and closing routers\' management access' },

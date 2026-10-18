@@ -4563,6 +4563,26 @@ app.post('/api/routers/:id/management', requirePermission('security.manage'), wr
 }));
 
 /**
+ * Router chaining monitor (see router-chaining.js): the routers plugged into a hotspot router's ports to extend its signal, found by MAC and
+ * watched. Viewing is chaining.view; scanning, adding, renaming, ignoring and removing is chaining.manage.
+ */
+const chainRoute = (fn, status = 200) => wrap(async (req, res) => {
+  try { res.status(status).json(await fn(req)); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); throw e; }
+});
+app.get('/api/router-chaining', requirePermission('chaining.view'), chainRoute(async (req) => (await import('./router-chaining.js')).listChained(req.tenant.id)));
+app.post('/api/router-chaining/scan', requirePermission('chaining.manage'), chainRoute(async (req) => (await import('./router-chaining.js')).scanRouter(req.tenant.id, req.body?.routerId)));
+app.post('/api/router-chaining', requirePermission('chaining.manage'), chainRoute(async (req) => (await import('./router-chaining.js')).addChained(req.tenant.id, req.body ?? {}), 201));
+app.patch('/api/router-chaining/:id', requirePermission('chaining.manage'), chainRoute(async (req) => {
+  const c = await (await import('./router-chaining.js')).updateChained(req.tenant.id, req.params.id, req.body ?? {});
+  if (!c) throw Object.assign(new Error('No such router in the list'), { status: 404 });
+  return c;
+}));
+app.delete('/api/router-chaining/:id', requirePermission('chaining.manage'), chainRoute(async (req) => {
+  if (!(await (await import('./router-chaining.js')).deleteChained(req.tenant.id, req.params.id))) throw Object.assign(new Error('No such router in the list'), { status: 404 });
+  return { ok: true };
+}));
+
+/**
  * Shared links: the radio, switch or ONU several customers share, read as a group (see shared-links.js). Viewing is links.view; making,
  * editing, deleting and putting customers on a link is links.manage.
  */
@@ -15746,6 +15766,7 @@ const AUTOMATION_JOBS = [
   { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
   { job: 'sendVisitReminders', name: 'Visit reminders', cron: '*/10 * * * *', detail: 'A few hours before a booked technician visit, texts the customer a reminder and the technician where to go' },
   { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
+  { job: 'watchChainedRouters', name: 'Router chaining monitor', cron: '*/2 * * * *', detail: 'Reads each hotspot router\'s bridge, picks up routers plugged into its ports to extend the signal by their MAC, and watches them; two misses in a row mark one down and you get a single message however many went down together' },
   { job: 'checkLinkDevices', name: 'Radio and switch pings', cron: '*/2 * * * *', detail: 'Pings each shared radio, switch or ONU that has an address from the router it is locked to; two misses in a row mark it down on Shared links and on SkyPlan' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },
   { job: 'syncRouterQueues', name: 'Router queues', cron: '*/2 * * * *', detail: 'Every two minutes, brings the customer queues of each PPPoE router in line with the database and puts back a missing local-address on its PPP profile; Refresh wipes the queue list and writes it fresh' },

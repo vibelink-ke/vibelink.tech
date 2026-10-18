@@ -3561,3 +3561,27 @@ alter table shared_links add column if not exists ping_ms numeric(8,1);
 alter table shared_links add column if not exists ping_at timestamptz;
 alter table shared_links add column if not exists ping_fails integer not null default 0;
 alter table shared_links add column if not exists down_since timestamptz;
+
+-- Router chaining monitor: routers plugged into a hotspot router's Ethernet ports to extend the signal, found by their MAC on its bridge and
+-- watched (see router-chaining.js). status: up | down | unknown (unknown while the router they hang off is itself unreachable).
+create table if not exists chained_routers (
+  id               uuid primary key default gen_random_uuid(),
+  tenant_id        uuid not null references tenants on delete cascade,
+  router_id        uuid not null references routers on delete cascade,
+  mac              text not null,
+  name             text,
+  hostname         text,
+  ip               text,
+  port             text,
+  behind           integer not null default 0,
+  confidence       text not null default 'likely' check (confidence in ('high','likely','manual')),
+  status           text not null default 'unknown' check (status in ('up','down','unknown')),
+  ping_fails       integer not null default 0,
+  first_seen       timestamptz not null default now(),
+  last_seen        timestamptz,
+  offline_since    timestamptz,
+  offline_notified boolean not null default false,
+  ignored          boolean not null default false,
+  unique (tenant_id, mac)
+);
+create index if not exists chained_routers_router on chained_routers (router_id);

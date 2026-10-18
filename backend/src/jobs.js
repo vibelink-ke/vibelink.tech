@@ -123,6 +123,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
   // Every 2 minutes: is each radio, switch or ONU with an address answering a ping from the router it is locked to?
   cron.schedule('*/2 * * * *', safely('checkLinkDevices', checkLinkDevices));
+  // Every 2 minutes: find the routers chained behind each hotspot router (by MAC) and watch them.
+  cron.schedule('*/2 * * * *', safely('watchChainedRouters', watchChained));
   // Every 10 minutes: remind the customer and the technician about a booked visit in the next few hours.
   cron.schedule('*/10 * * * *', safely('sendVisitReminders', sendVisitReminders));
   // Every 5 minutes: add what each PPPoE session has moved since the last pass to the client's daily usage.
@@ -2124,6 +2126,14 @@ async function accumulateUsage() {
  * misses in a row mark it down (one lost round is not a fault), one answer marks it up. A router that cannot be reached leaves the device
  * as it was: a router problem is not the radio's fault.
  */
+/** Router chaining monitor: see router-chaining.js. */
+let chainedRunning = false;
+async function watchChained() {
+  if (chainedRunning) return;
+  chainedRunning = true;
+  try { await (await import('./router-chaining.js')).watchChainedRouters({ notify: notifyOwner }); } finally { chainedRunning = false; }
+}
+
 let linkDevicesRunning = false;
 async function checkLinkDevices() {
   if (linkDevicesRunning) return;
