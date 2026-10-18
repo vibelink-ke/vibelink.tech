@@ -25,6 +25,7 @@ export default function RouterChaining() {
   const [scanRouter, setScanRouter] = useState('');
   const [adding, setAdding] = useState(null);
   const [show, setShow] = useState('watched');
+  const [seen, setSeen] = useState(null);          // what the last scan saw, port by port
   const routers = (store.routers ?? []).filter((r) => r.role === 'hotspot' || r.role === 'both' || !r.role);
 
   const load = useCallback(() => api.chainedRouters().then(setRows).catch((e) => store.toast(`Could not load: ${e.message}`)),
@@ -37,6 +38,7 @@ export default function RouterChaining() {
     setScanning(true);
     try {
       const r = await api.scanChaining({ routerId: scanRouter });
+      setSeen(r);
       const side = r.lan?.length ? ` Looked at the LAN side (${r.lan.join(', ')})${r.uplink?.length ? `, skipped the uplink (${r.uplink.join(', ')})` : ''}.` : (r.uplink?.length ? ` Skipped the uplink (${r.uplink.join(', ')}).` : '');
       store.toast((r.added ? `Found ${r.added} new chained router${r.added === 1 ? '' : 's'}. Watching ${r.watched}.` : `Nothing new. Watching ${r.watched}.`) + (r.cleaned ? ` Removed ${r.cleaned} that were on the uplink.` : '') + side);
       await load();
@@ -113,6 +115,22 @@ export default function RouterChaining() {
           "Found" means the router named itself like one (Tenda, TP-Link…). "Check" means it was picked by behaviour: a router-looking device carrying a group of others on one port. If it is something else, press Ignore. Up means seen on the bridge or answering in the last 3 minutes. Two misses in a row mark it down and you get one message, however many went down together.
         </p>
       </Card>
+
+      {seen && (
+        <Card title={`What the scan saw on ${seen.router}`} subtitle={`Read ${seen.hostsRead} device address${seen.hostsRead === 1 ? '' : 'es'} from the router's bridge. The hotspot runs on ${seen.hotspotOn?.length ? seen.hotspotOn.join(', ') : 'an interface billing could not read'}.`}>
+          <Table
+            rowKey={(x) => x.port}
+            empty={seen.hostsRead === 0 ? "The router's bridge lists no devices. Either nothing is connected, or the hotspot is not on a bridge (then there is no table to read)." : 'Every device was on an uplink or a wireless port.'}
+            rows={seen.seen ?? []}
+            columns={[
+              { key: 'port', label: 'Port', render: (x) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{x.port}</span> },
+              { key: 'bridge', label: 'Bridge', render: (x) => x.bridge || '—' },
+              { key: 'devices', label: 'Devices seen', render: (x) => x.devices },
+              { key: 'verdict', label: 'Decided', render: (x) => <span style={{ color: x.router ? color.green : color.muted }}>{x.verdict}{x.router ? `: ${x.router}` : ''}</span> },
+            ]}
+          />
+        </Card>
+      )}
 
       <Modal
         open={!!adding}

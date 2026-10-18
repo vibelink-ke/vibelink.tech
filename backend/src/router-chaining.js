@@ -111,44 +111,61 @@ export async function chainSnapshot(conn) {
     hostname: String(r['host-name'] ?? ''), seenSec: parseRosAge(r['last-seen']),
   })).filter((l) => l.mac);
   const wired = new Set(ifaceRows.filter((i) => String(i.type) === 'ether').map((i) => String(i.name)));
-  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges };
+  return { hosts, leases, wired, wan: scope.wan, lanBridges: scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean) };
 }
 
 /**
- * Pick the chained routers out of a snapshot. On each wired bridge port, a router (or several chained one behind the other) is the device that
- * names itself like one, or failing that the most router-looking MAC among a group of devices on the port: a universal (not private) MAC that
- * holds a lease. A lone device only counts when it names itself like a router, so a laptop on a cable is not taken for one.
- * Returns [{ mac, port, behind, ip, hostname, confidence: 'high' | 'likely' }].
+ * Go through each port of the snapshot, say what was decided about it, and pick the chained routers. On each wired port of the hotspot's
+ * bridge (never an uplink), a router is a device that names itself like one (Tenda, TP-Link…) — every such device, so extenders chained one behind
+ * the other are all found — or, failing a name, the one device with a real (not private) MAC where the rest of the port is phones using private
+ * MACs, or where it also holds a lease. A lone device only counts when it names itself like a router, so a laptop on a cable is not taken for one.
+ * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router }] }.
  */
-export function detectChained({ hosts, leases, wired, wan = new Set(), lanBridges = null }) {
+export function analysePorts({ hosts, leases, wired, wan = new Set(), lanBridges = null }) {
   const lease = new Map(leases.map((l) => [l.mac, l]));
-  const byPort = new Map();
+  const ports = new Map();
   for (const h of hosts) {
-    if (h.local || !wired.has(h.port) || !MAC.test(h.mac) || multicast(h.mac)) continue;
-    if (wan.has(h.port) || (h.bridge && wan.has(h.bridge))) continue;                    // the uplink side: upstream, not a router plugged in to extend the signal
-    if (lanBridges && h.bridge && !lanBridges.has(h.bridge)) continue;                  // not the hotspot's own bridge
-    if (!byPort.has(h.port)) byPort.set(h.port, new Set());
-    byPort.get(h.port).add(h.mac);
+    if (h.local || !MAC.test(h.mac) || multicast(h.mac)) continue;
+    let p = ports.get(h.port);
+    if (!p) {
+      p = { port: h.port, bridge: h.bridge || '', macs: new Set(), skip: null };
+      if (wan.has(h.port) || (h.bridge && wan.has(h.bridge))) p.skip = 'Uplink: skipped';              // upstream, not a router plugged in to extend the signal
+      else if (lanBridges && h.bridge && !lanBridges.has(h.bridge)) p.skip = 'Not the hotspot bridge: skipped';
+      else if (!wired.has(h.port)) p.skip = 'Not a cable port (wireless or virtual): skipped';
+      ports.set(h.port, p);
+    }
+    p.macs.add(h.mac);
   }
-  const out = [];
-  for (const [port, macs] of byPort) {
-    const scored = [...macs].map((mac) => {
+  const found = []; const report = [];
+  for (const p of ports.values()) {
+    const row = { port: p.port, bridge: p.bridge, devices: p.macs.size, verdict: p.skip, router: null };
+    report.push(row);
+    if (p.skip) continue;
+    const scored = [...p.macs].map((mac) => {
       const l = lease.get(mac);
       const hostname = l?.hostname ?? '';
       const hint = EXTENDER_NAME.test(hostname);
       const score = (hint ? 4 : 0) + (universal(mac) ? 1 : -3) + (l?.address ? 1 : 0);
       return { mac, hostname, ip: l?.address || null, hint, score };
     }).sort((a, b) => b.score - a.score || (a.mac < b.mac ? -1 : 1));
-    const need = macs.size >= 3 ? 2 : macs.size === 2 ? 3 : Infinity;
     const top = scored[0];
-    if (!(top.hint || top.score >= need)) continue;
-    const hinted = scored.filter((s) => s.hint);
-    for (const c of hinted.length ? hinted : [top]) {
-      out.push({ mac: c.mac, port, behind: macs.size - 1, ip: c.ip, hostname: c.hostname, confidence: c.hint ? 'high' : 'likely' });
+    const othersPrivate = scored.length > 1 && scored.slice(1).every((s) => !universal(s.mac));
+    const need = p.macs.size >= 3 ? 2 : 3;
+    const picked = top.hint || (p.macs.size >= 2 && universal(top.mac) && (othersPrivate || top.score >= need));
+    if (!picked) {
+      row.verdict = p.macs.size === 1 ? 'One device, not named like a router' : `${p.macs.size} devices, none looks like a router`;
+      continue;
     }
+    const hinted = scored.filter((s) => s.hint);
+    const chosen = hinted.length ? hinted : [top];
+    for (const c of chosen) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - 1, ip: c.ip, hostname: c.hostname, confidence: c.hint ? 'high' : 'likely' });
+    row.router = chosen.map((c) => c.hostname || c.mac).join(', ');
+    row.verdict = hinted.length ? 'Router found (by its name)' : 'Router found (by behaviour: check it)';
   }
-  return out;
+  return { found, report };
 }
+
+export const detectChained = (snap) => analysePorts(snap).found;
 
 /** Is a chained router alive right now: on the bridge recently, or leased recently. */
 export function aliveFromSnapshot(mac, snap) {
@@ -172,7 +189,8 @@ async function pass(r, { ros, secrets, notify }) {
     const snap = await chainSnapshot(conn);
 
     // ── learn: new chained routers are added by their MAC ──
-    const found = detectChained(snap);
+    const analysis = analysePorts(snap);
+    const found = analysis.found;
     const uplink = [...snap.wan];
     let cleaned = 0;
     if (uplink.length) {
@@ -241,7 +259,8 @@ async function pass(r, { ros, secrets, notify }) {
     if (recovered.length) {
       await notify(r.tenant_id, recovered.length === 1 ? `${label(recovered[0])} (chained to ${r.name}) is back.` : `${recovered.length} chained routers on ${r.name} are back.`, opts);
     }
-    return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink };
+    return { added, watched: byMac.size, down: downNow.length, cleaned, lan: snap.lanBridges ? [...snap.lanBridges] : null, uplink,
+      seen: analysis.report.slice(0, 60), hostsRead: snap.hosts.length, hotspotOn: snap.hotspotOn, router: r.name };
   } finally {
     if (conn) ros.close(conn);
   }
