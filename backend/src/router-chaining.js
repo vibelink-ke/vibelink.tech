@@ -372,6 +372,24 @@ export async function withDeadline(r, ros, work, seconds = READ_DEADLINE_SECONDS
   try { return await Promise.race([work, deadline]); } finally { clearTimeout(timer); }
 }
 
+
+/**
+ * Which PPPoE customer (by name) owns each of these MACs: the caller-id of an active session, or the caller-id locked on a PPP secret. Used only to LABEL a
+ * device ("PPPoE customer: John"); nothing is ever left out because of it. Asked by MAC, since a PPPoE router has thousands of sessions.
+ */
+export async function pppNamesFor(conn, macs) {
+  const list = [...new Set(macs.filter(Boolean))];
+  const out = new Map();
+  if (!list.length) return out;
+  for (const path of ['/ppp/active/print', '/ppp/secret/print']) {
+    for (let i = 0; i < list.length; i += OR_CHUNK) {
+      const rows = await conn.write(path, [...orQuery('caller-id', list.slice(i, i + OR_CHUNK)), '=.proplist=name,caller-id']).catch(() => []);
+      for (const row of rows ?? []) { const m = normMac(row['caller-id']); if (m && row.name && !out.has(m)) out.set(m, String(row.name)); }
+    }
+  }
+  return out;
+}
+
 /**
  * Which of these MACs belong to PPPoE customers. Asked by MAC (a PPPoE router has thousands of sessions, so the lists are never read whole): the
  * caller-id of an active session, the caller-id locked on a PPP secret (a customer who is offline now), and a PPPoE server's own client entries.
@@ -444,6 +462,16 @@ async function pass(r, { ros, secrets, notify }) {
     if (pppMacs.size) {
       cleaned += (await pool.query(`delete from chained_routers where tenant_id=$1 and router_id=$2 and confidence <> 'manual' and mac = any($3::text[])`, [r.tenant_id, r.id, [...pppMacs]])).rowCount;
     }
+    // Label (never remove) the devices that are a PPPoE customer's router, so it is clear which cable a chain starts from.
+    try {
+      const labels = await pppNamesFor(conn, suspects);
+      if (labels.size) {
+        for (const [mac, name] of labels) {
+          await pool.query(`update chained_routers set via = $4 where tenant_id=$1 and router_id=$2 and mac=$3`, [r.tenant_id, r.id, mac, `PPPoE customer: ${name}`]);
+        }
+      }
+      await pool.query(`update chained_routers set via = null where tenant_id=$1 and router_id=$2 and via is not null and not (mac = any($3::text[]))`, [r.tenant_id, r.id, [...labels.keys()]]);
+    } catch { /* the label column is not there yet (schema not applied): scanning goes on without labels */ }
     const { rows: known } = await pool.query('select * from chained_routers where tenant_id=$1 and router_id=$2 limit $3', [r.tenant_id, r.id, MAX_PER_ROUTER]);
     const byMac = new Map(known.map((k) => [k.mac, k]));
     let added = 0;

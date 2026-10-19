@@ -3591,6 +3591,8 @@ alter table chained_routers add column if not exists kind text not null default 
 
 -- Why a chained device is up or down (what the last check saw), and what the last scan of each router did.
 alter table chained_routers add column if not exists note text;
+-- Who owns the device when it is a PPPoE customer's router (a label only: it is still watched like any other).
+alter table chained_routers add column if not exists via text;
 create table if not exists chained_scans (
   router_id uuid primary key references routers on delete cascade,
   tenant_id uuid not null references tenants on delete cascade,

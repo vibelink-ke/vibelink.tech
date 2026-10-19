@@ -104,7 +104,7 @@ export default function RouterChaining() {
           empty={rows ? (show === 'watched' ? 'No chained routers found yet. They appear by themselves once a router is plugged into a hotspot port and a few devices connect through it.' : 'Nothing here.') : 'Loading…'}
           rows={shown}
           columns={[
-            { key: 'name', label: 'Router', render: (c) => <span><b>{c.name || c.hostname || 'Unnamed router'}</b>{c.hostname && c.name ? <span style={{ color: color.muted }}> · {c.hostname}</span> : null}</span> },
+            { key: 'name', label: 'Router', render: (c) => <span><b>{c.name || c.hostname || 'Unnamed router'}</b>{c.hostname && c.name ? <span style={{ color: color.muted }}> · {c.hostname}</span> : null}{c.via ? <span style={{ color: color.muted, fontSize: 12 }}> · {c.via}</span> : null}</span> },
             { key: 'kind', label: 'Type', render: (c) => <Badge>{KIND_LABEL[c.kind] ?? 'Router'}</Badge> },
             { key: 'mac', label: 'MAC', render: (c) => <span><span style={{ fontFamily: font.mono, fontSize: 12 }}>{c.mac}</span>{c.vendor ? <span style={{ color: color.muted, fontSize: 12 }}> · {c.vendor}</span> : null}</span> },
             { key: 'where', label: 'Plugged into', render: (c) => <span>{c.router_name}{c.port ? <span style={{ color: color.muted }}> · {c.port}</span> : null}</span> },
