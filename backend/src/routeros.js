@@ -987,6 +987,21 @@ export async function applyNat(conn, { subnet, wan = null }) {
 }
 
 /**
+ * Every IPv4 address a hostname answers with, asked of the system resolver and of three public ones, twice. A hostname behind a CDN (Cloudflare) can
+ * answer with a different address from one resolver, or one moment, to the next, and the router's IP-level allow is only as good as this list.
+ */
+export async function resolveEverywhere(host) {
+  const out = new Set();
+  const ask = async (resolver) => { try { for (const ip of await resolver.resolve4(host)) out.add(ip); } catch { /* that resolver has no answer */ } };
+  const resolvers = [dns];
+  for (const server of ['1.1.1.1', '8.8.8.8', '9.9.9.9']) {
+    try { const r = new dns.Resolver(); r.setServers([server]); resolvers.push(r); } catch { /* skip */ }
+  }
+  for (let round = 0; round < 2; round += 1) await Promise.all(resolvers.map(ask));
+  return [...out];
+}
+
+/**
  * Hosts reachable before anyone logs in.
  *
  * Without this a customer with no credit cannot reach M-Pesa to buy any, and the
@@ -1052,11 +1067,9 @@ export async function applyWalledGarden(conn, hosts = []) {
   const ipMine = ipCurrent.filter((r) => isManaged(r) && !isDynamic(r));
   const wantedIps = new Set();
   for (const host of wanted) {
-    try {
-      for (const ip of await dns.resolve4(host)) wantedIps.add(ip);
-    } catch (e) {
-      console.warn(`applyWalledGarden: could not resolve ${host} for its IP-level allow`, e.message);
-    }
+    const found = await resolveEverywhere(host);
+    if (!found.length) console.warn(`applyWalledGarden: could not resolve ${host} for its IP-level allow`);
+    for (const ip of found) wantedIps.add(ip);
   }
   const ipHave = new Set(ipMine.map((r) => String(r['dst-address']).split('/')[0]));
   const ipToRemove = ipMine.filter((r) => !wantedIps.has(String(r['dst-address']).split('/')[0]));

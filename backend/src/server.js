@@ -129,6 +129,19 @@ app.use('/api', auditTap);
 // Caddy's own side (private addresses) and Cloudflare's published ranges; an address outside them is never believed.
 const CLOUDFLARE_RANGES = ["173.245.48.0/20","103.21.244.0/22","103.22.200.0/22","103.31.4.0/22","141.101.64.0/18","108.162.192.0/18","190.93.240.0/20","188.114.96.0/20","197.234.240.0/22","198.41.128.0/17","162.158.0.0/15","104.16.0.0/13","104.24.0.0/14","172.64.0.0/13","131.0.72.0/22","2400:cb00::/32","2606:4700::/32","2803:f800::/32","2405:b500::/32","2405:8100::/32","2a06:98c0::/29","2c0f:f248::/32"];
 app.set('trust proxy', ['loopback', 'linklocal', 'uniquelocal', ...CLOUDFLARE_RANGES]);
+/** Is this IPv4 address one of Cloudflare's published ranges? */
+function isCloudflareIp(ip) {
+  const num = (a) => a.split('.').reduce((n, o) => (n * 256) + Number(o), 0);
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip))) return false;
+  const x = num(ip);
+  return CLOUDFLARE_RANGES.some((c) => {
+    if (c.includes(':')) return false;
+    const [base, bits] = c.split('/');
+    const size = 2 ** (32 - Number(bits));
+    const start = num(base);
+    return x >= start && x < start + size;
+  });
+}
 
 /**
  * The hotspot login page is not served from this app's own origin — it is
@@ -6820,6 +6833,16 @@ async function runHotspotPush(tenantId, routerId, opts = {}) {
     const garden = await tryStep('walled garden', () => ros.applyWalledGarden(conn, gardenHosts), 40000);
     done.push(`walled garden allows ${garden.allowed} host${garden.allowed === 1 ? '' : 's'}`
       + (portal ? `, including ${portal}` : ''));
+    // A sign-in page behind Cloudflare is the usual reason guests on EVERY router stop reaching it: Cloudflare answers with a different pair of
+    // addresses from one resolver and place to the next, and the router can only allow the ones it was told. Say so where it will be read.
+    if (portal) {
+      try {
+        const behind = (await ros.resolveEverywhere(portal)).filter(isCloudflareIp);
+        if (behind.length) {
+          done.push(`WARNING: ${portal} is behind Cloudflare (it answers with ${behind.join(', ')}). Cloudflare gives different addresses to different guests, so some may not reach the sign-in page. In Cloudflare, set the DNS record for ${portal} to "DNS only" (grey cloud).`);
+        }
+      } catch { /* a warning only */ }
+    }
 
     // The tenant's own login page, replacing MikroTik's. Non-fatal: a hotspot
     // serving the stock page still sells bundles and still authenticates, so a
@@ -15767,6 +15790,7 @@ const AUTOMATION_JOBS = [
   { job: 'syncTr069Devices', name: 'TR-069 devices', cron: '*/2 * * * *', detail: 'Reads the ACS’s device list, links a newly-seen device to whichever client’s serial matches, and gives a freshly-linked device its first WiFi/PPPoE' },
   { job: 'sendVisitReminders', name: 'Visit reminders', cron: '*/10 * * * *', detail: 'A few hours before a booked technician visit, texts the customer a reminder and the technician where to go' },
   { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
+  { job: 'refreshWalledGardens', name: 'Walled garden refresh', cron: '*/15 * * * *', detail: 'Looks the sign-in page\'s address up again (from several resolvers) and updates each hotspot router only if it changed, so guests can still reach the sign-in page after the portal host moves or is put behind Cloudflare' },
   { job: 'watchChainedRouters', name: 'Router chaining monitor', cron: '*/2 * * * *', detail: 'Reads each hotspot router\'s bridge, picks up routers plugged into its ports to extend the signal by their MAC, and watches them; two misses in a row mark one down and you get a single message however many went down together' },
   { job: 'checkLinkDevices', name: 'Radio and switch pings', cron: '*/2 * * * *', detail: 'Pings each shared radio, switch or ONU that has an address from the router it is locked to; two misses in a row mark it down on Shared links and on SkyPlan' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },

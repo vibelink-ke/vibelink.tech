@@ -123,6 +123,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
   // Every 2 minutes: is each radio, switch or ONU with an address answering a ping from the router it is locked to?
   cron.schedule('*/2 * * * *', safely('checkLinkDevices', checkLinkDevices));
+  // Every 15 minutes: look the sign-in page's address up again and tell each hotspot router (only if it changed), so a moved or CDN-fronted portal host cannot lock guests out.
+  cron.schedule('*/15 * * * *', safely('refreshWalledGardens', refreshWalledGardens));
   // Every 2 minutes: find the routers chained behind each hotspot router (by MAC) and watch them.
   cron.schedule('*/2 * * * *', safely('watchChainedRouters', watchChained));
   // Every 10 minutes: remind the customer and the technician about a booked visit in the next few hours.
@@ -2126,6 +2128,48 @@ async function accumulateUsage() {
  * misses in a row mark it down (one lost round is not a fault), one answer marks it up. A router that cannot be reached leaves the device
  * as it was: a router problem is not the radio's fault.
  */
+/**
+ * Keep the walled garden's IP-level allow current. Guests reach the sign-in page (and M-Pesa) before logging in only through addresses the router
+ * has been told about, and those were looked up once, when the router was last configured. A hostname that moves (put behind Cloudflare, a new
+ * origin address, Cloudflare handing out a different pair) leaves every router allowing the OLD address, and no guest can then load the sign-in page,
+ * on every router at once. So the lookup is repeated every 15 minutes, from several public resolvers, and a router is touched only when the answer
+ * has changed (applyWalledGarden diffs). Routers are read three at a time and a router that cannot be reached is left for the next round.
+ */
+let walledGardenRunning = false;
+async function refreshWalledGardens() {
+  if (walledGardenRunning) return;
+  walledGardenRunning = true;
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    const { rows: routers } = await pool.query(
+      `select r.id, r.name, r.host, r.api_port, r.service_user, r.service_password_enc, t.subdomain, hs.walled_garden
+         from routers r
+         join tenants t on t.id = r.tenant_id
+         left join hotspot_settings hs on hs.tenant_id = r.tenant_id
+        where r.status = 'up' and r.role in ('hotspot','both') and r.autoconfig_last_ok = true
+          and r.service_user is not null and r.service_password_enc is not null
+          and r.tenant_id in (${enabledTenants})`, ['refreshWalledGardens']);
+    const one = async (r) => {
+      let conn;
+      try {
+        const hosts = [...(r.walled_garden ?? []), r.subdomain ? `${r.subdomain}.${root}` : null].filter(Boolean);
+        if (!hosts.length) return;
+        conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+        await ros.applyWalledGarden(conn, hosts);
+      } catch (e) {
+        console.warn('refreshWalledGardens:', r.name, '-', e.message);
+      } finally {
+        if (conn) ros.close(conn);
+      }
+    };
+    for (let i = 0; i < routers.length; i += 3) await Promise.all(routers.slice(i, i + 3).map(one));
+  } finally {
+    walledGardenRunning = false;
+  }
+}
+
 /** Router chaining monitor: see router-chaining.js. */
 let chainedRunning = false;
 async function watchChained() {
