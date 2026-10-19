@@ -24,6 +24,7 @@
  * white screen for every guest, and a push that reported success. A size check
  * cannot tell those apart; a marker can.
  */
+import { createHash } from 'node:crypto';
 export const MARKER = 'vibelink-hotspot-login';
 // Bump when the page changes in a way a guest would miss on an old copy: Routers → Login pages shows which routers are behind.
 export const PAGE_VERSION = 15;
@@ -1845,4 +1846,10 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   </script>
 </body>
 </html>`;
+}
+
+/** Adds a short hash of the rendered page to its marker line, so a router's copy can be compared with what the server would serve now. */
+export function stampPage(html) {
+  const h = createHash('sha1').update(String(html)).digest('hex').slice(0, 10);
+  return String(html).replace(`<!-- ${MARKER} v${PAGE_VERSION} -->`, `<!-- ${MARKER} v${PAGE_VERSION} h:${h} -->`);
 }

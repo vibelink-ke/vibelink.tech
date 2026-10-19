@@ -1780,7 +1780,7 @@ export async function loginPageInfo(conn, expected) {
       else {
         const m = /vibelink-hotspot-login v(\d+)/.exec(text);
         const version = m ? Number(m[1]) : 0;
-        one = { state: version >= expected ? 'current' : 'old', version };
+        one = { state: version >= expected ? 'current' : 'old', version, hash: /h:([0-9a-f]{10})/.exec(text)?.[1] ?? null };
       }
     }
     if (rank[one.state] > rank[worst.state]) worst = { ...one, dir };

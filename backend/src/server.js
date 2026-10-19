@@ -892,7 +892,7 @@ app.get('/internal/tls-check', wrap(async (req, res) => {
  * people type the first.
  */
 app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
-  const { loginPage } = await import('./hotspot-portal.js');
+  const { loginPage, stampPage } = await import('./hotspot-portal.js');
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   const tenant = await tenantByHost(req.hostname)
     ?? (process.env.DEV_TENANT ? await tenantByHost(process.env.DEV_TENANT) : null);
@@ -955,7 +955,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
   // Read on its own so a database without the column yet still serves the page (the box simply stays on top).
   const { rows: [pos] } = await pool.query('select login_position from hotspot_settings where tenant_id=$1', [tenant.id]).catch(() => ({ rows: [] }));
 
-  res.type('html').send(loginPage({
+  const html = loginPage({
     loginPosition: pos?.login_position ?? 'top',
     currency: String(tenant.currency ?? 'KES').trim(),
     company: tenant.name ?? 'WiFi',
@@ -1002,7 +1002,8 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     hotspotGateway,
     adText: hs?.ad_text ?? null,
     adUrl: hs?.banner_url ?? null,
-  }));
+  });
+  res.type('html').send(stampPage(html));
 }));
 
 /**
@@ -15791,6 +15792,7 @@ const AUTOMATION_JOBS = [
   { job: 'sendVisitReminders', name: 'Visit reminders', cron: '*/10 * * * *', detail: 'A few hours before a booked technician visit, texts the customer a reminder and the technician where to go' },
   { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
   { job: 'refreshWalledGardens', name: 'Walled garden refresh', cron: '*/15 * * * *', detail: 'Looks the sign-in page\'s address up again (from several resolvers) and updates each hotspot router only if it changed, so guests can still reach the sign-in page after the portal host moves or is put behind Cloudflare' },
+  { job: 'syncHotspotLoginPages', name: 'Sign-in page sync', cron: '*/10 * * * *', detail: 'Compares each hotspot router sign-in page with the one the server serves now and re-sends it when it is old, stock, missing or different, so guests never see a stale page' },
   { job: 'watchChainedRouters', name: 'Router chaining monitor', cron: '*/2 * * * *', detail: 'Reads each hotspot router\'s bridge, picks up routers plugged into its ports to extend the signal by their MAC, and watches them; two misses in a row mark one down and you get a single message however many went down together' },
   { job: 'checkLinkDevices', name: 'Radio and switch pings', cron: '*/2 * * * *', detail: 'Pings each shared radio, switch or ONU that has an address from the router it is locked to; two misses in a row mark it down on Shared links and on SkyPlan' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },

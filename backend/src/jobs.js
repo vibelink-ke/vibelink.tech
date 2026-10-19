@@ -125,6 +125,7 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('checkLinkDevices', checkLinkDevices));
   // Every 15 minutes: look the sign-in page's address up again and tell each hotspot router (only if it changed), so a moved or CDN-fronted portal host cannot lock guests out.
   cron.schedule('*/15 * * * *', safely('refreshWalledGardens', refreshWalledGardens));
+  cron.schedule('*/10 * * * *', safely('syncHotspotLoginPages', syncHotspotLoginPages));
   // Every 2 minutes: find the routers chained behind each hotspot router (by MAC) and watch them.
   cron.schedule('*/2 * * * *', safely('watchChainedRouters', watchChained));
   // Every 10 minutes: remind the customer and the technician about a booked visit in the next few hours.
@@ -2167,6 +2168,56 @@ async function refreshWalledGardens() {
     for (let i = 0; i < routers.length; i += 3) await Promise.all(routers.slice(i, i + 3).map(one));
   } finally {
     walledGardenRunning = false;
+  }
+}
+
+/**
+ * Keep every hotspot router's sign-in page the same as the one the server would serve now. A router keeps the copy it was sent when it was last
+ * configured; a landing-page edit re-sends it, but a changed plan list, hotspot network, branding, or a newer page version on the server did not
+ * reach routers that were set up earlier, so guests there saw an old or broken page until someone pressed Configure by hand. Each router's file
+ * carries "vibelink-hotspot-login v<N> h:<hash>" (the hash is of the page the server renders for that router). Every 10 minutes the page is
+ * rendered again here, and a router whose file is stock, missing, an older version, or has a different hash is sent the new page.
+ */
+let loginPageSyncRunning = false;
+async function syncHotspotLoginPages() {
+  if (loginPageSyncRunning) return;
+  loginPageSyncRunning = true;
+  try {
+    const ros = await import('./routeros.js');
+    const secrets = await import('./secrets.js');
+    const { PAGE_VERSION, MARKER } = await import('./hotspot-portal.js');
+    const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+    const { rows: routers } = await pool.query(
+      `select r.id, r.name, r.host, r.api_port, r.service_user, r.service_password_enc, t.subdomain
+         from routers r
+         join tenants t on t.id = r.tenant_id
+        where r.status = 'up' and r.role in ('hotspot','both') and r.autoconfig_last_ok = true
+          and r.service_user is not null and r.service_password_enc is not null and t.subdomain is not null
+          and r.tenant_id in (${enabledTenants})`, ['syncHotspotLoginPages']);
+    const one = async (r) => {
+      let conn;
+      try {
+        const url = `https://${r.subdomain}.${root}/hotspot/login.html?router=${r.id}`;
+        const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10000) });
+        const body = res.ok ? await res.text() : '';
+        if (!body.includes(MARKER)) return; // the server cannot show the page right now: leave the router's copy alone
+        const want = /h:([0-9a-f]{10})/.exec(body.slice(0, 400))?.[1] ?? null;
+        conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+        const info = await ros.loginPageInfo(conn, PAGE_VERSION);
+        const behind = info.state !== 'current' && info.state !== 'unknown' || (info.state === 'current' && want && info.hash !== want)
+          || (info.state === 'unknown' && want);
+        if (!behind) return;
+        const page = await ros.pushHotspotPage(conn, { url });
+        console.log('syncHotspotLoginPages:', r.name, '- sent', page.bytes, 'bytes (was', info.state, info.version ?? '', info.hash ?? '', ')');
+      } catch (e) {
+        console.warn('syncHotspotLoginPages:', r.name, '-', e.message);
+      } finally {
+        if (conn) try { ros.close(conn); } catch { /* already gone */ }
+      }
+    };
+    for (let i = 0; i < routers.length; i += 3) await Promise.all(routers.slice(i, i + 3).map(one));
+  } finally {
+    loginPageSyncRunning = false;
   }
 }
 
