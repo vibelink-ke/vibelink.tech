@@ -263,7 +263,8 @@
       "Router chaining no longer loads busy routers: the full scan of every port now runs once every 30 minutes (and when you press Scan); in between, only the watched devices are checked by MAC, with a few small reads.",
       "Router chaining sends far fewer messages: only for confirmed (Found or added by hand) devices, and only after 10 minutes missing.",
       "Payments: money paid while an account is still active is kept in the wallet and renews the account when it expires. Unpaid past-due invoices are paid first. A partial amount is kept in the wallet until the full amount is there, and no longer switches an expired account back on.",
-      "Payments: a client billed daily or weekly is activated and extended as soon as the amount covers a day or a week, even while still active. Less than that waits in the wallet."
+      "Payments: a client billed daily or weekly is activated and extended as soon as the amount covers a day or a week, even while still active. Less than that waits in the wallet.",
+      "Payments: when a customer has several services and one has expired, a payment aimed at a running service goes to the expired one (the longest expired first). A payment for a specific invoice stays where it was aimed."
     ]
   }
 ]

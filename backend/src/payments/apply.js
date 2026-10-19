@@ -200,6 +200,7 @@ async function applyPaymentOnce(tenantId, tx) {
     }
 
     if (target.type === 'subscriber') {
+      if (!target.invoiceId) target = { ...target, id: await expiredLineOf(c, tenantId, target.id) };
       const r = await settleSubscriber(c, tenantId, target.id, tx.amount, paymentId, target.invoiceId ?? null);
       // Only a payment that really renews the account switches it on: money kept in the wallet (a partial amount, or paid while still active) changes nothing.
       if (!r.partial) await activateSubscriber(c, tenantId, target.id);
@@ -341,6 +342,22 @@ async function applyPaymentOnce(tenantId, tx) {
     await send(tenantId, tx.phone, 'voucher', { code: v.code, expires, link, points_line: pointsLine(loyalty) });
     return { paymentId, applied: true, voucher: v };
   });
+}
+
+/**
+ * One account can carry several lines (a house and a shop, a landlord's flats). A payment aimed at a line that is still running, while another line of the
+ * same account has EXPIRED, belongs to the expired one: that is the one the customer needs back on. If more than one has expired, the longest expired
+ * first. A payment aimed at a specific invoice stays where it was pointed, and so does one for a line that is itself expired.
+ */
+async function expiredLineOf(c, tenantId, subId) {
+  const { rows: [cur] } = await c.query('select account_code, expires_at from subscribers where id=$1 and tenant_id=$2', [subId, tenantId]);
+  if (!cur?.account_code || (cur.expires_at && new Date(cur.expires_at).getTime() <= Date.now())) return subId;
+  const { rows: [other] } = await c.query(
+    `select s.id from subscribers s join plans p on p.id = s.plan_id
+      where s.tenant_id=$1 and s.account_code=$2 and s.id <> $3 and s.expires_at < now()
+        and s.status in ('active','grace','expired')
+      order by s.expires_at asc limit 1`, [tenantId, cur.account_code, subId]);
+  return other?.id ?? subId;
 }
 
 /**
@@ -559,6 +576,7 @@ export async function applyMatched(tenantId, paymentId, subscriberId) {
       'select id from subscribers where id=$1 and tenant_id=$2', [subscriberId, tenantId]);
     if (!sub) throw new Error('That customer was not found.');
 
+    subscriberId = await expiredLineOf(c, tenantId, subscriberId);
     const r = await settleSubscriber(c, tenantId, subscriberId, pay.amount, pay.id, null);
     if (!r.partial) await activateSubscriber(c, tenantId, subscriberId);
 
