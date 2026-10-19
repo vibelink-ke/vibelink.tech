@@ -248,7 +248,8 @@
       "Router chaining: routers with a maker's prefix are added again even with no address on the hotspot (marked Check), and nothing is deleted for lacking an address; this restores the bridged routers the last update removed",
       "Router chaining: a Scan all ports option reads every bridge port (uplink, PPPoE, other bridges and wireless ports too) and keeps what it finds",
       "Hotspot sign-in page: the walled garden address of the portal is now refreshed every 15 minutes from several resolvers (it only changes a router when the answer changed), and Configure warns when the portal host is behind Cloudflare",
-      "Fix: the anti-tunnel firewall rules were placed in reverse order, so the DNS 'drop' came before the 'allow' and guests could not resolve names (no sign-in page); rules are now placed by explicit moves at the top in the right order, read back, and removed again if the order cannot be confirmed"
+      "Fix: the anti-tunnel firewall rules were placed in reverse order, so the DNS 'drop' came before the 'allow' and guests could not resolve names (no sign-in page); rules are now placed by explicit moves at the top in the right order, read back, and removed again if the order cannot be confirmed",
+      "Configure now gives every guest network on the router a DNS server when it has none (the router's own address on that network). Guests on hand-made extra networks could not load the sign-in page."
     ]
   }
 ]

@@ -594,6 +594,23 @@ export async function applyHotspotServer(conn, {
     done.push('dhcp network');
   }
 
+  // Other guest networks on this router (a second or third pool, made by hand) often have no DNS server at all: their guests get an address but cannot
+  // resolve a single name, so the sign-in page never loads while people with a code (already authorized) seem fine. Where a network has no dns-server
+  // and its gateway is an address of this router, the gateway is given as the DNS server. Networks that already have one are left alone.
+  try {
+    const mine = new Set((await conn.write('/ip/address/print', ['=.proplist=address'])).map((r) => String(r.address ?? '').split('/')[0]));
+    for (const n of nets) {
+      if (String(n.address) === cidr || n.dynamic === 'true') continue;
+      const gw = String(n.gateway ?? '').split(',')[0].trim();
+      if (!String(n['dns-server'] ?? '').trim() && gw && mine.has(gw)) {
+        await cmd(conn, 'DHCP network DNS', '/ip/dhcp-server/network/set', [`=.id=${idOf(n)}`, `=dns-server=${gw}`]);
+        done.push(`dns server for ${n.address}`);
+      }
+    }
+  } catch (e) {
+    console.warn('configure: other DHCP networks left as they are -', e.message);
+  }
+
   const PROFILE = 'hsprof-billing';
   const profile = (await conn.write('/ip/hotspot/profile/print', [`?name=${PROFILE}`]))[0];
   const profileFields = [
