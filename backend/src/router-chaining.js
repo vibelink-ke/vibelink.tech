@@ -229,12 +229,14 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   const leaseMacs = new Set(leases.map((l) => l.mac));
   const arpWant = [...new Set(hosts.filter((h) => !leaseMacs.has(h.mac) && (vendorOf(h.mac) || onuVendorOf(h.mac) || maybeOnuVendorOf(h.mac))).map((h) => h.mac))];
   const arp = new Map();
+  const arpOff = new Map();      // an address the MAC holds somewhere that is NOT the hotspot (a PPPoE customer's, another network)
   if (arpWant.length) say(`Checking which of ${arpWant.length} router-maker device${arpWant.length === 1 ? '' : 's'} have an address on the hotspot…`);
   for (let i = 0; i < arpWant.length; i += OR_CHUNK) {
     const rows = await soft('/ip/arp/print', [...orQuery('mac-address', arpWant.slice(i, i + OR_CHUNK)), '=.proplist=mac-address,address,interface']);
     for (const row of rows) {
       const onLan = !scope.lanBridges || scope.lanBridges.has(String(row.interface ?? ''));
       if (onLan && row.address) arp.set(normMac(row['mac-address']), String(row.address));
+      else if (row.address) arpOff.set(normMac(row['mac-address']), { address: String(row.address), interface: String(row.interface ?? '') });
     }
   }
   // A router in router mode plugged into the hotspot (a Tenda, TP-Link ... used as an extender with its own LAN) shows up in the hotspot's host list as a
@@ -248,7 +250,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   }
   // With opts.allPorts nothing is left out for being the uplink, a PPPoE port, another bridge or a wireless port: every port that was read counts.
   const open = !!opts.allPorts;
-  return { hosts, leases, arp, nat, wired: open ? new Set([...wired, ...lanPorts.map((x) => x.port)]) : wired, wan: open ? new Set() : scope.wan, pppPorts: open || !EXCLUDE_PPP ? new Set() : scope.ppp, lanBridges: open ? null : scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
+  return { hosts, leases, arp, arpOff, nat, wired: open ? new Set([...wired, ...lanPorts.map((x) => x.port)]) : wired, wan: open ? new Set() : scope.wan, pppPorts: open || !EXCLUDE_PPP ? new Set() : scope.ppp, lanBridges: open ? null : scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
 }
 
 /**
@@ -259,7 +261,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
  * lists those devices so a router that gives nothing away can be added by hand.
  * Returns { found: [{ mac, port, behind, ip, hostname, confidence }], report: [{ port, bridge, devices, verdict, router, candidates }] }.
  */
-export function analysePorts({ hosts, leases, nat = new Map(), wired, wan = new Set(), lanBridges = null, bigPorts = [], pppPorts = new Set(), pppMacs = new Set(), arp = new Map() }) {
+export function analysePorts({ hosts, leases, nat = new Map(), arpOff = new Map(), wired, wan = new Set(), lanBridges = null, bigPorts = [], pppPorts = new Set(), pppMacs = new Set(), arp = new Map() }) {
   const isPpp = (mac) => pppMacs.has(mac) || [...pppMacs].some((m) => sameDevice(m, mac));
   const lease = new Map(leases.map((l) => [l.mac, l]));
   const ports = new Map();
@@ -288,17 +290,17 @@ export function analysePorts({ hosts, leases, nat = new Map(), wired, wan = new 
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
       const onLan = !!l || arp.has(mac);                                    // an address on the hotspot's bridge
-      return { mac, hostname, classId, onLan, lease: !!l, ip: l?.address || arp.get(mac) || nt?.to || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId), natted: nat.has(mac) };
+      return { mac, hostname, classId, onLan, lease: !!l, ip: l?.address || arp.get(mac) || nt?.to || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId), natted: nat.has(mac), off: !l && !arp.has(mac) ? arpOff.get(mac) ?? null : null };
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
     // A router says what it is in its own words (name, DHCP signature: both come with a lease), or has a router maker's prefix. A prefix with no address on
     // the hotspot is seen only at layer 2 (a bridged extender looks exactly so, and so can a PPPoE customer's router where PPPoE shares the bridge): it is
     // added and marked "Check", never silently left out.
-    const asCandidate = (d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor ?? d.onuVendor ?? (d.maybeVendor ? `${d.maybeVendor} (could be an xPON router or a phone)` : null), note: (d.vendor || d.onuVendor || (d.maybeVendor && !d.hostname)) && !d.onLan ? "no address on the hotspot: maybe a PPPoE customer's router" : '' });
+    const asCandidate = (d) => ({ mac: d.mac, hostname: d.hostname, classId: d.classId, ip: d.ip, vendor: d.vendor ?? d.onuVendor ?? (d.maybeVendor ? `${d.maybeVendor} (could be an xPON router or a phone)` : null), note: d.off ? `its address ${d.off.address} is on ${d.off.interface || 'another network'}, not on the hotspot: a customer's or another network's device` : (d.vendor || d.onuVendor || (d.maybeVendor && !d.hostname)) && !d.onLan ? "no address on the hotspot: maybe a PPPoE customer's router" : '' });
     const strong = (x) => x.named || x.embedded || x.onuNamed || x.natted;
     const byPrefix = (x) => x.vendor || x.onuVendor || (x.maybeVendor && !x.hostname);
-    for (const d of all.filter((x) => !x.client && (strong(x) || byPrefix(x))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
+    for (const d of all.filter((x) => !x.client && !(x.off && !x.natted) && (strong(x) || byPrefix(x))).sort((a, b) => (a.mac < b.mac ? -1 : 1))) {
       if (!routers.some((r2) => sameDevice(r2.mac, d.mac))) routers.push(d);
     }
     if (!routers.length) {
