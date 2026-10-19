@@ -288,7 +288,7 @@ export function analysePorts({ hosts, leases, nat = new Map(), wired, wan = new 
       const hostname = l?.hostname ?? '';
       const classId = l?.classId ?? '';
       const onLan = !!l || arp.has(mac);                                    // an address on the hotspot's bridge
-      return { mac, hostname, classId, onLan, ip: l?.address || arp.get(mac) || nt?.to || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId), natted: nat.has(mac) };
+      return { mac, hostname, classId, onLan, lease: !!l, ip: l?.address || arp.get(mac) || nt?.to || null, client: CLIENT_NAME.test(hostname) || CLIENT_DHCP.test(classId), vendor: vendorOf(mac), onuVendor: onuVendorOf(mac), maybeVendor: maybeOnuVendorOf(mac), onuNamed: ONU_NAME.test(hostname), named: EXTENDER_NAME.test(hostname), embedded: EMBEDDED_DHCP.test(classId), natted: nat.has(mac) };
     });
     // A router's own interfaces (LAN, radios) take addresses a few apart, so two such MACs on one port are one router: keep the first.
     const routers = [];
@@ -311,7 +311,10 @@ export function analysePorts({ hosts, leases, nat = new Map(), wired, wan = new 
       continue;
     }
     const kindOf = (c) => (c.onuNamed || c.onuVendor || (c.maybeVendor && !c.named && !c.vendor) ? 'onu' : 'router');
-    for (const c of routers) found.push({ mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: strong(c) || c.onLan ? 'high' : 'likely' });
+    // Proof that hotspot guests pass through it: other devices on the same cable port that hold a hotspot (DHCP) lease. A device that is only a maker's prefix
+    // on a LAN port is "Check"; once guests are seen behind it, it is confirmed.
+    const guests = all.filter((x) => x.onLan && x.lease && !routers.some((r2) => sameDevice(r2.mac, x.mac))).length;
+    for (const c of routers) found.push({ carries: guests, mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: strong(c) || c.onLan || guests > 0 ? 'high' : 'likely' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
     row.candidates = all.filter((x) => !x.client && byPrefix(x) && !x.onLan && !routers.some((r2) => r2.mac === x.mac)).slice(0, 8).map(asCandidate);
     const what = [...new Set(routers.map((c) => (kindOf(c) === 'onu' ? 'ONU' : 'Router')))].join(' and ');
@@ -450,8 +453,8 @@ async function pass(r, { ros, secrets, notify }) {
         await pool.query(
           `update chained_routers set port=$2, behind=$3, ip=coalesce($4, ip), hostname=coalesce(nullif($5,''), hostname),
                   kind = case when confidence = 'manual' then kind else $6 end,
-                  confidence = case when $7 then 'manual' else confidence end where id=$1`,
-          [have.id, f.port, f.behind, f.ip, f.hostname, f.kind, !!r.allPorts]);
+                  confidence = case when $7 then 'manual' when confidence = 'likely' and $8 = 'high' then 'high' else confidence end where id=$1`,
+          [have.id, f.port, f.behind, f.ip, f.hostname, f.kind, !!r.allPorts, f.confidence]);
         continue;
       }
       if (added >= MAX_NEW_PER_PASS) break;

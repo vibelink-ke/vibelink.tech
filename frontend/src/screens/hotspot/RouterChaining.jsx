@@ -123,7 +123,7 @@ export default function RouterChaining() {
           ]}
         />
         <p style={{ margin: '12px 0 0', fontSize: 12.5, color: color.muted }}>
-          "Found" means the router named itself like one (Tenda, TP-Link…). "Check" means it was picked by behaviour: a router-looking device carrying a group of others on one port. If it is something else, press Ignore. Up means seen on the bridge or answering in the last 3 minutes. Two misses in a row mark it down and you get one message, however many went down together.
+          "Found" means the router named itself like one (Tenda, TP-Link…). "Check" means it was picked by behaviour or by its maker, and no guest has been seen behind it yet. The next scan confirms it (and turns it to Found) as soon as hotspot guests are seen on its cable port or it has an address on the hotspot. If it is something else, press Ignore. Up means seen on the bridge or answering in the last 3 minutes. Two misses in a row mark it down and you get one message, however many went down together.
         </p>
       </Card>
 

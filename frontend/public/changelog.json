@@ -254,7 +254,8 @@
       "Router chaining: Scan all ports now also includes PPPoE ports and PPPoE customers' devices.",
       "Router chaining now finds routers that have their own LAN behind the hotspot (their address differs from the one the hotspot gave them), and lists up to 40 devices per port to pick from.",
       "Router chaining: add a router by MAC in any style (AA:BB.., AA-BB.., aabbccddeeff). A MAC that is on the router's uplink or PPPoE side is refused: only LAN-side devices are added.",
-      "Router chaining: PPPoE devices are no longer filtered out of scans (back to the behaviour that found 66 routers on one router)."
+      "Router chaining: PPPoE devices are no longer filtered out of scans (back to the behaviour that found 66 routers on one router).",
+      "Router chaining: a device marked Check is confirmed (Found) on the next scan once hotspot guests are seen behind it on its LAN port."
     ]
   }
 ]
