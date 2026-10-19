@@ -486,7 +486,9 @@ async function pass(r, { ros, secrets, notify }) {
       }
       if (!alive && !ip) why += ' (no address to ping)';
       if (alive) {
-        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false, note=$2 where id=$1`, [c.id, why]);
+        // A device seen online by its MAC on a LAN port (listed on the hotspot bridge, or holding a lease) is confirmed: Check turns to Found.
+        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false, note=$2,
+                confidence = case when $3 and confidence = 'likely' then 'high' else confidence end where id=$1`, [c.id, why, seen.alive]);
         if (c.offline_notified) recovered.push(c);
         continue;
       }
