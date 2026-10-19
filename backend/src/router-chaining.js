@@ -313,7 +313,7 @@ export function analysePorts({ hosts, leases, nat = new Map(), wired, wan = new 
     const kindOf = (c) => (c.onuNamed || c.onuVendor || (c.maybeVendor && !c.named && !c.vendor) ? 'onu' : 'router');
     // Proof that hotspot guests pass through it: other devices on the same cable port that hold a hotspot (DHCP) lease. A device that is only a maker's prefix
     // on a LAN port is "Check"; once guests are seen behind it, it is confirmed.
-    const guests = all.filter((x) => x.onLan && x.lease && !routers.some((r2) => sameDevice(r2.mac, x.mac))).length;
+    const guests = p.macs.size > 24 ? 0 : all.filter((x) => x.onLan && x.lease && !routers.some((r2) => sameDevice(r2.mac, x.mac))).length;
     for (const c of routers) found.push({ carries: guests, mac: c.mac, port: p.port, behind: p.macs.size - routers.length, ip: c.ip, hostname: c.hostname, vendor: c.vendor ?? c.onuVendor ?? c.maybeVendor, kind: kindOf(c), confidence: strong(c) || c.onLan || guests > 0 ? 'high' : 'likely' });
     row.router = routers.map((c) => c.hostname || c.mac).join(', ');
     row.candidates = all.filter((x) => !x.client && byPrefix(x) && !x.onLan && !routers.some((r2) => r2.mac === x.mac)).slice(0, 8).map(asCandidate);
@@ -481,7 +481,7 @@ async function pass(r, { ros, secrets, notify }) {
         await pool.query(
           `update chained_routers set port=$2, behind=$3, ip=coalesce($4, ip), hostname=coalesce(nullif($5,''), hostname),
                   kind = case when confidence = 'manual' then kind else $6 end,
-                  confidence = case when $7 then 'manual' when confidence = 'likely' and $8 = 'high' then 'high' else confidence end where id=$1`,
+                  confidence = case when $7 then 'manual' when confidence in ('likely','high') then $8 else confidence end where id=$1`,
           [have.id, f.port, f.behind, f.ip, f.hostname, f.kind, !!r.allPorts, f.confidence]);
         continue;
       }
@@ -515,8 +515,7 @@ async function pass(r, { ros, secrets, notify }) {
       if (!alive && !ip) why += ' (no address to ping)';
       if (alive) {
         // A device seen online by its MAC on a LAN port (listed on the hotspot bridge, or holding a lease) is confirmed: Check turns to Found.
-        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false, note=$2,
-                confidence = case when $3 and confidence = 'likely' then 'high' else confidence end where id=$1`, [c.id, why, seen.alive]);
+        await pool.query(`update chained_routers set status='up', last_seen=now(), ping_fails=0, offline_since=null, offline_notified=false, note=$2 where id=$1`, [c.id, why]);
         if (c.offline_notified) recovered.push(c);
         continue;
       }
