@@ -259,7 +259,8 @@
       "Router chaining: any device seen online by its MAC on a LAN port is confirmed (Check becomes Found) on every scan.",
       "Router chaining: a device that is a PPPoE customer's router now shows 'PPPoE customer: <name>' next to it, so you can see which cable a chain starts from. It is a label only.",
       "Router chaining: a device is confirmed only on hotspot-side evidence (an address on the hotspot, or its own LAN behind the hotspot, or guests behind it on a small cable port). Being online by MAC alone no longer confirms, and wrongly confirmed ones go back to Check.",
-      "Router chaining: the address a MAC holds is now checked. A device whose address is on a PPPoE or other non-hotspot network is not taken as a chained router, and the reason is shown."
+      "Router chaining: the address a MAC holds is now checked. A device whose address is on a PPPoE or other non-hotspot network is not taken as a chained router, and the reason is shown.",
+      "Router chaining no longer loads busy routers: the full scan of every port now runs once every 30 minutes (and when you press Scan); in between, only the watched devices are checked by MAC, with a few small reads."
     ]
   }
 ]
