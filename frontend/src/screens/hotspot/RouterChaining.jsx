@@ -27,6 +27,7 @@ export default function RouterChaining() {
   const [adding, setAdding] = useState(null);
   const [show, setShow] = useState('watched');
   const [scans, setScans] = useState([]);
+  const [allPorts, setAllPorts] = useState(false);   // scan every bridge port, not only the hotspot's cable ports
   const [seenId, setSeenId] = useState(null);      // the router whose last scan is shown below, port by port
   const routers = (store.routers ?? []).filter((r) => r.role === 'hotspot' || r.role === 'both' || !r.role);
 
@@ -42,7 +43,7 @@ export default function RouterChaining() {
   const startScan = async (routerId) => {
     setScanning(true);
     try {
-      const r = await api.scanChaining({ routerId });
+      const r = await api.scanChaining({ routerId, allPorts });
       setSeenId(routerId);
       store.toast(r.started ? 'Scanning in the background. Its progress shows in the Routers table; you can leave this page.' : 'That router is already being scanned.');
     } catch (e) { store.toast(`Could not scan: ${e.message}`); } finally { setScanning(false); await load(); }
@@ -85,6 +86,9 @@ export default function RouterChaining() {
         actions={can && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
             <Select style={{ width: 180 }} value={scanRouter} onChange={(e) => setScanRouter(e.target.value)} options={routers.map((r) => ({ value: r.id, label: r.name }))} />
+            <label title="Also read the uplink, the PPPoE ports, other bridges and wireless ports, and keep what is found. Slower; for when a router is on a port the normal scan skips." style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12.5, cursor: 'pointer' }}>
+              <input type="checkbox" checked={allPorts} onChange={(e) => setAllPorts(e.target.checked)} /> Scan all ports
+            </label>
             <Button size="sm" onClick={scan} disabled={scanning || !scanRouter || scans.find((x) => x.id === scanRouter)?.running}>{scanning || scans.find((x) => x.id === scanRouter)?.running ? 'Scanning…' : 'Scan now'}</Button>
             <Button size="sm" onClick={() => setAdding({ routerId: scanRouter, mac: '', name: '', kind: 'router' })}>+ Add by MAC</Button>
           </div>
