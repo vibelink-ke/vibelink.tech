@@ -117,6 +117,9 @@ export function lanScope({ ifaces = [], hotspots = [], lists = [], routes = [], 
   return { wan, lanBridges: lan.size ? lan : null, ppp };
 }
 
+// PPPoE devices are NOT left out: the scan found far more routers (66 on one router) before PPPoE customers were filtered out, and the filter dropped real
+// chained routers on routers where PPPoE and the hotspot share a bridge. Set to true to bring the filtering back.
+const EXCLUDE_PPP = false;
 const MAX_PORT_HOSTS = 100000;    // a safety stop only: a port is read however many devices it carries (a big hotspot takes minutes over a slow tunnel, and that is allowed)
 const OR_CHUNK = 28;              // MACs asked for in one query
 
@@ -175,7 +178,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   const HOSTS = '/interface/bridge/host/print';
   const lanPorts = bridgePorts
     .map((b) => ({ port: String(b.interface ?? ''), bridge: String(b.bridge ?? '') }))
-    .filter((b) => b.port && (opts.allPorts || (wired.has(b.port) && !scope.wan.has(b.port) && !scope.wan.has(b.bridge) && !scope.ppp.has(b.port) && !scope.ppp.has(b.bridge) && (!scope.lanBridges || scope.lanBridges.has(b.bridge)))));
+    .filter((b) => b.port && (opts.allPorts || (wired.has(b.port) && !scope.wan.has(b.port) && !scope.wan.has(b.bridge) && (!EXCLUDE_PPP || (!scope.ppp.has(b.port) && !scope.ppp.has(b.bridge))) && (!scope.lanBridges || scope.lanBridges.has(b.bridge)))));
   const hostRows = []; const bigPorts = [];
   const say = (t) => { try { opts.progress?.(t); } catch { /* progress is only a courtesy */ } };
   say(opts.allPorts ? `Scanning all ports: found ${lanPorts.length} bridge port${lanPorts.length === 1 ? '' : 's'}. Counting the devices on each…` : `Found ${lanPorts.length} cable port${lanPorts.length === 1 ? '' : 's'} on the hotspot side. Counting the devices on each…`);
@@ -245,7 +248,7 @@ export async function chainSnapshot(conn, trace = null, opts = {}) {
   }
   // With opts.allPorts nothing is left out for being the uplink, a PPPoE port, another bridge or a wireless port: every port that was read counts.
   const open = !!opts.allPorts;
-  return { hosts, leases, arp, nat, wired: open ? new Set([...wired, ...lanPorts.map((x) => x.port)]) : wired, wan: open ? new Set() : scope.wan, pppPorts: open ? new Set() : scope.ppp, lanBridges: open ? null : scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
+  return { hosts, leases, arp, nat, wired: open ? new Set([...wired, ...lanPorts.map((x) => x.port)]) : wired, wan: open ? new Set() : scope.wan, pppPorts: open || !EXCLUDE_PPP ? new Set() : scope.ppp, lanBridges: open ? null : scope.lanBridges, hotspotOn: hotspots.map((h) => String(h.interface ?? '')).filter(Boolean), bigPorts };
 }
 
 /**
@@ -421,7 +424,7 @@ async function pass(r, { ros, secrets, notify }) {
     const suspects = [...analysis.found.map((f) => f.mac), ...analysis.report.flatMap((x) => x.candidates.map((c) => c.mac)), ...watching.map((x) => x.mac)];
     void recordScan(r, { running: true, note: r.allPorts ? 'Reading every device…' : 'Leaving out PPPoE customers…' });
     // "Scan all ports" means everything on the cable, PPPoE customers' devices included: nothing is left out for being a PPPoE session.
-    const pppMacs = r.allPorts ? new Set() : await pppSetFor(conn, suspects);
+    const pppMacs = r.allPorts || !EXCLUDE_PPP ? new Set() : await pppSetFor(conn, suspects);
     if (pppMacs.size) analysis = analysePorts({ ...snap, pppMacs });
     // A router with no hotspot on it has no guest bridge to find extenders on; one whose hotspot could not be read (a PPPoE-only router has none) is
     // looked at only when its role says it has one.
