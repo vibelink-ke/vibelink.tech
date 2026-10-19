@@ -198,7 +198,7 @@ export default function RouterChaining() {
           <div style={{ display: 'grid', gap: 12 }}>
             <Field label="Plugged into router"><Select options={routers.map((r) => ({ value: r.id, label: r.name }))} value={adding.routerId} onChange={(e) => setAdding({ ...adding, routerId: e.target.value })} /></Field>
             <Field label="Type"><Select options={[{ value: 'router', label: 'Router or extender' }, { value: 'onu', label: 'Fibre unit (ONU/ONT)' }]} value={adding.kind} onChange={(e) => setAdding({ ...adding, kind: e.target.value })} /></Field>
-            <Field label="MAC address" hint="Printed on the label."><Input value={adding.mac} onChange={(e) => setAdding({ ...adding, mac: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} autoFocus /></Field>
+            <Field label="MAC address" hint="Printed on the label. Any style works: AA:BB:CC:DD:EE:FF, AA-BB-CC-DD-EE-FF or aabbccddeeff. Only devices on the LAN side are added."><Input value={adding.mac} onChange={(e) => setAdding({ ...adding, mac: e.target.value })} placeholder="AA:BB:CC:DD:EE:FF" style={{ fontFamily: font.mono }} autoFocus /></Field>
             <Field label="Name"><Input value={adding.name} onChange={(e) => setAdding({ ...adding, name: e.target.value })} placeholder="Shop 4 extender" /></Field>
           </div>
         )}

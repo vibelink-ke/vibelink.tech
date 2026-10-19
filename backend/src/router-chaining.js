@@ -33,7 +33,12 @@ const CLIENT_DHCP = /^android|^msft/i;
 /** What embedded router firmware (BusyBox udhcp) puts in its DHCP request: phones send "android-dhcp", Windows "MSFT", iPhones nothing. */
 const EMBEDDED_DHCP = /^udhcp|busybox/i;
 
-export const normMac = (m) => String(m ?? '').trim().toUpperCase().replace(/-/g, ':');
+/** Any way of writing a MAC (AA:BB:.., AA-BB-.., AABB.CCDD.EEFF, aabbccddeeff) as AA:BB:CC:DD:EE:FF; anything else is returned as typed, upper case. */
+export const normMac = (m) => {
+  const t = String(m ?? '').trim().toUpperCase();
+  const hex = t.replace(/[s:.-]/g, '');
+  return /^[0-9A-F]{12}$/.test(hex) ? hex.match(/../g).join(':') : t.replace(/-/g, ':');
+};
 const MAC = /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/;
 export const validMac = (m) => MAC.test(normMac(m));
 /** A MAC with the "locally administered" bit set is a phone's private address or a virtual one, never an extender's own burned-in one. */
@@ -597,11 +602,61 @@ export async function listChainedRaw(tenantId) {
 const bad = (m, status = 400) => Object.assign(new Error(m), { status });
 const text = (v, max) => { const s = String(v ?? '').trim(); return s ? s.slice(0, max) : null; };
 
+
+/**
+ * Which ports of a router are the LAN side and which are not (uplink, PPPoE service ports, other bridges), read the same way a scan reads them. Used to
+ * refuse a MAC added by hand that is really on the WAN side. Never throws: an unreadable router gives null and the add goes ahead.
+ */
+async function portScopeOf(conn) {
+  try {
+    const soft = (path, query = []) => conn.write(path, query).catch(() => []);
+    const IFACE = (type) => soft('/interface/print', [`?type=${type}`, '=.proplist=name,type,comment']);
+    const [ether, bridges, vlanIfaces, pppoeOut, hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts, pppoeServers] = await Promise.all([
+      IFACE('ether'), IFACE('bridge'), IFACE('vlan'), IFACE('pppoe-out'),
+      soft('/ip/hotspot/print', ['=.proplist=interface']),
+      soft('/interface/list/member/print', ['=.proplist=list,interface']),
+      soft('/ip/route/print', ['?dst-address=0.0.0.0/0', '=.proplist=gateway,immediate-gw,gateway-status,active,disabled']),
+      soft('/ip/dhcp-client/print', ['=.proplist=interface']),
+      soft('/interface/pppoe-client/print', ['=.proplist=interface']),
+      soft('/interface/vlan/print', ['=.proplist=name,interface']),
+      soft('/interface/bridge/port/print', ['=.proplist=interface,bridge']),
+      soft('/interface/pppoe-server/server/print', ['=.proplist=interface']),
+    ]);
+    return lanScope({ ifaces: [...ether, ...bridges, ...vlanIfaces, ...pppoeOut], hotspots, lists, routes, dhcpClients, pppoe, vlans, bridgePorts, pppoeServers });
+  } catch { return null; }
+}
+
 /** Add one by hand (a chained router the scan cannot tell apart). */
 export async function addChained(tenantId, { routerId, mac, name, kind }) {
-  if (!validMac(mac)) throw bad('The MAC address must look like AA:BB:CC:DD:EE:FF.');
-  const { rows: [r] } = await pool.query('select id from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
+  const mac_ = mac;
+  if (!validMac(mac)) throw bad('The MAC address must be 12 hex digits, such as AA:BB:CC:DD:EE:FF (AA-BB-CC-DD-EE-FF or aabbccddeeff also work).');
+  const { rows: [r] } = await pool.query('select id, host, api_port, status, service_user, service_password_enc from routers where id=$1 and tenant_id=$2', [routerId, tenantId]);
   if (!r) throw bad('Choose the router it hangs off.');
+  // Only a device on the LAN side belongs here: if the router can be asked and the MAC is on its uplink, a PPPoE service port or a bridge that is not the
+  // hotspot's, say so instead of adding the ISP's or an upstream device. A MAC the router has not seen (switched off, aged out) is accepted: it cannot be placed.
+  if (r.status === 'up' && r.service_user && r.service_password_enc) {
+    let conn; let ros;
+    try {
+      ros = await import('./routeros.js');
+      const secrets = await import('./secrets.js');
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
+      const mac = normMac(mac_);
+      const rows = (await conn.write('/interface/bridge/host/print', [`?mac-address=${mac}`, '=.proplist=mac-address,on-interface,bridge,local']).catch(() => []))
+        .filter((h) => String(h.local) !== 'true');
+      if (rows.length) {
+        const scope = await portScopeOf(conn);
+        if (scope) {
+          const wrong = rows.every((h) => scope.wan.has(h['on-interface']) || scope.wan.has(h.bridge) || scope.ppp.has(h['on-interface']) || scope.ppp.has(h.bridge)
+            || (scope.lanBridges && h.bridge && !scope.lanBridges.has(h.bridge)));
+          if (wrong) throw bad(`${mac} is on ${rows[0]['on-interface']}, which is the uplink side of this router, not a LAN port. Only devices on the LAN side are added.`);
+        }
+      }
+    } catch (e) {
+      if (e.status) throw e;                          // our own refusal; a router that could not be read does not block the add
+    } finally {
+      if (conn) try { ros.close(conn); } catch { /* gone */ }
+    }
+  }
   try {
     const { rows: [c] } = await pool.query(
       `insert into chained_routers (tenant_id, router_id, mac, name, confidence, status, kind) values ($1,$2,$3,$4,'manual','unknown',$5) returning *`,
