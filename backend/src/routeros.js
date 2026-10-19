@@ -3683,8 +3683,8 @@ export function antiTunnelRules({ subnet, bridge, hosts = [], options = {} }) {
  * `ignore` names a field that RouterOS prints in another form than it is written in, so comparing it would rewrite the rule on every refresh.
  */
 export async function syncAntiTunnelTable(conn, path, wanted) {
-  const out = { added: 0, updated: 0, removed: 0 };
-  const rows = await conn.write(`${path}/print`, []);
+  const out = { added: 0, updated: 0, removed: 0, moved: 0 };
+  let rows = await conn.write(`${path}/print`, []);
   const mine = rows.filter((r) => isManaged(r) && String(r.comment ?? '').startsWith(AT));
   const have = new Map();
   for (const r of mine) {
@@ -3699,8 +3699,8 @@ export async function syncAntiTunnelTable(conn, path, wanted) {
       out.removed += 1;
     }
   }
-  // Added in reverse, each at the top, so the final order is the order of the list.
-  for (const w of [...wanted].reverse()) {
+  // Make or fix each rule (wherever it lands; the order is set below).
+  for (const w of wanted) {
     const comment = managed(w.label);
     const fields = [...w.fields, `=comment=${comment}`];
     const existing = have.get(comment);
@@ -3711,8 +3711,34 @@ export async function syncAntiTunnelTable(conn, path, wanted) {
         out.updated += 1;
       }
     } else {
-      await conn.write(`${path}/add`, rows.length ? [...fields, '=place-before=0'] : fields);
+      await conn.write(`${path}/add`, fields);
       out.added += 1;
+    }
+  }
+  // The ORDER matters, and a wrong one is worse than no rules: "accept what is within the rate" must come before "drop the rest", or the drop matches
+  // everything and guests cannot resolve a single name. A position given when adding was ignored by the router (the rules came out reversed), so
+  // they are placed by explicit moves, to the top of the chain in the order of the list, and then read back: if the order cannot be confirmed the
+  // rules are not left behind (the caller removes them).
+  const comments = wanted.map((w) => managed(w.label));
+  if (comments.length) {
+    rows = await conn.write(`${path}/print`, []);
+    const topNow = () => rows.slice(0, comments.length).map((r) => r.comment);
+    if (JSON.stringify(topNow()) !== JSON.stringify(comments)) {
+      const byComment = new Map(rows.filter((r) => isManaged(r) && comments.includes(r.comment)).map((r) => [r.comment, r]));
+      let dest = idOf(rows[0]);
+      for (const c of [...comments].reverse()) {
+        const row = byComment.get(c);
+        if (!row) continue;
+        if (idOf(row) !== dest) {
+          await conn.write(`${path}/move`, [`=numbers=${idOf(row)}`, `=destination=${dest}`]);
+          out.moved += 1;
+        }
+        dest = idOf(row);
+      }
+      rows = await conn.write(`${path}/print`, []);
+      if (JSON.stringify(topNow()) !== JSON.stringify(comments)) {
+        throw new Error('the rules could not be put in order at the top of the chain');
+      }
     }
   }
   return out;
@@ -3731,11 +3757,17 @@ export async function applyAntiTunnel(conn, { subnet, bridge, hosts = [], option
     want.filter = want.filter.filter((r) => !r.label.includes('SNI'));
     await syncAntiTunnelTable(conn, '/ip/firewall/mangle', []).catch(() => {});
   }
-  sum(await syncAntiTunnelTable(conn, '/ip/firewall/filter', want.filter));
+  try {
+    sum(await syncAntiTunnelTable(conn, '/ip/firewall/filter', want.filter));
+  } catch (e) {
+    await syncAntiTunnelTable(conn, '/ip/firewall/filter', []).catch(() => {});
+    throw new Error(`${e.message}; the protection rules were removed again so guests are not affected`);
+  }
   try {
     sum(await syncAntiTunnelTable(conn, '/ipv6/firewall/filter', want.ipv6));
-  } catch {
-    if (want.ipv6.length) total.notes.push('IPv6 is not installed on this router, so there is nothing to close');
+  } catch (e) {
+    await syncAntiTunnelTable(conn, '/ipv6/firewall/filter', []).catch(() => {});
+    if (want.ipv6.length) total.notes.push(/order/.test(String(e.message)) ? 'The IPv6 rule could not be put in order, so it was removed again' : 'IPv6 is not installed on this router, so there is nothing to close');
   }
   return total;
 }
