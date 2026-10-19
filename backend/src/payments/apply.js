@@ -484,7 +484,8 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   // one ends (jobs.js renewFromWallet does that automatically). What a client owes comes first (the debts above are already cleared), and so does a
   // renewal invoice that is past its due date: paying that one renews now. Auto-renewing from the wallet (preferCurrentPrice) is the activation itself.
   const nowMs = Date.now();
-  const stillActive = !preferCurrentPrice && sub.status === 'active' && sub.expires_at && new Date(sub.expires_at).getTime() > nowMs;
+  // A client billed daily or weekly (proRated) is not held back: they pay as they go, so a payment that covers at least one day/week extends the account at once.
+  const stillActive = !preferCurrentPrice && !proRated && sub.status === 'active' && sub.expires_at && new Date(sub.expires_at).getTime() > nowMs;
   const renewalOverdue = !!(inv?.due_date && new Date(inv.due_date).getTime() <= nowMs);
   if (stillActive && !renewalOverdue && Number(amount) > 0) {
     await c.query('update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2', [tenantId, sub.account_code, available]);
