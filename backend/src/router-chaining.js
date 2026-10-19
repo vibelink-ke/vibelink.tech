@@ -14,7 +14,7 @@
 import { pool, enabledTenants } from './db.js';
 import { FAMILY_SPAN, makerOf, maybeOnuVendorOf, onuVendorOf, sameDevice, vendorOf } from './router-ouis.js';
 
-export const OFFLINE_MINUTES = 3;
+export const OFFLINE_MINUTES = 10;   // a quiet extender drops out of the bridge's host table by itself (ageing), so a message is sent only when it has been missing this long
 const PINGS_PER_ROUTER = 20;
 const MAX_NEW_PER_PASS = 200;
 const MAX_PER_ROUTER = 500;
@@ -547,7 +547,8 @@ async function pass(r, { ros, secrets, notify }) {
       if (fails < 2) { await pool.query('update chained_routers set ping_fails=$2, note=$3 where id=$1', [c.id, fails, `${why} (missed once)`]); continue; }
       await pool.query(`update chained_routers set status='down', ping_fails=$2, offline_since=coalesce(offline_since, now()), note=$3 where id=$1`, [c.id, fails, why]);
       const since = c.offline_since ? new Date(c.offline_since) : new Date();
-      if (!c.offline_notified && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
+      // Only a device that is really known as a chained router (Found, or added by hand) is worth a message: a Check device is a guess and must not text anyone.
+      if (!c.offline_notified && c.confidence !== 'likely' && (Date.now() - since) / 60000 >= OFFLINE_MINUTES) {
         await pool.query('update chained_routers set offline_notified=true where id=$1', [c.id]);
         downNow.push(c);
       }
