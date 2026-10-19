@@ -201,7 +201,8 @@ async function applyPaymentOnce(tenantId, tx) {
 
     if (target.type === 'subscriber') {
       const r = await settleSubscriber(c, tenantId, target.id, tx.amount, paymentId, target.invoiceId ?? null);
-      await activateSubscriber(c, tenantId, target.id);
+      // Only a payment that really renews the account switches it on: money kept in the wallet (a partial amount, or paid while still active) changes nothing.
+      if (!r.partial) await activateSubscriber(c, tenantId, target.id);
       // A payment that didn't cover a full period leaves expires_at right
       // where it was — sending the usual receipt here would read "Active
       // until <the date it already expires>" with no hint that anything is
@@ -479,6 +480,18 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   // a real payment applied and was charged, then crashed before service was ever extended. A
   // non-positive unit price has no meaningful "how many periods did this buy" answer, so the
   // payment lands as wallet credit instead, same as an underpayment already does.
+  // Money paid while the account is STILL ACTIVE is kept in the wallet, not added on top of the time already running: it buys the next period when the current
+  // one ends (jobs.js renewFromWallet does that automatically). What a client owes comes first (the debts above are already cleared), and so does a
+  // renewal invoice that is past its due date: paying that one renews now. Auto-renewing from the wallet (preferCurrentPrice) is the activation itself.
+  const nowMs = Date.now();
+  const stillActive = !preferCurrentPrice && sub.status === 'active' && sub.expires_at && new Date(sub.expires_at).getTime() > nowMs;
+  const renewalOverdue = !!(inv?.due_date && new Date(inv.due_date).getTime() <= nowMs);
+  if (stillActive && !renewalOverdue && Number(amount) > 0) {
+    await c.query('update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2', [tenantId, sub.account_code, available]);
+    await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, service='pppoe', applied_at=now() where id=$1", [paymentId, subId, firstDebtId]);
+    if (sub.referred_by) await creditReferral(c, tenantId, sub, subId, amount, paymentId);
+    return { expires: sub.expires_at, partial: true, stored: true, balance: available, debtCleared };
+  }
   const units = unitPrice > 0 ? Math.floor(available / unitPrice) : 0;
   const full = units >= 1;
   const minutesBought = units * (proRated ? unitMinutes : sub.duration_min);
@@ -500,14 +513,16 @@ export async function settleSubscriber(c, tenantId, subId, amount, paymentId, in
   await c.query(
     `update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2`,
     [tenantId, sub.account_code, credit]);
-  if (inv && forService > 0) {
-    await c.query(
-      "update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1",
-      [inv.id, forService]
-    );
+  // The renewal invoice is paid only when the full amount is there (a partial payment stays in the wallet, the invoice stays as it was). When it is,
+  // the invoice is marked paid for what the periods bought cover, whether the money came from this payment or from the wallet.
+  if (inv && full) {
+    const cover = Math.min(Number(inv.amount) - Number(inv.paid), units * unitPrice);
+    if (cover > 0) {
+      await c.query("update invoices set paid=paid+$2, status=case when paid+$2 >= amount then 'paid' else 'partial' end where id=$1", [inv.id, cover]);
+    }
   }
   await c.query("update payments set status='applied', subscriber_id=$2, invoice_id=$3, service='pppoe', applied_at=now() where id=$1",
-    [paymentId, subId, (forService > 0 ? inv?.id : null) ?? firstDebtId ?? inv?.id ?? null]);
+    [paymentId, subId, (full && forService > 0 ? inv?.id : null) ?? firstDebtId ?? null]);
 
   if (sub.referred_by) await creditReferral(c, tenantId, sub, subId, amount, paymentId);
 
@@ -544,7 +559,7 @@ export async function applyMatched(tenantId, paymentId, subscriberId) {
     if (!sub) throw new Error('That customer was not found.');
 
     const r = await settleSubscriber(c, tenantId, subscriberId, pay.amount, pay.id, null);
-    await activateSubscriber(c, tenantId, subscriberId);
+    if (!r.partial) await activateSubscriber(c, tenantId, subscriberId);
 
     const days = Math.max(0, Math.ceil((new Date(r.expires).getTime() - Date.now()) / 86400000));
     const { rows: [own] } = await c.query('select name from tenants where id=$1', [tenantId]);
