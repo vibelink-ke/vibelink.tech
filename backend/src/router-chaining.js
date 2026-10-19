@@ -403,8 +403,9 @@ async function pass(r, { ros, secrets, notify }) {
     // ── learn: new chained routers are added by their MAC ──
     let analysis = analysePorts(snap);
     const suspects = [...analysis.found.map((f) => f.mac), ...analysis.report.flatMap((x) => x.candidates.map((c) => c.mac)), ...watching.map((x) => x.mac)];
-    void recordScan(r, { running: true, note: 'Leaving out PPPoE customers…' });
-    const pppMacs = await pppSetFor(conn, suspects);
+    void recordScan(r, { running: true, note: r.allPorts ? 'Reading every device…' : 'Leaving out PPPoE customers…' });
+    // "Scan all ports" means everything on the cable, PPPoE customers' devices included: nothing is left out for being a PPPoE session.
+    const pppMacs = r.allPorts ? new Set() : await pppSetFor(conn, suspects);
     if (pppMacs.size) analysis = analysePorts({ ...snap, pppMacs });
     // A router with no hotspot on it has no guest bridge to find extenders on; one whose hotspot could not be read (a PPPoE-only router has none) is
     // looked at only when its role says it has one.
