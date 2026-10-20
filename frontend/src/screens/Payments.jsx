@@ -487,7 +487,14 @@ export default function Payments() {
   const rematch = async (ids) => {
     setBusy(true);
     try {
-      const r = await api.rematchPayments(ids);
+      // In batches of 40, one after another: a few thousand ids in one request is too large to send, and one long request would time out.
+      const all = (ids && ids.length ? ids : unmatched.map((p) => p.id));
+      const r = { matched: 0, still: 0, failed: [] };
+      for (let i = 0; i < all.length; i += 40) {
+        const part = await api.rematchPayments(all.slice(i, i + 40));
+        r.matched += part.matched; r.still += part.still; r.failed.push(...(part.failed ?? []));
+        store.toast(`Matching… ${Math.min(i + 40, all.length)} of ${all.length}`);
+      }
       const fresh = await api.unmatchedPayments().catch(() => null);
       if (Array.isArray(fresh)) store.setUnmatched(() => fresh);
       setPicked([]);
@@ -503,7 +510,11 @@ export default function Payments() {
     if (!assignTo) return store.toast('Pick a client to apply these payments to');
     setBusy(true);
     try {
-      const r = await api.batchMatchPayments(picked, assignTo);
+      const r = { applied: 0, failed: [] };
+      for (let i = 0; i < picked.length; i += 40) {
+        const part = await api.batchMatchPayments(picked.slice(i, i + 40), assignTo);
+        r.applied += part.applied; r.failed.push(...(part.failed ?? []));
+      }
       const ok = new Set(picked.filter((id) => !(r.failed ?? []).some((f) => f.id === id)));
       store.setUnmatched((u) => u.filter((p) => !ok.has(p.id)));
       setPicked((r.failed ?? []).map((f) => f.id));
