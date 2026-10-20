@@ -3683,3 +3683,7 @@ alter table web_clients add column if not exists suspend_reason text;
 alter table web_clients add column if not exists grace_until   date;
 alter table web_clients add column if not exists site_key      text not null default replace(gen_random_uuid()::text, '-', '');
 create unique index if not exists web_clients_site_key on web_clients (site_key);
+
+-- The private link in a website client's messages (/web/<portal_key>): their services, invoices and payments, and a Pay now button.
+alter table web_clients add column if not exists portal_key text not null default replace(gen_random_uuid()::text, '-', '');
+create unique index if not exists web_clients_portal_key on web_clients (portal_key);

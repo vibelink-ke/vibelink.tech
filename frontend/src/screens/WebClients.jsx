@@ -104,7 +104,14 @@ export default function WebClients() {
               { key: 'owed', label: 'Owed', align: 'right', render: (c) => (c.overdue > 0 ? <b style={{ color: color.rust }}>{kes(c.owed)}</b> : c.owed > 0 ? kes(c.owed) : '—') },
               { key: 'credit', label: 'Credit', align: 'right', render: (c) => (Number(c.credit) > 0 ? kes(c.credit) : '—') },
               { key: 'status', label: 'Status', render: (c) => (c.suspended ? <Badge tone="expired">suspended</Badge> : <Badge tone={c.status === 'active' ? 'active' : 'default'}>{c.status}</Badge>) },
-              { key: 'act', label: '', align: 'right', render: (c) => <Button size="sm" onClick={() => setOpenId(c.id)}>Open</Button> },
+              { key: 'act', label: '', align: 'right', render: (c) => (
+                <span style={{ display: 'inline-flex', gap: 6 }}>
+                  {c.suspended
+                    ? <Button size="sm" disabled={busy} onClick={() => run(() => api.webSuspend(c.id, false), 'Restored')}>Restore</Button>
+                    : <Button size="sm" disabled={busy || c.status !== 'active'} onClick={() => window.confirm(`Suspend ${c.name}? Their website shows a "suspended" notice if it has the service check installed.`) && run(() => api.webSuspend(c.id, true), 'Suspended')}>Suspend</Button>}
+                  <Button size="sm" onClick={() => setOpenId(c.id)}>Open</Button>
+                </span>
+              ) },
             ]}
           />
         </>
@@ -140,6 +147,11 @@ export default function WebClients() {
               <textarea readOnly rows={9} value={phpSnippet(window.location.origin, client.site_key)} style={{ width: '100%', fontFamily: font.mono, fontSize: 11.5, padding: 8, borderRadius: radius.md, border: `1px solid ${color.line}` }} onFocus={(e) => e.target.select()} />
               <Button size="sm" onClick={() => { navigator.clipboard?.writeText(phpSnippet(window.location.origin, client.site_key)); store.toast('Copied'); }}>Copy</Button>
             </details>
+            <div style={{ fontSize: 12.5, color: color.muted }}>
+              Their own page (sent in every message):{' '}
+              <span style={{ fontFamily: font.mono }}>{window.location.origin}/web/{client.portal_key}</span>{' '}
+              <Button size="sm" onClick={() => { navigator.clipboard?.writeText(`${window.location.origin}/web/${client.portal_key}`); store.toast('Link copied'); }}>Copy link</Button>
+            </div>
             <KV k="Credit held" v={kes(client.credit)} />
             <KV k="Owed" v={kes(client.owed)} />
 

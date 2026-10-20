@@ -285,7 +285,8 @@
       "Email: a tenant with no email gateway of its own now sends through the platform mail gateway automatically, free up to 50 emails a day. Customers' replies go to the tenant's support email.",
       "Platform admin: new Website clients screen for domains, hosting and maintenance billed to clients who are not ISPs. Yearly or monthly, invoices raised ahead of each renewal with SMS reminders, payments on the platform paybill matched by the client's WS- account number.",
       "Website clients: unpaid clients are suspended automatically 7 days after an invoice's due date (and restored the moment they pay), or by hand. Their website reads a status link and shows a notice while suspended.",
-      "Website clients now also has its own tab in the platform console at /admin."
+      "Website clients now also has its own tab in the platform console at /admin.",
+      "Website clients get their own page (link in every message): services, invoices, payments and a Pay now button that sends an M-Pesa prompt. Suspend and Restore are now buttons in the client list too."
     ]
   }
 ]

@@ -800,6 +800,13 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      */
     // A tenant paying its own licence by prompting itself: credited to that
     // tenant (p.tenant_id), taken on the platform owner's paybill (req.tenant_id).
+    // A website client paying from their own page: credited to that client (web-services.js), taken on the platform owner's paybill. The same M-Pesa
+    // receipt also arrives on the paybill confirmation, and the unique reference means it is counted once.
+    if (p.type === 'web_client') {
+      const { recordPayment } = await import('../web-services.js');
+      await recordPayment(p.web_client_id, Number(req.amount), { method: 'stk', reference: tx.ref, phone: tx.phone });
+      return;
+    }
     if (p.type === 'tenant_fee') {
       const { applyTenantPayment } = await import('../charges.js');
       await applyTenantPayment(p.tenant_id, Number(req.amount), { method: 'stk', reference: tx.ref, phone: tx.phone });

@@ -1018,6 +1018,43 @@ app.get('/api/public/web-status/:key', wrap(async (req, res) => {
   res.json(out);
 }));
 
+/** A website client's own page: their services, invoices and payments, by the private key in the link we send them. */
+app.get('/api/public/web-client/pay-status/:checkoutId', wrap(async (req, res) => {
+  const { rows: [r] } = await pool.query(
+    "select status, result_desc from stk_requests where checkout_id=$1 and purpose->>'type' = 'web_client'", [req.params.checkoutId]);
+  res.json(r ?? { status: 'unknown' });
+}));
+app.get('/api/public/web-client/:key', wrap(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  const out = await (await import('./web-services.js')).portalView(req.params.key);
+  if (!out) return res.status(404).json({ error: 'This link is not valid.' });
+  res.json(out);
+}));
+/** Pay now: an M-Pesa prompt on the client's phone, paid into the platform paybill under their account number. */
+app.post('/api/public/web-client/:key/pay', stkLimiter, wrap(async (req, res) => {
+  const w = await import('./web-services.js');
+  const c = await w.clientByPortalKey(req.params.key);
+  if (!c) return res.status(404).json({ error: 'This link is not valid.' });
+  const view = await w.portalView(req.params.key);
+  const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
+  if (!/^254[17]\d{8}$/.test(phone)) return res.status(400).json({ error: 'That does not look like a Kenyan mobile number.' });
+  const amount = req.body?.amount == null || req.body.amount === '' ? view.owed : Number(req.body.amount);
+  if (!(amount >= 10)) return res.status(400).json({ error: view.owed > 0 ? 'The smallest payment is KES 10.' : 'Nothing is due right now. Enter an amount of at least KES 10 to pay ahead.' });
+  if (amount > 250000) return res.status(400).json({ error: 'M-Pesa allows at most KES 250,000 in one prompt.' });
+  try {
+    const owner = await ownerTenantId();
+    const data = await mpesa.stkPush(owner, { phone, amount, accountRef: c.billing_ref, description: 'Hosting', platformCollect: true });
+    const checkoutId = data?.CheckoutRequestID ?? null;
+    if (!checkoutId) return res.status(502).json({ error: 'M-Pesa did not accept the request. Try again in a moment.' });
+    await pool.query(
+      `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose) values ($1,'daraja',$2,$3,$4,$5)
+       on conflict (tenant_id, provider, checkout_id) do nothing`, [owner, checkoutId, phone, Math.round(amount), { type: 'web_client', web_client_id: c.id }]);
+    res.json({ phone, amount, checkoutId });
+  } catch (e) {
+    res.status(e.status ?? 502).json({ error: e.response?.data?.errorMessage ?? e.message });
+  }
+}));
+
 /**
  * Just enough to brand the sign-in screen before anyone has signed in.
  *

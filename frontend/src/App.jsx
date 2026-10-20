@@ -14,6 +14,7 @@ import LicenceLocked from './screens/LicenceLocked';
 import CustomerPortal from './screens/CustomerPortal';
 import VerifyStaff from './screens/VerifyStaff';
 import InvoiceView from './screens/InvoiceView';
+import WebClientPortal from './screens/WebClientPortal';
 import { useMediaQuery } from './app/useMediaQuery';
 import { useStore } from './state/store';
 import { api } from './api/client';
@@ -197,6 +198,9 @@ export default function App() {
   // A shared invoice link (SMS/WhatsApp/email) — same reasoning: reachable by
   // whoever holds the link, with no portal session at all.
   if (pathname.startsWith('/invoice/')) return <InvoiceView />;
+
+  // A website client's own page (the link in their messages): services, invoices, Pay now. No session.
+  if (pathname.startsWith('/web/')) return <WebClientPortal />;
 
   // Reachable with no session at all — that is the point of a password
   // reset — so this has to come before the session gate below, not after it.

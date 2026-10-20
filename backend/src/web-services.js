@@ -46,9 +46,43 @@ async function tell(client, body) {
   } catch (e) { console.warn('web-services: could not send a message to', client.name, '-', e.message); }
 }
 
+/** The client's own page (services, invoices, Pay now), if the key is known. */
+export function portalLink(client) {
+  if (!client?.portal_key) return null;
+  const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+  return `https://${root}/web/${client.portal_key}`;
+}
+
 async function payLine(client) {
   const paybill = await platformPaybill().catch(() => null);
-  return paybill ? `Pay by M-Pesa Paybill ${paybill}, account ${client.billing_ref}.` : `Your payment reference is ${client.billing_ref}.`;
+  const link = portalLink(client);
+  const how = paybill ? `Pay by M-Pesa Paybill ${paybill}, account ${client.billing_ref}` : `Your payment reference is ${client.billing_ref}`;
+  return `${how}${link ? `, or pay online and see your invoices: ${link}` : '.'}`;
+}
+
+/** What the client's own page shows, by their private key. Costs and margins are never included. */
+export async function portalView(key) {
+  const { rows: [c] } = await pool.query('select * from web_clients where portal_key=$1', [String(key ?? '').slice(0, 64)]);
+  if (!c) return null;
+  const [{ rows: services }, { rows: invoices }, { rows: payments }] = await Promise.all([
+    pool.query("select kind, label, price, cycle, next_due, status from web_services where client_id=$1 and status <> 'cancelled' order by kind, label", [c.id]),
+    pool.query("select number, description, amount, paid, due_date, status from web_invoices where client_id=$1 and status <> 'void' order by due_date desc, created_at desc limit 24", [c.id]),
+    pool.query('select amount, method, reference, created_at from web_payments where client_id=$1 order by created_at desc limit 24', [c.id]),
+  ]);
+  const owed = invoices.filter((i) => i.status === 'open' || i.status === 'partial').reduce((a, i) => a + Number(i.amount) - Number(i.paid), 0);
+  return {
+    name: c.name, billing_ref: c.billing_ref, suspended: !!c.suspended, credit: Number(c.credit), owed, today: today(),
+    paybill: await platformPaybill().catch(() => null),
+    services: services.map((x) => ({ ...x, next_due: dateOnly(x.next_due) })),
+    invoices: invoices.map((x) => ({ ...x, due_date: dateOnly(x.due_date) })),
+    payments,
+  };
+}
+
+/** The client by their page key, for starting a payment prompt. */
+export async function clientByPortalKey(key) {
+  const { rows: [c] } = await pool.query('select * from web_clients where portal_key=$1', [String(key ?? '').slice(0, 64)]);
+  return c ?? null;
 }
 
 // ── reading ──
@@ -213,7 +247,7 @@ export async function raiseInvoice(serviceId) {
   try {
     await c.query('begin');
     const { rows: [s] } = await c.query(
-      `select s.*, w.name as client_name, w.phone, w.billing_ref from web_services s join web_clients w on w.id = s.client_id where s.id=$1 for update of s`, [serviceId]);
+      `select s.*, w.name as client_name, w.phone, w.billing_ref, w.portal_key from web_services s join web_clients w on w.id = s.client_id where s.id=$1 for update of s`, [serviceId]);
     if (!s) throw bad('No such service.', 404);
     const start = dateOnly(s.next_due);
     const end = addMonths(start, cycleMonths(s.cycle));
@@ -313,13 +347,13 @@ export async function voidInvoice(id) {
 
 export async function remindInvoice(id) {
   const { rows: [i] } = await pool.query(
-    `select i.*, w.name as client_name, w.phone, w.billing_ref from web_invoices i join web_clients w on w.id = i.client_id where i.id=$1`, [id]);
+    `select i.*, w.name as client_name, w.phone, w.billing_ref, w.portal_key from web_invoices i join web_clients w on w.id = i.client_id where i.id=$1`, [id]);
   if (!i) throw bad('No such invoice.', 404);
   if (!['open', 'partial'].includes(i.status)) throw bad('That invoice is not waiting for payment.');
   if (!i.phone) throw bad('This client has no phone number to send the reminder to.');
   const late = dateOnly(i.due_date) < today();
   await tell({ name: i.client_name, phone: i.phone },
-    `${i.client_name}: invoice ${i.number}, KES ${kes(Number(i.amount) - Number(i.paid))} for ${i.description.split(' (')[0]}, ${late ? 'was due' : 'is due'} ${day(dateOnly(i.due_date))}. ${await payLine({ billing_ref: i.billing_ref })}`);
+    `${i.client_name}: invoice ${i.number}, KES ${kes(Number(i.amount) - Number(i.paid))} for ${i.description.split(' (')[0]}, ${late ? 'was due' : 'is due'} ${day(dateOnly(i.due_date))}. ${await payLine({ billing_ref: i.billing_ref, portal_key: i.portal_key })}`);
   await pool.query('update web_invoices set reminders = reminders + 1, last_reminder_at = now() where id=$1', [id]);
   return { sent: true };
 }
