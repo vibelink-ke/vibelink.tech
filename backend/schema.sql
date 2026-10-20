@@ -1432,6 +1432,8 @@ create table if not exists email_log (
   created_at timestamptz not null default now()
 );
 create index if not exists email_log_tenant_idx on email_log (tenant_id, created_at desc);
+-- 'platform' when the message went out through the platform's own mail gateway (a tenant with no SMTP of its own): the free daily limit counts these.
+alter table email_log add column if not exists via text;
 
 -- ─────────────── hotspot walled garden ───────────────
 -- What a guest can reach before they have paid. The only thing a guest's

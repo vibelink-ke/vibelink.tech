@@ -59,7 +59,8 @@ function transportFor(c) {
  */
 export async function send(tenantId, to, subject, body, { html = false } = {}) {
   const c = await config(tenantId);
-  if (!c || !c.enabled) return { ok: false, error: 'No email gateway configured' };
+  // A tenant with no email gateway of their own uses the platform's (free, up to PLATFORM_DAILY_LIMIT a day).
+  if (!c || !c.enabled) return sendViaPlatform(tenantId, to, subject, body, { html });
 
   try {
     const from = c.from_name ? `"${c.from_name}" <${c.from_email}>` : c.from_email;
@@ -100,6 +101,46 @@ export async function sendToSubscriber(tenantId, subscriberId, subject, body) {
   const vars = subscriberVars(s, await orgVars(tenantId, s.router_id ?? null, s.connection_type ?? null));
   const fill = (t) => String(t ?? '').replace(/\{(\w+)\}/g, (m, k) => vars[k] ?? m);
   return send(tenantId, s.email, fill(subject), fill(body));
+}
+
+/** Emails a tenant may send a day through the platform's own mail gateway, free. A tenant with its own SMTP is not limited. */
+export const PLATFORM_DAILY_LIMIT = 50;
+
+/**
+ * Send as the platform on behalf of a tenant that has no SMTP of its own. From: the tenant's name on the platform's address (a tenant's own domain
+ * cannot be the sender without its mail records), Reply-To: the tenant's support email so a customer's reply reaches the tenant. Every send is logged
+ * under the tenant with via='platform', and that log is what the daily limit counts.
+ */
+async function sendViaPlatform(tenantId, to, subject, body, { html = false } = {}) {
+  const transport = platformTransport();
+  if (!transport) return { ok: false, error: 'No email gateway configured' };
+  let used = 0;
+  try {
+    const { rows: [n] } = await pool.query(
+      `select count(*)::int as n from email_log
+        where tenant_id=$1 and via='platform' and status='sent'
+          and created_at >= date_trunc('day', now() at time zone 'Africa/Nairobi') at time zone 'Africa/Nairobi'`, [tenantId]);
+    used = n?.n ?? 0;
+  } catch { /* the via column is not there yet (schema not applied): sent without the limit until it is */ }
+  if (used >= PLATFORM_DAILY_LIMIT) {
+    return { ok: false, limited: true, error: `The free limit of ${PLATFORM_DAILY_LIMIT} emails a day on the platform mail gateway has been reached. Set up your own email under Settings → Email to send more.` };
+  }
+  try {
+    const { rows: [t] } = await pool.query(
+      "select t.name, a.prefs->>'supportEmail' as reply from tenants t left join app_settings a on a.tenant_id = t.id where t.id=$1", [tenantId]);
+    const fromAddr = (/<([^>]+)>/.exec(process.env.PLATFORM_SMTP_FROM || '')?.[1]) || process.env.PLATFORM_SMTP_FROM || 'no-reply@vibelink.tech';
+    const name = String(t?.name ?? 'Vibelink').replace(/["<>\r\n]/g, '').slice(0, 60);
+    await transport.sendMail({
+      from: `"${name}" <${fromAddr}>`, to, subject, [html ? 'html' : 'text']: body,
+      ...(t?.reply && /^S+@S+$/.test(t.reply) ? { replyTo: t.reply } : {}),
+    });
+    await pool.query('insert into email_log (tenant_id, to_email, subject, status, via) values ($1,$2,$3,$4,$5)', [tenantId, to, subject, 'sent', 'platform'])
+      .catch(() => pool.query('insert into email_log (tenant_id, to_email, subject, status) values ($1,$2,$3,$4)', [tenantId, to, subject, 'sent']).catch(() => {}));
+    return { ok: true, via: 'platform', left: Math.max(0, PLATFORM_DAILY_LIMIT - used - 1) };
+  } catch (e) {
+    await pool.query('insert into email_log (tenant_id, to_email, subject, status, error, via) values ($1,$2,$3,$4,$5,$6)', [tenantId, to, subject, 'failed', e.message.slice(0, 300), 'platform']).catch(() => {});
+    return { ok: false, error: e.message };
+  }
 }
 
 function platformTransport() {
