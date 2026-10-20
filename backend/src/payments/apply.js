@@ -54,6 +54,13 @@ export function ceilToMidnight(d) {
  */
 export async function accrueSettlement(tenantId, amount) {
   if (!(amount > 0)) return;
+  // Money is only owed to a tenant whose customers pay INTO THE PLATFORM's paybill (platform collect), and never to the platform owner's own tenant: its
+  // customers already pay the platform's own paybill, so settling to it would pay the owner their own money, minus a fee, and mark it as collected.
+  const { rows: [t] } = await pool.query(
+    `select t.platform_collect_enabled,
+            exists (select 1 from staff s where s.is_super_admin and s.tenant_id = t.id) as is_owner
+       from tenants t where t.id = $1`, [tenantId]);
+  if (!t?.platform_collect_enabled || t.is_owner) return;
   await pool.query(
     `insert into settlements (tenant_id, amount, status)
      values ($1, $2, 'pending')

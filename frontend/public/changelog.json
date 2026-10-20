@@ -275,5 +275,12 @@
       "Unmatched payments: Re-run matching and batch apply now work in small batches, so thousands of waiting payments no longer fail with 'request entity too large'.",
       "SmartOLT: a loss-of-signal (LOS) ticket now closes by itself, with a note, when the ONU comes back online. You get one message."
     ]
+  },
+  {
+    "date": "2026-10-21",
+    "title": "Settlements only for platform-collect tenants",
+    "items": [
+      "Settlements: the platform owner's own tenant, and any tenant that does not collect through the platform paybill, no longer accrues or is paid a settlement."
+    ]
   }
 ]

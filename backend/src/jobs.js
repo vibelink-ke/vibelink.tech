@@ -1710,6 +1710,7 @@ export async function settleTenants() {
     const { rows: due } = await pool.query(
       `select t.id, t.name, (t.settlement_retry_at is not null) as retried from tenants t
         where t.platform_collect_enabled and t.deleted_at is null
+          and not exists (select 1 from staff sa where sa.is_super_admin and sa.tenant_id = t.id)
           and (t.settlement_frequency = 'daily' or (t.settlement_frequency = 'weekly' and extract(dow from ${local}) = 1))
           and t.settlement_time <= ${local}::time
           and (t.settlement_last_run is null or t.settlement_last_run < ${local}::date)
@@ -1726,6 +1727,7 @@ export async function settleTenants() {
          from settlements s join tenants t on t.id = s.tenant_id
         where s.status='pending' and s.amount >= $1
           and t.platform_collect_enabled and ${SETTLEMENT_READY_SQL}
+          and not exists (select 1 from staff sa where sa.is_super_admin and sa.tenant_id = t.id)   -- the platform owner is never paid its own money
           -- Paused while the licence has lapsed: what they collect keeps building up
           -- and is paid out once they renew.
           and t.status not in ('readonly', 'suspended')
@@ -1825,6 +1827,12 @@ export async function payoutTenantNow(tenantId, requestedAmount) {
       where s.tenant_id=$1 and s.status='pending'`,
     [tenantId]);
   if (!row) throw Object.assign(new Error('Nothing pending to settle.'), { status: 400 });
+  // Only a tenant whose customers pay into the platform paybill is owed anything, and never the platform owner's own tenant.
+  const { rows: [flags] } = await pool.query(
+    `select t.platform_collect_enabled, exists (select 1 from staff sa where sa.is_super_admin and sa.tenant_id = t.id) as is_owner from tenants t where t.id = $1`, [tenantId]);
+  if (!flags?.platform_collect_enabled || flags.is_owner) {
+    throw Object.assign(new Error('This account is not paid out by the platform: its customers pay straight into its own paybill.'), { status: 400 });
+  }
   if (['readonly', 'suspended'].includes(row.tenant_status) || row.licence_lapsed) {
     throw Object.assign(new Error(
       'Payouts are paused until your licence is renewed. The money collected for you is safe and keeps building up — renew under Licence & billing and it is released.'),
