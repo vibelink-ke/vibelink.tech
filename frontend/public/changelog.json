@@ -266,5 +266,12 @@
       "Payments: a client billed daily or weekly is activated and extended as soon as the amount covers a day or a week, even while still active. Less than that waits in the wallet.",
       "Payments: when a customer has several services and one has expired, a payment aimed at a running service goes to the expired one (the longest expired first). A payment for a specific invoice stays where it was aimed."
     ]
+  },
+  {
+    "date": "2026-10-20",
+    "title": "Short account numbers and batch matching",
+    "items": [
+      "Account numbers can now be 1 character long. Unmatched payments: Re-run matching tries every waiting payment again, and you can tick several and apply them to one client in one go."
+    ]
   }
 ]

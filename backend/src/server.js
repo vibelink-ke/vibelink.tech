@@ -3741,6 +3741,21 @@ app.get('/api/payments/unmatched', requirePermission('payments.view'), wrap(asyn
   res.json(rows);
 }));
 
+/** Try the automatic matching again for the unmatched payments (all, or the ids given). */
+app.post('/api/payments/rematch', requirePermission('payments.apply'), wrap(async (req, res) => {
+  const { rematchUnmatched } = await import('./payments/apply.js');
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x) => typeof x === 'string').slice(0, 500) : null;
+  res.json(await rematchUnmatched(req.tenant.id, ids));
+}));
+
+/** Apply several unmatched payments to one customer. */
+app.post('/api/payments/batch-match', requirePermission('payments.apply'), wrap(async (req, res) => {
+  const { batchMatch } = await import('./payments/apply.js');
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x) => typeof x === 'string').slice(0, 200) : [];
+  if (!ids.length || !req.body?.subscriberId) return res.status(400).json({ error: 'Choose the payments and the customer.' });
+  res.json(await batchMatch(req.tenant.id, ids, req.body.subscriberId));
+}));
+
 /** Cashier resolves an unmatched payment by pointing it at the right customer. */
 app.post('/api/payments/:id/match', requirePermission('payments.apply'), wrap(async (req, res) => {
   const { subscriberId } = req.body;
@@ -10753,8 +10768,8 @@ app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wa
  */
 app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'), wrap(async (req, res) => {
   const next = String(req.body?.accountCode ?? '').trim();
-  if (!/^[A-Za-z0-9]{3,16}$/.test(next)) {
-    return res.status(400).json({ error: 'The account number must be 3 to 16 letters or digits, with no spaces or symbols.' });
+  if (!/^[A-Za-z0-9]{1,16}$/.test(next)) {
+    return res.status(400).json({ error: 'The account number must be 1 to 16 letters or digits, with no spaces or symbols.' });
   }
   if (['SMSCREDIT', 'HOTSPOT'].includes(next.toUpperCase())) {
     return res.status(400).json({ error: 'That is reserved for the system — choose another.' });

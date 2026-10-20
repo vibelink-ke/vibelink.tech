@@ -141,6 +141,8 @@ export const api = {
   hotspotFind: (q) => get(`/api/hotspot/find?q=${encodeURIComponent(q)}`),
   unmatchedPayments: () => get('/api/payments/unmatched'),
   matchPayment: (id, subscriberId) => post(`/api/payments/${id}/match`, { subscriberId }),
+  rematchPayments: (ids) => post('/api/payments/rematch', { ids }),
+  batchMatchPayments: (ids, subscriberId) => post('/api/payments/batch-match', { ids, subscriberId }),
   invoices: () => get('/api/invoices'),
   createInvoice: (i) => post('/api/invoices', i),
   updateInvoice: (id, i) => put(`/api/invoices/${id}`, i),

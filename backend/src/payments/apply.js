@@ -601,6 +601,40 @@ export async function applyMatched(tenantId, paymentId, subscriberId) {
   });
 }
 
+
+/**
+ * Try the automatic matching again for payments that are sitting unmatched (after an account number was changed or added, a customer's phone was
+ * corrected, or a one-character account number now exists). Each payment is matched the same way a new one is; one that still points at no customer
+ * stays where it is. Only a payment that finds a customer is applied. ids limits it to those payments.
+ */
+export async function rematchUnmatched(tenantId, ids = null) {
+  const { rows } = await pool.query(
+    "select id, raw_account, payer_phone, amount from payments where tenant_id=$1 and status='unmatched'" + (ids?.length ? ' and id = any($2::uuid[])' : '') + ' order by received_at',
+    ids?.length ? [tenantId, ids] : [tenantId]);
+  const out = { tried: rows.length, matched: 0, still: 0, failed: [] };
+  for (const p of rows) {
+    try {
+      const target = await withTenant(tenantId, (c) => match(c, tenantId, { rawAccount: p.raw_account, phone: p.payer_phone, amount: p.amount }));
+      if (target?.type !== 'subscriber') { out.still += 1; continue; }
+      await applyMatched(tenantId, p.id, target.id);
+      out.matched += 1;
+    } catch (e) {
+      out.failed.push({ id: p.id, error: String(e.message ?? e).slice(0, 160) });
+    }
+  }
+  return out;
+}
+
+/** Apply several unmatched payments to ONE customer (the same person paid more than once with a wrong account), one after the other. */
+export async function batchMatch(tenantId, ids, subscriberId) {
+  const out = { applied: 0, failed: [] };
+  for (const id of ids ?? []) {
+    try { await applyMatched(tenantId, id, subscriberId); out.applied += 1; }
+    catch (e) { out.failed.push({ id, error: String(e.message ?? e).slice(0, 160) }); }
+  }
+  return out;
+}
+
 /**
  * One-time commission, earned on the client's first applied payment only — the
  * unique (subscriber_id) constraint on referral_commissions is what makes
@@ -692,7 +726,7 @@ async function match(c, tenantId, tx) {
        limit 1`,
       [tenantId, norm, plain]
     );
-    if (rows[0] && rows[0].score > 0.75) return { type: 'subscriber', id: rows[0].id };
+    if (plain.length >= 3 && rows[0] && rows[0].score > 0.75) return { type: 'subscriber', id: rows[0].id };
   }
   if (tx.phone) {
     // Same rule when matching on the payer's number: the soonest to expire.

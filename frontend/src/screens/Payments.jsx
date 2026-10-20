@@ -67,6 +67,8 @@ export default function Payments() {
   const pay = useInvoicePay(store);
   const [tab, setTab] = useState('unmatched');
   const [resolving, setResolving] = useState(null);
+  const [picked, setPicked] = useState([]);          // ids of the unmatched payments ticked for a batch
+  const [batchOpen, setBatchOpen] = useState(false);
   const [assignTo, setAssignTo] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -482,6 +484,39 @@ export default function Payments() {
     store.toast(n ? `Exported ${n} transaction(s)` : 'Nothing to export yet');
   };
 
+  const rematch = async (ids) => {
+    setBusy(true);
+    try {
+      const r = await api.rematchPayments(ids);
+      const fresh = await api.unmatchedPayments().catch(() => null);
+      if (Array.isArray(fresh)) store.setUnmatched(() => fresh);
+      setPicked([]);
+      store.toast(`${r.matched} matched and applied, ${r.still} still need a person${r.failed?.length ? `, ${r.failed.length} failed` : ''}`);
+    } catch (e) {
+      store.toast(`Could not re-run matching: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const applyBatch = async () => {
+    if (!assignTo) return store.toast('Pick a client to apply these payments to');
+    setBusy(true);
+    try {
+      const r = await api.batchMatchPayments(picked, assignTo);
+      const ok = new Set(picked.filter((id) => !(r.failed ?? []).some((f) => f.id === id)));
+      store.setUnmatched((u) => u.filter((p) => !ok.has(p.id)));
+      setPicked((r.failed ?? []).map((f) => f.id));
+      store.toast(`${r.applied} applied${r.failed?.length ? `, ${r.failed.length} failed: ${r.failed[0].error}` : ''}`);
+      setBatchOpen(false);
+      setAssignTo('');
+    } catch (e) {
+      store.toast(`Could not apply: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resolve = async () => {
     if (!assignTo) return store.toast('Pick a client to apply this payment to');
     setBusy(true);
@@ -625,12 +660,29 @@ export default function Payments() {
         </div>
 
         <div style={{ padding: '16px 20px' }}>
+          {tab === 'unmatched' && unmatched.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+              <Button size="sm" onClick={() => rematch(null)} disabled={busy}>{busy ? 'Working…' : `Re-run matching (${unmatched.length})`}</Button>
+              <Button size="sm" onClick={() => setPicked(picked.length === unmatched.length ? [] : unmatched.map((p) => p.id))}>
+                {picked.length === unmatched.length ? 'Clear selection' : 'Select all'}
+              </Button>
+              {picked.length > 0 && (
+                <>
+                  <Button size="sm" onClick={() => rematch(picked)} disabled={busy}>Re-run matching on {picked.length} selected</Button>
+                  <Button size="sm" variant="primary" onClick={() => { setAssignTo(''); setBatchOpen(true); }}>Apply {picked.length} selected to one client</Button>
+                </>
+              )}
+            </div>
+          )}
           {tab === 'unmatched' && (
             <Table
               rowKey={(r) => r.id}
               empty="Nothing waiting — every payment matched automatically"
               rows={unmatched}
               columns={[
+                { key: 'pick', label: '', render: (r) => (
+                  <input type="checkbox" checked={picked.includes(r.id)} onChange={(e) => setPicked((cur) => (e.target.checked ? [...cur, r.id] : cur.filter((x) => x !== r.id)))} />
+                ) },
                 { key: 'provider_ref', label: 'M-Pesa code', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
                 { key: 'payer', label: 'From', render: (r) => (
@@ -969,6 +1021,34 @@ export default function Payments() {
         </div>
       </div>
 
+      <Modal
+        open={batchOpen}
+        title={`Apply ${picked.length} payment${picked.length === 1 ? '' : 's'} to one client`}
+        onClose={() => setBatchOpen(false)}
+        footer={
+          <>
+            <Button onClick={() => setBatchOpen(false)}>Cancel</Button>
+            <Button variant="primary" onClick={applyBatch} disabled={busy}>{busy ? 'Applying…' : 'Apply all'}</Button>
+          </>
+        }
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: color.tileBg, borderRadius: radius.md, padding: 12, fontSize: 13 }}>
+            {money(unmatched.filter((p) => picked.includes(p.id)).reduce((a, p) => a + Number(p.amount), 0))} in total, applied one after the other (an expired service is renewed first).
+          </div>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: color.inkSoft }}>Apply to client</span>
+            <Select
+              value={assignTo}
+              onChange={(e) => setAssignTo(e.target.value)}
+              options={[
+                { value: '', label: store.clients.length ? 'Select a client…' : 'No clients loaded' },
+                ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
+              ]}
+            />
+          </label>
+        </div>
+      </Modal>
       <Modal
         open={!!resolving}
         title={`Resolve ${resolving?.provider_ref ?? ''}`}

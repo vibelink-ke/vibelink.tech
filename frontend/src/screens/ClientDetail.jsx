@@ -1883,7 +1883,7 @@ export default function ClientDetail() {
             <Button
               variant="primary"
               onClick={submitAccountChange}
-              disabled={acctBusy || !acctChange || acctChange.value.trim() === client.account_code || !/^[A-Za-z0-9]{3,16}$/.test(acctChange.value.trim())}
+              disabled={acctBusy || !acctChange || acctChange.value.trim() === client.account_code || !/^[A-Za-z0-9]{1,16}$/.test(acctChange.value.trim())}
             >
               {acctBusy ? 'Saving…' : 'Change it'}
             </Button>
@@ -1892,7 +1892,7 @@ export default function ClientDetail() {
       >
         {acctChange && (
           <div style={{ display: 'grid', gap: 12 }}>
-            <Field label="New account number" hint="3 to 16 letters or digits. Not used by any other client.">
+            <Field label="New account number" hint="1 to 16 letters or digits. Not used by any other client.">
               <Input
                 value={acctChange.value}
                 onChange={(e) => setAcctChange({ value: e.target.value })}
