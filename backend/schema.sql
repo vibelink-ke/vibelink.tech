@@ -3610,3 +3610,66 @@ create table if not exists chained_scans (
 alter table chained_scans add column if not exists running boolean not null default false;
 alter table chained_scans add column if not exists started_at timestamptz;
 alter table chained_scans add column if not exists report jsonb;
+
+
+-- ─────────────── website clients (platform owner) ───────────────
+-- Businesses that are not ISP tenants but pay the platform owner for a domain, hosting or maintenance. billing_ref (WS-101) is the account number
+-- they use on the platform paybill. A service has what it costs the owner and what the client is charged, per monthly or annual cycle.
+create sequence if not exists web_client_seq start 101;
+create sequence if not exists web_invoice_seq start 1;
+create table if not exists web_clients (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  contact_name text,
+  phone        text,
+  email        text,
+  notes        text,
+  billing_ref  text not null unique,
+  credit       numeric(12,2) not null default 0,
+  status       text not null default 'active' check (status in ('active','paused','closed')),
+  created_at   timestamptz not null default now()
+);
+create table if not exists web_services (
+  id         uuid primary key default gen_random_uuid(),
+  client_id  uuid not null references web_clients on delete cascade,
+  kind       text not null check (kind in ('domain','hosting','maintenance','other')),
+  label      text not null,
+  cost       numeric(12,2) not null default 0,
+  price      numeric(12,2) not null default 0,
+  cycle      text not null check (cycle in ('monthly','annual')),
+  next_due   date not null,
+  status     text not null default 'active' check (status in ('active','paused','cancelled')),
+  notes      text,
+  created_at timestamptz not null default now()
+);
+create index if not exists web_services_client on web_services (client_id);
+create table if not exists web_invoices (
+  id               uuid primary key default gen_random_uuid(),
+  client_id        uuid not null references web_clients on delete cascade,
+  service_id       uuid references web_services on delete set null,
+  number           text not null unique,
+  description      text not null,
+  amount           numeric(12,2) not null,
+  cost             numeric(12,2) not null default 0,
+  paid             numeric(12,2) not null default 0,
+  period_start     date,
+  period_end       date,
+  due_date         date not null,
+  status           text not null default 'open' check (status in ('open','partial','paid','void')),
+  reminders        int not null default 0,
+  last_reminder_at timestamptz,
+  paid_at          timestamptz,
+  created_at       timestamptz not null default now()
+);
+create index if not exists web_invoices_client on web_invoices (client_id, status);
+create table if not exists web_payments (
+  id         uuid primary key default gen_random_uuid(),
+  client_id  uuid references web_clients on delete set null,
+  amount     numeric(12,2) not null,
+  method     text,
+  reference  text,
+  phone      text,
+  note       text,
+  created_at timestamptz not null default now()
+);
+create unique index if not exists web_payments_reference on web_payments (reference) where reference is not null;

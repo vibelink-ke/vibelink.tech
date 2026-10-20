@@ -68,6 +68,7 @@ const KnowledgeBase = lazy(() => import('./screens/KnowledgeBase'));
 const Inventory = lazy(() => import('./screens/Inventory'));
 const Automation = lazy(() => import('./screens/Automation'));
 const Tenants = lazy(() => import('./screens/Tenants'));
+const WebClients = lazy(() => import('./screens/WebClients'));
 const AdminConsole = lazy(() => import('./screens/AdminConsole'));
 const SaasRevenue = lazy(() => import('./screens/SaasRevenue'));
 const Staff = lazy(() => import('./screens/Staff'));
@@ -360,6 +361,7 @@ export default function App() {
 
             <Route path="/tenants" element={<Tenants />} />
             <Route path="/saas-revenue" element={<SaasRevenue />} />
+            <Route path="/web-clients" element={<WebClients />} />
 
             <Route path="/field-team" element={<FieldTeam />} />
             <Route path="/staff" element={<Staff />} />

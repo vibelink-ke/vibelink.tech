@@ -103,6 +103,7 @@ export function startJobs() {
   cron.schedule('* * * * *', safely('enforceHotspotDataCaps', enforceHotspotDataCaps));
   cron.schedule('*/3 * * * *', safely('expireStuckStkRequests', expireStuckStkRequests));
   cron.schedule('0 6 * * *',  safely('generateInvoices', generateInvoices));
+  cron.schedule('15 6 * * *', safely('webServiceBilling', webServiceBilling));
   cron.schedule('0 8,12,18 * * *', safely('autoCharge', autoCharge));
   cron.schedule('0 9 * * *',  safely('remind', remind));
   cron.schedule('*/1 * * * *', safely('watchdog', watchdog));
@@ -2227,6 +2228,12 @@ async function syncHotspotLoginPages() {
   } finally {
     loginPageSyncRunning = false;
   }
+}
+
+/** Website clients (domain / hosting): raise the coming invoices and send reminders. Platform-owner business, so not per tenant. */
+async function webServiceBilling() {
+  const r = await (await import('./web-services.js')).runBilling();
+  if (r.raised || r.reminded) console.log('webServiceBilling: raised', r.raised, 'invoice(s), sent', r.reminded, 'reminder(s)');
 }
 
 /** Router chaining monitor: see router-chaining.js. */

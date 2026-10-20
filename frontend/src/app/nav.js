@@ -75,6 +75,7 @@ export const NAV_SECTIONS = [
       { to: '/platform', label: 'Platform monitor' },
       { to: '/tenants', label: 'ISP tenants', count: (s) => s.tenants.length },
       { to: '/saas-revenue', label: 'SaaS revenue' },
+      { to: '/web-clients', label: 'Website clients' },
       { to: '/automation', label: 'Automation' },
     ],
   },

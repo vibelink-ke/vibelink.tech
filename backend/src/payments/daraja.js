@@ -489,7 +489,7 @@ async function accountExists(b) {
 
   const ref = String(b.BillRefNumber ?? '').trim();
   if (RESERVED_BILL_REFS.has(ref.toUpperCase())) return { ok: true };
-  if (/^VL-\d+$/i.test(ref)) return { ok: true };            // a tenant paying the platform
+  if (/^(VL|WS)-\d+$/i.test(ref)) return { ok: true };            // a tenant paying the platform
   const key = ref.toUpperCase().replace(/[\s-]/g, '');
   if (!key) return { ok: false, tenant: t, ref };
 
@@ -595,6 +595,16 @@ router.post('/confirm', verifyWebhook, async (req, res) => {
    * and money that landed elsewhere must never credit a tenant.
    */
   const feeRef = String(b.BillRefNumber ?? '').trim().toUpperCase();
+  // A website client (domain / hosting, see web-services.js) paying the platform: the account number is their WS- reference. Only on the platform's own paybill.
+  if (/^WS-d+$/.test(feeRef)) {
+    const { platformPaybill } = await import('../charges.js');
+    const ownPaybill = await platformPaybill().catch(() => null);
+    if (ownPaybill && String(b.BusinessShortCode) === String(ownPaybill)) {
+      const { applyPaybillPayment } = await import('../web-services.js');
+      const r = await applyPaybillPayment(feeRef, Number(b.TransAmount), { reference: b.TransID, phone: normalise(b.MSISDN) }).catch((e) => { console.error(e); return null; });
+      if (r?.matched) return;
+    }
+  }
   if (/^VL-\d+$/.test(feeRef)) {
     const { pool: db } = await import('../db.js');
     const { platformPaybill, applyTenantPayment } = await import('../charges.js');

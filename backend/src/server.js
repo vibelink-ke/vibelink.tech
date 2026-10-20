@@ -14232,6 +14232,25 @@ app.put('/api/platform/b2c-fee-tiers', superAdminOnly, wrap(async (req, res) => 
   }
 }));
 
+// ── website clients (domain / hosting billed by the platform owner) ──
+const webRoute = (fn, status = 200) => wrap(async (req, res) => {
+  try {
+    res.status(status).json(await fn(req, await import('./web-services.js')));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+});
+app.get('/api/platform/web', superAdminOnly, webRoute((_req, w) => w.overview()));
+app.post('/api/platform/web/clients', superAdminOnly, webRoute((req, w) => w.createClient(req.body ?? {}), 201));
+app.patch('/api/platform/web/clients/:id', superAdminOnly, webRoute((req, w) => w.updateClient(req.params.id, req.body ?? {})));
+app.post('/api/platform/web/clients/:id/services', superAdminOnly, webRoute((req, w) => w.addService(req.params.id, req.body ?? {}), 201));
+app.patch('/api/platform/web/services/:id', superAdminOnly, webRoute((req, w) => w.updateService(req.params.id, req.body ?? {})));
+app.post('/api/platform/web/services/:id/invoice', superAdminOnly, webRoute((req, w) => w.raiseInvoice(req.params.id), 201));
+app.post('/api/platform/web/clients/:id/payments', superAdminOnly, webRoute((req, w) => w.recordPayment(req.params.id, req.body?.amount, { method: req.body?.method || 'manual', reference: req.body?.reference, note: req.body?.note }), 201));
+app.post('/api/platform/web/invoices/:id/void', superAdminOnly, webRoute((req, w) => w.voidInvoice(req.params.id)));
+app.post('/api/platform/web/invoices/:id/remind', superAdminOnly, webRoute((req, w) => w.remindInvoice(req.params.id)));
+
 app.get('/api/tenants', superAdminOnly, wrap(async (_req, res) => {
   const { rows } = await pool.query(`
     select t.*,
@@ -15812,6 +15831,7 @@ const AUTOMATION_JOBS = [
   { job: 'accumulateUsage', name: 'Daily data usage', cron: '*/5 * * * *', detail: 'Adds what each PPPoE session has moved since the last pass to the client\'s usage for today, so the Statistics tab shows exact data per day and per month' },
   { job: 'refreshWalledGardens', name: 'Walled garden refresh', cron: '*/15 * * * *', detail: 'Looks the sign-in page\'s address up again (from several resolvers) and updates each hotspot router only if it changed, so guests can still reach the sign-in page after the portal host moves or is put behind Cloudflare' },
   { job: 'syncHotspotLoginPages', name: 'Sign-in page sync', cron: '*/10 * * * *', detail: 'Compares each hotspot router sign-in page with the one the server serves now and re-sends it when it is old, stock, missing or different, so guests never see a stale page' },
+  { job: 'webServiceBilling', name: 'Website client billing', cron: '0 6 * * *', detail: 'Raises the invoices for the domain, hosting and maintenance of website clients 30 days before an annual renewal (5 before a monthly one), and sends payment reminders by SMS: 3 days before, on the due date, then weekly while unpaid' },
   { job: 'watchChainedRouters', name: 'Router chaining monitor', cron: '*/2 * * * *', detail: 'Reads each hotspot router\'s bridge, picks up routers plugged into its ports to extend the signal by their MAC, and watches them; two misses in a row mark one down and you get a single message however many went down together' },
   { job: 'checkLinkDevices', name: 'Radio and switch pings', cron: '*/2 * * * *', detail: 'Pings each shared radio, switch or ONU that has an address from the router it is locked to; two misses in a row mark it down on Shared links and on SkyPlan' },
   { job: 'checkOnlineLines', name: 'Online but no internet', cron: '*/10 * * * *', detail: 'Compares each online PPPoE line\'s traffic with the last pass; a line that is connected, moving nothing and not answering a ping from the router is flagged in the clients list' },
