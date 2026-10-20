@@ -280,7 +280,8 @@
     "date": "2026-10-21",
     "title": "Settlements only for platform-collect tenants",
     "items": [
-      "Settlements: the platform owner's own tenant, and any tenant that does not collect through the platform paybill, no longer accrues or is paid a settlement."
+      "Settlements: the platform owner's own tenant, and any tenant that does not collect through the platform paybill, no longer accrues or is paid a settlement.",
+      "Hotspot payments now always settle straight into the tenant's own till, paybill or bank. Only PPPoE payments use the platform paybill. A tenant with no hotspot gateway is asked to set one up."
     ]
   }
 ]

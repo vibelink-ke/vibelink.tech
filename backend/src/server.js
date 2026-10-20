@@ -1347,11 +1347,13 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   // of leaving the guest with a hard failure, when the tenant opted into it.
   // The router can overrule it: a site set to 'platform' pays the platform paybill even when the tenant has their
   // own gateway, and one set to 'own' never does.
-  const usePlatformCollect = viaPlatform(await routerCollection(tenant.id, routerId), tenant.platform_collect_enabled, !!(kk || daraja || piggyback));
-  if (!kk && !daraja && !piggyback && !usePlatformCollect) {
+  // Hotspot money NEVER goes through the platform paybill: every tenant's hotspot payments settle straight into their own till, paybill or bank. Only PPPoE
+  // payments use the platform paybill (and the platform's settlement). A tenant with no gateway of their own has to set one up for hotspot.
+  const usePlatformCollect = false;
+  if (!kk && !daraja && !piggyback) {
     return res.status(503).json({
-      error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
-        + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
+      error: 'Hotspot payments settle straight into your own till, paybill or bank, and none is set up yet. '
+        + 'Add it under Hotspot → Settings → Payment gateways.',
     });
   }
 
@@ -1983,11 +1985,13 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
     });
   }
   // Same platform-paybill rule as /hotspot/buy above, router override included.
-  const usePlatformCollect = viaPlatform(await routerCollection(tenant.id, router.id), tenant.platform_collect_enabled, !!(kk || daraja || piggyback));
-  if (!kk && !daraja && !piggyback && !usePlatformCollect) {
+  // Hotspot money NEVER goes through the platform paybill: every tenant's hotspot payments settle straight into their own till, paybill or bank. Only PPPoE
+  // payments use the platform paybill (and the platform's settlement). A tenant with no gateway of their own has to set one up for hotspot.
+  const usePlatformCollect = false;
+  if (!kk && !daraja && !piggyback) {
     return res.status(503).json({
-      error: `Hotspot is set to take payments via ${method === 'kopokopo' ? 'KopoKopo' : 'M-Pesa Paybill'}, `
-        + 'but that gateway is not configured yet. Ask the operator to finish Settings → Payment gateways.',
+      error: 'Hotspot payments settle straight into your own till, paybill or bank, and none is set up yet. '
+        + 'Add it under Hotspot → Settings → Payment gateways.',
     });
   }
 
