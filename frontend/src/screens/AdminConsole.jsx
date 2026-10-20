@@ -10,6 +10,7 @@ const PlatformMonitor = lazy(() => import('./PlatformMonitor'));
 const SaasRevenue = lazy(() => import('./SaasRevenue'));
 const PlatformHistory = lazy(() => import('./PlatformHistory'));
 const Gateways = lazy(() => import('./settings/Gateways'));
+const WebClients = lazy(() => import('./WebClients'));
 
 /**
  * The platform owner's console, at <root domain>/admin.
@@ -25,6 +26,7 @@ const TABS = [
   { to: '/admin/monitor', label: 'Platform monitor', view: PlatformMonitor },
   { to: '/admin/revenue', label: 'SaaS revenue', view: SaasRevenue },
   { to: '/admin/history', label: 'Payout & pay-in history', view: PlatformHistory },
+  { to: '/admin/web-clients', label: 'Website clients', view: WebClients },
   { to: '/admin/gateways', label: 'Payment gateways', view: Gateways, props: { platform: true },
     note: 'The platform\'s own paybill: it takes the fees ISPs pay the platform and the payments of ISPs who collect through it. It is kept here and appears in no ISP\'s own settings.' },
 ];
