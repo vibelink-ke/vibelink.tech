@@ -319,6 +319,7 @@ export async function syncTenant(tenantId, mode = 'statuses') {
     }
     await evaluateOutages(tenantId).catch((e) => console.warn('smartolt outages', e.message));
     await handleLos(tenantId).catch((e) => console.warn('smartolt los', e.message));
+    await recoverLos(tenantId).catch((e) => console.warn('smartolt los recovery', e.message));
     // ONUs waiting to be authorised: a separate call whose failure must not spoil the sync
     await syncUnconfigured(cfg).catch((e) => console.warn('smartolt unconfigured', e.message));
     return { olts, onus };
@@ -404,6 +405,38 @@ async function handleLos(tenantId) {
     }
     await pool.query('update smartolt_onus set los_notified=true where tenant_id=$1 and external_id=$2', [tenantId, o.external_id]);
     await notifyOwner(tenantId, `${label} has lost light (LOS) at ${where}${number ? ` — ticket ${number}` : ''}.`, { url: '/support', title: 'ONU on LOS' });
+  }
+}
+
+
+/**
+ * Close the LOS tickets whose ONU has come back. A ticket raised by handleLos ("ONU on LOS — ...") stays open until someone resolves it, though the fibre
+ * was mended and the client is online again. When the ONU it was raised for is online (and none of that client's ONUs is still on LOS), the ticket is
+ * resolved with a note, and the owner is told once. The ONU is found through the client the ticket is for, or, for a ticket with no client, by the serial
+ * or name written in its description.
+ */
+async function recoverLos(tenantId) {
+  const { rows: open } = await pool.query(
+    `select id, number, subject, subscriber_id, description from tickets
+      where tenant_id=$1 and subject like 'ONU on LOS%' and status <> 'resolved' and source = 'smartolt' limit 200`, [tenantId]);
+  if (!open.length) return;
+  const { notifyOwner } = await import('./jobs.js');
+  for (const t of open) {
+    let onus;
+    if (t.subscriber_id) {
+      onus = (await pool.query('select status, los_polls from smartolt_onus where tenant_id=$1 and subscriber_id=$2', [tenantId, t.subscriber_id])).rows;
+    } else {
+      const ref = /ONU (S+) at /.exec(String(t.description ?? ''))?.[1];
+      if (!ref) continue;
+      onus = (await pool.query('select status, los_polls from smartolt_onus where tenant_id=$1 and (sn=$2 or name=$2)', [tenantId, ref])).rows;
+    }
+    if (!onus.length) continue;
+    if (onus.some((o) => o.status === 'los') || !onus.some((o) => o.status === 'online')) continue;   // still no light, or not back yet
+    await pool.query("update tickets set status='resolved', resolved_at=coalesce(resolved_at, now()), updated_at=now() where id=$1 and tenant_id=$2", [t.id, tenantId]);
+    await pool.query(
+      `insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,'System',$3,true)`,
+      [tenantId, t.id, 'Closed automatically: SmartOLT now reports the ONU online, so the loss of signal is over.']);
+    await notifyOwner(tenantId, `${t.subject.replace(/^ONU on LOS — /, '')} is back online. Ticket ${t.number} was closed automatically.`, { url: '/support', title: 'LOS recovered' });
   }
 }
 
