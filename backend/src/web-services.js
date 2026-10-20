@@ -106,10 +106,13 @@ export async function updateClient(id, b = {}) {
   const { rows: [cur] } = await pool.query('select * from web_clients where id=$1', [id]);
   if (!cur) throw bad('No such client.', 404);
   const status = b.status && ['active', 'paused', 'closed'].includes(b.status) ? b.status : cur.status;
+  const grace = 'graceDays' in b ? Math.round(num(b.graceDays)) : cur.grace_days;
+  if (!(grace >= 0 && grace <= 90)) throw bad('Grace days must be between 0 and 90.');
   const { rows: [c] } = await pool.query(
-    `update web_clients set name=$2, contact_name=$3, phone=$4, email=$5, notes=$6, status=$7 where id=$1 returning *`,
+    `update web_clients set name=$2, contact_name=$3, phone=$4, email=$5, notes=$6, status=$7, grace_days=$8 where id=$1 returning *`,
     [id, text(b.name, 120) ?? cur.name, 'contactName' in b ? text(b.contactName, 120) : cur.contact_name, 'phone' in b ? text(b.phone, 30) : cur.phone,
-      'email' in b ? text(b.email, 160) : cur.email, 'notes' in b ? text(b.notes, 1000) : cur.notes, status]);
+      'email' in b ? text(b.email, 160) : cur.email, 'notes' in b ? text(b.notes, 1000) : cur.notes, status, grace]);
+  await evaluateSuspension(id);
   return c;
 }
 
@@ -149,6 +152,53 @@ export async function updateService(id, b = {}) {
     `update web_services set kind=$2, label=$3, cost=$4, price=$5, cycle=$6, next_due=$7, status=$8, notes=$9 where id=$1 returning *`,
     [id, f.kind, f.label, f.cost, f.price, f.cycle, f.nextDue, f.status, f.notes]);
   return s;
+}
+
+// ── lock-out ──
+
+/**
+ * Suspend or restore a client by the rule: an open invoice more than grace_days past its due date suspends them, and paying it (or cancelling it) restores them.
+ * A client the platform owner suspended by hand stays suspended until restored by hand. Never throws.
+ */
+export async function evaluateSuspension(clientId) {
+  try {
+    const { rows: [c] } = await pool.query('select * from web_clients where id=$1', [clientId]);
+    if (!c || c.status !== 'active') return;
+    const t = today();
+    const held = c.grace_until && dateOnly(c.grace_until) >= t;
+    const { rows: [o] } = await pool.query(
+      `select count(*)::int as n, coalesce(sum(amount - paid), 0) as owed from web_invoices
+        where client_id=$1 and status in ('open','partial') and due_date + $2::int < $3::date`, [clientId, c.grace_days, t]);
+    if (o.n > 0 && !c.suspended && !held) {
+      await pool.query("update web_clients set suspended=true, suspended_at=now(), suspend_reason='auto' where id=$1", [clientId]);
+      await tell(c, `${c.name}: your website services are suspended because KES ${kes(o.owed)} is overdue. ${await payLine(c)} Paying restores them at once.`);
+    } else if (o.n === 0 && c.suspended && c.suspend_reason === 'auto') {
+      await pool.query("update web_clients set suspended=false, suspended_at=null, suspend_reason=null where id=$1", [clientId]);
+      await tell(c, `${c.name}: thank you, your payment is received and your website services are restored.`);
+    }
+  } catch (e) { console.warn('web-services: suspension check failed -', e.message); }
+}
+
+/** The platform owner suspends or restores by hand. A restore holds off the automatic rule for 3 days, so a client who is still overdue gets a chance to pay. */
+export async function setSuspended(id, suspend) {
+  const { rows: [c] } = await pool.query('select * from web_clients where id=$1', [id]);
+  if (!c) throw bad('No such client.', 404);
+  if (suspend) {
+    await pool.query("update web_clients set suspended=true, suspended_at=now(), suspend_reason='manual' where id=$1", [id]);
+    await tell(c, `${c.name}: your website services have been suspended. Contact us to restore them.`);
+  } else {
+    await pool.query("update web_clients set suspended=false, suspended_at=null, suspend_reason=null, grace_until=$2 where id=$1", [id, addDays(today(), 3)]);
+    await tell(c, `${c.name}: your website services have been restored.`);
+  }
+  const { rows: [out] } = await pool.query('select * from web_clients where id=$1', [id]);
+  return out;
+}
+
+/** What a client's website asks: active or suspended. By the client's private key, not the sequential account number. Nothing else is revealed. */
+export async function publicStatus(key) {
+  const { rows: [c] } = await pool.query('select suspended, status from web_clients where site_key=$1', [String(key ?? '').slice(0, 64)]);
+  if (!c) return null;
+  return { status: c.suspended || c.status === 'closed' ? 'suspended' : 'active' };
 }
 
 // ── invoices ──
@@ -241,6 +291,7 @@ export async function recordPayment(clientId, amount, { method = 'manual', refer
   const { rows: [after] } = await pool.query(
     `select w.credit, (select coalesce(sum(amount - paid), 0) from web_invoices i where i.client_id = w.id and i.status in ('open','partial')) as owed from web_clients w where w.id=$1`, [clientId]);
   await tell(client, `${client.name}: we received KES ${kes(value)}. ${Number(after.owed) > 0 ? `Still due: KES ${kes(after.owed)}.` : 'Nothing is due. Thank you.'}${Number(after.credit) > 0 ? ` Credit on your account: KES ${kes(after.credit)}.` : ''}`);
+  await evaluateSuspension(clientId);          // a paid-up client is restored at once
   return { duplicate: false, owed: Number(after.owed), credit: Number(after.credit) };
 }
 
@@ -256,6 +307,7 @@ export async function voidInvoice(id) {
   if (!i) throw bad('No such invoice.', 404);
   if (Number(i.paid) > 0) throw bad('Part of this invoice is already paid, so it cannot be cancelled.');
   const { rows: [out] } = await pool.query("update web_invoices set status='void' where id=$1 returning *", [id]);
+  await evaluateSuspension(i.client_id);
   return out;
 }
 
@@ -303,5 +355,8 @@ export async function runBilling() {
       try { await remindInvoice(i.id); reminded += 1; } catch (e) { console.warn('web-services: reminder not sent -', e.message); }
     }
   }
+  // The lock-out rule, for every active client (a client with nothing overdue is restored if the rule had suspended them).
+  const { rows: clients } = await pool.query("select id from web_clients where status = 'active'");
+  for (const c of clients) await evaluateSuspension(c.id);
   return { raised, reminded };
 }

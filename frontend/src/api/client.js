@@ -472,6 +472,7 @@ export const api = {
   webUpdateService: (id, b) => patch(`/api/platform/web/services/${id}`, b),
   webRaiseInvoice: (serviceId) => post(`/api/platform/web/services/${serviceId}/invoice`, {}),
   webRecordPayment: (clientId, b) => post(`/api/platform/web/clients/${clientId}/payments`, b),
+  webSuspend: (id, suspend) => post(`/api/platform/web/clients/${id}/suspend`, { suspend }),
   webVoidInvoice: (id) => post(`/api/platform/web/invoices/${id}/void`, {}),
   webRemindInvoice: (id) => post(`/api/platform/web/invoices/${id}/remind`, {}),
   updateRouter: (id, r) => put(`/api/routers/${id}`, r),

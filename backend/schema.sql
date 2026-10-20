@@ -3673,3 +3673,13 @@ create table if not exists web_payments (
   created_at timestamptz not null default now()
 );
 create unique index if not exists web_payments_reference on web_payments (reference) where reference is not null;
+
+-- Lock-out: a client with an invoice more than grace_days past due is suspended (the status link their website reads says so) until it is paid;
+-- the platform owner can also suspend or restore by hand. grace_until holds off the automatic rule for a few days after a manual restore.
+alter table web_clients add column if not exists grace_days    int not null default 7;
+alter table web_clients add column if not exists suspended     boolean not null default false;
+alter table web_clients add column if not exists suspended_at  timestamptz;
+alter table web_clients add column if not exists suspend_reason text;
+alter table web_clients add column if not exists grace_until   date;
+alter table web_clients add column if not exists site_key      text not null default replace(gen_random_uuid()::text, '-', '');
+create unique index if not exists web_clients_site_key on web_clients (site_key);

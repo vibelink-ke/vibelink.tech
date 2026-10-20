@@ -283,7 +283,8 @@
       "Settlements: the platform owner's own tenant, and any tenant that does not collect through the platform paybill, no longer accrues or is paid a settlement.",
       "Hotspot payments now always settle straight into the tenant's own till, paybill or bank. Only PPPoE payments use the platform paybill. A tenant with no hotspot gateway is asked to set one up.",
       "Email: a tenant with no email gateway of its own now sends through the platform mail gateway automatically, free up to 50 emails a day. Customers' replies go to the tenant's support email.",
-      "Platform admin: new Website clients screen for domains, hosting and maintenance billed to clients who are not ISPs. Yearly or monthly, invoices raised ahead of each renewal with SMS reminders, payments on the platform paybill matched by the client's WS- account number."
+      "Platform admin: new Website clients screen for domains, hosting and maintenance billed to clients who are not ISPs. Yearly or monthly, invoices raised ahead of each renewal with SMS reminders, payments on the platform paybill matched by the client's WS- account number.",
+      "Website clients: unpaid clients are suspended automatically 7 days after an invoice's due date (and restored the moment they pay), or by hand. Their website reads a status link and shows a notice while suspended."
     ]
   }
 ]

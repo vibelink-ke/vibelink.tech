@@ -7,6 +7,22 @@ import { Badge, Button, Drawer, Empty, Field, Grid, Input, KV, Modal, Screen, Se
 const kes = (n) => `KES ${Number(n ?? 0).toLocaleString('en-KE', { maximumFractionDigits: 2 })}`;
 const KINDS = [['hosting', 'Hosting'], ['domain', 'Domain'], ['maintenance', 'Maintenance'], ['other', 'Other']];
 const CYCLES = [['annual', 'Yearly'], ['monthly', 'Monthly']];
+/** The few lines a client's PHP site includes at the very top: it asks the platform whether the client is suspended (cached 5 minutes; if the platform cannot be reached the site stays up). */
+const phpSnippet = (origin, key) => `<?php
+// Service check: shows a notice instead of the site while the account is suspended for non-payment.
+$cache = sys_get_temp_dir() . '/svc_${key}';
+if (!is_file($cache) || time() - filemtime($cache) > 300) {
+  $r = @file_get_contents('${origin}/api/public/web-status/${key}', false, stream_context_create(['http' => ['timeout' => 3]]));
+  if ($r !== false) @file_put_contents($cache, $r);
+}
+$s = @json_decode(@file_get_contents($cache), true);
+if (($s['status'] ?? 'active') === 'suspended') {
+  http_response_code(503);
+  echo '<!doctype html><meta charset="utf-8"><title>Service suspended</title><body style="font-family:sans-serif;text-align:center;padding:15vh 1rem"><h1>This website is temporarily unavailable</h1><p>Please contact the site owner.</p></body>';
+  exit;
+}
+?>`;
+
 const BLANK_CLIENT = { name: '', contactName: '', phone: '', email: '', notes: '' };
 const BLANK_SERVICE = { kind: 'hosting', label: '', cost: '', price: '', cycle: 'annual', nextDue: '', invoiceNow: false, notes: '' };
 
@@ -87,7 +103,7 @@ export default function WebClients() {
               } },
               { key: 'owed', label: 'Owed', align: 'right', render: (c) => (c.overdue > 0 ? <b style={{ color: color.rust }}>{kes(c.owed)}</b> : c.owed > 0 ? kes(c.owed) : '—') },
               { key: 'credit', label: 'Credit', align: 'right', render: (c) => (Number(c.credit) > 0 ? kes(c.credit) : '—') },
-              { key: 'status', label: 'Status', render: (c) => <Badge tone={c.status === 'active' ? 'active' : 'default'}>{c.status}</Badge> },
+              { key: 'status', label: 'Status', render: (c) => (c.suspended ? <Badge tone="expired">suspended</Badge> : <Badge tone={c.status === 'active' ? 'active' : 'default'}>{c.status}</Badge>) },
               { key: 'act', label: '', align: 'right', render: (c) => <Button size="sm" onClick={() => setOpenId(c.id)}>Open</Button> },
             ]}
           />
@@ -103,9 +119,27 @@ export default function WebClients() {
               <div style={{ color: color.muted }}>{client.phone ?? 'No phone'}{client.email ? ` · ${client.email}` : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <Button size="sm" onClick={() => setClientForm({ id: client.id, name: client.name, contactName: client.contact_name ?? '', phone: client.phone ?? '', email: client.email ?? '', notes: client.notes ?? '', status: client.status })}>Edit client</Button>
+              <Button size="sm" onClick={() => setClientForm({ id: client.id, name: client.name, contactName: client.contact_name ?? '', phone: client.phone ?? '', email: client.email ?? '', notes: client.notes ?? '', status: client.status, graceDays: client.grace_days })}>Edit client</Button>
               <Button size="sm" variant="primary" onClick={() => setPayForm({ clientId: client.id, amount: '', method: 'cash', reference: '', note: '' })}>Record a payment</Button>
+              {client.suspended
+                ? <Button size="sm" disabled={busy} onClick={() => run(() => api.webSuspend(client.id, false), 'Restored')}>Restore services</Button>
+                : <Button size="sm" disabled={busy} onClick={() => window.confirm(`Suspend ${client.name}? Their website shows a "suspended" notice if it has the service check installed.`) && run(() => api.webSuspend(client.id, true), 'Suspended')}>Suspend now</Button>}
             </div>
+            {client.suspended && (
+              <div style={{ background: color.rustBg, color: color.rust, borderRadius: radius.md, padding: 10, fontSize: 13 }}>
+                Suspended{client.suspend_reason === 'auto' ? ' automatically (an invoice is overdue). They are restored as soon as it is paid.' : ' by hand. Use Restore services to switch them back on.'}
+              </div>
+            )}
+            <KV k="Lock-out" v={`Suspended ${client.grace_days} days after an invoice's due date`} />
+            <details>
+              <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>Service check for their website</summary>
+              <div style={{ fontSize: 12.5, color: color.muted, margin: '8px 0' }}>
+                Paste this at the very top of the site's main PHP file (index.php). While the client is suspended the site shows a notice instead; the moment they pay it is back.
+                The link it reads is <span style={{ fontFamily: font.mono }}>{window.location.origin}/api/public/web-status/{client.site_key}</span>
+              </div>
+              <textarea readOnly rows={9} value={phpSnippet(window.location.origin, client.site_key)} style={{ width: '100%', fontFamily: font.mono, fontSize: 11.5, padding: 8, borderRadius: radius.md, border: `1px solid ${color.line}` }} onFocus={(e) => e.target.select()} />
+              <Button size="sm" onClick={() => { navigator.clipboard?.writeText(phpSnippet(window.location.origin, client.site_key)); store.toast('Copied'); }}>Copy</Button>
+            </details>
             <KV k="Credit held" v={kes(client.credit)} />
             <KV k="Owed" v={kes(client.owed)} />
 
@@ -188,6 +222,9 @@ export default function WebClients() {
             <Field label="Phone" hint="Invoices, reminders and receipts are sent here by SMS."><Input value={clientForm.phone} onChange={(e) => setClientForm({ ...clientForm, phone: e.target.value })} placeholder="0712345678" /></Field>
             <Field label="Email"><Input value={clientForm.email} onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })} /></Field>
             <Field label="Notes"><Input value={clientForm.notes} onChange={(e) => setClientForm({ ...clientForm, notes: e.target.value })} /></Field>
+            {clientForm.id && (
+              <Field label="Grace days before suspension" hint="How many days after an invoice's due date before their services are suspended. Paying restores them at once."><Input type="number" min="0" max="90" value={clientForm.graceDays} onChange={(e) => setClientForm({ ...clientForm, graceDays: e.target.value })} /></Field>
+            )}
             {clientForm.id && (
               <Field label="Status"><Select value={clientForm.status} onChange={(e) => setClientForm({ ...clientForm, status: e.target.value })} options={[{ value: 'active', label: 'Active' }, { value: 'paused', label: 'Paused (no new invoices)' }, { value: 'closed', label: 'Closed' }]} /></Field>
             )}

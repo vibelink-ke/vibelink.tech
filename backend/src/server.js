@@ -1007,6 +1007,18 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
 }));
 
 /**
+ * What a website client's own site asks before it shows itself: {"status":"active"} or {"status":"suspended"} (see web-services.js). By the client's
+ * private key. Public and ahead of the tenant middleware on purpose: the site calling it has no session, and it reveals nothing but the one word.
+ * Open to any origin so a page script can read it too.
+ */
+app.get('/api/public/web-status/:key', wrap(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*').set('Cache-Control', 'no-store');
+  const out = await (await import('./web-services.js')).publicStatus(req.params.key);
+  if (!out) return res.status(404).json({ error: 'unknown' });
+  res.json(out);
+}));
+
+/**
  * Just enough to brand the sign-in screen before anyone has signed in.
  *
  * AuthGate has no session yet at that point — no staff row, no tenant_id,
@@ -14248,6 +14260,7 @@ app.post('/api/platform/web/clients/:id/services', superAdminOnly, webRoute((req
 app.patch('/api/platform/web/services/:id', superAdminOnly, webRoute((req, w) => w.updateService(req.params.id, req.body ?? {})));
 app.post('/api/platform/web/services/:id/invoice', superAdminOnly, webRoute((req, w) => w.raiseInvoice(req.params.id), 201));
 app.post('/api/platform/web/clients/:id/payments', superAdminOnly, webRoute((req, w) => w.recordPayment(req.params.id, req.body?.amount, { method: req.body?.method || 'manual', reference: req.body?.reference, note: req.body?.note }), 201));
+app.post('/api/platform/web/clients/:id/suspend', superAdminOnly, webRoute((req, w) => w.setSuspended(req.params.id, !!req.body?.suspend)));
 app.post('/api/platform/web/invoices/:id/void', superAdminOnly, webRoute((req, w) => w.voidInvoice(req.params.id)));
 app.post('/api/platform/web/invoices/:id/remind', superAdminOnly, webRoute((req, w) => w.remindInvoice(req.params.id)));
 
