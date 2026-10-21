@@ -416,11 +416,11 @@ function Authorise() {
     return Array.from(bytes, (b) => chars[b % chars.length]).join('');
   };
 
-  // Picking the client fills in what can be worked out: the name on SmartOLT, a WiFi name and a fresh WiFi password.
+  // Picking the client fills in what can be worked out: the name on SmartOLT (the client's name), a WiFi name and a fresh WiFi password.
   const pick = (c) => {
     setClient(c);
     const ssid = String(c.name ?? '').replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 24) || String(c.account_code ?? '');
-    setForm((f) => ({ ...f, name: f.name || c.account_code || '', wifiSsid: f.wifiSsid || ssid, wifiPassword: f.wifiPassword || genPass() }));
+    setForm((f) => ({ ...f, name: f.name || c.name || c.account_code || '', wifiSsid: f.wifiSsid || ssid, wifiPassword: f.wifiPassword || genPass() }));
   };
 
   const closeModal = () => { setForm(null); setClient(null); setJob(null); load(); };
@@ -495,7 +495,7 @@ function Authorise() {
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}><b>{client.name}</b> <span style={{ color: color.muted }}>{client.account_code}</span><Button size="sm" onClick={() => setClient(null)}>Change</Button></div>
               ) : <ClientPicker onPick={pick} />}
             </Field>
-            <Field label="Name on SmartOLT" hint="Often the client's account number"><Input value={form.name} onChange={set('name')} placeholder={client?.account_code ?? ''} /></Field>
+            <Field label="Name on SmartOLT" hint="The client's name"><Input value={form.name} onChange={set('name')} placeholder={client?.name ?? ''} /></Field>
             <Field label="ONU type"><Input value={form.onu_type} onChange={set('onu_type')} list="so-types" /></Field>
             <Field label="Mode" hint={form.onu_mode === 'Bridging' ? 'Bridging: the customer router does the PPPoE' : undefined}><Select value={form.onu_mode} onChange={set('onu_mode')} options={['Routing', 'Bridging']} /></Field>
             <Field label="Zone"><Input value={form.zone} onChange={set('zone')} list="so-zones" /></Field>
