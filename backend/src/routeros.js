@@ -812,10 +812,18 @@ export async function wanInterface(conn, ifaceNames = null) {
  * accidentally opening a resolver to the internet, the same choice applyNat
  * already makes when it cannot name an interface.
  */
-export async function applyDnsProxy(conn, { hotspotSubnet = null } = {}) {
+const hasUpstreamDns = (dns) => !!(String(dns?.servers ?? '').trim() || String(dns?.['dynamic-servers'] ?? '').trim());
+
+export async function applyDnsProxy(conn,{ hotspotSubnet = null } = {}) {
   const done = [];   // what was repaired on this run (the order of the guest DNS rules), reported back to the caller
   const [dns] = await conn.write('/ip/dns/print', []);
   const already = dns?.['allow-remote-requests'] === 'true' || dns?.['allow-remote-requests'] === 'yes';
+
+  // A proxy with nowhere to forward to answers nothing either: guests get an address and the router as DNS server, and every name still fails
+  // ("DNS address could not be found"). Only when the router has no resolver at all, static or learned from its uplink, is one given.
+  if (!hasUpstreamDns(dns)) {
+    await cmd(conn, 'DNS upstream servers', '/ip/dns/set', [`=servers=${DEFAULT_PPP_DNS}`]);
+  }
 
   const wan = await wanInterface(conn);
   if (!wan) {
@@ -3303,6 +3311,13 @@ export async function hotspotCheck(conn, { bridge = null } = {}) {
       : `allow-remote-requests=${remote ?? '(unset)'} — a phone handed this router as its DNS `
         + 'server cannot resolve anything at all, including the check the OS uses to decide '
         + 'whether to show the login prompt. Press Hotspot or Configure again to fix this.');
+
+  add('the DNS proxy has a resolver to ask',
+    hasUpstreamDns(dns[0]),
+    hasUpstreamDns(dns[0])
+      ? `${dns[0].servers || dns[0]['dynamic-servers']}`
+      : '/ip dns has no servers and none learned from the uplink — the router cannot resolve any name for guests, so the browser says '
+        + '"DNS address could not be found" and the login page never loads. Press Hotspot or Configure again to fix this.');
 
   return { checks, ok: checks.every((c) => c.ok), interface: iface, htmlDirectory: dir };
 }

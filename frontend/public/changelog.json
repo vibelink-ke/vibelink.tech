@@ -298,5 +298,13 @@
     "items": [
       "Payments list loads faster: the 2,000 most recent payments are read with an index instead of sorting the tenant's whole history."
     ]
+  },
+  {
+    "date": "2026-10-22",
+    "title": "Hotspot: sign-in page no longer lost when the router has no DNS resolver",
+    "items": [
+      "A router with no DNS servers at all (none set, none learned from its uplink) gave guests an address but could not resolve any name, so the sign-in page never appeared (\"DNS address could not be found\"). Pressing Hotspot or Configure now sets 8.8.8.8 and 1.1.1.1 on such a router.",
+      "The Hotspot check now reports this case as its own line."
+    ]
   }
 ]
