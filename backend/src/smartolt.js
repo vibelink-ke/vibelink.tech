@@ -568,6 +568,23 @@ export async function oltVlans(tenantId, oltId) {
   })).filter((o) => o.vlan);
 }
 
+/**
+ * The TR069 profile names in use on this OLT, most used first. SmartOLT has no call that lists profiles, but every ONU shows the profile it uses, and the ONU
+ * list can be filtered to those with TR069 enabled. Best effort: [] when nothing can be learned.
+ */
+export async function discoverTr069Profiles(cfg, oltId) {
+  const count = new Map();
+  const read = async (params) => {
+    for (const o of list(await call(cfg, 'GET', '/onu/get_all_onus_details', { params }))) {
+      const p = text(first(o, 'tr069_profile'));
+      if (p && !/^(null|none|disabled|-)$/i.test(p)) count.set(p, (count.get(p) ?? 0) + (String(first(o, 'olt_id') ?? '') === String(oltId ?? '') ? 3 : 1));
+    }
+  };
+  try { await read({ tr069: 'enabled', ...(oltId ? { olt_id: oltId } : {}) }); } catch { /* an OLT filter this API does not take: ask for all */ }
+  if (!count.size) { try { await read({ tr069: 'enabled' }); } catch { /* nothing to learn from */ } }
+  return [...count.entries()].sort((x, y) => y[1] - x[1]).map(([p]) => p);
+}
+
 // ── authorise and set up in one go ────────────────────────────────────────────────────────────────
 //
 // Authorising is the first step; the rest (management VLAN, other VLANs, the customer's PPPoE login on the ONU's WAN,
@@ -638,21 +655,28 @@ export async function provisionOnu(tenantId, f, ctx = {}) {
     // TR069 profile: "SmartOLT" unless the tenant's smartolt_config.tr069_profile says otherwise). An ONU that already has it answers "already", which is fine.
     steps.push({ key: 'tr069', label: 'TR069 on the ONU (needed to set the WiFi)', state: 'pending' });
     const tr069 = async () => {
-      const profile = cfg.tr069_profile || 'SmartOLT';
+      // Which profile: the one typed on the Authorise screen; if that is left empty (automatic), the one the ONUs on this OLT that already have TR069 use
+      // (SmartOLT shows it on each ONU), then the one this tenant used last time, then SmartOLT's own name. Each is tried in turn until one is accepted.
+      const typed = String(f.tr069_profile ?? '').trim().slice(0, 80);
+      const candidates = [];
+      const add = (p) => { const v = String(p ?? '').trim(); if (v && !candidates.includes(v)) candidates.push(v); };
+      if (typed && typed.toLowerCase() !== 'auto') add(typed);
+      else for (const p of await discoverTr069Profiles(cfg, f.olt_id)) add(p);
+      add(cfg.tr069_profile); add('SmartOLT');
       // The interface is optional: asked for without it first, then each value SmartOLT lists, so a value it does not accept for this OLT cannot be what fails.
       const tries = [{}, { tr069_interface: 'wan' }, { tr069_interface: 'mgmt' }];
-      let last = null;
-      for (const extra of tries) {
-        try {
-          await post('enable_tr069', { tr069_profile: profile, ...extra })();
-          last = null;
-          break;
-        } catch (e) {
-          if (/already/i.test(e.message)) { last = null; break; }
-          last = e;
+      let used = null; let last = null;
+      outer: for (const profile of candidates) {
+        for (const extra of tries) {
+          try { await post('enable_tr069', { tr069_profile: profile, ...extra })(); used = profile; break outer; }
+          catch (e) {
+            if (/already/i.test(e.message)) { used = profile; break outer; }
+            last = e;
+          }
         }
       }
-      if (last) throw new Error(`${last.message} (profile "${profile}": check that this is the exact name of the TR069 profile in SmartOLT, Settings → VPN & TR069)`);
+      if (!used) throw new Error(`${last?.message ?? 'TR069 was not enabled'} (profiles tried: ${candidates.join(', ')}. Type the exact name of the TR069 profile from SmartOLT, Settings → VPN & TR069)`);
+      if (used !== cfg.tr069_profile) await pool.query('update smartolt_config set tr069_profile=$2 where tenant_id=$1', [tenantId, used]).catch(() => {});   // remembered as the default
       await sleep(15000);   // the ONU needs a moment to reach SmartOLT's ACS before the WiFi can be set
     };
     runs.push(tr069);

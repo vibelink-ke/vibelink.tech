@@ -387,6 +387,8 @@ function Authorise() {
   const [client, setClient] = useState(null);
   const [vlans, setVlans] = useState(null);   // the chosen OLT's VLANs; null while loading
   const [job, setJob] = useState(null);       // what is being set up after authorising
+  const [tr069Default, setTr069Default] = useState('');   // the TR069 profile this tenant used last time
+  useEffect(() => { api.smartoltStatus().then((st) => setTr069Default(st?.tr069_profile ?? '')).catch(() => {}); }, []);
 
   const load = useCallback(() => {
     setRows(null); setErr('');
@@ -465,7 +467,7 @@ function Authorise() {
               { key: 'olt', label: 'OLT', render: (r) => r.olt_name ?? r.olt_id ?? '—' },
               { key: 'port', label: 'Board / port', render: (r) => `${r.board ?? '?'} / ${r.port ?? '?'}` },
               { key: 'type', label: 'Type', render: (r) => r.onu_type ?? '—' },
-              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setJob(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', mgmt_vlan: '', other_vlans: [], zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '', wifiSsid: '', wifiPassword: '', wifi5: false, pushPppoe: true, sendSms: true }); }}>Authorise</Button> },
+              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setJob(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', mgmt_vlan: '', other_vlans: [], zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '', wifiSsid: '', wifiPassword: '', wifi5: false, pushPppoe: true, sendSms: true, tr069_profile: '' }); }}>Authorise</Button> },
             ]}
           />
         )}
@@ -523,6 +525,7 @@ function Authorise() {
               <Toggle checked={!!form.pushPppoe} onChange={(v) => setForm((f) => ({ ...f, pushPppoe: v }))} label="Send the client's PPPoE username and password to the ONU"
                 detail={client ? (form.onu_mode === 'Bridging' ? 'Not used in Bridging mode' : 'Done automatically once the ONU is authorised') : 'Choose a client above to use this'} />
             </div>
+            <Field label="TR069 profile" hint="Needed to set the WiFi. Leave empty for automatic: billing uses the profile the other ONUs on this OLT already use. Or type the exact name from SmartOLT (Settings → VPN & TR069). Remembered once it works."><Input value={form.tr069_profile ?? ''} onChange={set('tr069_profile')} placeholder="Automatic" list="so-tr069" />{tr069Default ? <datalist id="so-tr069"><option value={tr069Default} /></datalist> : null}</Field>
             <Field label="WiFi name"><Input value={form.wifiSsid} onChange={set('wifiSsid')} maxLength={32} /></Field>
             <Field label="WiFi password" hint="8 or more characters">
               <div style={{ display: 'flex', gap: 6 }}>

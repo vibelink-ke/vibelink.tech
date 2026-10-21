@@ -307,7 +307,8 @@
       "The Hotspot check now reports this case as its own line.",
       "SmartOLT authorise: TR069 is now switched on for the ONU before its WiFi name and password are set, and the WiFi step waits longer for the ONU to check in.",
       "SmartOLT authorise: the ONU's name now defaults to the customer's name instead of the account number.",
-      "SmartOLT authorise: the TR069 step tries without an interface first, then wan, then mgmt, and names the TR069 profile in its error."
+      "SmartOLT authorise: the TR069 step tries without an interface first, then wan, then mgmt, and names the TR069 profile in its error.",
+      "SmartOLT authorise: choose the TR069 profile, or leave it empty for automatic (billing uses the profile the other ONUs on that OLT already use). The one that works is remembered."
     ]
   }
 ]
