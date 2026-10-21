@@ -634,11 +634,24 @@ export async function provisionOnu(tenantId, f, ctx = {}) {
     ...(routing ? {} : { vlan: f.vlan }),
   });
   if (ctx.wifi) {
+    // Most OLT types can only change an ONU's WiFi through TR-069, so TR-069 is switched on first (SmartOLT's POST /onu/enable_tr069 takes the name of the
+    // TR069 profile: "SmartOLT" unless the tenant's smartolt_config.tr069_profile says otherwise). An ONU that already has it answers "already", which is fine.
+    steps.push({ key: 'tr069', label: 'TR069 on the ONU (needed to set the WiFi)', state: 'pending' });
+    const tr069 = async () => {
+      try {
+        await post('enable_tr069', { tr069_profile: cfg.tr069_profile || 'SmartOLT', ...(f.mgmt_vlan ? { tr069_interface: 'mgmt' } : {}) })();
+      } catch (e) {
+        if (!/already/i.test(e.message)) throw e;
+      }
+      await sleep(15000);   // the ONU needs a moment to reach SmartOLT's ACS before the WiFi can be set
+    };
+    runs.push(tr069);
+    // The WiFi is set through TR-069 only once the ONU has checked in, which can take a minute or two: try for longer.
     steps.push({ key: 'wifi', label: `WiFi name "${ctx.wifi.ssid}"`, state: 'pending' });
-    runs.push(wifiCall('wifi_0/1', ctx.wifi.ssid));
+    const w1 = wifiCall('wifi_0/1', ctx.wifi.ssid); w1.attempts = 8; w1.gap = 15000; runs.push(w1);
     if (ctx.wifi.band5) {
       steps.push({ key: 'wifi5', label: `5 GHz WiFi name "${ctx.wifi.ssid}_5G"`, state: 'pending' });
-      runs.push(wifiCall('wifi_0/5', `${ctx.wifi.ssid}_5G`));
+      const w5 = wifiCall('wifi_0/5', `${ctx.wifi.ssid}_5G`); w5.attempts = 8; w5.gap = 15000; runs.push(w5);
     }
   }
   const smsWanted = !!(ctx.wifi && ctx.phone && ctx.notify !== false);
@@ -655,9 +668,10 @@ export async function provisionOnu(tenantId, f, ctx = {}) {
     for (const run of runs) {
       const step = steps[index++];
       step.state = 'running';
-      for (let attempt = 1; attempt <= 3; attempt++) {
+      const attempts = run.attempts ?? 3; const gap = run.gap ?? 8000;
+      for (let attempt = 1; attempt <= attempts; attempt++) {
         try { await run(); step.state = 'ok'; step.message = ''; break; }
-        catch (e) { step.state = 'failed'; step.message = e.message; if (attempt < 3) await sleep(8000); }
+        catch (e) { step.state = 'failed'; step.message = e.message; if (attempt < attempts) await sleep(gap); }
       }
     }
     const sms = steps.find((s) => s.key === 'sms');
