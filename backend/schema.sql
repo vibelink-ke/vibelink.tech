@@ -3730,3 +3730,6 @@ begin
   end if;
   return true;
 end $fn$;
+
+-- The Payments list reads the newest payments of each channel: this index makes that a quick lookup instead of a sort of the tenant's whole history.
+create index if not exists payments_tenant_provider_received on payments (tenant_id, provider, received_at desc);

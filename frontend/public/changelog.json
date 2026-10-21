@@ -291,5 +291,12 @@
       "Add TV or console: a one-device bundle that is already in use can now be moved to the TV. The page asks first; the TV becomes the device and the one using it now is signed out.",
       "Fix: the sign-in page sync no longer re-sends the page to every router every 10 minutes (it was doing so for routers that cannot report their page), which could slow the whole system."
     ]
+  },
+  {
+    "date": "2026-10-22",
+    "title": "Payments load faster (recent 2,000)",
+    "items": [
+      "Payments list loads faster: the 2,000 most recent payments are read with an index instead of sorting the tenant's whole history."
+    ]
   }
 ]

@@ -11666,15 +11666,18 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
              -- were real, just crowded out of the list before the filter ever ran.
              -- Ranking within each provider instead means every channel keeps its
              -- own 500 most recent, regardless of how busy any other channel is.
-             row_number() over (partition by pay.provider order by pay.received_at desc) as rn
-        from payments pay
+             -- Read per channel with an index (the newest 500 of each), not by ranking every payment the tenant has ever had: that sorted the whole table on
+             -- every load and took seconds for a tenant with thousands of payments.
+             1 as rn
+        from (select distinct provider from payments where tenant_id=$1) pr
+        cross join lateral (select * from payments where tenant_id=$1 and provider = pr.provider order by received_at desc limit 500) pay
         left join vouchers v on v.id = pay.voucher_id
         left join plans p on p.id = v.plan_id
         left join subscribers s on s.id = pay.subscriber_id
        where pay.tenant_id=$1
     ) x
-    where rn <= 500
-    order by received_at desc`, [req.tenant.id]);
+    order by received_at desc
+    limit 2000`, [req.tenant.id]);        // the 2,000 most recent overall, however many channels there are
   res.json(rows);
 }));
 
