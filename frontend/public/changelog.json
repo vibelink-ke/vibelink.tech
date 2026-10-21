@@ -309,7 +309,8 @@
       "SmartOLT authorise: the ONU's name now defaults to the customer's name instead of the account number.",
       "SmartOLT authorise: the TR069 step tries without an interface first, then wan, then mgmt, and names the TR069 profile in its error.",
       "SmartOLT authorise: choose the TR069 profile, or leave it empty for automatic (billing uses the profile the other ONUs on that OLT already use). The one that works is remembered.",
-      "Customers can change their own WiFi name and password from their portal, and technicians can do it from the field app (new permission: Change a customer's WiFi). Works on SmartOLT ONUs and TR-069 routers."
+      "Customers can change their own WiFi name and password from their portal, and technicians can do it from the field app (new permission: Change a customer's WiFi). Works on SmartOLT ONUs and TR-069 routers.",
+      "When authorising an ONU, the management VLAN now gets a fixed (static) IP instead of DHCP. SmartOLT picks a free address from the OLT's pool, or you can type the address, mask, gateway and DNS."
     ]
   }
 ]
