@@ -83,7 +83,7 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       company: req.session.company ?? req.tenant.name,
       shift: shift ? { active: true, since: shift.started_at } : { active: false },
       // What the New tab offers: only what the permission matrix lets this login actually do.
-      can: { ticket: await may('tickets.edit'), lead: await may('leads.create'), location: await may('field.update_location'), credentials: await may('field.view_credentials') },
+      can: { ticket: await may('tickets.edit'), lead: await may('leads.create'), location: await may('field.update_location'), credentials: await may('field.view_credentials'), wifi: await may('field.change_wifi') },
     });
   }));
 
@@ -413,6 +413,22 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
       ? await pool.query('select pppoe_pass from subscribers where tenant_id=$1 and id=$2', [req.tenant.id, c.id])
       : { rows: [] };
     res.json({ ...c, state: stateOf(c), expires_at: undefined, jobs, pppoe_pass: cr?.pppoe_pass ?? null });
+  }));
+
+  // Change the customer's WiFi name and password on their ONU or router.
+  app.get('/api/field/customers/:id/wifi', use, onShift, wrap(async (req, res) => {
+    const { wifiTarget } = await import('./wifi.js');
+    const t = await wifiTarget(req.tenant.id, req.params.id);
+    res.json({ available: !!t, ssid: t?.ssid ?? null });
+  }));
+  app.post('/api/field/customers/:id/wifi', use, onShift, requirePermission('field.change_wifi'), wrap(async (req, res) => {
+    const { changeWifi } = await import('./wifi.js');
+    try {
+      res.json(await changeWifi(req.tenant.id, req.params.id, req.body ?? {}, req.session?.name ?? 'technician'));
+    } catch (e) {
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      throw e;
+    }
   }));
 
   // Drop the customer's session so their router dials back in fresh (a first thing to try on a repair).

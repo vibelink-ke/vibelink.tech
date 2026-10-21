@@ -30,6 +30,8 @@ const api = {
   pppoePlans: () => api.call('GET', '/portal/plans-pppoe'),
   requestPlanChange: (planId) => api.call('POST', '/portal/request-plan-change', { planId }),
   recover: (phone) => api.call('POST', '/portal/recover', { phone }),
+  wifi: () => api.call('GET', '/portal/wifi'),
+  setWifi: (ssid, password, band5) => api.call('POST', '/portal/wifi', { ssid, password, band5 }),
   changePassword: (currentPassword, newPassword) =>
     api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
   usage: () => api.call('GET', '/portal/usage'),
@@ -408,6 +410,31 @@ export default function CustomerPortal() {
     } catch (err) {
       setPayMsg(err.message);
       setPayBusy(false);
+    }
+  };
+
+  // The customer's own WiFi name and password, when their equipment can be reached from here.
+  const [wifi, setWifiInfo] = useState(null);       // { available, ssid }
+  const [wifiForm, setWifiForm] = useState({ ssid: '', password: '', band5: false });
+  const [wifiBusy, setWifiBusy] = useState(false);
+  const [wifiMsg, setWifiMsg] = useState('');
+  const [wifiOpen, setWifiOpen] = useState(false);
+  useEffect(() => {
+    if (!me) return;
+    api.wifi().then((w) => { setWifiInfo(w); setWifiForm((f) => ({ ...f, ssid: f.ssid || w.ssid || '' })); }).catch(() => setWifiInfo({ available: false }));
+  }, [!!me]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveWifi = async (e) => {
+    e.preventDefault();
+    setWifiBusy(true);
+    setWifiMsg('');
+    try {
+      await api.setWifi(wifiForm.ssid.trim(), wifiForm.password, wifiForm.band5);
+      setWifiMsg('Done. Your WiFi now uses the new name and password. Devices will need to reconnect.');
+      setWifiForm((f) => ({ ...f, password: '' }));
+    } catch (err) {
+      setWifiMsg(err.message);
+    } finally {
+      setWifiBusy(false);
     }
   };
 
@@ -912,6 +939,28 @@ export default function CustomerPortal() {
             </div>
           ))}
         </div>
+
+        {wifi?.available && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Your WiFi</span>
+            {!wifiOpen ? (
+              <button style={button(false)} onClick={() => setWifiOpen(true)}>Change WiFi name or password</button>
+            ) : (
+              <form onSubmit={saveWifi} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <input style={input} value={wifiForm.ssid} onChange={(e) => setWifiForm({ ...wifiForm, ssid: e.target.value })} maxLength={32} placeholder="WiFi name" aria-label="WiFi name" />
+                <input style={input} value={wifiForm.password} onChange={(e) => setWifiForm({ ...wifiForm, password: e.target.value })} minLength={8} maxLength={63} placeholder="New WiFi password (8 or more characters)" aria-label="New WiFi password" />
+                <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13 }}>
+                  <input type="checkbox" checked={wifiForm.band5} onChange={(e) => setWifiForm({ ...wifiForm, band5: e.target.checked })} />
+                  Also the 5 GHz network (its name ends _5G)
+                </label>
+                {wifiMsg && <span style={{ fontSize: 12.5, color: wifiMsg.startsWith('Done') ? pc.teal : pc.rust }}>{wifiMsg}</span>}
+                <button type="submit" style={button(true)} disabled={wifiBusy || !wifiForm.ssid.trim() || wifiForm.password.length < 8}>
+                  {wifiBusy ? 'Applying… this can take a minute' : 'Save WiFi'}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         <div style={card}>
           {/* Portal password only — never pppoe_pass, which is what the router

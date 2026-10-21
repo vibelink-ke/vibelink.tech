@@ -585,6 +585,38 @@ export async function discoverTr069Profiles(cfg, oltId) {
   return [...count.entries()].sort((x, y) => y[1] - x[1]).map(([p]) => p);
 }
 
+/**
+ * Change the WiFi name and password on an ONU that is already set up (the customer's own page, the technician app). The 2.4 GHz network is wifi_0/1 and the
+ * 5 GHz one wifi_0/5 with "_5G" on its name, as when authorising. If SmartOLT says TR069 is needed, it is switched on first (the profile found the same
+ * way as when authorising) and the change is tried again, because a freshly enabled ONU takes a minute to check in.
+ */
+export async function setWifiOnOnu(tenantId, target, { ssid, password, band5 = false }) {
+  const cfg = await loadConfig(tenantId);
+  if (!cfg?.enabled || !cfg.apiKey) throw new Error('SmartOLT is not connected.');
+  const id = encodeURIComponent(target.externalId);
+  const one = (port, name) => call(cfg, 'POST', `/onu/set_wifi_port_lan/${id}`, { form: { wifi_port: port, ssid: name, password, authentication_mode: 'WPA2', dhcp: 'No control' } });
+  const all = async () => { await one('wifi_0/1', ssid); if (band5) await one('wifi_0/5', `${ssid}_5G`); };
+  try { await all(); return; } catch (e) { if (!/tr069/i.test(e.message)) throw e; }
+  const candidates = [];
+  const add = (p) => { const v = String(p ?? '').trim(); if (v && !candidates.includes(v)) candidates.push(v); };
+  for (const p of await discoverTr069Profiles(cfg, target.oltId)) add(p);
+  add(cfg.tr069_profile); add('SmartOLT');
+  let enabled = false;
+  outer: for (const profile of candidates) {
+    for (const extra of [{}, { tr069_interface: 'wan' }, { tr069_interface: 'mgmt' }]) {
+      try { await call(cfg, 'POST', `/onu/enable_tr069/${id}`, { form: { tr069_profile: profile, ...extra } }); enabled = true; break outer; }
+      catch (e) { if (/already/i.test(e.message)) { enabled = true; break outer; } }
+    }
+  }
+  if (!enabled) throw new Error('This ONU needs TR069 and it could not be switched on. Contact support.');
+  let last = null;
+  for (let i = 0; i < 4; i += 1) {
+    await sleep(15000);
+    try { await all(); return; } catch (e) { last = e; }
+  }
+  throw last;
+}
+
 // ── authorise and set up in one go ────────────────────────────────────────────────────────────────
 //
 // Authorising is the first step; the rest (management VLAN, other VLANs, the customer's PPPoE login on the ONU's WAN,

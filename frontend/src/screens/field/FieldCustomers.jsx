@@ -68,6 +68,26 @@ export function FieldCustomer() {
     finally { setBusy(false); }
   };
 
+  // WiFi name and password on the customer's ONU or router (only when their equipment can be reached).
+  const [wifi, setWifiInfo] = useState(null);
+  const [wifiOpen, setWifiOpen] = useState(false);
+  const [wf, setWf] = useState({ ssid: '', password: '', band5: false });
+  useEffect(() => {
+    if (!me?.can?.wifi) return;
+    api.fieldWifi(id).then((w) => { setWifiInfo(w); setWf((f) => ({ ...f, ssid: f.ssid || w.ssid || '' })); }).catch(() => setWifiInfo({ available: false }));
+  }, [id, me?.can?.wifi]); // eslint-disable-line react-hooks/exhaustive-deps
+  const saveWifi = async () => {
+    setBusy(true);
+    try {
+      store.toast('Applying the WiFi… this can take a minute');
+      await api.fieldSetWifi(id, { ssid: wf.ssid.trim(), password: wf.password, band5: wf.band5 });
+      store.toast('WiFi changed');
+      setWf((f) => ({ ...f, password: '' }));
+      setWifiOpen(false);
+    } catch (e) { store.toast(e.message); }
+    finally { setBusy(false); }
+  };
+
   const reconnect = async () => {
     if (!window.confirm(`Drop ${c.name}'s connection so their router dials in again? They will be offline for a few seconds.`)) return;
     setBusy(true);
@@ -110,6 +130,21 @@ export function FieldCustomer() {
         {c.pppoe_user && c.service === 'pppoe' && (
           <Btn tone="quiet" busy={busy} onClick={reconnect}>Reset their connection</Btn>
         )}
+        {me?.can?.wifi && wifi?.available && (!wifiOpen ? (
+          <Btn tone="quiet" onClick={() => setWifiOpen(true)}>Change their WiFi name / password</Btn>
+        ) : (
+          <div style={{ display: 'grid', gap: 8 }}>
+            <input value={wf.ssid} onChange={(e) => setWf({ ...wf, ssid: e.target.value })} maxLength={32} placeholder="WiFi name" style={{ height: 44, borderRadius: 8, border: `1px solid ${color.line}`, padding: '0 12px', fontSize: 15 }} />
+            <input value={wf.password} onChange={(e) => setWf({ ...wf, password: e.target.value })} maxLength={63} placeholder="New password (8 or more characters)" style={{ height: 44, borderRadius: 8, border: `1px solid ${color.line}`, padding: '0 12px', fontSize: 15 }} />
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13.5 }}>
+              <input type="checkbox" checked={wf.band5} onChange={(e) => setWf({ ...wf, band5: e.target.checked })} /> Also the 5 GHz network (name ends _5G)
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Btn tone="quiet" style={{ flex: 1 }} onClick={() => setWifiOpen(false)}>Cancel</Btn>
+              <Btn busy={busy} disabled={!wf.ssid.trim() || wf.password.length < 8} style={{ flex: 1 }} onClick={saveWifi}>Save</Btn>
+            </div>
+          </div>
+        ))}
       </div>
       {c.service === 'pppoe' && c.pppoe_user && (
         <div style={panel}>

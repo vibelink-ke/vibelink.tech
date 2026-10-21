@@ -3033,6 +3033,27 @@ app.post('/portal/change-password', loginLimiter, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/** Whether this customer's WiFi can be changed from their page, and its current name when known. */
+app.get('/portal/wifi', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const { wifiTarget } = await import('./wifi.js');
+  const t = await wifiTarget(s.tenant_id, s.subscriber_id);
+  res.json({ available: !!t, ssid: t?.ssid ?? null });
+}));
+/** The customer changes their own WiFi name and password. */
+app.post('/portal/wifi', loginLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const { changeWifi } = await import('./wifi.js');
+  try {
+    res.json(await changeWifi(s.tenant_id, s.subscriber_id, req.body ?? {}, 'the customer'));
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    res.status(502).json({ error: 'The WiFi could not be changed right now. Try again in a few minutes.' });
+  }
+}));
+
 /** Everything the customer's own page shows. Their row only — never a list. */
 app.get('/portal/me', wrap(async (req, res) => {
   const s = await portalSession(req);
