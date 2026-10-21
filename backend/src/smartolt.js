@@ -638,11 +638,21 @@ export async function provisionOnu(tenantId, f, ctx = {}) {
     // TR069 profile: "SmartOLT" unless the tenant's smartolt_config.tr069_profile says otherwise). An ONU that already has it answers "already", which is fine.
     steps.push({ key: 'tr069', label: 'TR069 on the ONU (needed to set the WiFi)', state: 'pending' });
     const tr069 = async () => {
-      try {
-        await post('enable_tr069', { tr069_profile: cfg.tr069_profile || 'SmartOLT', ...(f.mgmt_vlan ? { tr069_interface: 'mgmt' } : {}) })();
-      } catch (e) {
-        if (!/already/i.test(e.message)) throw e;
+      const profile = cfg.tr069_profile || 'SmartOLT';
+      // The interface is optional: asked for without it first, then each value SmartOLT lists, so a value it does not accept for this OLT cannot be what fails.
+      const tries = [{}, { tr069_interface: 'wan' }, { tr069_interface: 'mgmt' }];
+      let last = null;
+      for (const extra of tries) {
+        try {
+          await post('enable_tr069', { tr069_profile: profile, ...extra })();
+          last = null;
+          break;
+        } catch (e) {
+          if (/already/i.test(e.message)) { last = null; break; }
+          last = e;
+        }
       }
+      if (last) throw new Error(`${last.message} (profile "${profile}": check that this is the exact name of the TR069 profile in SmartOLT, Settings → VPN & TR069)`);
       await sleep(15000);   // the ONU needs a moment to reach SmartOLT's ACS before the WiFi can be set
     };
     runs.push(tr069);
