@@ -2264,8 +2264,19 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
   // first bind always report "already full" before a single device was
   // ever added.
   const reservedForOriginal = found.voucher.mac || found.hasLiveSession ? 1 : 0;
-  if (count + reservedForOriginal >= limit) {
-    return res.status(409).json({ error: 'This code already has as many devices as it can take.' });
+  // A one-device bundle already in use cannot take a TV as well, but the guest may MOVE it: the TV becomes the device and the one that has it now is
+  // signed out (see the end of this route). The page asks first, then sends move=true.
+  const singleDevice = limit <= 1;
+  const moving = singleDevice && req.body?.move === true;
+  if (count + reservedForOriginal >= limit && !moving) {
+    return res.status(409).json(singleDevice
+      ? { error: 'This bundle is for one device and it is already in use. Move it to this device instead? The device using it now will be signed out.', canMove: true }
+      : { error: 'This code already has as many devices as it can take.' });
+  }
+  // Moving: whatever extra device it had before is taken off the router and forgotten; the device it was bought on is freed at the end, once the new one is in.
+  if (moving) {
+    await unbindVoucherDevices(tenant.id, [found.voucher.id]).catch(() => {});
+    await pool.query('delete from voucher_devices where voucher_id=$1', [found.voucher.id]);
   }
 
   const { rows: [plan] } = await pool.query(
@@ -2347,7 +2358,20 @@ app.post('/hotspot/nearby-devices/bind', stkLimiter, wrap(async (req, res) => {
     const { forgetVoucherAccess } = await import('./radius.js');
     await forgetVoucherAccess(pool, [found.voucher.code], tenant.id).catch(() => {});
   }
-  res.json({ ok: true });
+  if (moving) {
+    // The device it was bought on (the guest's phone) is freed and signed out, last, so the guest is not cut off before the TV is in.
+    try {
+      const { clearVoucherDevices, disconnectVoucherSession } = await import('./radius.js');
+      const { withTenant } = await import('./db.js');
+      const out = await withTenant(tenant.id, (c) => clearVoucherDevices(c, tenant.id, [found.voucher.id]));
+      const { rows: live } = await pool.query(
+        `select r.host, r.secret from sessions se join routers r on r.id = se.router_id where se.voucher_id=$1 and se.stopped_at is null`, [found.voucher.id]);
+      for (const k of [...out.toKick, ...live.map((l) => ({ host: l.host, secret: l.secret, code: found.voucher.code }))]) {
+        await disconnectVoucherSession(pool, k.host, k.secret, k.code).catch(() => {});
+      }
+    } catch (e) { console.warn('move to TV: the old device was not freed -', e.message); }
+  }
+  res.json({ ok: true, moved: moving });
 }));
 
 /**

@@ -1825,20 +1825,27 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     }
     document.getElementById('oldDeviceFilter').addEventListener('input', function (e) { renderOldList(e.target.value); });
 
-    function bind(mac, btn) {
-      var name = window.prompt('Name this device (optional) — e.g. "Living room TV"', '') || '';
+    function bind(mac, btn, nameIn, move) {
+      var name = nameIn != null ? nameIn : (window.prompt('Name this device (optional) — e.g. "Living room TV"', '') || '');
       btn.disabled = true;
       btn.textContent = 'Adding…';
       var note = document.getElementById('bindNote');
       fetch(API + '/hotspot/nearby-devices/bind', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ code: code, password: document.getElementById('codePass').value.trim(), mac: mac, label: name.trim(), routerId: ROUTER_ID }),
+        body: JSON.stringify({ code: code, password: document.getElementById('codePass').value.trim(), mac: mac, label: name.trim(), routerId: ROUTER_ID, move: !!move }),
       })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (res) {
+          if (!res.ok && res.d.canMove && !move) {
+            // A one-device bundle: offer to move it to this device (the one using it now is signed out).
+            if (window.confirm(res.d.error)) { bind(mac, btn, name, true); return; }
+            note.textContent = 'Nothing was changed.'; btn.disabled = false; btn.textContent = 'Add'; return;
+          }
           if (!res.ok) { note.textContent = res.d.error || 'Could not add that device.'; btn.disabled = false; btn.textContent = 'Add'; return; }
           btn.textContent = 'Added';
-          note.textContent = "Done — that device is online now, no code or browser needed on it.";
+          note.textContent = res.d.moved
+            ? 'Done — this bundle now belongs to that device and is online. Your phone has been signed out of it.'
+            : "Done — that device is online now, no code or browser needed on it.";
         })
         .catch(function () { note.textContent = 'Could not reach the billing system from here.'; btn.disabled = false; btn.textContent = 'Add'; });
     }
