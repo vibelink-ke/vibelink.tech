@@ -154,6 +154,22 @@ export default function Vouchers() {
     }
   };
 
+  /** Free the selected codes from the device they are tied to, so the customer can use them on a new device. */
+  const changeDevice = async () => {
+    const picked = visible.filter((v) => selected.has(v.id));
+    if (!picked.length) return store.toast('Select at least one voucher first');
+    if (!window.confirm(`Free ${picked.length} voucher(s) from their current device? The customer can then use the code on a new device; the old one is signed out.`)) return;
+    try {
+      const out = await api.clearVoucherDevice(picked.map((v) => v.id));
+      const done = new Set(out.clearedIds ?? []);
+      store.setCollection('vouchers', (vs) => vs.map((v) => (done.has(v.id) ? { ...v, device_mac: null, device_label: null, online: false } : v)));
+      store.toast(out.cleared ? `${out.cleared} voucher(s) freed${out.skipped ? `, ${out.skipped} had no device or belong to a TV` : ''}` : 'Nothing to clear: no device is tied to the selected vouchers');
+      setSelected(new Set());
+    } catch (e) {
+      store.toast(`Could not clear: ${e.message}`);
+    }
+  };
+
   const generate = async () => {
     if (!gen.planId) return store.toast('Pick the bundle these codes are for');
     setBusy(true);
@@ -244,6 +260,7 @@ export default function Vouchers() {
           <Button size="sm" onClick={resendSms}>Resend SMS</Button>
           <Button size="sm" onClick={sendToNumber}>Send to a number…</Button>
           <Button size="sm" onClick={compensate}>Compensate</Button>
+          <Button size="sm" onClick={changeDevice}>Change device</Button>
           <Button
             size="sm"
             style={{ background: color.rust, borderColor: color.rust, color: '#fff', fontWeight: 600 }}

@@ -1169,6 +1169,31 @@ export async function ensureMacRadiusLogin(c, tenantId, code) {
 }
 
 /**
+ * Let a voucher move to another device: forget the device it is tied to (vouchers.mac) and that device's own MAC login, and kick it off if it is online
+ * right now. The next device to use the code becomes its device. A voucher tied to a TV or console (its own MAC is one of its registered devices) is left
+ * as it is. Returns { cleared, skipped, kicked }.
+ */
+export async function clearVoucherDevices(c, tenantId, ids) {
+  const out = { cleared: 0, skipped: 0, kicked: 0, clearedIds: [], toKick: [] };
+  const { rows } = await c.query(
+    `select v.id, v.code, v.mac::text as mac,
+            exists (select 1 from voucher_devices d where d.voucher_id = v.id and d.mac = v.mac) as is_tv
+       from vouchers v where v.tenant_id=$1 and v.id = any($2::uuid[]) and v.mac is not null`, [tenantId, ids]);
+  for (const v of rows) {
+    if (v.is_tv) { out.skipped += 1; continue; }
+    const { rows: [sess] } = await c.query(
+      `select r.host, r.secret from sessions se join routers r on r.id = se.router_id where se.voucher_id=$1 and se.stopped_at is null limit 1`, [v.id]).catch(() => ({ rows: [] }));
+    await c.query('update vouchers set mac = null where id=$1', [v.id]);
+    await forgetVoucherAccess(c, [], tenantId, [v.mac]);
+    if (sess) out.toKick.push({ host: sess.host, secret: sess.secret, code: v.code });      // kicked after the transaction, so a failed disconnect cannot undo the clear
+    out.cleared += 1;
+    out.clearedIds.push(v.id);
+  }
+  out.skipped += ids.length - rows.length;      // never tied to a device: nothing to clear
+  return out;
+}
+
+/**
  * Cut a voucher off before its normal expiry — the data-cap enforcement in
  * jobs.js is the only caller today. Unlike startVoucherClock above, this
  * always overwrites: that function only ever wrote Expiration once, the

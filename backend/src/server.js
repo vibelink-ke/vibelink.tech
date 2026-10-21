@@ -12993,6 +12993,21 @@ app.post('/api/vouchers/delete', requirePermission('hotspot.delete'), wrap(async
   res.json({ deleted: rowCount, revoked });
 }));
 
+/** Free a voucher from the device it is tied to, so the customer can use it on another device. */
+app.post('/api/vouchers/clear-device', requirePermission('hotspot.vouchers'), wrap(async (req, res) => {
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x) => typeof x === 'string').slice(0, 500) : [];
+  if (!ids.length) return res.status(400).json({ error: 'no vouchers selected' });
+  const { clearVoucherDevices } = await import('./radius.js');
+  const { withTenant } = await import('./db.js');
+  const out = await withTenant(req.tenant.id, (c) => clearVoucherDevices(c, req.tenant.id, ids));
+  const { disconnectVoucherSession } = await import('./radius.js');
+  for (const k of out.toKick) {
+    await disconnectVoucherSession(pool, k.host, k.secret, k.code).then(() => { out.kicked += 1; }).catch(() => {});
+  }
+  delete out.toKick;
+  res.json(out);
+}));
+
 /** Extra time for the selected vouchers (after an outage). */
 app.post('/api/vouchers/compensate', requirePermission('hotspot.compensate'), wrap(async (req, res) => {
   const ids = Array.isArray(req.body?.ids) ? req.body.ids.slice(0, 5000) : [];

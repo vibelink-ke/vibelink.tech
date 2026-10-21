@@ -186,6 +186,7 @@ export const api = {
   redeemLoyalty: (b) => post('/api/loyalty/redeem', b),
   sendVoucherSms: (ids, phone) => post('/api/vouchers/send-sms', { ids, phone }),
   deleteVouchers: (ids) => post('/api/vouchers/delete', { ids }),
+  clearVoucherDevice: (ids) => post('/api/vouchers/clear-device', { ids }),
   compensateVouchers: (ids, hours) => post('/api/vouchers/compensate', { ids, hours }),
   purgeExpiredVouchers: () => post('/api/vouchers/purge-expired', {}),
   setLoginPosition: (position) => patch('/api/hotspot/settings/login-position', { position }),

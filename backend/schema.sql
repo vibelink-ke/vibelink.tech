@@ -3687,3 +3687,46 @@ create unique index if not exists web_clients_site_key on web_clients (site_key)
 -- The private link in a website client's messages (/web/<portal_key>): their services, invoices and payments, and a Pay now button.
 alter table web_clients add column if not exists portal_key text not null default replace(gen_random_uuid()::text, '-', '');
 create unique index if not exists web_clients_portal_key on web_clients (portal_key);
+
+-- Changing device on a one-device voucher (a weekly bundle, say). A voucher is tied to the device it was bought on (vouchers.mac). When the code is
+-- typed on a DIFFERENT device and the first device has been offline for 15 minutes, the new device takes over: vouchers.mac moves to it and the old
+-- device's own MAC login is removed. While the first device is online nothing changes (the second is refused as before). Bundles that allow more than
+-- one device, and a TV's own voucher, are left alone. (Replaces access_code_mac_ok again: everything else in it is as before.)
+create or replace function access_code_mac_ok(p_user text, p_mac text, p_nas text) returns boolean language plpgsql as $fn$
+declare t uuid; c record; n int; vv record; has_v boolean; devs int;
+begin
+  select r.tenant_id into t from routers r where host(r.host) = p_nas limit 1;
+  if t is null then return true; end if;
+
+  select lock_mac, max_devices into c from hotspot_access_codes where tenant_id = t and username = p_user;
+  if found then
+    if not c.lock_mac then return true; end if;
+    if p_mac is null or p_mac = '' then return false; end if;
+    if exists (select 1 from hotspot_access_code_macs where tenant_id = t and username = p_user and mac = upper(p_mac)) then return true; end if;
+    select count(*) into n from hotspot_access_code_macs where tenant_id = t and username = p_user;
+    if n >= c.max_devices then return false; end if;
+    insert into hotspot_access_code_macs (tenant_id, username, mac) values (t, p_user, upper(p_mac)) on conflict do nothing;
+    return true;
+  end if;
+
+  select v.id, v.mac, coalesce(p.devices, 1) as devs into vv
+    from vouchers v left join plans p on p.id = v.plan_id where v.tenant_id = t and v.code = p_user;
+  has_v := found;
+
+  -- A voucher that belongs to a TV or console (its own MAC is one of its registered devices) works only from those devices.
+  if has_v and vv.mac is not null
+     and exists (select 1 from voucher_devices d where d.voucher_id = vv.id and d.mac = vv.mac) then
+    if p_mac is null or p_mac = '' then return false; end if;
+    return exists (select 1 from voucher_devices d where d.voucher_id = vv.id and upper(d.mac::text) = upper(p_mac));
+  end if;
+
+  -- A one-device voucher typed on another device while the first one is offline: the new device takes it over.
+  if has_v and vv.mac is not null and vv.devs <= 1 and p_mac is not null and p_mac <> '' and upper(vv.mac::text) <> upper(p_mac)
+     and not exists (select 1 from radacct a where a.username = p_user and a.acctstoptime is null
+                        and coalesce(a.acctupdatetime, a.acctstarttime) > now() - interval '15 minutes') then
+    delete from radcheck where tenant_id = t and username = upper(vv.mac::text);
+    delete from radreply where tenant_id = t and username = upper(vv.mac::text);
+    update vouchers set mac = upper(p_mac)::macaddr where id = vv.id;
+  end if;
+  return true;
+end $fn$;

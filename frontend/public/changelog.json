@@ -286,7 +286,8 @@
       "Platform admin: new Website clients screen for domains, hosting and maintenance billed to clients who are not ISPs. Yearly or monthly, invoices raised ahead of each renewal with SMS reminders, payments on the platform paybill matched by the client's WS- account number.",
       "Website clients: unpaid clients are suspended automatically 7 days after an invoice's due date (and restored the moment they pay), or by hand. Their website reads a status link and shows a notice while suspended.",
       "Website clients now also has its own tab in the platform console at /admin.",
-      "Website clients get their own page (link in every message): services, invoices, payments and a Pay now button that sends an M-Pesa prompt. Suspend and Restore are now buttons in the client list too."
+      "Website clients get their own page (link in every message): services, invoices, payments and a Pay now button that sends an M-Pesa prompt. Suspend and Restore are now buttons in the client list too.",
+      "Hotspot vouchers: a new Change device button frees a code from the device it is tied to. And a one-device code typed on a new device while the old one has been offline for 15 minutes now moves to the new device by itself."
     ]
   }
 ]
