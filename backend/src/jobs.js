@@ -2188,6 +2188,9 @@ async function refreshWalledGardens() {
  * rendered again here, and a router whose file is stock, missing, an older version, or has a different hash is sent the new page.
  */
 let loginPageSyncRunning = false;
+// What was last sent to each router (version and hash). RouterOS cannot hand back the start of a file this large, so a router often reports 'unknown'; for those
+// the page is sent only when this record says the router has not had the current page (so a restart sends it once, and nothing is re-sent every run).
+const loginPageSent = new Map();
 async function syncHotspotLoginPages() {
   if (loginPageSyncRunning) return;
   loginPageSyncRunning = true;
@@ -2213,10 +2216,13 @@ async function syncHotspotLoginPages() {
         const want = /h:([0-9a-f]{10})/.exec(body.slice(0, 400))?.[1] ?? null;
         conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 8 });
         const info = await ros.loginPageInfo(conn, PAGE_VERSION);
-        const behind = info.state !== 'current' && info.state !== 'unknown' || (info.state === 'current' && want && info.hash !== want)
-          || (info.state === 'unknown' && want);
-        if (!behind) return;
+        const key = `${PAGE_VERSION}:${want ?? ''}`;
+        const behind = info.state === 'unknown'
+          ? (!!want && loginPageSent.get(r.id) !== key)
+          : info.state !== 'current' || (want && info.hash && info.hash !== want);
+        if (!behind) { if (info.state === 'current') loginPageSent.set(r.id, key); return; }
         const page = await ros.pushHotspotPage(conn, { url });
+        loginPageSent.set(r.id, key);
         console.log('syncHotspotLoginPages:', r.name, '- sent', page.bytes, 'bytes (was', info.state, info.version ?? '', info.hash ?? '', ')');
       } catch (e) {
         console.warn('syncHotspotLoginPages:', r.name, '-', e.message);

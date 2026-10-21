@@ -288,7 +288,8 @@
       "Website clients now also has its own tab in the platform console at /admin.",
       "Website clients get their own page (link in every message): services, invoices, payments and a Pay now button that sends an M-Pesa prompt. Suspend and Restore are now buttons in the client list too.",
       "Hotspot vouchers: a new Change device button frees a code from the device it is tied to. And a one-device code typed on a new device while the old one has been offline for 15 minutes now moves to the new device by itself.",
-      "Add TV or console: a one-device bundle that is already in use can now be moved to the TV. The page asks first; the TV becomes the device and the one using it now is signed out."
+      "Add TV or console: a one-device bundle that is already in use can now be moved to the TV. The page asks first; the TV becomes the device and the one using it now is signed out.",
+      "Fix: the sign-in page sync no longer re-sends the page to every router every 10 minutes (it was doing so for routers that cannot report their page), which could slow the whole system."
     ]
   }
 ]
