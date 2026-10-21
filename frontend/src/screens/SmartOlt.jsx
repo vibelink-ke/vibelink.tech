@@ -467,7 +467,7 @@ function Authorise() {
               { key: 'olt', label: 'OLT', render: (r) => r.olt_name ?? r.olt_id ?? '—' },
               { key: 'port', label: 'Board / port', render: (r) => `${r.board ?? '?'} / ${r.port ?? '?'}` },
               { key: 'type', label: 'Type', render: (r) => r.onu_type ?? '—' },
-              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setJob(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', mgmt_vlan: '', mgmt_ip: '', mgmt_mask: '', mgmt_gateway: '', mgmt_dns1: '', other_vlans: [], zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '', wifiSsid: '', wifiPassword: '', wifi5: false, pushPppoe: true, sendSms: true, tr069_profile: '' }); }}>Authorise</Button> },
+              { key: 'a', label: '', align: 'right', render: (r) => <Button size="sm" variant="primary" onClick={() => { setClient(null); setJob(null); setForm({ olt_id: r.olt_id, olt_name: r.olt_name, board: r.board ?? '', port: r.port ?? '', pon_type: r.pon_type || 'gpon', sn: r.sn, onu_type: r.onu_type ?? '', onu_mode: 'Routing', vlan: '', mgmt_vlan: '', other_vlans: [], zone: '', name: '', address: '', upload_speed_profile: '', download_speed_profile: '', wifiSsid: '', wifiPassword: '', wifi5: false, pushPppoe: true, sendSms: true, tr069_profile: '' }); }}>Authorise</Button> },
             ]}
           />
         )}
@@ -508,16 +508,6 @@ function Authorise() {
             <Field label="Management VLAN" hint="Optional — for managing the ONU itself. It gets a static IP from the OLT's pool in SmartOLT.">
               {hasVlans ? <Select value={form.mgmt_vlan} onChange={set('mgmt_vlan')} options={vlanOptions('mgmt/voip')} /> : <Input value={form.mgmt_vlan} onChange={set('mgmt_vlan')} />}
             </Field>
-            {form.mgmt_vlan && (
-              <Field label="Fixed management IP" span={2} hint="Optional. Leave empty and SmartOLT picks a free address from the OLT's pool. Otherwise type the address, mask, gateway and DNS.">
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-                  <Input value={form.mgmt_ip ?? ''} onChange={set('mgmt_ip')} placeholder="IP address" />
-                  <Input value={form.mgmt_mask ?? ''} onChange={set('mgmt_mask')} placeholder="Subnet mask" />
-                  <Input value={form.mgmt_gateway ?? ''} onChange={set('mgmt_gateway')} placeholder="Gateway" />
-                  <Input value={form.mgmt_dns1 ?? ''} onChange={set('mgmt_dns1')} placeholder="DNS" />
-                </div>
-              </Field>
-            )}
             {hasVlans && (
               <Field label="Other VLANs on this OLT" span={2} hint="Optional — attached to the ONU as well (IPTV, voice…)">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
