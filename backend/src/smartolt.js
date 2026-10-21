@@ -660,8 +660,15 @@ export async function provisionOnu(tenantId, f, ctx = {}) {
   const runs = [];
 
   if (f.mgmt_vlan) {
-    steps.push({ key: 'mgmt', label: `Management VLAN ${f.mgmt_vlan}`, state: 'pending' });
-    runs.push(post('set_onu_mgmt_ip_dhcp', { vlan: f.mgmt_vlan }));
+    // A fixed (static) management address, not DHCP: the one typed on the Authorise screen, or else SmartOLT picks a free one from the OLT's IP pool.
+    steps.push({ key: 'mgmt', label: `Management VLAN ${f.mgmt_vlan} (static IP)`, state: 'pending' });
+    const ip = String(f.mgmt_ip ?? '').trim();
+    const mgmt = { vlan: f.mgmt_vlan };
+    if (ip) {
+      mgmt.ipv4_address = ip;
+      for (const [k, v] of [['subnet_mask', f.mgmt_mask], ['gateway', f.mgmt_gateway], ['dns1', f.mgmt_dns1], ['dns2', f.mgmt_dns2]]) if (String(v ?? '').trim()) mgmt[k] = String(v).trim();
+    }
+    runs.push(post('set_onu_mgmt_ip_static_ip', mgmt));
   }
   const others = (Array.isArray(f.other_vlans) ? f.other_vlans : []).map(String).filter((v) => /^[0-9]+$/.test(v) && v !== String(f.vlan) && v !== String(f.mgmt_vlan));
   if (others.length) {
