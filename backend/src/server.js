@@ -2889,7 +2889,7 @@ async function portalSession(req) {
   if (!token) return null;
   const { rows: [row] } = await pool.query(
     `select s.subscriber_id, s.tenant_id, sub.name, sub.account_code, sub.phone,
-            sub.status, sub.expires_at, sub.service, sub.router_id, sub.fibre_kind,
+            sub.status, sub.expires_at, sub.service, sub.router_id,
             sub.portal_password_hash,
             p.title as plan_title, coalesce(sub.custom_price, p.price) as plan_price, p.rate_down, p.rate_up
        from portal_sessions s
@@ -3153,7 +3153,6 @@ app.get('/portal/me', wrap(async (req, res) => {
     phone: s.phone,
     status: s.status,
     service: s.service,
-    fibre_kind: s.fibre_kind ?? null,
     expiresAt: s.expires_at,
     daysLeft: days == null ? null : Math.max(0, days),
     balance: Number(wallet?.balance ?? 0) - Number(owed.amount ?? 0),
@@ -10916,7 +10915,7 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
-                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'fibre_kind', 'ap_node_id', 'mgmt_ip', 'shared_link_id'];
+                   'email', 'category', 'identification', 'billing_type', 'tags', 'customer_ref', 'custom_price', 'connection_type', 'ap_node_id', 'mgmt_ip', 'shared_link_id'];
   const sets = Object.keys(req.body).filter((k) => allowed.includes(k));
   const settingCredit = 'credit' in req.body;
   if (!sets.length && !settingCredit) return res.status(400).json({ error: 'nothing to update' });
@@ -10981,12 +10980,6 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     const v = req.body.connection_type || null;
     if (v !== null && !['fibre', 'pmp', 'ptp'].includes(v)) return res.status(400).json({ error: 'Connection type is fibre, pmp or ptp.' });
     req.body.connection_type = v;
-  }
-  // FTTH or FTTB for a fibre service; empty clears it.
-  if ('fibre_kind' in req.body) {
-    const v = req.body.fibre_kind || null;
-    if (v !== null && !['ftth', 'fttb'].includes(v)) return res.status(400).json({ error: 'Fibre kind is ftth or fttb.' });
-    req.body.fibre_kind = v;
   }
   // The management address of the customer's radio or ONU: from a device-management pool, and held by one service only.
   if ('mgmt_ip' in req.body) {

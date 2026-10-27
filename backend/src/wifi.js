@@ -19,9 +19,6 @@ export function checkWifi({ ssid, password }) {
 
 /** The equipment this account's WiFi can be changed on: { kind, ... } or null. */
 export async function wifiTarget(tenantId, subscriberId) {
-  // A building customer (FTTB) shares the building's equipment: there is no WiFi of their own here to change.
-  const { rows: [kind] } = await pool.query('select fibre_kind from subscribers where tenant_id=$1 and id=$2', [tenantId, subscriberId]).catch(() => ({ rows: [] }));
-  if (kind?.fibre_kind === 'fttb') return null;
   const { rows: [dev] } = await pool.query(
     'select id, ssid, data_model from tr069_devices where tenant_id=$1 and subscriber_id=$2 and data_model is not null order by updated_at desc nulls last limit 1',
     [tenantId, subscriberId]).catch(() => ({ rows: [] }));

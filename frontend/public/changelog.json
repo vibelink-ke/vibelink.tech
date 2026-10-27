@@ -323,8 +323,7 @@
       "A PPPoE customer who was cut off and then pays is now reconnected automatically: their blocked session is dropped so their router redials at once, instead of staying blocked until it is rebooted or the service is paused and resumed.",
       "Customer portal sign-in now ignores capital letters and spaces in the account number, so vbtl26102 and VBTL 26102 both open VBTL26102.",
       "The customer portal sign-in box now accepts letters and up to 20 characters, so account numbers such as VBTL26102 can be typed. It was limited to 5 digits.",
-      "The welcome message to a new customer now includes their customer portal login (the portal link, their account number and first password), so they can sign in straight away. Tags {portal_password} and {portal_login} are available in message templates; a customised welcome gets the login added at the end if it has neither.",
-      "Fibre customers can now be marked FTTH (home) or FTTB (building). Set it on the client page, or tick several clients and use Set FTTH / FTTB. The Clients page has FTTH, FTTB and Fibre kind not set filters, and building customers are not offered WiFi changes on the customer portal."
+      "The welcome message to a new customer now includes their customer portal login (the portal link, their account number and first password), so they can sign in straight away. Tags {portal_password} and {portal_login} are available in message templates; a customised welcome gets the login added at the end if it has neither."
     ]
   }
 ]

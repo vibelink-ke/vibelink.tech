@@ -72,9 +72,6 @@ const FILTERS = [
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
   // How the customer is reached: fibre, or wireless (a shared PMP radio or a dedicated P2P link). Set on the client page or in bulk.
   { key: 'fibre', label: 'Fibre', match: (c) => c.connection_type === 'fibre' },
-  { key: 'ftth', label: 'FTTH', match: (c) => c.connection_type === 'fibre' && c.fibre_kind === 'ftth' },
-  { key: 'fttb', label: 'FTTB', match: (c) => c.connection_type === 'fibre' && c.fibre_kind === 'fttb' },
-  { key: 'nokind', label: 'Fibre kind not set', match: (c) => c.connection_type === 'fibre' && !c.fibre_kind },
   { key: 'wireless', label: 'Wireless', match: (c) => c.connection_type === 'pmp' || c.connection_type === 'ptp' },
   { key: 'notype', label: 'Type not set', match: (c) => !c.connection_type },
   // Blocked for 3+ months; deleted automatically past 5. See jobs.js's dormantSweep.
@@ -474,7 +471,6 @@ export default function Clients() {
       // How this one service is reached — per service, since an account can have a fibre line and a wireless one.
       const orig = clients.find((c) => c.id === editing.id) ?? {};
       if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
-      if ((editing.fibre_kind || null) !== (orig.fibre_kind ?? null)) patch.fibre_kind = editing.fibre_kind || null;
       if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
       if ((editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null) !== (orig.mgmt_ip ? String(orig.mgmt_ip).split('/')[0] : null)) patch.mgmt_ip = editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null;
     }
@@ -664,28 +660,6 @@ export default function Clients() {
             <option value="pmp">Wireless · PMP</option>
             <option value="ptp">Wireless · P2P</option>
             <option value="none">Not set</option>
-          </select>
-          <select
-            value=""
-            title="Set FTTH or FTTB on the ticked fibre clients"
-            style={{ fontSize: 12.5, padding: '5px 8px', borderRadius: radius.md, border: `1px solid ${color.line}`, background: '#fff' }}
-            onChange={async (e) => {
-              const kind = e.target.value;
-              if (!kind) return;
-              const fibre_kind = kind === 'none' ? null : kind;
-              const ids = [...selected];
-              // Only fibre services have a kind: asking for it on a wireless client would set a value nothing reads.
-              const patchBody = { fibre_kind, connection_type: 'fibre' };
-              const results = await Promise.allSettled(ids.map((id) => api.updateSubscriber(id, patchBody)));
-              const ok = ids.filter((_, i) => results[i].status === 'fulfilled');
-              store.setCollection('clients', (cs) => cs.map((c) => (ok.includes(c.id) ? { ...c, fibre_kind, connection_type: 'fibre' } : c)));
-              store.toast(ok.length === ids.length ? `Set ${ok.length} client${ok.length === 1 ? '' : 's'}` : `Set ${ok.length}, ${ids.length - ok.length} failed`);
-            }}
-          >
-            <option value="">Set FTTH / FTTB…</option>
-            <option value="ftth">FTTH (to the home)</option>
-            <option value="fttb">FTTB (to the building)</option>
-            <option value="none">Kind not set</option>
           </select>
           <Button
             size="sm"
@@ -958,15 +932,6 @@ export default function Clients() {
                 options={[{ value: '', label: 'Not set' }, { value: 'fibre', label: 'Fibre' }, { value: 'pmp', label: 'Wireless · PMP (shared radio / sector)' }, { value: 'ptp', label: 'Wireless · P2P (dedicated radio)' }]}
               />
             </Field>
-            {editing.connection_type === 'fibre' && (
-              <Field label="Fibre kind" hint="FTTH: their own ONU at home. FTTB: served from a building's shared equipment, so the customer portal does not offer WiFi changes.">
-                <Select
-                  value={editing.fibre_kind ?? ''}
-                  onChange={(e) => setEditing((v) => ({ ...v, fibre_kind: e.target.value }))}
-                  options={[{ value: '', label: 'Not set' }, { value: 'ftth', label: 'FTTH (to the home)' }, { value: 'fttb', label: 'FTTB (to the building)' }]}
-                />
-              </Field>
-            )}
             {editing.connection_type && (
               <Field label={editing.connection_type === 'fibre' ? 'ONU address' : 'Radio address'} hint="Management address of the customer's radio or ONU. It is reachable from the system but has no internet.">
                 {(() => {

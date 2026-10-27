@@ -666,7 +666,6 @@ export default function ClientDetail() {
       // How this one service is reached — per service, since an account can have a fibre line and a wireless one.
       const orig = clients.find((c) => c.id === editing.id) ?? {};
       if ((editing.connection_type || null) !== (orig.connection_type ?? null)) patch.connection_type = editing.connection_type || null;
-      if ((editing.fibre_kind || null) !== (orig.fibre_kind ?? null)) patch.fibre_kind = editing.fibre_kind || null;
       if ((editing.ap_node_id || null) !== (orig.ap_node_id ?? null)) patch.ap_node_id = editing.ap_node_id || null;
       if ((editing.shared_link_id || null) !== (orig.shared_link_id ?? null)) patch.shared_link_id = editing.shared_link_id || null;
       if ((editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null) !== (orig.mgmt_ip ? String(orig.mgmt_ip).split('/')[0] : null)) patch.mgmt_ip = editing.mgmt_ip ? String(editing.mgmt_ip).split('/')[0] : null;
@@ -1729,15 +1728,6 @@ export default function ClientDetail() {
                   value={editing.shared_link_id ?? ''}
                   onChange={(e) => setEditing((v) => ({ ...v, shared_link_id: e.target.value }))}
                   options={[{ value: '', label: 'Nothing (their own dish)' }, ...sharedLinks.filter((l) => (l.kind !== 'ap' && l.kind !== 'radio') || l.id === editing.shared_link_id).map((l) => ({ value: l.id, label: `${l.name} (${l.kind === 'ap' ? 'access point' : l.kind === 'onu' ? 'ONU' : l.kind})` }))]}
-                />
-              </Field>
-            )}
-            {editing.connection_type === 'fibre' && (
-              <Field label="Fibre kind" hint="FTTH: their own ONU at home. FTTB: served from a building's shared equipment, so the customer portal does not offer WiFi changes.">
-                <Select
-                  value={editing.fibre_kind ?? ''}
-                  onChange={(e) => setEditing((v) => ({ ...v, fibre_kind: e.target.value }))}
-                  options={[{ value: '', label: 'Not set' }, { value: 'ftth', label: 'FTTH (to the home)' }, { value: 'fttb', label: 'FTTB (to the building)' }]}
                 />
               </Field>
             )}
