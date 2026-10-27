@@ -3739,3 +3739,6 @@ alter table smartolt_config add column if not exists tr069_profile text;
 
 -- Router chaining is off until a tenant turns it on (Hotspot, Router chaining). The monitor reads each hotspot router, so it is opt-in.
 alter table tenants add column if not exists chaining_enabled boolean not null default false;
+
+-- Who a plan is for: everyone, FTTH customers (category Individual) or FTTB customers (category Business). Only limits what can be chosen for a new or changed plan.
+alter table plans add column if not exists audience text not null default 'all' check (audience in ('all','ftth','fttb'));

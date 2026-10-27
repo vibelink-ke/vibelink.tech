@@ -3459,12 +3459,14 @@ app.post('/portal/support', wrap(async (req, res) => {
 app.get('/portal/plans-pppoe', wrap(async (req, res) => {
   const s = await portalSession(req);
   if (!s) return res.status(401).json({ error: 'not signed in' });
+  const { rows: [me] } = await pool.query('select category from subscribers where id=$1', [s.subscriber_id]);
+  const kind = /^individual/i.test(me?.category ?? '') ? 'ftth' : /^business/i.test(me?.category ?? '') ? 'fttb' : '';
   const { rows } = await pool.query(
     `select id, title, price, rate_down, rate_up from plans p
-      where tenant_id=$1 and service='pppoe' and active
+      where tenant_id=$1 and service='pppoe' and active and (p.audience = 'all' or $3 = '' or p.audience = $3)
         and (not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
              or exists (select 1 from plan_sites ps where ps.plan_id = p.id and ps.router_id = $2))
-      order by price`, [s.tenant_id, s.router_id]);
+      order by price`, [s.tenant_id, s.router_id, kind]);
   res.json(rows);
 }));
 
@@ -3485,8 +3487,11 @@ app.post('/portal/request-plan-change', wrap(async (req, res) => {
   const planId = String(req.body?.planId ?? '');
 
   const { rows: [plan] } = await pool.query(
-    `select id, title, price from plans where id=$1 and tenant_id=$2 and service='pppoe' and active`,
-    [planId, s.tenant_id]);
+    `select p.id, p.title, p.price from plans p
+      where p.id=$1 and p.tenant_id=$2 and p.service='pppoe' and p.active
+        and (p.audience = 'all' or exists (select 1 from subscribers b where b.id=$3
+              and ((p.audience = 'ftth' and coalesce(b.category,'') !~* '^business') or (p.audience = 'fttb' and coalesce(b.category,'') !~* '^individual'))))`,
+    [planId, s.tenant_id, s.subscriber_id]);
   if (!plan) return res.status(404).json({ error: 'That plan is not available.' });
 
   const { rows: [t] } = await pool.query(
@@ -12604,14 +12609,14 @@ app.get('/api/plans', requirePermission('tariffs.view'), wrap(async (req, res) =
 
 app.post('/api/plans', requirePermission('tariffs.create'), wrap(async (req, res) => {
   const { service = 'hotspot', title, price: p, durationMin, devices = 1,
-          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible, contentionRatio, deviceClass } = req.body;
+          rateDown, rateUp, dataCapMb, radiusProfile, routerIds, visible, contentionRatio, deviceClass, audience } = req.body;
   const { rows: [row] } = await pool.query(
     `insert into plans (tenant_id, service, title, price, duration_min, devices,
-       rate_down, rate_up, data_cap_mb, radius_profile, visible, contention_ratio, device_class)
-     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) returning *`,
+       rate_down, rate_up, data_cap_mb, radius_profile, visible, contention_ratio, device_class, audience)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) returning *`,
     [req.tenant.id, service, title, p, durationMin, devices,
      rateDown ?? 0, rateUp ?? 0, dataCapMb ?? null, radiusProfile ?? `${service}-${title}`,
-     visible ?? true, contentionRatio ?? 1, deviceClass === 'tv' ? 'tv' : 'normal']);
+     visible ?? true, contentionRatio ?? 1, deviceClass === 'tv' ? 'tv' : 'normal', ['ftth', 'fttb'].includes(audience) ? audience : 'all']);
 
   const sites = Array.isArray(routerIds) ? routerIds.filter(Boolean) : [];
   if (sites.length) {
@@ -12675,7 +12680,7 @@ async function syncPlanDeviceProfile(tenantId, plan) {
 
 app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, res) => {
   const { rows: [before] } = await pool.query('select devices, duration_min, service from plans where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
-  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio, deviceClass } = req.body ?? {};
+  const { title, price: p, durationMin, devices, rateDown, rateUp, dataCapMb, routerIds, visible, contentionRatio, deviceClass, audience } = req.body ?? {};
   const { rows: [row] } = await pool.query(
     `update plans set
        title        = coalesce(nullif($3,''), title),
@@ -12689,12 +12694,14 @@ app.put('/api/plans/:id', requirePermission('tariffs.edit'), wrap(async (req, re
        visible      = coalesce($11, visible),
        contention_ratio = coalesce($12, contention_ratio),
        device_class = coalesce($13, device_class),
+       audience     = coalesce($14, audience),
        updated_at   = now()
      where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, title ?? '', p ?? null, durationMin ?? null,
      devices ?? null, rateDown ?? null, rateUp ?? null,
      dataCapMb === undefined ? 'keep' : 'set', dataCapMb ?? null,
-     visible ?? null, contentionRatio ?? null, deviceClass === 'tv' || deviceClass === 'normal' ? deviceClass : null]);
+     visible ?? null, contentionRatio ?? null, deviceClass === 'tv' || deviceClass === 'normal' ? deviceClass : null,
+     ['all', 'ftth', 'fttb'].includes(audience) ? audience : null]);
   if (!row) return res.status(404).json({ error: 'No such plan' });
   // The device count or length changed on a hotspot plan: bring the routers and the codes already sold along with it.
   let profileSync = null;

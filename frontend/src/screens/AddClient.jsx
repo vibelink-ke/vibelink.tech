@@ -1,3 +1,4 @@
+import { planFits } from '../lib/planAudience';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius, cur } from '../theme/tokens';
@@ -121,7 +122,7 @@ export default function AddClient() {
   // below — a hotspot client offered PPPoE plans (or the reverse) is not a
   // choice, since neither activateSubscriber nor a hotspot voucher can use
   // the other service's plan at all.
-  const pppoePlans = (store.plans ?? []).filter((p) => p.service === f.service);
+  const pppoePlans = (store.plans ?? []).filter((p) => p.service === f.service && planFits(p, f.category));
 
   /**
    * A real account number from the moment the form opens, not just its

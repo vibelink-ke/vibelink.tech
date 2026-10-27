@@ -1,3 +1,4 @@
+import { planFits } from '../lib/planAudience';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import L from 'leaflet';
@@ -1597,7 +1598,7 @@ export default function ClientDetail() {
               <Select
                 value={serviceForm.planId}
                 onChange={(e) => setServiceForm((s) => ({ ...s, planId: e.target.value }))}
-                options={[{ value: '', label: 'No plan yet' }, ...(store.plans ?? []).filter((p) => p.service === 'pppoe').map((p) => ({ value: p.id, label: p.title }))]}
+                options={[{ value: '', label: 'No plan yet' }, ...(store.plans ?? []).filter((p) => p.service === 'pppoe' && planFits(p, client?.category)).map((p) => ({ value: p.id, label: p.title }))]}
               />
             </Field>
             <Field label="Router">
@@ -1663,7 +1664,7 @@ export default function ClientDetail() {
                 onChange={(e) => setSwitching((s) => ({ ...s, planId: e.target.value }))}
                 options={[
                   { value: '', label: 'No plan' },
-                  ...(store.plans ?? []).filter((p) => p.service === switching.line.service)
+                  ...(store.plans ?? []).filter((p) => p.service === switching.line.service && planFits(p, switching.line.category ?? client?.category, switching.line.plan_id))
                     .map((p) => ({ value: p.id, label: `${p.title} · ${cur()} ${kes(p.price)}` })),
                 ]}
               />
@@ -1810,7 +1811,7 @@ export default function ClientDetail() {
               <Select
                 value={editing.plan_id ?? ''}
                 onChange={(e) => setEditing((s) => ({ ...s, plan_id: e.target.value }))}
-                options={[{ value: '', label: 'No plan' }, ...(store.plans ?? []).filter((p) => p.service === editing.service).map((p) => ({ value: p.id, label: p.title }))]}
+                options={[{ value: '', label: 'No plan' }, ...(store.plans ?? []).filter((p) => p.service === editing.service && planFits(p, editing.category ?? client?.category, editing.plan_id)).map((p) => ({ value: p.id, label: p.title }))]}
               />
             </Field>
             <Field label="Status">

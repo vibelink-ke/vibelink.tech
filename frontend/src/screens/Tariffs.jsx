@@ -1,3 +1,4 @@
+import { AUDIENCE_OPTIONS, audienceLabel } from '../lib/planAudience';
 import React, { useMemo, useState } from 'react';
 import { color, font, kes, radius, cur } from '../theme/tokens';
 import { useStore } from '../state/store';
@@ -25,7 +26,7 @@ const PERIODS = [
   { value: 1440, label: 'Daily' },
 ];
 
-const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterIds: [], contentionRatio: 1 };
+const BLANK = { title: '', price: '', speedDown: '', speedUp: '', capGb: '', durationMin: 43200, siteRouterIds: [], contentionRatio: 1, audience: 'all' };
 
 const CONTENTION_OPTIONS = [1, 2, 3, 4, 5, 6].map((n) => ({ value: n, label: `1:${n}` }));
 
@@ -85,6 +86,7 @@ export default function Tariffs() {
     dataCapMb: v.capGb === '' || v.capGb == null ? null : Math.round(Number(v.capGb) * 1024),
     routerIds: v.siteRouterIds ?? [],
     contentionRatio: Number(v.contentionRatio) || 1,
+    audience: v.audience || 'all',
   });
 
   const create = async () => {
@@ -146,6 +148,7 @@ export default function Tariffs() {
     durationMin: p.duration_min ?? 43200,
     siteRouterIds: p.site_ids ?? [],
     contentionRatio: p.contention_ratio ?? 1,
+    audience: p.audience ?? 'all',
   });
 
   const siteLabel = (p) => {
@@ -184,6 +187,11 @@ export default function Tariffs() {
         <Field label="Contention ratio">
           <select value={v.contentionRatio ?? 1} onChange={update('contentionRatio')} style={selectStyle}>
             {CONTENTION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Available to" hint="FTTH plans are offered to Individual customers, FTTB plans to Business customers.">
+          <select value={v.audience ?? 'all'} onChange={update('audience')} style={selectStyle}>
+            {AUDIENCE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </Field>
         <Field label="Sites" span={2}>
@@ -230,6 +238,7 @@ export default function Tariffs() {
               { key: 'period', label: 'Period', render: (p) => periodLabel(p.duration_min) },
               { key: 'speed', label: 'Speed', render: speed },
               { key: 'cap', label: 'Data cap', render: (p) => <span style={{ color: color.neutralInk }}>{capLabel(p)}</span> },
+              { key: 'audience', label: 'For', render: (p) => <span style={{ color: (p.audience ?? 'all') === 'all' ? color.muted : color.ink, fontWeight: (p.audience ?? 'all') === 'all' ? 400 : 600 }}>{audienceLabel(p.audience)}</span> },
               { key: 'contention', label: 'Contention', render: (p) => <span style={{ color: Number(p.contention_ratio ?? 1) > 1 ? color.green : color.muted }}>{contentionLabel(p)}</span> },
               { key: 'site', label: 'Site', render: (p) => <span style={{ color: (p.site_ids ?? []).length ? color.ink : color.muted }}>{siteLabel(p)}</span> },
               { key: 'subs', label: 'Subscribers', render: (p) => <span style={{ fontFamily: font.mono }}>{subsPerPlan[p.id] ?? 0}</span> },
