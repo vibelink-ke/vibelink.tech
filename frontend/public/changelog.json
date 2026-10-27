@@ -318,7 +318,8 @@
     "title": "Router chaining on/off",
     "items": [
       "Router chaining now has an on/off switch under Hotspot, Router chaining. It is off until you turn it on; while off, billing reads nothing from your routers and sends no chaining messages.",
-      "Dormant clients are no longer marked or deleted while they are online or have been seen online in the last 30 days, even if their status is expired, suspended or paused."
+      "Dormant clients are no longer marked or deleted while they are online or have been seen online in the last 30 days, even if their status is expired, suspended or paused.",
+      "Pages open faster: a customer's own page, a shared invoice and a staff badge scan now load only what they need (about 8 KB instead of the whole app), and the web fonts no longer hold up the first paint."
     ]
   }
 ]

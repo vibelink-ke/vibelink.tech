@@ -1,21 +1,36 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter } from 'react-router-dom';
-import App from './App';
 import CookieBanner from './ui/CookieBanner';
-import { StoreProvider } from './state/store';
 import './theme/global.css';
 
-createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <StoreProvider>
-        <App />
-      </StoreProvider>
-      <CookieBanner />
-    </BrowserRouter>
-  </React.StrictMode>
-);
+/**
+ * Pages a customer opens from a link on their phone — their own page, a shared invoice, a staff badge scan, a website client's page — need none of the staff app: no
+ * sidebar, no store, no router. They are loaded on their own, so a customer downloads a small page instead of the whole admin app. Everything else loads the app.
+ */
+const standalone = (() => {
+  const p = window.location.pathname;
+  if (p.startsWith('/customer')) return () => import('./screens/CustomerPortal');
+  if (p.startsWith('/invoice/')) return () => import('./screens/InvoiceView');
+  if (p.startsWith('/verify-staff/')) return () => import('./screens/VerifyStaff');
+  if (p.startsWith('/web/')) return () => import('./screens/WebClientPortal');
+  return null;
+})();
+
+const root = createRoot(document.getElementById('root'));
+if (standalone) {
+  standalone().then(({ default: Page }) => root.render(<React.StrictMode><Page /><CookieBanner /></React.StrictMode>));
+} else {
+  Promise.all([import('./App'), import('./state/store'), import('react-router-dom')]).then(([{ default: App }, { StoreProvider }, { BrowserRouter }]) => root.render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <StoreProvider>
+          <App />
+        </StoreProvider>
+        <CookieBanner />
+      </BrowserRouter>
+    </React.StrictMode>
+  ));
+}
 
 // Registered from the app shell rather than left to the browser to notice
 // on its own — makes the app installable (the manifest link alone is not
