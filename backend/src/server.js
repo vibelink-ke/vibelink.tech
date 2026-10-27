@@ -2919,8 +2919,9 @@ app.post('/portal/login', loginLimiter, wrap(async (req, res) => {
   // to read whichever row the database returned first, so a password set on one line
   // of a seventeen-line account was "wrong" whenever another line came back first.
   const { rows: lines } = await pool.query(
-    'select id, portal_password_hash from subscribers where tenant_id=$1 and account_code=$2 and portal_password_hash is not null order by created_at',
-    [req.tenant.id, account]);
+    // Case and stray spaces do not matter: a number typed as vbtl26102 or "VBTL 26102" is the same account as VBTL26102.
+    `select id, portal_password_hash from subscribers where tenant_id=$1 and upper(replace(account_code, ' ', '')) = $2 and portal_password_hash is not null order by created_at`,
+    [req.tenant.id, account.replace(/\s+/g, '').toUpperCase()]);
   let s = null;
   const tried = new Set();
   for (const l of lines) {
