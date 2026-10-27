@@ -321,7 +321,8 @@
       "Dormant clients are no longer marked or deleted while they are online or have been seen online in the last 30 days, even if their status is expired, suspended or paused.",
       "Pages open faster: a customer's own page, a shared invoice and a staff badge scan now load only what they need (about 8 KB instead of the whole app), and the web fonts no longer hold up the first paint.",
       "A PPPoE customer who was cut off and then pays is now reconnected automatically: their blocked session is dropped so their router redials at once, instead of staying blocked until it is rebooted or the service is paused and resumed.",
-      "Customer portal sign-in now ignores capital letters and spaces in the account number, so vbtl26102 and VBTL 26102 both open VBTL26102."
+      "Customer portal sign-in now ignores capital letters and spaces in the account number, so vbtl26102 and VBTL 26102 both open VBTL26102.",
+      "The customer portal sign-in box now accepts letters and up to 20 characters, so account numbers such as VBTL26102 can be typed. It was limited to 5 digits."
     ]
   }
 ]

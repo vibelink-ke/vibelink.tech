@@ -567,8 +567,8 @@ export default function CustomerPortal() {
             <input
               style={input}
               value={account}
-              onChange={(e) => setAccount(e.target.value.replace(/\D/g, '').slice(0, 5))}
-              inputMode="numeric"
+              onChange={(e) => setAccount(e.target.value.replace(/[^A-Za-z0-9]/g, "").slice(0, 20))}
+              autoCapitalize="characters" autoCorrect="off" spellCheck={false}
               placeholder="Account number"
               aria-label="Account number"
             />
