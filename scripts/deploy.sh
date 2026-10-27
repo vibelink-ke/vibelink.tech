@@ -1,8 +1,8 @@
-#!/bin/sh
+#!/bin/bash
 # Deploy: pull, rebuild api and web, and bring the stack up so nothing is left on a stale network.
 # api, openvpn, freeradius and wireguard share the `net` container's network (network_mode: service:net). If `net` is
 # recreated, anything left running from before loses its network (DNS to `db` fails, radius stops answering), so they are
-# recreated together with it (only when net itself changed, so a normal deploy does not drop the router tunnels). Run from the project folder:  sh scripts/deploy.sh
+# recreated together with it (only when net itself changed, so a normal deploy does not drop the router tunnels). Run from the project folder:  bash scripts/deploy.sh
 set -e
 F="-f docker-compose.yml -f docker-compose.prod.yml"
 git pull --no-rebase
