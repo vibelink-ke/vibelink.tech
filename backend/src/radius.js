@@ -326,8 +326,15 @@ export async function activateSubscriber(c, tenantId, subId) {
   // Off the block list they were put on while suspended/expired/paused, if
   // any — regardless of whether a plan joined below, so a broken plan_id
   // never leaves this half-done.
-  await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
+  const unblock = await c.query('delete from radreply where tenant_id=$3 and username=$1 and attribute=$2',
     [s.pppoe_user, 'Mikrotik-Address-List', tenantId]);
+  const { rowCount: wasLimited } = await c.query(
+    `select 1 from radreply where tenant_id=$3 and username=$1 and attribute='Mikrotik-Rate-Limit' and value=$2`,
+    [s.pppoe_user, EXPIRED_RATE, tenantId]);
+  // A customer who was cut off keeps the block on their live session (it was put there when they were cut off, and a rate change does not take it
+  // off), so paying must also drop that session: their router then redials at once with clean attributes, instead of staying blocked until the
+  // customer's router is rebooted or the service is paused and resumed.
+  const wasBlocked = unblock.rowCount > 0 || wasLimited > 0;
 
   const address = await framedAddress(c, tenantId, subId, s);
   if (address == null) {
@@ -340,8 +347,13 @@ export async function activateSubscriber(c, tenantId, subId) {
        on conflict (tenant_id, username, attribute) do update set value = excluded.value`,
       [s.pppoe_user, address, tenantId]);
   }
+  const kickBlocked = async () => {
+    if (wasBlocked && s.host) await coa(c, s.host, s.secret, s.pppoe_user, null, undefined, true, { force: true })
+      .catch((e) => console.warn('activateSubscriber: could not drop the blocked session of', s.pppoe_user, '—', e.message));
+  };
 
   if (s.rate_down == null || s.rate_up == null) {
+    await kickBlocked();
     console.error('activateSubscriber: subscriber', subId, 'has no plan (plan_id', s.plan_id,
       ') — address-list block cleared and password/IP refreshed, but rate limit and CoA skipped for lack of one');
     return;
@@ -371,7 +383,8 @@ export async function activateSubscriber(c, tenantId, subId) {
     // attribute only applies at the start of a session — so if they were
     // parked on the expired pool, force a reconnect now rather than leaving
     // them on the old (expired-range) address until they redial on their own.
-    if (address && s.static_ip && String(s.static_ip).split('/')[0] !== address) {
+    if (wasBlocked) await kickBlocked();
+    else if (address && s.static_ip && String(s.static_ip).split('/')[0] !== address) {
       await coa(c, s.host, s.secret, s.pppoe_user, rate, undefined, true);
     }
   }
@@ -1274,7 +1287,7 @@ export async function disconnectSubscriberSession(c, host, secret, username) {
  * thrown away — a CoA that never works is invisible otherwise, which is exactly
  * how it stayed broken before.
  */
-async function coa(c, host, secret, user, rate, mode, disconnect = false, { onlyIfOnline = false } = {}) {
+async function coa(c, host, secret, user, rate, mode, disconnect = false, { onlyIfOnline = false, force = false } = {}) {
   // Target the live session if there is one. Without a session id the NAS has to
   // guess which login to change when a subscriber is connected more than once, and its
   // address is what a hotspot router matches a guest by.
@@ -1305,7 +1318,7 @@ async function coa(c, host, secret, user, rate, mode, disconnect = false, { only
   // request with a red hotspot error line ("Radius request for unknown ip", "Radius with no ip provided"), and a stale accounting
   // row is not proof they are online. The router-reported session list is, so a customer not on it is skipped: their new speed or
   // address applies when they next connect, which is when it would have anyway.
-  if (!onlyIfOnline) {
+  if (!onlyIfOnline && !force) {
     let seen = true;
     try {
       const { rowCount } = await c.query("select 1 from live_sessions where username = $1 and seen_at > now() - interval '5 minutes' limit 1", [user]);
