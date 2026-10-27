@@ -36,17 +36,36 @@ try {
     `select ${subCols.map(q).join(',')} from subscribers where tenant_id=$1 and account_code = any($2)`, [tenant, codes]);
   const { rows: stillThere } = await client.query('select id from subscribers where id = any($1::uuid[])', [inBackup.map((r) => r.id)]);
   const have = new Set(stillThere.map((r) => r.id));
-  const missing = inBackup.filter((r) => !have.has(r.id));
+  let missing = inBackup.filter((r) => !have.has(r.id));
+  // Only what the dormant sweep deleted: its own log entries name the account and, for a line, its label. (Rows removed some other way stay removed.)
+  // Set ALL=1 to bring back everything missing for these account codes instead.
+  if (process.env.ALL !== '1') {
+    const { rows: log } = await client.query(
+      `select account_code, detail from activity_log where tenant_id=$1 and action='Service deleted' and actor='system' and detail like 'Dormant:%' and account_code = any($2)`, [tenant, codes]);
+    const keys = log.map((l) => ({ code: l.account_code, label: /— line "(.*)"$/.exec(l.detail)?.[1] ?? '' }));
+    const left = keys.slice();
+    const kept = [];
+    for (const r of missing) {
+      const i = left.findIndex((k) => k.code === r.account_code && k.label === String(r.line_label ?? ''));
+      if (i >= 0) { kept.push(r); left.splice(i, 1); }
+    }
+    console.log(`The sweep's log names ${keys.length} deleted; matched in the backup: ${kept.length}; skipped as not deleted by the sweep: ${missing.length - kept.length}.`);
+    for (const r of missing.filter((m) => !kept.includes(m))) console.log(`  skipped: ${r.account_code}  ${r.name ?? ''}  [${r.status}]  ${r.line_label ?? ''}`);
+    for (const k of left) console.log(`  in the log but not found in the backup: ${k.code} ${k.label}`);
+    missing = kept;
+  }
   console.log(`In the backup for these account codes: ${inBackup.length}. Already in the live database: ${have.size}. To bring back: ${missing.length}.`);
   for (const r of missing) console.log(`  ${r.account_code}  ${r.name ?? ''}  [${r.status}]  ${r.line_label ?? ''}  ${r.pppoe_user ?? ''}`);
   if (!missing.length) { await client.query('rollback'); console.log('Nothing to do.'); process.exit(0); }
-  const ids = missing.map((r) => r.id);
 
   const ins = await client.query(
     `insert into subscribers (${subCols.map(q).join(',')})
      select ${subCols.map(q).join(',')} from jsonb_populate_recordset(null::subscribers, $1::jsonb)
-     on conflict do nothing`, [JSON.stringify(missing)]);
-  console.log(`Subscribers inserted: ${ins.rowCount}`);
+     on conflict do nothing returning id`, [JSON.stringify(missing)]);
+  const ids = ins.rows.map((r) => r.id);
+  console.log(`Subscribers inserted: ${ins.rowCount} of ${missing.length}`);
+  for (const r of missing.filter((m) => !ids.includes(m.id))) console.log(`  could not insert (clashes with a live row, left out): ${r.account_code} ${r.name ?? ''} ${r.line_label ?? ''} ${r.pppoe_user ?? ''}`);
+  const missingDone = missing.filter((m) => ids.includes(m.id));
 
   // 2. every table with a foreign key to subscribers
   const { rows: fks } = await client.query(
@@ -81,7 +100,7 @@ try {
     }
   }
 
-  for (const r of missing) {
+  for (const r of missingDone) {
     await client.query(
       `insert into activity_log (tenant_id, subscriber_id, account_code, actor, action, detail) values ($1,$2,$3,'system','Service restored',$4)`,
       [tenant, r.id, r.account_code, `Restored from backup after the dormant sweep deleted it${r.line_label ? ` - line "${r.line_label}"` : ''}`]);
