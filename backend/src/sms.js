@@ -189,6 +189,12 @@ export const DEFAULTS = {
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');
 
 /**
+ * A new customer's welcome message carries their portal sign-in. When the operator's own wording has no {portal_password} or {portal_login} in it,
+ * the login is added at the end, so a customised welcome does not leave the customer without a password.
+ */
+const withPortalLogin = (body, vars) => (vars.portal_login && vars.portal_password && !body.includes(vars.portal_password) ? `${body}${vars.portal_login}` : body);
+
+/**
  * Fill the tags in a message an operator wrote.
  *
  * Separate from `render`, and used before it, because the two run at different
@@ -234,6 +240,8 @@ export const PLACEHOLDERS = [
   { token: 'paybill',       desc: 'Your default paybill or till' },
   { token: 'router',        desc: 'Router they are connected to' },
   { token: 'portal',        desc: 'Link to their customer portal sign-in page' },
+  { token: 'portal_password', desc: 'New customers only: their first portal password' },
+  { token: 'portal_login',  desc: 'New customers only: the portal link, account and password' },
   { token: 'account_status', desc: 'A signed-in chat visitor\'s own status/days-left, or blank' },
   { token: 'help_link',      desc: 'Link to the public help center, or blank if nothing is published' },
   { token: 'code',           desc: 'Hotspot visitors only: the code they are using now' },
@@ -397,7 +405,7 @@ async function sendSms(tenantId, to, template, vars) {
   // a tenant with no gateway of their own, sending entirely through the platform's, still has to be able
   // to set and actually get their own wording, not just the built-in default.
   const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [tenantId]).catch(() => ({ rows: [] }));
-  const body = render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars);
+  const body = withPortalLogin(render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars), vars);
 
   if (!gateways.length) {
     console.warn('no sms gateway for tenant', tenantId);
@@ -560,7 +568,7 @@ async function sendWhatsApp(tenantId, to, template, vars) {
   // Same wording as the SMS side of the same send() call (tenants.sms_templates) — a tenant editing
   // Settings → Templates expects it to change both, not just whichever one happens to go out on SMS.
   const { rows: [t] } = await pool.query('select sms_templates from tenants where id=$1', [tenantId]).catch(() => ({ rows: [] }));
-  const body = render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars);
+  const body = withPortalLogin(render(t?.sms_templates?.[template] ?? DEFAULTS[template], vars), vars);
   try {
     const res = await PROVIDERS.twilio_whatsapp(g.credentials, to, body);
     if (!accepted('twilio_whatsapp', res)) {

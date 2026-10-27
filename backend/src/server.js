@@ -10781,7 +10781,7 @@ app.post('/api/subscribers', requirePermission('clients.create'), wrap(async (re
 
   // After responding: a customer is created whether or not their phone is
   // reachable, and the operator should not wait on an SMS gateway to find out.
-  notifySubscriber(req.tenant.id, s.id, 'welcome').catch(() => {});
+  notifySubscriber(req.tenant.id, s.id, 'welcome', portalPassword ? { portal_password: portalPassword } : {}).catch(() => {});
 }));
 
 /**
@@ -10801,6 +10801,8 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
   if (!s) return;
 
   const vars = { ...sms.subscriberVars(s, await sms.orgVars(tenantId, s.router_id ?? null, s.connection_type ?? null)), ...extra };
+  // A new customer's first portal password, with the account they sign in with (the account number itself, as the portal expects it).
+  if (extra.portal_password) vars.portal_login = ` Portal${vars.portal ? ` ${vars.portal}` : ''} login: ${s.account_code} / ${extra.portal_password}`;
   // Duplicates would text the same handset twice when both fields match.
   const numbers = [...new Set([s.phone, s.phone_alt].filter(Boolean))];
   for (const n of numbers) await sms.send(tenantId, n, template, vars).catch(() => {});
