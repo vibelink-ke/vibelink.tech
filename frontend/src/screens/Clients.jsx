@@ -72,6 +72,9 @@ const FILTERS = [
   { key: 'suspended', label: 'Suspended', match: (c) => c.status === 'suspended' },
   // How the customer is reached: fibre, or wireless (a shared PMP radio or a dedicated P2P link). Set on the client page or in bulk.
   { key: 'fibre', label: 'Fibre', match: (c) => c.connection_type === 'fibre' },
+  // FTTH is a fibre customer whose category is Individual, FTTB one whose category is Business: nothing extra to set.
+  { key: 'ftth', label: 'FTTH', match: (c) => c.connection_type === 'fibre' && /^individual/i.test(c.category ?? '') },
+  { key: 'fttb', label: 'FTTB', match: (c) => c.connection_type === 'fibre' && /^business/i.test(c.category ?? '') },
   { key: 'wireless', label: 'Wireless', match: (c) => c.connection_type === 'pmp' || c.connection_type === 'ptp' },
   { key: 'notype', label: 'Type not set', match: (c) => !c.connection_type },
   // Blocked for 3+ months; deleted automatically past 5. See jobs.js's dormantSweep.
