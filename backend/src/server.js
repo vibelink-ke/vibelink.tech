@@ -15962,7 +15962,7 @@ const AUTOMATION_JOBS = [
    * here at all.
    */
   { job: 'dbBackup', name: 'Database backup', cron: '0 3 * * *', system: true, detail: 'Nightly pg_dump to R2 — daily kept a week, Sunday\'s kept two months' },
-  { job: 'dormantSweep', name: 'Dormant clients', cron: '0 4 * * *', detail: 'Marks a client dormant after 3 months blocked, then deletes them past 5 months and 30 days after the notice — never one with wallet credit or an unpaid invoice' },
+  { job: 'dormantSweep', name: 'Dormant clients', cron: '0 4 * * *', detail: 'Marks a client dormant after 3 months blocked, then deletes them past 5 months and 30 days after the notice — never one with wallet credit, an unpaid invoice, or one online in the last 30 days' },
   { job: 'generateMonthlyBills', name: 'Monthly bills', cron: '15 6 * * *', detail: 'Adds each active monthly bill to the expense log three days before it is due, and texts the owner which are coming up' },
   { job: 'purgeExpiredVouchers', name: 'Purge expired vouchers', cron: '30 3 * * *', detail: 'Deletes a voucher a day after it expired, if Hotspot → Settings has the auto-purge toggle on' },
   { job: 'expireUnusedVouchers', name: 'Expire unused codes', cron: '*/30 * * * *', detail: 'Stops a bought code that nobody has used after the number of days set on Hotspot → Vouchers (one figure for plans under a day, one for the rest)' },

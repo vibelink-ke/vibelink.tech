@@ -889,13 +889,25 @@ async function remind() {
  *
  * Never deleted, however long they have been blocked:
  *  - an account with money on it (wallet credit) — that is the customer's;
- *  - a line with an open or partly-paid invoice — that is a debt on record.
+ *  - a line with an open or partly-paid invoice — that is a debt on record;
+ *  - a client who is online or has been seen online in the last 30 days.
  * Both stay dormant until settled. Payments and invoices survive a delete
  * either way (their subscriber link is set to null, not removed).
  *
  * A tenant can switch it off under Automation, like any other job.
  */
 async function dormantSweep() {
+  // Someone still online is not dormant, whatever their status says: a session open now, or any accounting seen in the last 30 days (a PPPoE
+  // line or a hotspot code). They are never marked and never deleted, and their clock starts again.
+  const inUse = (alias) => `exists (select 1 from radacct a
+                          where (a.username = ${alias}.pppoe_user or a.username = ${alias}.account_code)
+                            and (a.acctstoptime is null or coalesce(a.acctstoptime, a.acctupdatetime, a.acctstarttime) > now() - interval '30 days'))`;
+  await pool.query(
+    `update subscribers s set blocked_since = null, dormant_at = null
+      where status in ('expired','suspended','paused') and (blocked_since is not null or dormant_at is not null)
+        and ${inUse('s')} and tenant_id in (${enabledTenants})`,
+    ['dormantSweep']);
+
   // Back in service: the clock stops and the warning is withdrawn.
   await pool.query(
     `update subscribers set blocked_since = null, dormant_at = null
@@ -921,6 +933,7 @@ async function dormantSweep() {
     `update subscribers set dormant_at = now()
       where status in ('expired','suspended','paused') and dormant_at is null
         and blocked_since <= now() - interval '3 months'
+        and not (${inUse('subscribers')})
         and tenant_id in (${enabledTenants})
       returning tenant_id`,
     ['dormantSweep']);
@@ -941,6 +954,7 @@ async function dormantSweep() {
         and s.blocked_since <= now() - interval '5 months'
         and s.dormant_at <= now() - interval '30 days'
         and s.tenant_id in (${enabledTenants})
+        and not (${inUse('s')})
         and coalesce((select w.balance from account_wallets w
                        where w.tenant_id = s.tenant_id and w.account_code = s.account_code), 0) <= 0
         and not exists (select 1 from invoices i

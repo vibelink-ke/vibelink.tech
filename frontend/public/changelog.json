@@ -317,7 +317,8 @@
     "date": "2026-10-27",
     "title": "Router chaining on/off",
     "items": [
-      "Router chaining now has an on/off switch under Hotspot, Router chaining. It is off until you turn it on; while off, billing reads nothing from your routers and sends no chaining messages."
+      "Router chaining now has an on/off switch under Hotspot, Router chaining. It is off until you turn it on; while off, billing reads nothing from your routers and sends no chaining messages.",
+      "Dormant clients are no longer marked or deleted while they are online or have been seen online in the last 30 days, even if their status is expired, suspended or paused."
     ]
   }
 ]
