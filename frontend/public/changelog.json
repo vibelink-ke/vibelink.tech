@@ -312,5 +312,12 @@
       "Customers can change their own WiFi name and password from their portal, and technicians can do it from the field app (new permission: Change a customer's WiFi). Works on SmartOLT ONUs and TR-069 routers.",
       "When authorising an ONU, the management VLAN now gets a fixed (static) IP instead of DHCP. SmartOLT picks a free address from the OLT's pool automatically."
     ]
+  },
+  {
+    "date": "2026-10-27",
+    "title": "Router chaining on/off",
+    "items": [
+      "Router chaining now has an on/off switch under Hotspot, Router chaining. It is off until you turn it on; while off, billing reads nothing from your routers and sends no chaining messages."
+    ]
   }
 ]

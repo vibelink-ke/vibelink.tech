@@ -21,6 +21,15 @@ const ago = (d) => {
 export default function RouterChaining() {
   const store = useStore();
   const can = !!store.session?.perms?.['chaining.manage'];
+  const [on, setOn] = useState(null);   // whether this business has router chaining switched on (null while loading)
+  const [switching, setSwitching] = useState(false);
+  useEffect(() => { api.chainingEnabled().then((r) => setOn(!!r.enabled)).catch(() => setOn(false)); }, []);
+  const flip = async (next) => {
+    setSwitching(true);
+    try { await api.setChainingEnabled(next); setOn(next); store.toast(next ? 'Router chaining is on. The first scan runs within a few minutes.' : 'Router chaining is off.'); }
+    catch (e) { store.toast(e.message); }
+    finally { setSwitching(false); }
+  };
   const [rows, setRows] = useState(null);
   const [scanning, setScanning] = useState(false);
   const [scanRouter, setScanRouter] = useState('');
@@ -71,6 +80,19 @@ export default function RouterChaining() {
   const watched = all.filter((c) => !c.ignored);
   const shown = show === 'onu' ? watched.filter((c) => c.kind === 'onu') : show === 'router' ? watched.filter((c) => c.kind !== 'onu') : show === 'ignored' ? all.filter((c) => c.ignored) : show === 'down' ? watched.filter((c) => c.status === 'down') : show === 'check' ? watched.filter((c) => c.confidence === 'likely') : watched;
 
+  if (on === null) return <Card title="Router chaining"><div style={{ color: color.muted }}>Loading…</div></Card>;
+  if (!on) {
+    return (
+      <Card title="Router chaining" subtitle="Off. Turn it on if routers or fibre units are plugged into your hotspot routers' ports to extend the signal, and you want them found and watched.">
+        <div style={{ display: 'grid', gap: 10, maxWidth: 620, fontSize: 13.5, lineHeight: 1.5 }}>
+          <div>When it is on, billing reads each hotspot router every couple of minutes, finds the routers and fibre units chained behind it by their MAC, and messages you once if one stops answering. Nothing is read from your routers while it is off.</div>
+          {can ? <div><Button variant="primary" onClick={() => flip(true)} disabled={switching}>{switching ? 'Turning on…' : 'Turn on router chaining'}</Button></div>
+            : <div style={{ color: color.muted }}>Ask the owner or an admin to turn it on.</div>}
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <div style={{ display: 'grid', gap: 14 }}>
       <Grid min={190} gap={14}>
@@ -91,6 +113,7 @@ export default function RouterChaining() {
             </label>
             <Button size="sm" onClick={scan} disabled={scanning || !scanRouter || scans.find((x) => x.id === scanRouter)?.running}>{scanning || scans.find((x) => x.id === scanRouter)?.running ? 'Scanning…' : 'Scan now'}</Button>
             <Button size="sm" onClick={() => setAdding({ routerId: scanRouter, mac: '', name: '', kind: 'router' })}>+ Add by MAC</Button>
+            <Button size="sm" onClick={() => { if (window.confirm('Turn router chaining off? Nothing is read from your routers and no down messages are sent. The list is kept.')) flip(false); }} disabled={switching}>Turn off</Button>
           </div>
         )}
       >

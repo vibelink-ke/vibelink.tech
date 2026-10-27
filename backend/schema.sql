@@ -3736,3 +3736,6 @@ create index if not exists payments_tenant_provider_received on payments (tenant
 
 -- The name of the TR069 profile to switch on for an ONU before its WiFi is set (SmartOLT's own is "SmartOLT"). Empty means that default.
 alter table smartolt_config add column if not exists tr069_profile text;
+
+-- Router chaining is off until a tenant turns it on (Hotspot, Router chaining). The monitor reads each hotspot router, so it is opt-in.
+alter table tenants add column if not exists chaining_enabled boolean not null default false;

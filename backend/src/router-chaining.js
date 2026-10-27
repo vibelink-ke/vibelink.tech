@@ -600,11 +600,22 @@ function launch(r, deps) {
   return true;
 }
 
+/** Whether this tenant has router chaining switched on. */
+export async function chainingEnabled(tenantId) {
+  const { rows: [t] } = await pool.query('select chaining_enabled from tenants where id=$1', [tenantId]).catch(() => ({ rows: [] }));
+  return !!t?.chaining_enabled;
+}
+export async function setChainingEnabled(tenantId, on) {
+  await pool.query('update tenants set chaining_enabled=$2 where id=$1', [tenantId, !!on]);
+  return { enabled: !!on };
+}
+
 export async function watchChainedRouters({ notify }) {
   const { rows: routers } = await pool.query(
     `select r.id, r.tenant_id, r.name, r.host, r.api_port, r.role, r.status, r.service_user, r.service_password_enc
        from routers r left join chained_scans s on s.router_id = r.id
       where r.tenant_id in (${enabledTenants})
+        and r.tenant_id in (select id from tenants where chaining_enabled)
       order by coalesce(s.at, 'epoch') asc`, ['watchChainedRouters']);          // the one scanned longest ago first, so a slow router cannot starve the rest
   await pool.query(
     `update chained_routers c set status='unknown', ping_fails=0
@@ -627,6 +638,7 @@ export async function watchChainedRouters({ notify }) {
 
 /** The Scan button: start a scan of one router now, in the background, without telling anyone. It can take minutes; the screen shows how far it has got. */
 export async function scanRouter(tenantId, routerId, opts = {}) {
+  if (!(await chainingEnabled(tenantId))) throw Object.assign(new Error('Router chaining is switched off. Turn it on first.'), { status: 409 });
   const { rows: [r] } = await pool.query(
     `select id, tenant_id, name, host, api_port, role, service_user, service_password_enc, status
        from routers where id=$1 and tenant_id=$2`, [routerId, tenantId]);
