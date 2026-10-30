@@ -322,7 +322,9 @@ function describe(e) {
  * whoever is actually debugging it.
  */
 function gatewayErrorMessage(e, context) {
-  const fromGateway = e?.response?.data?.errorMessage ?? e?.response?.data?.ResponseDescription;
+  // KopoKopo words its errors error_message. A phone with a prompt still waiting is the common one: someone pressing Pay twice, or again before answering.
+  const fromGateway = e?.response?.data?.errorMessage ?? e?.response?.data?.ResponseDescription ?? e?.response?.data?.error_message;
+  if (/pending request/i.test(String(fromGateway ?? ''))) return 'A payment request is already waiting on your phone. Check for the M-Pesa prompt and enter your PIN, or wait a minute and try again.';
   if (fromGateway) return fromGateway;
   // The gateway answered, just not with a message: say what it said, so a 429 reads as "rate limited" and not as "could not be reached".
   const status = e?.response?.status;
