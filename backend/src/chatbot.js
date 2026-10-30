@@ -77,7 +77,7 @@ export async function botStart(chat) {
   const first = String(chat.display_name ?? '').trim().split(/\s+/)[0];
   await say(chat,
     `Hi${first && !/^guest$/i.test(first) ? ` ${first}` : ''}, I'm the automated assistant.`,
-    "If you've paid and haven't got your code, or you have a code and can't connect, paste your M-Pesa confirmation message here (the whole message is fine) and I'll check it.",
+    ...MENU,
     "Type 'person' at any time to talk to our team.");
 }
 
@@ -100,8 +100,48 @@ const WANTS_PERSON = /\b(person|human|agent|operator|someone|staff|representativ
 const ABOUT_PAYING = /\b(paid|pay|payment|mpesa|m-pesa|code|voucher|nimelipa|sent)\b/i;
 const ABOUT_CONNECTING = /\b(connect|connected|internet|wifi|wi-fi|login|log in|working|cant|can't|cannot|not|still|slow|offline)\b/i;
 
+// Every way back online for someone who has already paid, as the login page offers them. The visitor replies with a number (see reconnectOption).
+const MENU = [
+  "If you've already paid, here are the ways to get back online. Reply with a number:\n"
+    + '1. Connect me automatically (this phone is recognised)\n'
+    + '2. Use my voucher code\n'
+    + '3. Find my code from my M-Pesa message\n'
+    + '4. Sign in with the phone number I paid with\n'
+    + '5. Use a username and password\n'
+    + '6. Connect a TV or console\n'
+    + '7. I have home internet, not the hotspot\n'
+    + '8. Talk to a person',
+  "Or paste your M-Pesa message here and I'll look up your payment.",
+];
+
+const OPTIONS = {
+  1: ['On the login page, tap "I already have an active bundle: connect me". It recognises this phone.',
+    'If it says no bundle was found: forget this Wi-Fi network, turn off "Private Wi-Fi address" (or "Random MAC") for it, reconnect and try again. A phone is recognised by its Wi-Fi address, so a changed address looks like a new phone.'],
+  2: ['Type the code from your SMS or voucher into the "Voucher code" box on the login page and tap Connect.'],
+  3: ['Under the login form tap "Paid but got no SMS? Use your M-Pesa code" and type the 10-character code from your M-Pesa message (it looks like SGH7K2L9QX).',
+    "Or paste your M-Pesa message here and I'll find your code."],
+  4: ['Tap "Paid with M-Pesa? Sign in with your phone number" on the login page, type the number you paid with, then the 6-digit code we text you.',
+    'It signs you in on the bundle you paid for, as long as that bundle is still running.'],
+  5: ['If you were given a username and password instead of a code, tap "Have a username and password instead?" under the voucher box and enter them.'],
+  6: ['For a TV or console, tap "Add TV / console" on the login page. You can pay for a TV package there, or activate a TV voucher.',
+    'A TV or console can also share a bundle you have already paid for: once your phone is online, add it from "Add TV / console".'],
+  7: ['Home internet: switch your router off for 30 seconds, then on, and wait about five minutes for it to connect.',
+    "If it still has no internet, paste your M-Pesa message and I'll check your payment, or type 'person'."],
+};
+
+const WANTS_MENU = /\b(options?|menu|reconnect|reconnecting|already paid|paid already)\b/i;
+
+async function reconnectOption(chat, state, n) {
+  if (n === 8) return handOff(chat, state, 'asked for a person');
+  await say(chat, ...OPTIONS[n]);
+  return say(chat, "Reply with another number, paste your M-Pesa message, or type 'person' for our team.");
+}
+
 async function converse(chat, state, text) {
   const m = readMpesa(text);
+  const pick = /^\s*([1-8])[.)]?\s*$/.exec(text);
+  if (pick) return reconnectOption(chat, state, Number(pick[1]));
+  if (WANTS_MENU.test(text) && !m.codes.length) return say(chat, ...MENU);
   if (WANTS_PERSON.test(text) && !m.codes.length) return handOff(chat, state, 'asked for a person');
   if (m.codes.length) return checkPayment(chat, state, m);
 
@@ -114,7 +154,7 @@ async function converse(chat, state, text) {
   if (state.unclear >= 3) return handOff(chat, state, 'the assistant could not tell what was needed');
   return say(chat,
     'I can check a payment for you. Please paste the M-Pesa confirmation message, or just the 10-character code at the start of it (for example SGH7K2L9QX).',
-    "Or type 'person' to talk to our team.");
+    "Or reply 'options' to see every way to reconnect, or type 'person' to talk to our team.");
 }
 
 async function checkPayment(chat, state, m) {
@@ -154,7 +194,7 @@ async function checkPayment(chat, state, m) {
       `Found it: ${money(p.amount)} received${p.plan_title ? ` for ${p.plan_title}` : ''}. Your code is ${p.voucher_code}, `
         + `${p.voucher_expires ? `valid until ${when(p.voucher_expires)}` : 'and its time starts at your first login'}.`);
     await say(chat, p.voucher_status === 'in_use' ? inUseAdvice() : 'To connect: open the login page, type the code in the voucher box and tap Connect.');
-    return say(chat, "If it still won't connect, tell me and I'll check again, or type 'person'.");
+    return say(chat, "If it still won't connect, tell me and I'll check again. Reply 'options' to see every way to reconnect, or type 'person'.");
   }
 
   if (p.subscriber_id) {
@@ -252,5 +292,5 @@ async function checkPhone(chat, state, phone) {
 
   state.notFound += 1;
   if (state.notFound >= 2) return handOff(chat, state, `could not find a recent payment from ${masked(phone)}`);
-  return say(chat, "I can't find a recent payment from that number.", 'Please paste the M-Pesa confirmation message you got, or just its 10-character code.');
+  return say(chat, "I can't find a recent payment from that number.", "Please paste the M-Pesa confirmation message you got, or just its 10-character code. Or reply 'options' to see every way to reconnect.");
 }

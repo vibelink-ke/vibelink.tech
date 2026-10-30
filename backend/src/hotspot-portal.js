@@ -498,7 +498,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .chat.on { display:block; }
   .log { max-height:190px; overflow-y:auto; display:flex; flex-direction:column; gap:7px;
          margin:0 0 10px; }
-  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; }
+  .msg { padding:7px 10px; border-radius:9px; font-size:13.5px; max-width:85%; white-space:pre-line; }
   .msg.them { background:#fff; border:1px solid var(--line); align-self:flex-start; }
   .msg.me { background:var(--green); color:var(--btnInk); align-self:flex-end; }
   .hint { margin:6px 0 0; font-size:12px; color:var(--muted); text-align:center; }

@@ -31,7 +31,7 @@ function Bubble({ from, text, mine }) {
         }}
       >
         {!mine && <span style={{ fontSize: 10.5, fontWeight: 600, color: color.muted }}>{from}</span>}
-        <span>{text}</span>
+        <span style={{ whiteSpace: 'pre-line' }}>{text}</span>
       </div>
     </div>
   );

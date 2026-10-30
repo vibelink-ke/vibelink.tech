@@ -640,7 +640,7 @@ export default function CustomerPortal() {
                         maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
                         background: m.sender !== 'visitor' ? '#fff' : pc.accent,
                         color: m.sender !== 'visitor' ? pc.ink : '#fff',
-                        border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none',
+                        border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none', whiteSpace: 'pre-line',
                       }}
                     >
                       {m.body}
@@ -1054,7 +1054,7 @@ export default function CustomerPortal() {
                       maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
                       background: m.sender !== 'visitor' ? '#fff' : pc.accent,
                       color: m.sender !== 'visitor' ? pc.ink : '#fff',
-                      border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none',
+                      border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none', whiteSpace: 'pre-line',
                     }}
                   >
                     {m.body}
