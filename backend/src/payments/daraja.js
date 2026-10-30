@@ -43,11 +43,25 @@ function verifyWebhook(req, res, next) {
   next();
 }
 
-async function token(cfg) {
-  const key = Buffer.from(`${cfg.credentials.consumer_key}:${cfg.credentials.consumer_secret}`).toString('base64');
-  const { data } = await axios.get(`${BASE}/oauth/v1/generate?grant_type=client_credentials`,
-    { headers: { Authorization: `Basic ${key}` } });
-  return data.access_token;
+// A token lasts about an hour, and Safaricom rate-limits the endpoint that makes one. One was being requested for every single payment, so under
+// load that endpoint answered 429 and guests were told the gateway could not be reached. It is now kept until shortly before it runs out, and a
+// burst of purchases at the same moment shares one request. `fresh` skips the kept one (the Test button wants to know the credentials work).
+const tokenCache = new Map();
+const tokenFlight = new Map();
+async function token(cfg, { fresh = false } = {}) {
+  const id = `${cfg.credentials.consumer_key}:${cfg.credentials.consumer_secret}`;
+  const hit = tokenCache.get(id);
+  if (!fresh && hit && hit.until > Date.now()) return hit.value;
+  if (tokenFlight.has(id)) return tokenFlight.get(id);
+  const flight = (async () => {
+    const key = Buffer.from(id).toString('base64');
+    const { data } = await axios.get(`${BASE}/oauth/v1/generate?grant_type=client_credentials`,
+      { headers: { Authorization: `Basic ${key}` } });
+    tokenCache.set(id, { value: data.access_token, until: Date.now() + Math.max(60, (Number(data.expires_in) || 3599) - 300) * 1000 });
+    return data.access_token;
+  })().finally(() => tokenFlight.delete(id));
+  tokenFlight.set(id, flight);
+  return flight;
 }
 
 const stamp = () => new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14);
@@ -64,7 +78,7 @@ const stamp = () => new Date().toISOString().replace(/[-T:.Z]/g, '').slice(0, 14
 export async function testAuth(tenantId) {
   const cfg = await config(tenantId, 'daraja');
   try {
-    await token(cfg);
+    await token(cfg, { fresh: true });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e?.response?.data?.errorMessage ?? e?.response?.data ?? e.message };

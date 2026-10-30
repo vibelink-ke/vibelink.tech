@@ -5,20 +5,33 @@ import { handleStkResult } from './daraja.js';
 
 const BASE = 'https://api.kopokopo.com';
 
-async function token(cfg) {
-  const { data } = await axios.post(`${BASE}/oauth/token`, {
-    grant_type: 'client_credentials',
-    client_id: cfg.credentials.client_id,
-    client_secret: cfg.credentials.client_secret
-  });
-  return data.access_token;
+// Kept until shortly before it runs out, with one request shared by simultaneous purchases, rather than a new token for every payment
+// (see the same note in daraja.js). `fresh` skips the kept one, for the Test button.
+const tokenCache = new Map();
+const tokenFlight = new Map();
+async function token(cfg, { fresh = false } = {}) {
+  const id = `${cfg.credentials.client_id}:${cfg.credentials.client_secret}`;
+  const hit = tokenCache.get(id);
+  if (!fresh && hit && hit.until > Date.now()) return hit.value;
+  if (tokenFlight.has(id)) return tokenFlight.get(id);
+  const flight = (async () => {
+    const { data } = await axios.post(`${BASE}/oauth/token`, {
+      grant_type: 'client_credentials',
+      client_id: cfg.credentials.client_id,
+      client_secret: cfg.credentials.client_secret
+    });
+    tokenCache.set(id, { value: data.access_token, until: Date.now() + Math.max(60, (Number(data.expires_in) || 3599) - 300) * 1000 });
+    return data.access_token;
+  })().finally(() => tokenFlight.delete(id));
+  tokenFlight.set(id, flight);
+  return flight;
 }
 
 /** Same rationale as daraja.js's testAuth: an OAuth token request is free. */
 export async function testAuth(tenantId) {
   const cfg = await config(tenantId, 'kopokopo');
   try {
-    await token(cfg);
+    await token(cfg, { fresh: true });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: e?.response?.data?.error_description ?? e?.response?.data ?? e.message };

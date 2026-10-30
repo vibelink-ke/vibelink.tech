@@ -324,7 +324,11 @@ function describe(e) {
 function gatewayErrorMessage(e, context) {
   const fromGateway = e?.response?.data?.errorMessage ?? e?.response?.data?.ResponseDescription;
   if (fromGateway) return fromGateway;
-  console.error(`${context ?? 'payment'} gateway unreachable:`, e?.code ?? '', e?.message ?? e);
+  // The gateway answered, just not with a message: say what it said, so a 429 reads as "rate limited" and not as "could not be reached".
+  const status = e?.response?.status;
+  const said = e?.response?.data == null ? '' : ` — ${(typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data)).slice(0, 300)}`;
+  console.error(`${context ?? 'payment'} gateway unreachable:`, e?.code ?? '', e?.message ?? e, status ? `[HTTP ${status}]${said}` : '');
+  if (status === 429) return 'The payment system is busy right now. Please wait a few seconds and try again.';
   return 'Could not reach the payment gateway right now. Please try again in a moment.';
 }
 
