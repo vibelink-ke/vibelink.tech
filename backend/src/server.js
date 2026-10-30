@@ -2474,10 +2474,16 @@ app.post('/chat/start', chatStartLimiter, wrap(async (req, res) => {
     if (!rr) deviceRouter = null;
   }
   // A database that has not had the two new columns added yet still starts the chat, just without the device.
+  // A customer chatting from their signed-in portal: the assistant then knows who they are.
+  let subscriberId = null;
+  try {
+    const sess = await portalSession(req);
+    if (sess && sess.tenant_id === tenant.id) subscriberId = sess.subscriber_id;
+  } catch { /* not signed in */ }
   const chatRow = await pool.query(
-    `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at, device_mac, device_router)
-     values ($1,$2,'waiting',$3,$4, now(), $5, $6) returning id`,
-    [tenant.id, phone ?? 'anonymous', token, name, deviceMac, deviceRouter]).catch(async (e) => {
+    `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at, device_mac, device_router, subscriber_id)
+     values ($1,$2,'waiting',$3,$4, now(), $5, $6, $7) returning id`,
+    [tenant.id, phone ?? 'anonymous', token, name, deviceMac, deviceRouter, subscriberId]).catch(async (e) => {
     if (e?.code !== '42703') throw e;
     return pool.query(
       `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at)
@@ -2539,7 +2545,7 @@ app.post('/chat/start', chatStartLimiter, wrap(async (req, res) => {
   }
 
   // The assistant's hello, if the tenant has it on. Never allowed to fail the chat.
-  await (await import('./chatbot.js')).botStart({ id: chat.id, tenant_id: tenant.id, display_name: name }).catch((e) => console.error('chat bot:', e.message));
+  await (await import('./chatbot.js')).botStart({ id: chat.id, tenant_id: tenant.id, display_name: name, device_router: deviceRouter, subscriber_id: subscriberId }).catch((e) => console.error('chat bot:', e.message));
   res.json({ chatId: chat.id, token });
 }));
 
@@ -3478,6 +3484,8 @@ app.post('/portal/support', wrap(async (req, res) => {
        values ($1,$2,$3,$4,false)`,
       [s.tenant_id, t.id, s.name ?? 'Customer', body]);
   }
+  // The assistant's first look: urgent wording raises the priority, and a note with the account, payment and line state saves the technician asking.
+  (await import('./chatbot.js')).triageTicket(s.tenant_id, t.id, s.subscriber_id, `${subject} ${body ?? ''}`).catch((e) => console.error('ticket triage:', e.message));
   res.json({ ok: true, ticket: t.number });
 }));
 

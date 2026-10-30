@@ -3752,3 +3752,7 @@ alter table tenants add column if not exists chat_bot_enabled boolean not null d
 -- The device a hotspot guest chats from (its Wi-Fi address and the site that served the login page), so the assistant can sign that phone in once a payment is proved.
 alter table live_chats add column if not exists device_mac text;
 alter table live_chats add column if not exists device_router uuid;
+
+-- A chat can belong to a signed-in customer (the assistant then knows their account) and can come from the web or WhatsApp.
+alter table live_chats add column if not exists subscriber_id uuid;
+alter table live_chats add column if not exists channel text not null default 'web';

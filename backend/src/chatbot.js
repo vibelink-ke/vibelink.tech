@@ -74,6 +74,9 @@ async function handOff(chat, state, why) {
 /** Said when a chat opens. */
 export async function botStart(chat) {
   if (!(await botEnabled(chat.tenant_id))) return;
+  // A known problem at this guest's site is the first thing to say: it is very likely why they are here.
+  const known = await siteProblem(chat.tenant_id, await chatRouterId(chat)).catch(() => null);
+  if (known) await say(chat, outageLine(known));
   const first = String(chat.display_name ?? '').trim().split(/\s+/)[0];
   await say(chat,
     `Hi${first && !/^guest$/i.test(first) ? ` ${first}` : ''}, I'm the automated assistant.`,
@@ -198,11 +201,81 @@ async function reconnectOption(chat, state, n) {
   return say(chat, "Reply with another number, paste your M-Pesa message, or type 'person' for our team.");
 }
 
+/** What is wrong at the router a chat is on, if we know of anything: an outage recorded for it, or a router that is not answering. */
+async function siteProblem(tenantId, routerId) {
+  if (!routerId) return null;
+  const { rows: [o] } = await pool.query(
+    "select site, cause, eta from outages where tenant_id=$1 and router_id=$2 and status='active' order by started_at desc limit 1", [tenantId, routerId]);
+  if (o) return o;
+  const { rows: [r] } = await pool.query("select name from routers where id=$1 and tenant_id=$2 and status='down'", [routerId, tenantId]);
+  return r ? { site: r.name, cause: null, eta: null } : null;
+}
+
+const outageLine = (o) => `There is a known problem at ${o.site}${o.cause ? ` (${o.cause})` : ''}. Our engineers are working on it${o.eta ? `, expected back ${o.eta}` : ''}. You don't need to restart anything.`;
+
+/** The router a chat is on: the one the login page named, or the signed-in customer's own. */
+async function chatRouterId(chat) {
+  if (chat.device_router) return chat.device_router;
+  if (!chat.subscriber_id) return null;
+  const { rows: [s] } = await pool.query('select router_id from subscribers where id=$1 and tenant_id=$2', [chat.subscriber_id, chat.tenant_id]);
+  return s?.router_id ?? null;
+}
+
+const ABOUT_ACCOUNT = /\b(expire|expires|expiry|expiring|balance|status|account|due|owe|active|valid|until|renew)\b/i;
+
+/** Everything the system knows about a customer's line, in one place (used by the assistant and by ticket triage). */
+async function accountSnapshot(tenantId, subscriberId) {
+  const { rows: [s] } = await pool.query(
+    `select s.account_code, s.status, s.expires_at, s.router_id, s.pppoe_user, p.title as plan_title
+       from subscribers s left join plans p on p.id = s.plan_id where s.id=$1 and s.tenant_id=$2`, [subscriberId, tenantId]);
+  if (!s) return null;
+  const { rows: [pay] } = await pool.query(
+    'select amount, status, received_at from payments where tenant_id=$1 and subscriber_id=$2 order by received_at desc limit 1', [tenantId, subscriberId]);
+  let online = false;
+  if (s.pppoe_user) {
+    const { rows: [o] } = await pool.query(
+      "select 1 from radacct where username=$1 and acctstoptime is null and coalesce(acctupdatetime, acctstarttime) > now() - interval '10 minutes' limit 1", [s.pppoe_user]);
+    online = !!o;
+  }
+  return { ...s, pay: pay ?? null, online, problem: await siteProblem(tenantId, s.router_id) };
+}
+
+/** A signed-in home-internet customer asking about their account or why they are offline. Returns true when it answered. */
+async function accountHelp(chat, state) {
+  const a = await accountSnapshot(chat.tenant_id, chat.subscriber_id);
+  if (!a) return false;
+  const lines = [`Account ${a.account_code}${a.plan_title ? `, ${a.plan_title}` : ''}: ${a.status}${a.expires_at ? `, until ${when(a.expires_at)}` : ''}.`];
+  if (a.pay) lines.push(`Your last payment was ${money(a.pay.amount)} on ${when(a.pay.received_at)} (${a.pay.status}).`);
+  if (['expired', 'suspended', 'paused'].includes(a.status)) {
+    lines.push(`Your service is ${a.status}. Pay from your portal or the paybill on your invoice and it reconnects within a minute or two.`);
+  } else if (a.problem) {
+    lines.push(outageLine(a.problem));
+  } else if (a.online) {
+    lines.push('Our system shows your line is connected. If your devices have no internet, restart your Wi-Fi router and check its cable.');
+  } else {
+    lines.push('Your line is not connected on our side. Switch your router off for 30 seconds and back on, then wait about five minutes for it to connect.');
+    state.offline = (state.offline ?? 0) + 1;
+    if (state.offline >= 2) {
+      await say(chat, ...lines);
+      await handOff(chat, state, `account ${a.account_code} (${a.status}) is still offline after a restart`);
+      return true;
+    }
+  }
+  lines.push("Reply 'person' to talk to our team.");
+  await say(chat, ...lines);
+  return true;
+}
+
 async function converse(chat, state, text) {
   const m = readMpesa(text);
   const pick = /^\s*([1-8])[.)]?\s*$/.exec(text);
   if (pick) return reconnectOption(chat, state, Number(pick[1]));
   if (WANTS_MENU.test(text) && !m.codes.length) return say(chat, ...MENU);
+  if (!m.codes.length && chat.subscriber_id && (ABOUT_ACCOUNT.test(text) || ABOUT_CONNECTING.test(text)) && await accountHelp(chat, state)) return;
+  if (!m.codes.length && ABOUT_CONNECTING.test(text)) {
+    const known = await siteProblem(chat.tenant_id, await chatRouterId(chat));
+    if (known) return say(chat, outageLine(known), "If it is still down after we say it is fixed, tell me and I'll bring in our team.");
+  }
   if (WANTS_PERSON.test(text) && !m.codes.length) return handOff(chat, state, 'asked for a person');
   if (m.codes.length) return checkPayment(chat, state, m);
 
@@ -358,4 +431,48 @@ async function checkPhone(chat, state, phone) {
   state.notFound += 1;
   if (state.notFound >= 2) return handOff(chat, state, `could not find a recent payment from ${masked(phone)}`);
   return say(chat, "I can't find a recent payment from that number.", "Please paste the M-Pesa confirmation message you got, or just its 10-character code. Or reply 'options' to see every way to reconnect.");
+}
+
+const lastPromptSms = new Map();   // tenant:phone -> when, so one guest is not texted over and over
+
+/**
+ * A hotspot guest whose payment prompt never reached them, or whose M-Pesa balance was too low, gets one SMS saying so and that nothing was taken.
+ * Not for a prompt they cancelled themselves. At most one per phone per half hour. Only while the assistant is switched on for the tenant.
+ */
+export async function failedPaymentSms(req, reason) {
+  const p = req.purpose ?? {};
+  if (!p.plan_id || (p.type && p.type !== 'platform_collect')) return;   // a hotspot purchase only
+  const tenantId = p.tenant_id ?? req.tenant_id;
+  if (!(await botEnabled(tenantId))) return;
+  const r = String(reason ?? '');
+  let why;
+  if (/no response|cannot be reached|timeout/i.test(r)) why = " because the M-Pesa prompt did not reach you or was not answered";
+  else if (/insufficient/i.test(r)) why = ' because the M-Pesa balance was too low';
+  else return;
+  const key = `${tenantId}:${last9(req.phone)}`;
+  if (Date.now() - (lastPromptSms.get(key) ?? 0) < 30 * 60000) return;
+  lastPromptSms.set(key, Date.now());
+  const sms = await import('./sms.js');
+  const org = await sms.orgVars(tenantId).catch(() => ({}));
+  await sms.send(tenantId, req.phone, 'payment_failed', { company: org.company ?? '', amount: Number(req.amount), reason_line: why });
+}
+
+/**
+ * A customer opened a ticket: urgent wording raises its priority, and an internal note carries what the system already knows (account, last payment,
+ * whether the line is connected, any known problem at the site), so the technician does not start by asking for it.
+ */
+export async function triageTicket(tenantId, ticketId, subscriberId, text) {
+  if (!(await botEnabled(tenantId))) return;
+  if (/\b(no internet|offline|down|not working|cannot connect|can't connect|dead|disconnected)\b/i.test(String(text ?? ''))) {
+    await pool.query("update tickets set priority='high' where id=$1 and tenant_id=$2 and priority='medium'", [ticketId, tenantId]);
+  }
+  const a = subscriberId ? await accountSnapshot(tenantId, subscriberId) : null;
+  if (!a) return;
+  const note = [
+    `Auto-check: account ${a.account_code} is ${a.status}${a.expires_at ? ` until ${when(a.expires_at)}` : ''}.`,
+    a.pay ? `Last payment ${money(a.pay.amount)} on ${when(a.pay.received_at)} (${a.pay.status}).` : 'No payment on record.',
+    a.online ? 'The line is connected on our side.' : 'The line is not connected on our side.',
+    a.problem ? `Known problem at ${a.problem.site}${a.problem.cause ? `: ${a.problem.cause}` : ''}.` : 'No known problem at the site.',
+  ].join(' ');
+  await pool.query("insert into ticket_notes (tenant_id, ticket_id, author, body, internal) values ($1,$2,'Assistant',$3,true)", [tenantId, ticketId, note]);
 }

@@ -184,6 +184,8 @@ export const DEFAULTS = {
   chat_offline: 'Thanks for reaching out to {company}. Our team is offline right now — we saw your '
               + 'message and will reply as soon as we\'re back.{account_status}{help_link} '
               + 'Urgent? Call {support_phone}.',
+  // A hotspot guest whose payment prompt never reached them, or whose M-Pesa balance was too low (sent by the chat assistant, see chatbot.js).
+  payment_failed: '{company}: your payment of KES {amount} did not go through{reason_line}. No money was taken. Please try again from the Wi-Fi login page.',
 };
 
 const render = (tpl, vars) => String(tpl).replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? '');

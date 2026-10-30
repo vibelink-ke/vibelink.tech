@@ -771,7 +771,11 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
   const ok = Number(code) === 0;
   await pool.query('update stk_requests set status=$2, result_code=$3, result_desc=$4 where id=$1',
     [req.id, ok ? 'success' : 'failed', String(code), desc]);
-  if (!ok) return;
+  if (!ok) {
+    // A guest whose prompt never reached them, or whose balance was too low, is told by SMS what happened (the assistant's switch; see chatbot.js).
+    import('../chatbot.js').then((m) => m.failedPaymentSms(req, desc)).catch(() => {});
+    return;
+  }
   const p = req.purpose;
 
   /**
