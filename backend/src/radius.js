@@ -909,6 +909,9 @@ export async function walledGarden(c, tenantId, subId, { heal = false } = {}) {
     `select s.*, r.host, r.secret, r.pppoe_pool
        from subscribers s left join routers r on r.id = s.router_id where s.id=$1`, [subId]);
   if (!s?.pppoe_user) return;   // nothing provisioned in RADIUS to walled-garden
+  // Every caller reaches this with the subscriber already in an off state. A job that read its list a while ago can arrive here after the customer
+  // has paid and been switched back on: cutting them off again from that stale list left a paid customer blocked until someone paused and resumed.
+  if (['active', 'grace'].includes(s.status)) return;
 
   await c.query(
     `insert into radreply (tenant_id, username, attribute, op, value)

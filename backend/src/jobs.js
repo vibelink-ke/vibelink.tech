@@ -424,7 +424,10 @@ export async function expireAndSuspend() {
   for (const s of rows) {
     const hours = (Date.now() - new Date(s.expires_at)) / 36e5;
     const next = hours < 24 ? 'grace' : 'expired';
-    await pool.query('update subscribers set status=$2 where id=$1', [s.id, next]);
+    // Only if they are still overdue: a customer who paid since the list above was read is left as they are.
+    const { rowCount: moved } = await pool.query(
+      `update subscribers set status=$2 where id=$1 and status in ('active','grace') and expires_at < now()`, [s.id, next]);
+    if (!moved) continue;
     if (next === 'expired') {
       await walledGarden(pool, s.tenant_id, s.id)
         .catch((e) => console.error('expireAndSuspend: walledGarden failed for', s.id, '—', e.message));
@@ -448,6 +451,19 @@ export async function expireAndSuspend() {
   for (const s of stillExpired) {
     await walledGarden(pool, s.tenant_id, s.id, { heal: true })
       .catch((e) => console.error('expireAndSuspend: walledGarden retry failed for', s.id, '—', e.message));
+  }
+  // The reverse: a customer who is paid up (active, or in the first day of grace) but still has the block or the 1k/1k rate in RADIUS. It is put back
+  // the way a payment does it, which also drops the session still carrying the block.
+  const { rows: stuck } = await pool.query(
+    `select s.id, s.tenant_id from subscribers s
+      where s.status in ('active','grace') and s.pppoe_user is not null and s.tenant_id in (${enabledTenants})
+        and exists (select 1 from radreply r where r.tenant_id = s.tenant_id and r.username = s.pppoe_user
+                      and ((r.attribute = 'Mikrotik-Address-List' and r.value = 'ispblocking') or (r.attribute = 'Mikrotik-Rate-Limit' and r.value = '1k/1k')))
+      limit 25`, ['expireAndSuspend']);
+  for (const s of stuck) {
+    await withTenant(s.tenant_id, (c) => activateSubscriber(c, s.tenant_id, s.id))
+      .then(() => console.log('expireAndSuspend: took a paid-up customer off the block list', s.id))
+      .catch((e) => console.error('expireAndSuspend: could not unblock', s.id, '—', e.message));
   }
   /**
    * unbindDeviceByMac is best-effort by design (the DB status change below

@@ -327,5 +327,12 @@
       "Fibre customers are now treated as FTTH when their category is Individual and FTTB when it is Business. The Clients page has FTTH and FTTB filters, and business customers are not offered WiFi changes on the customer portal.",
       "Plans now have an Available to setting: Everyone, FTTH only (Individual customers) or FTTB only (Business customers). Adding a client, changing a plan and the customer portal's plan change only offer the plans that fit the customer's category. Existing plans stay available to everyone."
     ]
+  },
+  {
+    "date": "2026-10-30",
+    "title": "Paid customers no longer re-blocked",
+    "items": [
+      "A customer who paid just as the expiry check was running could be cut off again and stay blocked until their service was paused and resumed. The check now skips anyone who has paid, and paid-up customers still carrying a block are put back automatically within 30 seconds."
+    ]
   }
 ]
