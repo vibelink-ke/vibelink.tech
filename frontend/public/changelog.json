@@ -337,7 +337,8 @@
       "Live chat can now have an automated assistant (Live support, Assistant, Turn on). A guest who has paid and has no code, or has a code and cannot connect, can paste their whole M-Pesa message or just its code and is told their code or what is wrong. It never shows a code to someone who only gives a phone number (it sends that to the number that paid by SMS), and it hands the chat to your team, alerting sales, when it cannot find the payment, is asked for a person, or a payment is not linked to anything. It is off until you turn it on.",
       "Hotspot payments no longer fail with \"Could not reach the payment gateway\" when many guests pay at once. The M-Pesa and KopoKopo access token is now reused for its hour instead of being requested for every payment, which Safaricom rate-limits. When a gateway does answer \"too busy\", guests are asked to wait a few seconds, and the log records what it said.",
       "A guest who presses Pay while a payment prompt is still waiting on their phone is now told so (\"check for the M-Pesa prompt and enter your PIN, or wait a minute\") instead of a message about the gateway being busy.",
-      "A guest who presses Pay again, or reloads the page, while their payment prompt is still on their phone is now taken back to that same prompt and keeps waiting for it, instead of getting an error."
+      "A guest who presses Pay again, or reloads the page, while their payment prompt is still on their phone is now taken back to that same prompt and keeps waiting for it, instead of getting an error.",
+      "A hotspot payment that fails now records and shows the real reason KopoKopo gave (cancelled, wrong PIN, not enough money, phone unreachable) instead of just \"Failed\", so a guest knows what to do and you can tell a cancelled prompt from a problem with the till."
     ]
   }
 ]

@@ -116,8 +116,14 @@ router.post('/stk', async (req, res) => {
    * anyone who found it later.
    * https://developers.kopokopo.com/guides/receive-money/mpesa-stk.html
    */
+  // A failed prompt says why in event.errors (cancelled, wrong PIN, not enough money, phone unreachable...). Only the word "Failed" used to be kept,
+  // so nobody could tell a guest who cancelled from a till that was refusing.
+  const said = (e) => (e == null ? '' : typeof e === 'string' ? e : Array.isArray(e) ? e.map(said).filter(Boolean).join('; ')
+    : typeof e === 'object' ? String(e.description ?? e.message ?? e.error ?? JSON.stringify(e)) : String(e));
+  const reason = d.status === 'Success' ? d.status : (said(d.event?.errors) || said(d.errors) || d.status);
+  if (d.status !== 'Success') console.warn(`kopokopo stk ${checkoutId} ${d.status}:`, JSON.stringify(d.event ?? d).slice(0, 400));
   await handleStkResult('kopokopo', checkoutId,
-    d.status === 'Success' ? 0 : 1, d.status,
+    d.status === 'Success' ? 0 : 1, String(reason).slice(0, 200),
     { ref: ev.reference, amount: ev.amount, phone: ev.sender_phone_number,
       name: [ev.sender_first_name, ev.sender_middle_name, ev.sender_last_name].filter(Boolean).join(' ') || null }
   ).catch(console.error);
