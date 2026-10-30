@@ -1332,6 +1332,15 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
       where id=$1 and tenant_id=$2 and service='hotspot' and active`,
     [planId, tenant.id]);
   if (!plan) return res.status(404).json({ error: 'That bundle is no longer on sale' });
+  // The same phone pressing Pay again for the same bundle while its prompt is still waiting (a second tap, a reload): the gateway refuses a second
+  // prompt ("a pending request for the phone number"), so the page is pointed at the one already out and carries on watching it.
+  const { rows: [waiting] } = await pool.query(
+    `select checkout_id from stk_requests
+      where status = 'pending' and created_at > now() - interval '60 seconds'
+        and phone = $1 and (tenant_id = $2 or purpose->>'tenant_id' = $2::text)
+        and purpose->>'plan_id' = $3
+      order by created_at desc limit 1`, [phone, tenant.id, plan.id]);
+  if (waiting) return res.json({ checkoutId: waiting.checkout_id, phone, amount: Number(plan.price), plan: plan.title });
 
   const { config } = await import('./db.js');
   /**
