@@ -3748,3 +3748,7 @@ alter table chat_messages drop constraint if exists chat_sender_valid;
 alter table chat_messages add constraint chat_sender_valid check (sender in ('visitor', 'staff', 'bot'));
 alter table live_chats add column if not exists bot_state jsonb not null default '{}'::jsonb;
 alter table tenants add column if not exists chat_bot_enabled boolean not null default false;
+
+-- The device a hotspot guest chats from (its Wi-Fi address and the site that served the login page), so the assistant can sign that phone in once a payment is proved.
+alter table live_chats add column if not exists device_mac text;
+alter table live_chats add column if not exists device_router uuid;

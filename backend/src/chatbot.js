@@ -84,7 +84,7 @@ export async function botStart(chat) {
 /** A visitor message arrived. Does nothing once a person has the chat, or when the assistant is off. */
 export async function botReply(chatId, text) {
   const { rows: [chat] } = await pool.query(
-    'select id, tenant_id, status, visitor_ref, display_name, bot_state from live_chats where id=$1', [chatId]);
+    'select * from live_chats where id=$1', [chatId]);
   if (!chat || chat.status !== 'waiting') return;
   if (!(await botEnabled(chat.tenant_id))) return;
   const state = { lookups: 0, notFound: 0, unclear: 0, stuck: 0, resentAt: null, voucher: null, handed: false, ...(chat.bot_state ?? {}) };
@@ -131,8 +131,69 @@ const OPTIONS = {
 
 const WANTS_MENU = /\b(options?|menu|reconnect|reconnecting|already paid|paid already)\b/i;
 
+/**
+ * Sign this guest's phone in on the router it is on, the way the login page's "connect me" does: the router is asked to log the device in with the
+ * voucher. Only called once a payment is proved (the M-Pesa code) or for a bundle already tied to this phone. Returns 'connected', 'already' (online
+ * already), 'unknown' (the page did not say which device this is), 'not-found' (that device is not waiting on any router's login page) or 'failed'.
+ */
+async function signIn(chat, code) {
+  const mac = String(chat.device_mac ?? '').toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) return 'unknown';
+  const { rows: routers } = await pool.query(
+    `select id, host, api_port, service_user, service_password_enc from routers
+      where tenant_id=$1 and role in ('hotspot','both') and service_user is not null and service_password_enc is not null
+      order by (id::text = $2) desc, name limit 8`, [chat.tenant_id, String(chat.device_router ?? '')]);
+  const ros = await import('./routeros.js');
+  const secrets = await import('./secrets.js');
+  let failed = false;
+  for (const r of routers) {
+    let conn;
+    try {
+      conn = await ros.connect({ host: String(r.host).split('/')[0], port: r.api_port ?? 8728, user: r.service_user, password: secrets.decrypt(r.service_password_enc), timeoutSec: 4 });
+      const hosts = await conn.write('/ip/hotspot/host/print', [`?mac-address=${mac}`]).catch(() => []);
+      if (!hosts.length) continue;
+      if (hosts.some((h) => String(h.authorized) === 'true')) return 'already';
+      const host = hosts.find((h) => h.address);
+      if (!host) continue;
+      // A voucher's password is its code (see issueVoucherAccess).
+      await conn.write('/ip/hotspot/active/login', [`=user=${code}`, `=password=${code}`, `=ip=${host.address}`, `=mac-address=${mac}`]);
+      return 'connected';
+    } catch (e) {
+      failed = true;
+      console.warn('chat bot: router login failed:', e.message);
+    } finally {
+      if (conn) { try { ros.close(conn); } catch { /* already gone */ } }
+    }
+  }
+  return failed ? 'failed' : 'not-found';
+}
+
+const connectedLine = "I've connected this phone for you. If the page doesn't open by itself, open any website.";
+
+/** Option 1: a bundle already running for this phone's own Wi-Fi address, signed in without typing anything. Returns what happened. */
+async function reconnectThisPhone(chat) {
+  const mac = String(chat.device_mac ?? '').toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)) return 'unknown';
+  const { rows: [v] } = await pool.query(
+    `select v.code from vouchers v
+      where v.tenant_id=$1 and upper(v.mac::text)=$2 and v.status='in_use' and (v.expires_at is null or v.expires_at > now())
+     union all
+     select v.code from voucher_devices d join vouchers v on v.id = d.voucher_id
+      where v.tenant_id=$1 and upper(d.mac::text)=$2 and v.status='in_use' and (v.expires_at is null or v.expires_at > now())
+     limit 1`, [chat.tenant_id, mac]);
+  if (!v) return 'no-bundle';
+  return signIn(chat, v.code);
+}
+
 async function reconnectOption(chat, state, n) {
   if (n === 8) return handOff(chat, state, 'asked for a person');
+  if (n === 1) {
+    const how = await reconnectThisPhone(chat);
+    if (how === 'connected') return say(chat, connectedLine);
+    if (how === 'already') return say(chat, 'This phone is already online on your bundle.');
+    if (how === 'no-bundle') await say(chat, "I couldn't find a running bundle for this phone. If you paid from another phone, paste your M-Pesa message and I'll connect this one.");
+    else if (how === 'not-found' || how === 'failed') await say(chat, "I couldn't sign this phone in from here. Here is what to try:");
+  }
   await say(chat, ...OPTIONS[n]);
   return say(chat, "Reply with another number, paste your M-Pesa message, or type 'person' for our team.");
 }
@@ -193,7 +254,11 @@ async function checkPayment(chat, state, m) {
     await say(chat,
       `Found it: ${money(p.amount)} received${p.plan_title ? ` for ${p.plan_title}` : ''}. Your code is ${p.voucher_code}, `
         + `${p.voucher_expires ? `valid until ${when(p.voucher_expires)}` : 'and its time starts at your first login'}.`);
-    await say(chat, p.voucher_status === 'in_use' ? inUseAdvice() : 'To connect: open the login page, type the code in the voucher box and tap Connect.');
+    // The M-Pesa code proves the payment, so this phone is signed in on it straight away.
+    const how = await signIn(chat, p.voucher_code);
+    if (how === 'connected') await say(chat, connectedLine);
+    else if (how === 'already') await say(chat, 'This phone is already online on your bundle.');
+    else await say(chat, p.voucher_status === 'in_use' ? inUseAdvice() : 'To connect: open the login page, type the code in the voucher box and tap Connect.');
     return say(chat, "If it still won't connect, tell me and I'll check again. Reply 'options' to see every way to reconnect, or type 'person'.");
   }
 

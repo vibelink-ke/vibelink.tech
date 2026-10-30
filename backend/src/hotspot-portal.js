@@ -1278,7 +1278,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       fetch(API + '/chat/start', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: name, phone: phone }),
+        body: JSON.stringify({ name: name, phone: phone, mac: (DEVICE_MAC && DEVICE_MAC.indexOf('$') !== 0) ? DEVICE_MAC : '', routerId: ROUTER_ID }),
       })
         .then(function (r) { return r.json(); })
         .then(function (d) {

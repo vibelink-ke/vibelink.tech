@@ -2465,10 +2465,26 @@ app.post('/chat/start', chatStartLimiter, wrap(async (req, res) => {
   const phone = String(req.body?.phone ?? '').replace(/[^0-9+]/g, '').slice(0, 15) || null;
   const token = crypto.randomBytes(24).toString('base64url');
 
-  const { rows: [chat] } = await pool.query(
-    `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at)
-     values ($1,$2,'waiting',$3,$4, now()) returning id`,
-    [tenant.id, phone ?? 'anonymous', token, name]);
+  // The phone's Wi-Fi address and the site, from the hotspot login page: so the assistant can sign it in once a payment is proved. Checked, not trusted.
+  let deviceMac = String(req.body?.mac ?? '').trim().toUpperCase();
+  if (!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(deviceMac) || deviceMac === '00:00:00:00:00:00') deviceMac = null;
+  let deviceRouter = String(req.body?.routerId ?? '').trim() || null;
+  if (deviceRouter) {
+    const { rows: [rr] } = await pool.query('select id from routers where id::text=$1 and tenant_id=$2', [deviceRouter, tenant.id]).catch(() => ({ rows: [] }));
+    if (!rr) deviceRouter = null;
+  }
+  // A database that has not had the two new columns added yet still starts the chat, just without the device.
+  const chatRow = await pool.query(
+    `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at, device_mac, device_router)
+     values ($1,$2,'waiting',$3,$4, now(), $5, $6) returning id`,
+    [tenant.id, phone ?? 'anonymous', token, name, deviceMac, deviceRouter]).catch(async (e) => {
+    if (e?.code !== '42703') throw e;
+    return pool.query(
+      `insert into live_chats (tenant_id, visitor_ref, status, token, display_name, last_visitor_at)
+       values ($1,$2,'waiting',$3,$4, now()) returning id`,
+      [tenant.id, phone ?? 'anonymous', token, name]);
+  });
+  const chat = chatRow.rows[0];
 
   // An immediate acknowledgment when nobody's actually around to answer —
   // the standard shape for this (see the WhatsApp/live-chat research this
