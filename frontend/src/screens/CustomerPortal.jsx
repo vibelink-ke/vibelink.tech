@@ -636,11 +636,11 @@ export default function CustomerPortal() {
                     <span
                       key={m.id}
                       style={{
-                        alignSelf: m.sender === 'staff' ? 'flex-start' : 'flex-end',
+                        alignSelf: m.sender !== 'visitor' ? 'flex-start' : 'flex-end',
                         maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
-                        background: m.sender === 'staff' ? '#fff' : pc.accent,
-                        color: m.sender === 'staff' ? pc.ink : '#fff',
-                        border: m.sender === 'staff' ? `1px solid ${pc.line}` : 'none',
+                        background: m.sender !== 'visitor' ? '#fff' : pc.accent,
+                        color: m.sender !== 'visitor' ? pc.ink : '#fff',
+                        border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none',
                       }}
                     >
                       {m.body}
@@ -1050,11 +1050,11 @@ export default function CustomerPortal() {
                   <span
                     key={m.id}
                     style={{
-                      alignSelf: m.sender === 'staff' ? 'flex-start' : 'flex-end',
+                      alignSelf: m.sender !== 'visitor' ? 'flex-start' : 'flex-end',
                       maxWidth: '85%', padding: '7px 10px', borderRadius: 9, fontSize: 13.5,
-                      background: m.sender === 'staff' ? '#fff' : pc.accent,
-                      color: m.sender === 'staff' ? pc.ink : '#fff',
-                      border: m.sender === 'staff' ? `1px solid ${pc.line}` : 'none',
+                      background: m.sender !== 'visitor' ? '#fff' : pc.accent,
+                      color: m.sender !== 'visitor' ? pc.ink : '#fff',
+                      border: m.sender !== 'visitor' ? `1px solid ${pc.line}` : 'none',
                     }}
                   >
                     {m.body}

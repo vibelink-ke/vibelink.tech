@@ -56,6 +56,8 @@ export const DEFAULT_PERMISSIONS = {
   'links.view':      { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'chaining.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
   'chaining.manage': { owner: true, cashier: false, technician: true,  support: false, sales: false },
+  // The chat assistant that answers visitors who paid and have no code: turning it on or off.
+  'chatbot.manage':  { owner: true, cashier: false, technician: false, support: true,  sales: false },
   'links.manage':    { owner: true, cashier: false, technician: true,  support: false, sales: false },
   // SmartOLT: seeing the ONUs, and acting on them (reboot, enable/disable, authorise, connecting the account).
   'smartolt.view':   { owner: true, cashier: false, technician: true,  support: true,  sales: false },
@@ -251,6 +253,7 @@ export const PERMISSION_META = [
   { key: 'apikeys.manage', page: 'Settings', action: 'Make and revoke API keys (SkyPlan)' },
   { key: 'chaining.view', page: 'Router chaining', action: 'View' },
   { key: 'chaining.manage', page: 'Router chaining', action: 'Scan, add, rename, ignore and remove chained routers' },
+  { key: 'chatbot.manage', page: 'Live support', action: 'Turn the chat assistant on or off' },
   { key: 'links.view', page: 'Shared links', action: 'View' },
   { key: 'links.manage', page: 'Shared links', action: 'Add, edit and delete links, and put customers on them' },
   { key: 'security.manage', page: 'Settings', action: 'Anti-tunnel protection and closing routers\' management access' },

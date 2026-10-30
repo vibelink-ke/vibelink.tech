@@ -343,6 +343,8 @@ export const api = {
   chatMessages: (id, since = 0) => get(`/api/live-chats/${id}/messages?since=${since}`),
   sendChatReply: (id, body) => post(`/api/live-chats/${id}/messages`, { body }),
   closeChat: (id) => post(`/api/live-chats/${id}/close`, {}),
+  liveBot: () => get('/api/live-support/bot'),
+  setLiveBot: (enabled) => put('/api/live-support/bot', { enabled }),
 
   outages: () => get('/api/outages'),
   createOutage: (o) => post('/api/outages', o),

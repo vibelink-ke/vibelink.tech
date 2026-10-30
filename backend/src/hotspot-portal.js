@@ -1252,7 +1252,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
           (d.messages || []).forEach(function (m) {
             chatLastId = m.id;
             // Only the other side: our own were shown the moment they were sent.
-            if (m.sender === 'staff') appendMessage('staff', m.body);
+            if (m.sender === 'staff' || m.sender === 'bot') appendMessage('staff', m.body);
           });
           if (d.status === 'closed') {
             clearInterval(chatPollTimer);

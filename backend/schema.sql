@@ -3742,3 +3742,9 @@ alter table tenants add column if not exists chaining_enabled boolean not null d
 
 -- Who a plan is for: everyone, FTTH customers (category Individual) or FTTB customers (category Business). Only limits what can be chosen for a new or changed plan.
 alter table plans add column if not exists audience text not null default 'all' check (audience in ('all','ftth','fttb'));
+
+-- The chat assistant: a "bot" sender for its replies, what it has done so far in each chat, and a per-tenant switch (off until turned on).
+alter table chat_messages drop constraint if exists chat_sender_valid;
+alter table chat_messages add constraint chat_sender_valid check (sender in ('visitor', 'staff', 'bot'));
+alter table live_chats add column if not exists bot_state jsonb not null default '{}'::jsonb;
+alter table tenants add column if not exists chat_bot_enabled boolean not null default false;

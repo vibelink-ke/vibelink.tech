@@ -50,6 +50,18 @@ export default function LiveSupport() {
   const [chats, setChats] = useState({}); // id -> [{from, text, mine}]
   const [draft, setDraft] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
+  const canBot = !!store.session?.perms?.['chatbot.manage'];
+  const [bot, setBot] = useState(null);
+  useEffect(() => { api.liveBot().then((r) => setBot(!!r.enabled)).catch(() => setBot(false)); }, []);
+  const flipBot = async () => {
+    try {
+      const r = await api.setLiveBot(!bot);
+      setBot(!!r.enabled);
+      store.toast(r.enabled ? 'Assistant turned on' : 'Assistant turned off');
+    } catch (e) {
+      store.toast(`Could not change it: ${e.message}`);
+    }
+  };
 
   const queue = store.liveQueue ?? [];
   const waiting = queue.filter((c) => c.status === 'waiting');
@@ -112,7 +124,7 @@ export default function LiveSupport() {
           ...c,
           [activeId]: messages.map((m) => ({
             id: m.id,
-            from: m.sender === 'staff' ? 'You' : 'Client',
+            from: m.sender === 'staff' ? 'You' : m.sender === 'bot' ? 'Assistant' : 'Client',
             text: m.body,
             mine: m.sender === 'staff',
           })),
@@ -184,6 +196,18 @@ export default function LiveSupport() {
       title="Live support"
       subtitle="Chats started by clients from the portal. The client's view is on the right, so you can see exactly what they see."
     >
+      <Card
+        title="Assistant"
+        subtitle="Answers visitors who have paid and have no code, or cannot connect, until a person takes the chat"
+        actions={canBot && bot != null ? <Button size="sm" onClick={flipBot}>{bot ? 'Turn off' : 'Turn on'}</Button> : undefined}
+      >
+        <span style={{ fontSize: 12.5, color: color.muted, lineHeight: 1.5 }}>
+          {bot == null ? 'Checking…' : bot
+            ? 'On. It greets each new chat and checks M-Pesa messages and codes against your payments. It stops when you accept a chat, and passes a chat to you when it cannot find a payment, is asked for a person, or goes round in circles.'
+            : 'Off. Chats wait for a person, as before. Turn it on to have an assistant answer "I paid but got no code" and "I cannot connect" automatically.'}
+        </span>
+      </Card>
+
       <Grid min={200} gap={14}>
         <Stat label="Waiting" value={waiting.length} tone={waiting.length ? color.amberInk : undefined} hint={waiting.length ? 'needs an agent' : 'queue clear'} />
         <Stat label="Active" value={active.length} hint="being handled" />
@@ -235,7 +259,7 @@ export default function LiveSupport() {
                     <span style={{ fontSize: 12, color: color.neutralInk, fontFamily: font.mono }}>{c.visitor_ref}</span>
                   )}
                   <span style={{ fontSize: 11.5, color: color.muted }}>
-                    {c.status === 'waiting' ? 'Waiting — click to accept' : 'Active'}
+                    {c.status === 'waiting' ? (c.bot_state?.handed ? 'Assistant passed this on — click to accept' : 'Waiting — click to accept') : 'Active'}
                   </span>
                 </div>
               ))}

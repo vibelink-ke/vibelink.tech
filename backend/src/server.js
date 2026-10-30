@@ -2516,6 +2516,8 @@ app.post('/chat/start', chatStartLimiter, wrap(async (req, res) => {
     }
   }
 
+  // The assistant's hello, if the tenant has it on. Never allowed to fail the chat.
+  await (await import('./chatbot.js')).botStart({ id: chat.id, tenant_id: tenant.id, display_name: name }).catch((e) => console.error('chat bot:', e.message));
   res.json({ chatId: chat.id, token });
 }));
 
@@ -2534,6 +2536,8 @@ app.post('/chat/:id/message', chatMessageLimiter, wrap(async (req, res) => {
     "insert into chat_messages (tenant_id, chat_id, sender, body) values ($1,$2,'visitor',$3)",
     [chat.tenant_id, chat.id, body]);
   await pool.query('update live_chats set last_visitor_at=now() where id=$1', [chat.id]);
+  // Answers while nobody has taken the chat; a failure here must never lose the visitor's own message.
+  await (await import('./chatbot.js')).botReply(chat.id, body).catch((e) => console.error('chat bot:', e.message));
   res.json({ ok: true });
 }));
 
@@ -6053,6 +6057,10 @@ app.post('/api/messages', requirePermission('messaging.send'), async (req, res) 
   }
   res.json({ ...m, delivered });
 });
+
+// The chat assistant's switch. Anyone on the live support screen can see it; turning it on or off is chatbot.manage.
+app.get('/api/live-support/bot', wrap(async (req, res) => res.json({ enabled: await (await import('./chatbot.js')).botEnabled(req.tenant.id) })));
+app.put('/api/live-support/bot', requirePermission('chatbot.manage'), wrap(async (req, res) => res.json(await (await import('./chatbot.js')).setBotEnabled(req.tenant.id, !!req.body?.enabled))));
 
 app.get('/api/live-chats', async (req, res) => {
   const { rows } = await pool.query("select * from live_chats where tenant_id=$1 and status<>'closed' order by started_at", [req.tenant.id]);
