@@ -421,6 +421,62 @@ export function syncRouterQueues(conn, opts) {
   return serial(opts.routerId, () => syncRouterQueuesUnlocked(conn, opts));
 }
 
+// routerId -> block-list problems seen on an earlier pass (key -> when first seen). One is only acted on once it has been there for a minute,
+// so a session that is just coming up or going down is never mistaken for one that is wrong.
+const blockSeen = new Map();
+
+/**
+ * The block list as the router holds it, against who is actually connected. Two things are put right:
+ *   - an entry for an address nobody is connected on (left behind by a session that ended): the next customer handed that address would be
+ *     blocked for nothing, however much they have paid;
+ *   - an entry on the session of a customer who is paid up and has no block in RADIUS any more: their session is dropped so they redial
+ *     clean, as it would be if the disconnect sent when they paid had not got through.
+ * A customer who is expired, suspended or paused is never touched, and nor is the managed expired range. Returns a sentence, or null.
+ */
+async function dropStaleBlockEntries(conn, { tenantId, routerId, lines }) {
+  const entries = await ros.dynamicBlockEntries(conn);
+  const before = blockSeen.get(routerId) ?? new Map();
+  const seen = new Map();
+  if (!entries.length) { blockSeen.delete(routerId); return null; }
+  const sessions = await ros.activeSessionsByName(conn);
+  const userAt = new Map();
+  for (const [name, sess] of sessions) if (sess.address) userAt.set(sess.address, name);
+  const lineOf = new Map(lines.filter((l) => l.pppoe_user).map((l) => [l.pppoe_user, l]));
+
+  const staleEntries = [];
+  const paidSessions = [];
+  for (const e of entries) {
+    const user = userAt.get(e.address);
+    if (!user) { staleEntries.push(e); continue; }
+    const l = lineOf.get(user);
+    if (l && ['active', 'grace'].includes(l.status)) paidSessions.push({ user, address: e.address });
+  }
+  // Still carrying a block in RADIUS: they would come straight back blocked, and the job that puts that right does it.
+  let stillBlocked = new Set();
+  if (paidSessions.length) {
+    const { rows } = await pool.query(
+      `select username from radreply where tenant_id=$1 and attribute='Mikrotik-Address-List' and value='ispblocking' and username = any($2::text[])`,
+      [tenantId, paidSessions.map((p) => p.user)]);
+    stillBlocked = new Set(rows.map((r) => r.username));
+  }
+
+  const due = (key) => { const first = before.get(key) ?? Date.now(); seen.set(key, first); return Date.now() - first >= 60000; };
+  let removed = 0; let refused = 0; let kicked = 0;
+  for (const e of staleEntries) {
+    if (!due(`a|${e.address}`)) continue;
+    try { await ros.removeBlockEntry(conn, e.id); removed += 1; } catch { refused += 1; }
+  }
+  for (const p of paidSessions.filter((x) => !stillBlocked.has(x.user)).slice(0, 10)) {
+    if (!due(`u|${p.user}`)) continue;
+    try { await ros.removeSession(conn, sessions.get(p.user).id); kicked += 1; } catch { /* gone already */ }
+  }
+  blockSeen.set(routerId, seen);
+  if (!removed && !refused && !kicked) return null;
+  return [removed ? `${removed} stale block entr${removed === 1 ? 'y' : 'ies'} removed` : null,
+    refused ? `${refused} stale entr${refused === 1 ? 'y' : 'ies'} the router would not remove` : null,
+    kicked ? `${kicked} paid-up customer(s) on a blocked session sent to redial` : null].filter(Boolean).join('; ');
+}
+
 // routerId -> what the router was last brought to, so an unchanged one is skipped.
 const state = new Map();
 
@@ -445,6 +501,10 @@ export async function syncRouterNow(r, { force = false } = {}) {
     if (fixed) console.warn('router queues:', r.name, '—', fixed);
 
     const lines = await customerLines(r.tenant_id, r.id);
+    // Before the unchanged-router skip below: a stale entry appears without anything in the database changing.
+    const cleaned = await dropStaleBlockEntries(conn, { tenantId: r.tenant_id, routerId: r.id, lines })
+      .catch((e) => `block list cleanup failed: ${e.message}`);
+    if (cleaned) console.log('router block list:', r.name, '—', cleaned);
     const sig = signature(lines);
     const prev = state.get(r.id);
     if (!force && prev && prev.sig === sig && Date.now() - prev.at < 30 * 60000) return null;

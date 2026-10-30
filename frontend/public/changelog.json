@@ -332,7 +332,8 @@
     "date": "2026-10-30",
     "title": "Paid customers no longer re-blocked",
     "items": [
-      "A customer who paid just as the expiry check was running could be cut off again and stay blocked until their service was paused and resumed. The check now skips anyone who has paid, and paid-up customers still carrying a block are put back automatically within 30 seconds."
+      "A customer who paid just as the expiry check was running could be cut off again and stay blocked until their service was paused and resumed. The check now skips anyone who has paid, and paid-up customers still carrying a block are put back automatically within 30 seconds.",
+      "Block-list entries left on a router by sessions that have ended are now cleared automatically, so the next customer given that address is not blocked for nothing. A paid-up customer whose live session is still on the block list is sent to redial clean."
     ]
   }
 ]

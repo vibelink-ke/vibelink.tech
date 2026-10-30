@@ -1438,6 +1438,14 @@ export async function dropBlockEntries(conn) {
   return removed;
 }
 
+/** The block-list entries a live session put there (dynamic), as { id, address }; the managed expired range is not one of them. */
+export async function dynamicBlockEntries(conn) {
+  const rows = await conn.write('/ip/firewall/address-list/print', ['?list=ispblocking']);
+  return rows.filter((r) => isDynamic(r) && !isManaged(r)).map((r) => ({ id: idOf(r), address: String(r.address ?? '') }));
+}
+
+export const removeBlockEntry = (conn, id) => conn.write('/ip/firewall/address-list/remove', [`=.id=${id}`]);
+
 /** Who is connected right now: username -> { id, address }. */
 export async function activeSessionsByName(conn) {
   const rows = await conn.write('/ppp/active/print', []);
