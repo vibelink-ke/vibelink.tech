@@ -208,7 +208,7 @@ const loginLimiter = rateLimit({
  * "Too many payment attempts". So the limit that protects a person is per phone number (nobody's phone should be
  * flooded with M-Pesa prompts). There is deliberately no per-IP limit on top: it is the whole site's budget.
  */
-const phoneOf = (req) => String(req.body?.phone ?? '').replace(/D/g, '').slice(-9);
+const phoneOf = (req) => String(req.body?.phone ?? '').replace(/[^0-9]/g, '').slice(-9);
 const stkPhoneLimiter = rateLimit({
   windowMs: 10 * 60 * 1000, max: 6, standardHeaders: true, legacyHeaders: false,
   skip: (req) => phoneOf(req).length < 9,
