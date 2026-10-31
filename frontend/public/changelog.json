@@ -357,7 +357,8 @@
       "Sign-in no longer cares about capital letters in your username, so Khan and khan both work (phones often capitalise the first letter).",
       "The Approvals tab and its approve and reject buttons are now shown only to the super-administrator. With one on the account, Administrators ask like everyone else and only the super-administrator decides.",
       "Approval of wallet changes and day extensions is now always on. The switch for it on the Approvals tab is gone.",
-      "Each router now has a Winbox (VPN) option in its Actions menu. It shows the router's tunnel address to put in Winbox, whether the router is on the tunnel, and downloads your VPN profile. No public IP or port-forwarding is needed."
+      "Each router now has a Winbox (VPN) option in its Actions menu. It shows the router's tunnel address to put in Winbox, whether the router is on the tunnel, and downloads your VPN profile. No public IP or port-forwarding is needed.",
+      "When you match a payment to a client, the client picker now has a search box: type part of a name, account number, phone or login to narrow the list."
     ]
   }
 ]

@@ -62,6 +62,33 @@ const whenFull = (d) => {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`;
 };
 
+/** Pick a client for a payment: type part of a name, account, phone or login to narrow the list. */
+function ClientPicker({ clients, value, onChange }) {
+  const [q, setQ] = useState('');
+  const shown = useMemo(() => {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hay = (c) => [c.name, c.account_code, c.phone, c.pppoe_username, c.username, c.email].filter(Boolean).join(' ').toLowerCase();
+    const hit = words.length ? clients.filter((c) => { const h = hay(c); return words.every((w) => h.includes(w)); }) : clients;
+    // The chosen client stays in the list even when the search no longer matches it.
+    const chosen = clients.find((c) => c.id === value);
+    return chosen && !hit.includes(chosen) ? [chosen, ...hit] : hit;
+  }, [clients, q, value]);
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <span style={{ fontSize: 12, fontWeight: 500, color: color.inkSoft }}>Apply to client</span>
+      <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, account, phone or login" autoFocus />
+      <Select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        options={[
+          { value: '', label: !clients.length ? 'No clients loaded' : shown.length ? `Select a client… (${shown.length}${q ? ' match' + (shown.length === 1 ? '' : 'es') : ''})` : 'No client matches that search' },
+          ...shown.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}${c.phone ? ' · ' + c.phone : ''}` })),
+        ]}
+      />
+    </label>
+  );
+}
+
 export default function Payments() {
   const store = useStore();
   const pay = useInvoicePay(store);
@@ -1047,17 +1074,7 @@ export default function Payments() {
           <div style={{ background: color.tileBg, borderRadius: radius.md, padding: 12, fontSize: 13 }}>
             {money(unmatched.filter((p) => picked.includes(p.id)).reduce((a, p) => a + Number(p.amount), 0))} in total, applied one after the other (an expired service is renewed first).
           </div>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            <span style={{ fontSize: 12, fontWeight: 500, color: color.inkSoft }}>Apply to client</span>
-            <Select
-              value={assignTo}
-              onChange={(e) => setAssignTo(e.target.value)}
-              options={[
-                { value: '', label: store.clients.length ? 'Select a client…' : 'No clients loaded' },
-                ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
-              ]}
-            />
-          </label>
+          <ClientPicker clients={store.clients} value={assignTo} onChange={setAssignTo} />
         </div>
       </Modal>
       <Modal
@@ -1081,17 +1098,7 @@ export default function Payments() {
                 {phone(resolving.payer_phone)} · typed "{resolving.raw_account ?? ''}"
               </span>
             </div>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span style={{ fontSize: 12, fontWeight: 500, color: color.inkSoft }}>Apply to client</span>
-              <Select
-                value={assignTo}
-                onChange={(e) => setAssignTo(e.target.value)}
-                options={[
-                  { value: '', label: store.clients.length ? 'Select a client…' : 'No clients loaded' },
-                  ...store.clients.map((c) => ({ value: c.id, label: `${c.name} · ${c.account_code}` })),
-                ]}
-              />
-            </label>
+            <ClientPicker clients={store.clients} value={assignTo} onChange={setAssignTo} />
           </div>
         )}
       </Modal>
