@@ -133,6 +133,18 @@ function MenuItem({ onClick, title, children }) {
   );
 }
 
+/** Mint a VPN profile for this login (a fresh peer each time: the password is only ever shown once) and save it as a .ovpn file. */
+async function issueVpnProfile() {
+  const res = await api.vpnAccessCreate({});
+  const blob = new Blob([res.config], { type: 'application/x-openvpn-profile' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = res.filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+  return res;
+}
+
 /**
  * Winbox into your own router directly, over the same tunnel it already
  * dials into — a real VPN peer for your own laptop, not a proxy through the
@@ -156,13 +168,7 @@ function WinboxAccess({ store }) {
   const generate = async () => {
     setBusy(true);
     try {
-      const res = await api.vpnAccessCreate({});
-      const blob = new Blob([res.config], { type: 'application/x-openvpn-profile' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = res.filename;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      const res = await issueVpnProfile();
       store.toast(`Downloaded — import into any OpenVPN client, then Winbox to a router's tunnel address (${res.yourAddress} is yours on the tunnel)`);
       load();
     } catch (e) {
@@ -309,6 +315,8 @@ export default function Routers() {
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState(null);         // the router row open for editing
   const [menuFor, setMenuFor] = useState(null);   // router id whose Actions menu is open
+  const [winbox, setWinbox] = useState(null);     // the router whose Winbox-over-VPN steps are open
+  const [winboxBusy, setWinboxBusy] = useState(false);
   const [menuRect, setMenuRect] = useState(null); // that menu's toggle button, at the moment it opened
   const menuNodeRef = useRef(null);               // the portal's own DOM node, for the outside-click check
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
@@ -323,6 +331,21 @@ export default function Routers() {
   const [detected, setDetected] = useState(null);   // { serverHost, detected, port }
   // What OpenVPN says is actually connected, which is the only reliable answer.
   const [tunnels, setTunnels] = useState({ tunnels: [], stale: [] });
+
+  const getVpnProfile = async () => {
+    setWinboxBusy(true);
+    try {
+      const res = await issueVpnProfile();
+      store.toast(`Downloaded ${res.filename}: import it into OpenVPN and connect`);
+    } catch (e) {
+      store.toast(`Could not create a VPN profile: ${e.message}`);
+    } finally {
+      setWinboxBusy(false);
+    }
+  };
+  const copyText = async (text) => {
+    try { await navigator.clipboard.writeText(text); store.toast('Copied'); } catch { store.toast(text); }
+  };
 
   // Closes whichever row's Actions menu is open on any click outside it. The
   // menu itself is portalled to document.body, so it is not a DOM descendant
@@ -1432,6 +1455,12 @@ Revoke anyway?`
                     >
                       Remove old local copies
                     </MenuItem>
+                    <MenuItem
+                      onClick={() => { setMenuFor(null); setWinbox(r); }}
+                      title="Open this router in Winbox over the VPN, with no public IP or port-forwarding"
+                    >
+                      Winbox (VPN)
+                    </MenuItem>
                     <MenuItem onClick={() => { setMenuFor(null); openEdit(r); }}>
                       Edit
                     </MenuItem>
@@ -1462,6 +1491,54 @@ Revoke anyway?`
           ]}
         />
       </Card>
+
+      <Modal
+        open={!!winbox}
+        title={`Winbox over VPN: ${winbox?.name ?? ''}`}
+        onClose={() => setWinbox(null)}
+        footer={<Button onClick={() => setWinbox(null)}>Close</Button>}
+      >
+        {winbox && (() => {
+          const addr = String(winbox.host).split('/')[0];
+          const canIssue = store.session?.role === 'owner' || !!store.session?.superAdmin;
+          return (
+            <div style={{ display: 'grid', gap: 12, fontSize: 13.5, color: color.inkSoft }}>
+              <p style={{ margin: 0 }}>
+                This router already dials into billing, so Winbox reaches it through that tunnel: no public IP and no port-forwarding.
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <span>
+                  Winbox, Connect To: <b style={{ fontFamily: font.mono }}>{addr}</b>
+                </span>
+                <Button onClick={() => copyText(addr)}>Copy address</Button>
+              </div>
+              <div>
+                Tunnel right now:{" "}
+                <b style={{ color: winbox.status === 'up' ? color.green : color.rust }}>
+                  {winbox.status === 'up' ? 'connected' : 'not connected'}
+                </b>
+                {winbox.status !== 'up' && ' (Winbox cannot reach it until the router is back on the tunnel)'}
+              </div>
+              <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
+                <li>
+                  Download your VPN profile and import it into OpenVPN (OpenVPN Connect or the Windows OpenVPN GUI), then connect.
+                  {canIssue ? (
+                    <div style={{ marginTop: 6 }}>
+                      <Button variant="primary" onClick={getVpnProfile} disabled={winboxBusy}>{winboxBusy ? 'Preparing…' : 'Download VPN profile'}</Button>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: 6, color: color.muted }}>Only an administrator can issue a profile. Ask one for the .ovpn file.</div>
+                  )}
+                </li>
+                <li>Open Winbox, put the address above in Connect To, and sign in with the router's own login.</li>
+              </ol>
+              <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
+                Each download is a new profile for this laptop; revoke old ones under Winbox access. The VPN reaches your own routers only.
+              </p>
+            </div>
+          );
+        })()}
+      </Modal>
 
       <Modal
         open={!!pages}

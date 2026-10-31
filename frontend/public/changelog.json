@@ -354,7 +354,10 @@
       "A hidden super-administrator login can now be created on the server. It has every permission, does not appear in the staff list, HR, leaderboards or the audit log for anyone else (the Administrator included), cannot be edited, reset or removed by them, and its actions in a client's history read System.",
       "Approvals are now decided only by the super-administrator, and the Approvals tab shows only for that login. With approval switched on, Administrators ask like everyone else: their wallet changes and day extensions wait for the super-administrator too.",
       "Approvals now follow the administrators. With approval switched on, a wallet change or day extension is applied once every administrator on the account has approved it (with one administrator, that one). A change an administrator asks for counts as their own approval, so a sole administrator is not held up. The super-administrator can approve alone and is never asked.",
-      "Sign-in no longer cares about capital letters in your username, so Khan and khan both work (phones often capitalise the first letter)."
+      "Sign-in no longer cares about capital letters in your username, so Khan and khan both work (phones often capitalise the first letter).",
+      "The Approvals tab and its approve and reject buttons are now shown only to the super-administrator. With one on the account, Administrators ask like everyone else and only the super-administrator decides.",
+      "Approval of wallet changes and day extensions is now always on. The switch for it on the Approvals tab is gone.",
+      "Each router now has a Winbox (VPN) option in its Actions menu. It shows the router's tunnel address to put in Winbox, whether the router is on the tunnel, and downloads your VPN profile. No public IP or port-forwarding is needed."
     ]
   }
 ]
