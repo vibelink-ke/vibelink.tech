@@ -343,5 +343,18 @@
       "The limit on payment prompts per phone number (6 in 10 minutes) now counts a number the same however it is typed, with or without spaces, plus sign or leading zero. Before, typing the same number differently was counted as a different number.",
       "The chat assistant now helps signed-in home-internet customers: it answers \"when does my account expire\" and \"I am offline\" from their own account, payments and line state, says so when there is a known outage at their site, and hands over to your team after a second failed restart. Guests whose M-Pesa prompt never reached them, or whose balance was too low, get one SMS saying nothing was taken. A ticket a customer opens from the portal is raised to high priority when it says they are offline, and gets an internal note with their account, last payment and line state."
     ]
+  },
+  {
+    "date": "2026-10-31",
+    "title": "Owner is now called Administrator",
+    "items": [
+      "The top staff role is now called Administrator instead of Owner everywhere it is shown: the sidebar, the staff list and ID cards, HR, leads and the audit log. What the role is allowed to do has not changed.",
+      "New option: approve every wallet adjustment. Under Payments, Wallet approvals, switch on that you approve each one. Adjustments made by staff then wait there and only change the wallet once you approve (or reject) them; yours apply straight away. Who may approve is the new Approve wallet adjustments permission, owner only by default.",
+      "The approval option now also covers the wallet balance and expiry date on Edit client, and day extensions (single and bulk). When you switch it on under Payments, Approvals, staff changes to those wait for you and only take effect once you approve them. The Wallet approvals tab is now called Approvals.",
+      "A hidden super-administrator login can now be created on the server. It has every permission, does not appear in the staff list, HR, leaderboards or the audit log for anyone else (the Administrator included), cannot be edited, reset or removed by them, and its actions in a client's history read System.",
+      "Approvals are now decided only by the super-administrator, and the Approvals tab shows only for that login. With approval switched on, Administrators ask like everyone else: their wallet changes and day extensions wait for the super-administrator too.",
+      "Approvals now follow the administrators. With approval switched on, a wallet change or day extension is applied once every administrator on the account has approved it (with one administrator, that one). A change an administrator asks for counts as their own approval, so a sole administrator is not held up. The super-administrator can approve alone and is never asked.",
+      "Sign-in no longer cares about capital letters in your username, so Khan and khan both work (phones often capitalise the first letter)."
+    ]
   }
 ]

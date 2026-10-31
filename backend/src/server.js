@@ -516,7 +516,7 @@ app.post('/api/auth/login', loginLimiter, wrap(async (req, res) => {
   const { rows: [acct] } = await pool.query(
     `select st.*, t.status as tenant_status, t.subdomain from staff st
      join tenants t on t.id = st.tenant_id
-     where (lower(st.email) = lower($1) or st.username = $1)
+     where (lower(st.email) = lower($1) or lower(st.username) = lower($1))
        and ($2::uuid is null or st.tenant_id = $2)`,
     [who, tenant?.id ?? null]);
 
