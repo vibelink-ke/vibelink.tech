@@ -358,7 +358,8 @@
       "The Approvals tab and its approve and reject buttons are now shown only to the super-administrator. With one on the account, Administrators ask like everyone else and only the super-administrator decides.",
       "Approval of wallet changes and day extensions is now always on. The switch for it on the Approvals tab is gone.",
       "Each router now has a Winbox (VPN) option in its Actions menu. It shows the router's tunnel address to put in Winbox, whether the router is on the tunnel, and downloads your VPN profile. No public IP or port-forwarding is needed.",
-      "When you match a payment to a client, the client picker now has a search box: type part of a name, account number, phone or login to narrow the list."
+      "When you match a payment to a client, the client picker now has a search box: type part of a name, account number, phone or login to narrow the list.",
+      "Winbox without a VPN: on a router's Actions menu, Winbox opens a public address for that router for 4 hours (like billing.example.com:18305). Paste it into Winbox's Connect To and sign in. It closes by itself, or earlier with Close it now."
     ]
   }
 ]

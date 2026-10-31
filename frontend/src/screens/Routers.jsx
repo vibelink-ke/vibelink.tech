@@ -317,6 +317,7 @@ export default function Routers() {
   const [menuFor, setMenuFor] = useState(null);   // router id whose Actions menu is open
   const [winbox, setWinbox] = useState(null);     // the router whose Winbox-over-VPN steps are open
   const [winboxBusy, setWinboxBusy] = useState(false);
+  const [winInfo, setWinInfo] = useState(null);    // { open, address, until, ... } from the server, for the router above
   const [menuRect, setMenuRect] = useState(null); // that menu's toggle button, at the moment it opened
   const menuNodeRef = useRef(null);               // the portal's own DOM node, for the outside-click check
   const [configuring, setConfiguring] = useState(null);   // router id being pushed to
@@ -332,6 +333,18 @@ export default function Routers() {
   // What OpenVPN says is actually connected, which is the only reliable answer.
   const [tunnels, setTunnels] = useState({ tunnels: [], stale: [] });
 
+  useEffect(() => {
+    setWinInfo(null);
+    if (!winbox) return undefined;
+    let live = true;
+    api.winboxStatus(winbox.id).then((i) => { if (live) setWinInfo(i); }).catch((e) => { if (live) setWinInfo({ error: e.message }); });
+    return () => { live = false; };
+  }, [winbox]);
+  const setWinboxOpen = async (open) => {
+    setWinboxBusy(true);
+    try { setWinInfo(open ? await api.winboxOpen(winbox.id, 4) : await api.winboxClose(winbox.id)); }
+    catch (e) { store.toast(e.message); } finally { setWinboxBusy(false); }
+  };
   const getVpnProfile = async () => {
     setWinboxBusy(true);
     try {
@@ -1494,47 +1507,56 @@ Revoke anyway?`
 
       <Modal
         open={!!winbox}
-        title={`Winbox over VPN: ${winbox?.name ?? ''}`}
+        title={`Winbox: ${winbox?.name ?? ''}`}
         onClose={() => setWinbox(null)}
         footer={<Button onClick={() => setWinbox(null)}>Close</Button>}
       >
         {winbox && (() => {
-          const addr = String(winbox.host).split('/')[0];
+          const tunnelAddr = String(winbox.host).split('/')[0];
           const canIssue = store.session?.role === 'owner' || !!store.session?.superAdmin;
+          const up = winbox.status === 'up';
           return (
-            <div style={{ display: 'grid', gap: 12, fontSize: 13.5, color: color.inkSoft }}>
-              <p style={{ margin: 0 }}>
-                This router already dials into billing, so Winbox reaches it through that tunnel: no public IP and no port-forwarding.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <span>
-                  Winbox, Connect To: <b style={{ fontFamily: font.mono }}>{addr}</b>
-                </span>
-                <Button onClick={() => copyText(addr)}>Copy address</Button>
-              </div>
+            <div style={{ display: 'grid', gap: 14, fontSize: 13.5, color: color.inkSoft }}>
               <div>
-                Tunnel right now:{" "}
-                <b style={{ color: winbox.status === 'up' ? color.green : color.rust }}>
-                  {winbox.status === 'up' ? 'connected' : 'not connected'}
-                </b>
-                {winbox.status !== 'up' && ' (Winbox cannot reach it until the router is back on the tunnel)'}
+                Router on the tunnel right now:{" "}
+                <b style={{ color: up ? color.green : color.rust }}>{up ? 'connected' : 'not connected'}</b>
+                {!up && ' (Winbox cannot reach it until it is back on the tunnel)'}
               </div>
-              <ol style={{ margin: 0, paddingLeft: 20, display: 'grid', gap: 6 }}>
-                <li>
-                  Download your VPN profile and import it into OpenVPN (OpenVPN Connect or the Windows OpenVPN GUI), then connect.
-                  {canIssue ? (
-                    <div style={{ marginTop: 6 }}>
-                      <Button variant="primary" onClick={getVpnProfile} disabled={winboxBusy}>{winboxBusy ? 'Preparing…' : 'Download VPN profile'}</Button>
-                    </div>
-                  ) : (
-                    <div style={{ marginTop: 6, color: color.muted }}>Only an administrator can issue a profile. Ask one for the .ovpn file.</div>
-                  )}
-                </li>
-                <li>Open Winbox, put the address above in Connect To, and sign in with the router's own login.</li>
-              </ol>
-              <p style={{ margin: 0, fontSize: 12.5, color: color.muted }}>
-                Each download is a new profile for this laptop; revoke old ones under Winbox access. The VPN reaches your own routers only.
-              </p>
+              {winInfo?.error && <p style={{ margin: 0, color: color.rust }}>{winInfo.error}</p>}
+              {winInfo?.open ? (
+                <div style={{ display: 'grid', gap: 8, background: color.tileBg, borderRadius: radius.md, padding: 12 }}>
+                  <span>Paste this into Winbox, in Connect To, and sign in with the router's own login:</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                    <b style={{ fontFamily: font.mono, fontSize: 15 }}>{winInfo.address}</b>
+                    <Button variant="primary" onClick={() => copyText(winInfo.address)}>Copy</Button>
+                  </div>
+                  <span style={{ fontSize: 12.5, color: color.muted }}>
+                    Open until {new Date(winInfo.until).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' })}, then it closes by itself.
+                  </span>
+                  <div><Button onClick={() => setWinboxOpen(false)} disabled={winboxBusy}>Close it now</Button></div>
+                </div>
+              ) : canIssue ? (
+                <div style={{ display: 'grid', gap: 6 }}>
+                  <span>Open a port for this router for 4 hours, then paste the address it gives you into Winbox. No VPN and no public IP needed.</span>
+                  <div>
+                    <Button variant="primary" onClick={() => setWinboxOpen(true)} disabled={winboxBusy || !winInfo || !!winInfo.error}>
+                      {winboxBusy ? 'Opening…' : 'Open Winbox for 4 hours'}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <p style={{ margin: 0, color: color.muted }}>Only an administrator can open Winbox for a router.</p>
+              )}
+              <details>
+                <summary style={{ cursor: 'pointer' }}>Or use a VPN instead</summary>
+                <div style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                  <span>Import your VPN profile into OpenVPN and connect, then in Winbox use Connect To <b style={{ fontFamily: font.mono }}>{tunnelAddr}</b>.</span>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <Button onClick={() => copyText(tunnelAddr)}>Copy tunnel address</Button>
+                    {canIssue && <Button onClick={getVpnProfile} disabled={winboxBusy}>Download VPN profile</Button>}
+                  </div>
+                </div>
+              </details>
             </div>
           );
         })()}

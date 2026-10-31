@@ -6516,6 +6516,36 @@ app.delete('/api/routers/vpn-access/:id', requireRole('owner'), wrap(async (req,
 }));
 
 /**
+ * Winbox without a VPN client: the router gets a public port on this server for a few hours, and Winbox connects to host:port.
+ * See winbox-proxy.js. Administrators only, since it puts a router's Winbox login on the internet while it is open.
+ */
+const winboxReply = async (req, res, routerId) => {
+  const { winboxState } = await import('./winbox-proxy.js');
+  const st = await winboxState(routerId);
+  const host = tunnelHost(req);
+  res.json({ ...st, host, address: st.open ? `${host}:${st.port}` : null });
+};
+const ownRouter = async (req) => (await pool.query('select id from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id])).rows[0];
+app.get('/api/routers/:id/winbox', requireRole('owner'), wrap(async (req, res) => {
+  const r = await ownRouter(req);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  await winboxReply(req, res, r.id);
+}));
+app.post('/api/routers/:id/winbox', requireRole('owner'), wrap(async (req, res) => {
+  const r = await ownRouter(req);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  const { openWinbox } = await import('./winbox-proxy.js');
+  try { await openWinbox(r.id, req.body?.hours); } catch (e) { return res.status(409).json({ error: e.message }); }
+  await winboxReply(req, res, r.id);
+}));
+app.delete('/api/routers/:id/winbox', requireRole('owner'), wrap(async (req, res) => {
+  const r = await ownRouter(req);
+  if (!r) return res.status(404).json({ error: 'No such router' });
+  await (await import('./winbox-proxy.js')).closeWinbox(r.id);
+  await winboxReply(req, res, r.id);
+}));
+
+/**
  * The tunnel username an address implies: 10.50.2.3 is router-2-3.
  *
  * The minting route builds it from the address octets, so the same rule
@@ -16323,4 +16353,5 @@ import('./wireguard.js').then((wg) => wg.syncServer())
   .catch((e) => console.error('wireguard syncServer on startup failed:', e.message));
 
 startJobs();
+import('./winbox-proxy.js').then((m) => m.startWinboxProxy()).catch((e) => console.error('winbox-proxy:', e.message));
 app.listen(process.env.PORT ?? 8080, () => console.log('billing api up'));

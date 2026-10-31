@@ -3756,3 +3756,8 @@ alter table live_chats add column if not exists device_router uuid;
 -- A chat can belong to a signed-in customer (the assistant then knows their account) and can come from the web or WhatsApp.
 alter table live_chats add column if not exists subscriber_id uuid;
 alter table live_chats add column if not exists channel text not null default 'web';
+
+-- Winbox without a VPN client: the router's fixed public port, and until when it is open (backend/src/winbox-proxy.js).
+alter table routers add column if not exists winbox_port  int;
+alter table routers add column if not exists winbox_until timestamptz;
+create unique index if not exists routers_winbox_port_uq on routers (winbox_port) where winbox_port is not null;

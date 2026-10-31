@@ -50,6 +50,7 @@ services:
       - '1812:1812/udp'   # RADIUS authentication
       - '1813:1813/udp'   # RADIUS accounting
       - '51820:51820/udp' # WireGuard
+      - '18300-18399:18300-18399/tcp' # Winbox forwards, one port per router and only while it is opened (backend/src/winbox-proxy.js)
       # 8080 stays unpublished; Caddy reaches the API inside the network as net:8080.
 
   db:
