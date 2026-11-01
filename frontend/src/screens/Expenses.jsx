@@ -188,8 +188,10 @@ export default function Expenses() {
   };
 
   const markPaid = async (e) => {
+    const code = window.prompt('M-Pesa transaction code for this payment (optional; leave empty if it was not paid by M-Pesa):', '');
+    if (code === null) return;
     try {
-      await api.markExpensePaid(e.id);
+      await api.markExpensePaid(e.id, code.trim());
       await reload();
       store.toast('Marked paid');
     } catch (err) {
@@ -198,7 +200,7 @@ export default function Expenses() {
   };
 
   const filtered = useMemo(
-    () => (filter === 'all' ? items : items.filter((e) => e.status === filter)),
+    () => (filter === 'all' ? items : filter === 'failed' ? items.filter((e) => e.pay_state === 'failed') : items.filter((e) => e.status === filter)),
     [items, filter]);
 
   const totalPending = items.filter((e) => e.status === 'pending').reduce((n, e) => n + Number(e.amount), 0);
@@ -252,6 +254,7 @@ export default function Expenses() {
               { value: 'pending', label: 'Pending' },
               { value: 'approved', label: 'Approved' },
               { value: 'paid', label: 'Paid' },
+              { value: 'failed', label: 'Failed M-Pesa' },
               { value: 'rejected', label: 'Rejected' },
             ]}
           />
@@ -285,7 +288,26 @@ export default function Expenses() {
               key: 'due', label: 'Due',
               render: (e) => (e.due_date ? <DueDate e={e} /> : <span style={{ color: color.muted }}>—</span>),
             },
-            { key: 'status', label: 'Status', render: (e) => <Badge tone={STATUS_TONE[e.status]}>{e.status}</Badge> },
+            {
+              key: 'status', label: 'Status',
+              render: (e) => (e.pay_state === 'failed'
+                ? <Badge tone="suspended">failed</Badge>
+                : <Badge tone={STATUS_TONE[e.status]}>{e.status}</Badge>),
+            },
+            {
+              key: 'mpesa', label: 'M-Pesa',
+              render: (e) => {
+                if (e.pay_state === 'failed') {
+                  return <span title={e.pay_error ?? ''} style={{ color: color.rust, fontSize: 12.5, fontWeight: 600 }}>Failed{e.pay_error ? <span style={{ display: 'block', fontWeight: 400, fontSize: 11.5, maxWidth: 220 }}>{e.pay_error}</span> : null}</span>;
+                }
+                if (e.pay_state === 'processing') return <span style={{ color: color.muted, fontSize: 12.5 }}>Sending…</span>;
+                if (e.pay_state === 'awaiting') return <span style={{ color: color.muted, fontSize: 12.5 }}>Awaiting approval</span>;
+                if (e.status === 'paid' && e.pay_reference) {
+                  return <span style={{ color: color.green, fontFamily: font.mono, fontSize: 12.5, fontWeight: 600 }}>{e.pay_reference}</span>;
+                }
+                return <span style={{ color: color.muted }}>—</span>;
+              },
+            },
             {
               key: 'receipt', label: 'Receipt',
               render: (e) => e.has_receipt

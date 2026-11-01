@@ -361,5 +361,13 @@
       "When you match a payment to a client, the client picker now has a search box: type part of a name, account number, phone or login to narrow the list.",
       "Winbox without a VPN: on a router's Actions menu, Winbox opens a public address for that router for 4 hours (like billing.example.com:18305). Paste it into Winbox's Connect To and sign in. It closes by itself, or earlier with Close it now."
     ]
+  },
+  {
+    "date": "2026-11-01",
+    "title": "Expenses: M-Pesa code and failed payments",
+    "items": [
+      "Expenses now has an M-Pesa column. A paid expense shows its M-Pesa transaction code, and a payment that failed shows Failed in red with the reason (there is also a Failed M-Pesa filter). Mark paid asks for the M-Pesa code when you paid by hand.",
+      "A router's Winbox port is now held only while it is open. Closing it, or its 4 hours running out, hands the port back for the next router."
+    ]
   }
 ]

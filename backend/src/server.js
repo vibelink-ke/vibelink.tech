@@ -5250,11 +5250,14 @@ app.post('/api/expenses/:id/approve', requirePermission('expenses.approve'), wra
 }));
 
 app.post('/api/expenses/:id/mark-paid', requirePermission('expenses.approve'), wrap(async (req, res) => {
+  // Paid some other way than the Pay button: the M-Pesa transaction code, if there is one, is kept with the expense.
+  const code = String(req.body?.mpesaCode ?? '').trim().toUpperCase();
+  if (code && !/^[A-Z0-9]{8,12}$/.test(code)) return res.status(400).json({ error: 'That does not look like an M-Pesa transaction code (for example SGH7K2L9QX).' });
   const { rows: [e] } = await pool.query(
-    `update expenses set status='paid', paid_at=now()
-      where id=$1 and tenant_id=$2 and status='approved' returning *`,
-    [req.params.id, req.tenant.id]);
-  if (!e) return res.status(404).json({ error: 'No such approved expense' });
+    `update expenses set status='paid', paid_at=now(), pay_state=null, pay_error=null, pay_reference=coalesce($3, pay_reference)
+      where id=$1 and tenant_id=$2 and status='approved' and pay_state is distinct from 'processing' returning *`,
+    [req.params.id, req.tenant.id, code || null]);
+  if (!e) return res.status(404).json({ error: 'No such approved expense, or an M-Pesa payment for it is still on its way.' });
   res.json(e);
 }));
 

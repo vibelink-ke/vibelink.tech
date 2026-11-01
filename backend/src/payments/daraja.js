@@ -440,7 +440,7 @@ router.post('/b2c-result', express.json(), async (req, res) => {
         (r.ResultParameters?.ResultParameter ?? []).map((p) => [p.Key, p.Value]));
       await pool.query(
         "update expenses set status='paid', paid_at=now(), pay_state=null, pay_error=null, pay_reference=$2 where id=$1",
-        [expense.id, String(items.TransactionReceipt ?? items.TransID ?? r.ConversationID)]);
+        [expense.id, String(items.TransactionReceipt ?? items.TransID ?? r.TransactionID ?? r.ConversationID)]);
     } else {
       console.error('daraja payment failed', r.ResultCode, r.ResultDesc, 'expense', expense.id);
       await pool.query(
