@@ -866,6 +866,14 @@ export default function Payments() {
                 { key: 'provider_ref', label: 'Transaction ID', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'received_at', label: 'Transaction time', render: (r) => whenFull(r.received_at) },
                 { key: 'raw_account', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.raw_account ?? '—'}</span> },
+                {
+                  key: 'first_name', label: 'First name',
+                  // Who M-Pesa says paid (the name on the paying phone), else the client the payment was applied to.
+                  render: (r) => {
+                    const n = String(r.payer_name || r.customer_name || '').trim().split(/s+/)[0];
+                    return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : <span style={{ color: color.muted }}>—</span>;
+                  },
+                },
                 { key: 'kind', label: 'Type', render: (r) => (r.kind === 'hotspot' ? 'Hotspot' : 'PPPoE') },
               ] : [
                 { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
