@@ -11770,6 +11770,10 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
              -- own 500 most recent, regardless of how busy any other channel is.
              -- Read per channel with an index (the newest 500 of each), not by ranking every payment the tenant has ever had: that sorted the whole table on
              -- every load and took seconds for a tenant with thousands of payments.
+             -- Hotspot sale or PPPoE payment, the same rule the by-site report uses.
+             case when pay.voucher_id is not null then 'hotspot'
+                  when pay.subscriber_id is not null then 'pppoe'
+                  else coalesce(pay.service, 'pppoe') end as kind,
              1 as rn
         from (select distinct provider from payments where tenant_id=$1) pr
         cross join lateral (select * from payments where tenant_id=$1 and provider = pr.provider order by received_at desc limit 500) pay
@@ -11780,6 +11784,31 @@ app.get('/api/payments', requirePermission('payments.view'), wrap(async (req, re
     ) x
     order by received_at desc
     limit 2000`, [req.tenant.id]);        // the 2,000 most recent overall, however many channels there are
+  res.json(rows);
+}));
+
+/**
+ * The last four months of transactions, read by date rather than as "the newest 2,000": a busy paybill passes that in a few weeks,
+ * and the older ones then vanished from All transactions even though they are all still stored. Nothing is ever deleted; this
+ * is just the window the screen browses. `kind` splits hotspot sales from PPPoE payments, the same rule the by-site report uses.
+ */
+app.get('/api/payments/history', requirePermission('payments.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(`
+    select pay.id, pay.provider, pay.provider_ref, pay.amount, pay.payer_name, pay.raw_account, pay.status, pay.received_at,
+           pay.subscriber_id, pay.voucher_id,
+           coalesce(pay.payer_phone, (select sr.phone from stk_requests sr
+                                       where sr.tenant_id = pay.tenant_id and sr.checkout_id = pay.payload->>'checkoutId' limit 1)) as payer_phone,
+           v.code as voucher_code, p.title as plan_title, p.rate_down, p.rate_up, s.name as customer_name,
+           case when pay.voucher_id is not null then 'hotspot'
+                when pay.subscriber_id is not null then 'pppoe'
+                else coalesce(pay.service, 'pppoe') end as kind
+      from payments pay
+      left join vouchers v on v.id = pay.voucher_id
+      left join plans p on p.id = v.plan_id
+      left join subscribers s on s.id = pay.subscriber_id
+     where pay.tenant_id = $1 and pay.received_at >= now() - interval '4 months'
+     order by pay.received_at desc
+     limit 30000`, [req.tenant.id]);
   res.json(rows);
 }));
 

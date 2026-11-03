@@ -205,7 +205,14 @@ export default function Payments() {
   })();
 
   const unmatched = store.unmatched ?? [];
-  const all = store.mpesaTx ?? [];
+  // The last four months by date (GET /api/payments/history), not just the newest 2,000 the store holds. Until it arrives the
+  // store's own list stands in, so the tab is never empty.
+  const [history, setHistory] = useState(null);
+  const [histMonths, setHistMonths] = useState(4);
+  const [kindFilter, setKindFilter] = useState('all');   // under M-Pesa Paybill: hotspot sales or PPPoE payments
+  const loadHistory = () => api.paymentsHistory().then(setHistory).catch(() => {});
+  useEffect(() => { if (tab === 'all') loadHistory(); }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const all = history ?? store.mpesaTx ?? [];
   const invoices = store.invoices ?? [];
   const settlements = store.settlements ?? [];
   const pendingSettlement = settlements
@@ -285,17 +292,38 @@ export default function Payments() {
   // What the All-transactions table actually shows: everything, unless a chart click narrowed it to one day,
   // channel or month (chartFilter, set above from the query string a chart click navigated here with), and/or
   // the channel buttons above the table narrowed it to one gateway (KopoKopo vs Paybill vs any other).
-  const filteredAll = useMemo(() => {
-    const byChart = !chartFilter ? all
-      : chartFilter.day ? all.filter((p) => (p.received_at ?? '').slice(0, 10) === chartFilter.day)
-      : chartFilter.channel ? all.filter((p) => chartFilter.channel.includes(p.provider))
-      : chartFilter.month != null ? all.filter((p) => {
+  // Paybill is the only channel with a hotspot / PPPoE split to show. A tenant whose only channel is the paybill sees it
+  // without having to pick the channel first.
+  const paybillView = channelFilter === 'daraja' || (channelsPresent.length === 1 && channelsPresent[0] === 'daraja');
+  const inWindow = useMemo(() => {
+    if (histMonths >= 4) return all;
+    const since = Date.now() - histMonths * 30.44 * 86400000;
+    return all.filter((p) => new Date(p.received_at ?? 0).getTime() >= since);
+  }, [all, histMonths]);
+  const filteredBase = useMemo(() => {
+    const byChart = !chartFilter ? inWindow
+      : chartFilter.day ? inWindow.filter((p) => (p.received_at ?? '').slice(0, 10) === chartFilter.day)
+      : chartFilter.channel ? inWindow.filter((p) => chartFilter.channel.includes(p.provider))
+      : chartFilter.month != null ? inWindow.filter((p) => {
           const t = new Date(p.received_at ?? 0);
           return t.getMonth() === chartFilter.month && t.getFullYear() === chartFilter.year;
         })
-      : all;
+      : inWindow;
+    if (paybillView) return byChart.filter((p) => p.provider === 'daraja');
     return channelFilter === 'all' ? byChart : byChart.filter((p) => p.provider === channelFilter);
-  }, [all, chartFilter, channelFilter]);
+  }, [inWindow, chartFilter, channelFilter, paybillView]);
+  const kindStats = useMemo(() => {
+    const out = { all: { n: 0, sum: 0 }, hotspot: { n: 0, sum: 0 }, pppoe: { n: 0, sum: 0 } };
+    for (const p of filteredBase) {
+      const k = p.kind === 'hotspot' ? 'hotspot' : 'pppoe';
+      out.all.n += 1; out.all.sum += Number(p.amount ?? 0);
+      out[k].n += 1; out[k].sum += Number(p.amount ?? 0);
+    }
+    return out;
+  }, [filteredBase]);
+  const filteredAll = useMemo(
+    () => (paybillView && kindFilter !== 'all' ? filteredBase.filter((p) => (p.kind === 'hotspot' ? 'hotspot' : 'pppoe') === kindFilter) : filteredBase),
+    [filteredBase, paybillView, kindFilter]);
 
   // The M-Pesa Paybill table's own ID column, chronological from that channel's first-ever transaction —
   // fixed per payment, not a position in whatever's currently on screen. Built off `all` (every Daraja
@@ -762,12 +790,46 @@ export default function Payments() {
 
           {tab === 'all' && (
             <>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12.5, color: color.muted, marginRight: 4 }}>Showing</span>
+                {[[1, 'Last month'], [2, '2 months'], [3, '3 months'], [4, '4 months']].map(([n, label]) => (
+                  <span
+                    key={n}
+                    onClick={() => setHistMonths(n)}
+                    style={{
+                      padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                      border: `1px solid ${histMonths === n ? color.green : color.line}`,
+                      background: histMonths === n ? color.green : '#fff',
+                      color: histMonths === n ? '#fff' : color.ink,
+                    }}
+                  >{label}</span>
+                ))}
+                <span onClick={loadHistory} style={{ color: color.green, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', marginLeft: 6 }}>Refresh</span>
+              </div>
+              {paybillView && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                  {[['all', 'All paybill'], ['hotspot', 'Hotspot'], ['pppoe', 'PPPoE']].map(([k, label]) => (
+                    <span
+                      key={k}
+                      onClick={() => setKindFilter(k)}
+                      style={{
+                        padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
+                        border: `1px solid ${kindFilter === k ? color.green : color.line}`,
+                        background: kindFilter === k ? color.green : '#fff',
+                        color: kindFilter === k ? '#fff' : color.ink,
+                      }}
+                    >
+                      {label} · {kindStats[k].n.toLocaleString('en-KE')} · {money(kindStats[k].sum)}
+                    </span>
+                  ))}
+                </div>
+              )}
               {channelsPresent.length > 1 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
                   {['all', ...channelsPresent].map((ch) => (
                     <span
                       key={ch}
-                      onClick={() => setChannelFilter(ch)}
+                      onClick={() => { setChannelFilter(ch); setKindFilter('all'); }}
                       style={{
                         padding: '5px 12px', borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
                         border: `1px solid ${channelFilter === ch ? color.green : color.line}`,
@@ -793,7 +855,7 @@ export default function Payments() {
               rowKey={(r) => r.id}
               empty="No transactions recorded yet"
               rows={filteredAll}
-              columns={channelFilter === 'daraja' ? [
+              columns={paybillView ? [
                 // Mirrors the M-Pesa Paybill portal's own transaction list (ID, Status, Amount,
                 // Transaction ID, Transaction time, Reference) — what an operator reconciling
                 // against that portal actually expects to see, rather than columns (Customer,
@@ -804,6 +866,7 @@ export default function Payments() {
                 { key: 'provider_ref', label: 'Transaction ID', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'received_at', label: 'Transaction time', render: (r) => whenFull(r.received_at) },
                 { key: 'raw_account', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.raw_account ?? '—'}</span> },
+                { key: 'kind', label: 'Type', render: (r) => (r.kind === 'hotspot' ? 'Hotspot' : 'PPPoE') },
               ] : [
                 { key: 'provider_ref', label: 'M-Pesa ref', render: (r) => <span style={{ fontFamily: font.mono }}>{r.provider_ref}</span> },
                 { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },

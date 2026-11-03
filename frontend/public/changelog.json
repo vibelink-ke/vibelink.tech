@@ -369,5 +369,12 @@
       "Expenses now has an M-Pesa column. A paid expense shows its M-Pesa transaction code, and a payment that failed shows Failed in red with the reason (there is also a Failed M-Pesa filter). Mark paid asks for the M-Pesa code when you paid by hand.",
       "A router's Winbox port is now held only while it is open. Closing it, or its 4 hours running out, hands the port back for the next router."
     ]
+  },
+  {
+    "date": "2026-11-03",
+    "title": "Payments: four-month history, hotspot and PPPoE split",
+    "items": [
+      "Payments, All transactions now keeps the last four months in view (choose last month, 2, 3 or 4 months), instead of only the newest 2,000. Under M-Pesa Paybill you can split hotspot sales from PPPoE payments, with a count and total for each."
+    ]
   }
 ]

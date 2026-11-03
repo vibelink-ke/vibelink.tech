@@ -105,6 +105,7 @@ export const api = {
 
   // ── money ──
   payments: () => get('/api/payments'),
+  paymentsHistory: () => get('/api/payments/history'),
   paymentsBySite: (from, to) => get(`/api/payments/by-site?from=${from}&to=${to}`),
   dashboardCollections: () => get('/api/dashboard/collections'),
   dashboardHotspot: () => get('/api/dashboard/hotspot'),
