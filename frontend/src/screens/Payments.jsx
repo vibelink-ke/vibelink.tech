@@ -868,9 +868,9 @@ export default function Payments() {
                 { key: 'raw_account', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.raw_account ?? '—'}</span> },
                 {
                   key: 'first_name', label: 'First name',
-                  // Who M-Pesa says paid (the name on the paying phone), else the client the payment was applied to.
+                  // The person who paid, as M-Pesa names them (the name on the paying phone), not the client it was applied to.
                   render: (r) => {
-                    const n = String(r.payer_name || r.customer_name || '').trim().split(/s+/)[0];
+                    const n = String(r.payer_name || '').trim().split(/s+/)[0];
                     return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : <span style={{ color: color.muted }}>—</span>;
                   },
                 },

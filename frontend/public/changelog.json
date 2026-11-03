@@ -375,7 +375,7 @@
     "title": "Payments: four-month history, hotspot and PPPoE split",
     "items": [
       "Payments, All transactions now keeps the last four months in view (choose last month, 2, 3 or 4 months), instead of only the newest 2,000. Under M-Pesa Paybill you can split hotspot sales from PPPoE payments, with a count and total for each.",
-      "The M-Pesa Paybill list under Payments now has a First name column, taken from the name on the paying phone (or the client it was applied to)."
+      "The M-Pesa Paybill list under Payments now has a First name column, the first name of the person who paid, as M-Pesa names them."
     ]
   }
 ]
