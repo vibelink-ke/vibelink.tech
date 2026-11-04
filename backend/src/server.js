@@ -4985,7 +4985,7 @@ app.get('/api/leads/sales-performance', requirePermission('leads.view'), wrap(as
        left join lead_stats ls on ls.staff_id = st.id
        left join comm_stats cs on cs.staff_id = st.id
       where st.tenant_id = $1 and st.role <> 'platform_admin'
-      order by brought_this_month desc, won_this_month desc`,
+      order by brought_this_month desc, won_this_month desc, st.name`,
     [req.tenant.id]);
   res.json(rows);
 }));

@@ -1130,6 +1130,10 @@ export default function Leads() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {(() => {
                   const max = Math.max(1, ...perf.map((p) => Number(p.brought_this_month)));
+                  // Nobody has brought in anything yet: no ranking, rather than a "first place" among zeros.
+                  if (!perf.some((p) => Number(p.brought_this_month) > 0)) {
+                    return <span style={{ fontSize: 13, color: color.muted }}>No sales this month yet, so nobody is ahead.</span>;
+                  }
                   return perf.map((p, i) => (
                     <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                       <span style={{ width: 18, fontSize: 12.5, color: color.muted, fontFamily: font.mono }}>{i + 1}</span>
@@ -1140,7 +1144,7 @@ export default function Leads() {
                         <div
                           style={{
                             width: `${(Number(p.brought_this_month) / max) * 100}%`, height: '100%',
-                            background: i === 0 ? color.green : color.neutralInk, borderRadius: radius.pill,
+                            background: i === 0 && Number(p.brought_this_month) > 0 ? color.green : color.neutralInk, borderRadius: radius.pill,
                             transition: 'width .3s',
                           }}
                         />
