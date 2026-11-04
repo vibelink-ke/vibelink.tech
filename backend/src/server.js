@@ -5093,16 +5093,15 @@ app.post('/api/leads/:id/notes', wrap(async (req, res) => {
  */
 app.get('/api/referrers', wrap(async (req, res) => {
   const { rows } = await pool.query(
+    // Each total is its own subquery. Joining clients and commissions side by side multiplied them together, so a
+    // referrer with 3 clients and 2 commissions showed every commission three times (and every client twice).
     `select r.*, sub.account_code as subscriber_account,
-            count(s.id) as clients_referred,
-            coalesce(sum(rc.amount) filter (where rc.status='owed'), 0) as owed,
-            coalesce(sum(rc.amount) filter (where rc.status='paid'), 0) as paid
+            (select count(*) from subscribers s where s.referred_by = r.id) as clients_referred,
+            coalesce((select sum(rc.amount) from referral_commissions rc where rc.referrer_id = r.id and rc.status='owed'), 0) as owed,
+            coalesce((select sum(rc.amount) from referral_commissions rc where rc.referrer_id = r.id and rc.status='paid'), 0) as paid
        from referrers r
        left join subscribers sub on sub.id = r.subscriber_id
-       left join subscribers s on s.referred_by = r.id
-       left join referral_commissions rc on rc.referrer_id = r.id
       where r.tenant_id=$1
-      group by r.id, sub.account_code
       order by r.created_at desc`,
     [req.tenant.id]);
   res.json(rows);

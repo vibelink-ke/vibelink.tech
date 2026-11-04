@@ -383,7 +383,8 @@
     "title": "Refresh network button",
     "items": [
       "New Refresh network button: customers have it on their portal (Your connection), and staff and technicians have it on each PPPoE line (Refresh network on the client's page, and Refresh their network in the technician app). It re-syncs the line's login and speed and drops the session so the router dials back in fresh. Who may use it is a new permission, Refresh a customer's network, under Roles and permissions.",
-      "The Sales leaderboard under Leads, Performance no longer shows a first place when nobody has brought in any sales this month. It says so instead of naming whoever happens to be listed first."
+      "The Sales leaderboard under Leads, Performance no longer shows a first place when nobody has brought in any sales this month. It says so instead of naming whoever happens to be listed first.",
+      "Fixed the Owed and Paid totals (and the clients referred count) on the Referrers screen. A referrer with several clients and several commissions had their amounts multiplied; each total is now counted once."
     ]
   }
 ]
