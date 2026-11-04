@@ -377,5 +377,12 @@
       "Payments, All transactions now keeps the last four months in view (choose last month, 2, 3 or 4 months), instead of only the newest 2,000. Under M-Pesa Paybill you can split hotspot sales from PPPoE payments, with a count and total for each.",
       "The M-Pesa Paybill list under Payments now has a First name column, the first name of the person who paid, as M-Pesa names them."
     ]
+  },
+  {
+    "date": "2026-11-04",
+    "title": "Refresh network button",
+    "items": [
+      "New Refresh network button: customers have it on their portal (Your connection), and staff and technicians have it on each PPPoE line (Refresh network on the client's page, and Refresh their network in the technician app). It re-syncs the line's login and speed and drops the session so the router dials back in fresh. Who may use it is a new permission, Refresh a customer's network, under Roles and permissions."
+    ]
   }
 ]

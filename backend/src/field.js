@@ -34,7 +34,7 @@ export function parsePhoto(dataUrl) {
   return { mime: m[1], buf };
 }
 
-export function registerField(app, { pool, requirePermission, hasPermission, wrap, radius, ensureStaffReferrer }) {
+export function registerField(app, { pool, requirePermission, hasPermission, wrap, radius, ensureStaffReferrer, refreshNetwork }) {
   const use = requirePermission('field.use');
   const me = (req) => req.session?.staff_id ?? null;
 
@@ -432,13 +432,12 @@ export function registerField(app, { pool, requirePermission, hasPermission, wra
   }));
 
   // Drop the customer's session so their router dials back in fresh (a first thing to try on a repair).
-  app.post('/api/field/customers/:id/reconnect', use, onShift, wrap(async (req, res) => {
-    const { rows: [c] } = await pool.query(
-      `select s.pppoe_user, r.host, r.secret from subscribers s left join routers r on r.id = s.router_id
-        where s.tenant_id=$1 and s.id=$2`, [req.tenant.id, req.params.id]);
-    if (!c?.pppoe_user || !c.host) return res.status(409).json({ error: 'This customer has no router or PPPoE login on file.' });
-    await radius.disconnectSubscriberSession(pool, c.host, c.secret, c.pppoe_user);
-    res.json({ ok: true });
+  app.post('/api/field/customers/:id/reconnect', use, onShift, requirePermission('clients.refresh_network'), wrap(async (req, res) => {
+    try {
+      res.json(await refreshNetwork(req.tenant.id, req.params.id));
+    } catch (e) {
+      res.status(e.status ?? 502).json({ error: e.status ? e.message : 'The router could not be reached to refresh this connection. Try again in a few minutes.' });
+    }
   }));
 
   // ── equipment used on a job ────────────────────────────────────────────

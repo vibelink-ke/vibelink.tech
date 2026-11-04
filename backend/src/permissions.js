@@ -28,6 +28,9 @@ export const DEFAULT_PERMISSIONS = {
   // A customer's own login credential, not their account data — the same
   // trust level as viewing one (owner-only, same as the credentials read
   // this sits beside), not general clients.edit.
+  // Drops a customer's connection and re-syncs their login and speed so their router dials back in fresh: harmless to the account,
+  // so every staff role that works with customers has it. A customer can do the same for their own line from their portal.
+  'clients.refresh_network': { owner: true, cashier: true,  technician: true,  support: true,  sales: false },
   'clients.reset_portal_password': { owner: true, cashier: false, technician: false, support: false, sales: false },
   // Financial documents — same trust level as applying a payment.
   'clients.invoices': { owner: true, cashier: true,  technician: false, support: false, sales: false },
@@ -233,6 +236,7 @@ export const PERMISSION_META = [
   { key: 'clients.delete',  page: 'Clients',          action: 'Delete' },
   { key: 'clients.wallet_adjust', page: 'Clients',    action: 'Adjust wallet balance' },
   { key: 'clients.compensate', page: 'Clients',       action: 'Compensate (extend free, in bulk)' },
+  { key: 'clients.refresh_network', page: 'Clients', action: "Refresh a customer's network (reconnect their line)" },
   { key: 'clients.reset_portal_password', page: 'Clients', action: "Reset a customer's portal password" },
   { key: 'clients.invoices', page: 'Clients',         action: 'Create / edit / delete invoices' },
   { key: 'routers.view',      page: 'Routers',         action: 'View' },

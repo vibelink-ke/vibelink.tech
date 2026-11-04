@@ -577,6 +577,16 @@ export default function ClientDetail() {
     }
   };
 
+  const refreshNetwork = async (c) => {
+    if (!window.confirm(`Refresh the network for ${c.line_label || c.name}? Their connection drops for a few seconds and the router dials back in.`)) return;
+    try {
+      await api.refreshNetwork(c.id);
+      store.toast('Network refreshed: give it a few seconds to come back');
+    } catch (e) {
+      store.toast(`Could not refresh: ${e.message}`);
+    }
+  };
+
   const clearMacLock = async (c) => {
     if (!window.confirm(`Clear the MAC lock for ${c.line_label || c.name}? Whichever router dials in next will be the new locked one.`)) return;
     try {
@@ -933,6 +943,11 @@ export default function ClientDetail() {
                         {line.service === 'pppoe' && (
                           <RowAction tone={color.amberInk} onClick={() => setTroubleshooting(line)} title="Online but no internet? Ask the router what is wrong with this line">
                             Troubleshoot
+                          </RowAction>
+                        )}
+                        {line.service === 'pppoe' && store.session?.perms?.['clients.refresh_network'] && (
+                          <RowAction tone={color.green} onClick={() => refreshNetwork(line)} title="Drop this line and re-sync it so the router dials back in fresh">
+                            Refresh network
                           </RowAction>
                         )}
                         {line.service === 'pppoe' && line.phone && (

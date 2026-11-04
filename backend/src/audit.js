@@ -53,6 +53,7 @@ const LABELS = [
   ['PUT', /^\/api\/routers\/[^/]+$/, 'Router edited'],
   ['DELETE', /^\/api\/routers\/[^/]+$/, 'Router deleted'],
   ['POST', /^\/api\/routers\/[^/]+\/autoconfig$/, 'Router configured'],
+  ['POST', /^\/api\/subscribers\/[^/]+\/refresh-network$/, 'Customer network refreshed'],
   ['POST', /^\/api\/routers\/[^/]+\/winbox$/, 'Router Winbox port opened'],
   ['DELETE', /^\/api\/routers\/[^/]+\/winbox$/, 'Router Winbox port closed'],
   ['POST', /^\/api\/routers\/[^/]+\/cleanup-apply$/, 'Old router rules cleaned up'],

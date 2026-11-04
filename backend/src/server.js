@@ -2877,7 +2877,7 @@ app.use('/api', (req, res, next) => {
 
 // The field technician app's API (field.js). After the sign-in guard above: every route needs a session.
 registerField(app, {
-  pool, requirePermission, hasPermission, wrap, ensureStaffReferrer,
+  pool, requirePermission, hasPermission, wrap, ensureStaffReferrer, refreshNetwork,
   radius: { disconnectSubscriberSession: async (...a) => (await import('./radius.js')).disconnectSubscriberSession(...a) },
 });
 
@@ -2915,6 +2915,48 @@ function portalToken(req) {
   }
   return null;
 }
+
+/**
+ * Refresh a customer's network: write their login and speed to RADIUS again and drop their session, so the router dials back in
+ * fresh with the right address, rate and credentials. The cure for a line that is stuck, on the wrong speed or showing online with
+ * nothing flowing. Used by the customer's portal, by staff on the client's page and by the technician app. One refresh a minute per line.
+ */
+const networkRefreshedAt = new Map();
+async function refreshNetwork(tenantId, subscriberId) {
+  const fail = (status, message) => Object.assign(new Error(message), { status });
+  const { rows: [s] } = await pool.query(
+    `select s.id, s.pppoe_user, s.status, r.host, r.secret
+       from subscribers s left join routers r on r.id = s.router_id
+      where s.tenant_id=$1 and s.id=$2`, [tenantId, subscriberId]);
+  if (!s) throw fail(404, 'No such customer.');
+  if (!s.pppoe_user || !s.host) throw fail(409, 'This line has no router or PPPoE login on file, so there is no connection to refresh.');
+  const last = networkRefreshedAt.get(s.id);
+  if (last && Date.now() - last < 60000) throw fail(429, 'The network was only just refreshed. Give it a minute.');
+  networkRefreshedAt.set(s.id, Date.now());
+  const radius = await import('./radius.js');
+  const { withTenant } = await import('./db.js');
+  const { rows: [live] } = await pool.query('select 1 from radacct where username=$1 and acctstoptime is null limit 1', [s.pppoe_user]);
+  await radius.syncSubscriberCredentials(pool, tenantId, s.id).catch((e) => console.warn('refresh network: credentials —', e?.message ?? e));
+  // Only a line entitled to service is re-activated: that also lifts a block, which must not happen to someone expired or suspended.
+  if (['active', 'grace'].includes(s.status)) {
+    await withTenant(tenantId, (c) => radius.activateSubscriber(c, tenantId, s.id)).catch((e) => console.warn('refresh network: speed —', e?.message ?? e));
+  }
+  await radius.disconnectSubscriberSession(pool, s.host, s.secret, s.pppoe_user);
+  return { ok: true, wasOnline: !!live };
+}
+const refreshFailed = (res, e) => (e.status
+  ? res.status(e.status).json({ error: e.message })
+  : res.status(502).json({ error: 'The router could not be reached to refresh this connection. Try again in a few minutes.' }));
+
+app.post('/api/subscribers/:id/refresh-network', requirePermission('clients.refresh_network'), wrap(async (req, res) => {
+  try { res.json(await refreshNetwork(req.tenant.id, req.params.id)); } catch (e) { refreshFailed(res, e); }
+}));
+/** The customer refreshes their own line from their portal. */
+app.post('/portal/refresh-network', loginLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  try { res.json(await refreshNetwork(s.tenant_id, s.subscriber_id)); } catch (e) { refreshFailed(res, e); }
+}));
 
 async function portalSession(req) {
   const token = portalToken(req);

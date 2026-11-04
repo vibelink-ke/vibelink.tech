@@ -31,6 +31,7 @@ const api = {
   requestPlanChange: (planId) => api.call('POST', '/portal/request-plan-change', { planId }),
   recover: (phone) => api.call('POST', '/portal/recover', { phone }),
   wifi: () => api.call('GET', '/portal/wifi'),
+  refreshNetwork: () => api.call('POST', '/portal/refresh-network'),
   setWifi: (ssid, password, band5) => api.call('POST', '/portal/wifi', { ssid, password, band5 }),
   changePassword: (currentPassword, newPassword) =>
     api.call('POST', '/portal/change-password', { currentPassword, newPassword }),
@@ -418,6 +419,19 @@ export default function CustomerPortal() {
   const [wifiForm, setWifiForm] = useState({ ssid: '', password: '', band5: false });
   const [wifiBusy, setWifiBusy] = useState(false);
   const [wifiMsg, setWifiMsg] = useState('');
+  const [netBusy, setNetBusy] = useState(false);
+  const [netMsg, setNetMsg] = useState('');
+  const refreshNetwork = async () => {
+    setNetBusy(true); setNetMsg('');
+    try {
+      await api.refreshNetwork();
+      setNetMsg('Done. Your connection drops for a few seconds and comes back by itself.');
+    } catch (e) {
+      setNetMsg(e.message ?? 'Could not refresh right now. Try again in a minute.');
+    } finally {
+      setNetBusy(false);
+    }
+  };
   const [wifiOpen, setWifiOpen] = useState(false);
   useEffect(() => {
     if (!me) return;
@@ -938,6 +952,13 @@ export default function CustomerPortal() {
               <button style={button(false)} onClick={() => { setPayOpen(false); setPayTarget(null); }}>Cancel</button>
             </div>
           ))}
+        </div>
+
+        <div style={card}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Your connection</span>
+          <span style={{ fontSize: 13, color: pc.muted }}>Internet slow or stuck? Refresh your network. It drops for a few seconds, then reconnects by itself.</span>
+          {netMsg && <span style={{ fontSize: 12.5, color: netMsg.startsWith('Done') ? pc.teal : pc.rust }}>{netMsg}</span>}
+          <button style={button(false)} onClick={refreshNetwork} disabled={netBusy}>{netBusy ? 'Refreshing…' : 'Refresh network'}</button>
         </div>
 
         {wifi?.available && (

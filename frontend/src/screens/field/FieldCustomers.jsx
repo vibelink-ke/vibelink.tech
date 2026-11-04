@@ -89,9 +89,9 @@ export function FieldCustomer() {
   };
 
   const reconnect = async () => {
-    if (!window.confirm(`Drop ${c.name}'s connection so their router dials in again? They will be offline for a few seconds.`)) return;
+    if (!window.confirm(`Refresh ${c.name}'s network? Their connection drops for a few seconds and their router dials back in.`)) return;
     setBusy(true);
-    try { await api.fieldReconnect(id); store.toast('Connection reset — give it a few seconds'); }
+    try { await api.fieldReconnect(id); store.toast('Network refreshed: give it a few seconds'); }
     catch (e) { store.toast(e.message); }
     finally { setBusy(false); }
   };
@@ -128,7 +128,7 @@ export function FieldCustomer() {
           <Btn tone="quiet" onClick={() => navigate(`/field/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`)}>Raise a ticket</Btn>
         )}
         {c.pppoe_user && c.service === 'pppoe' && (
-          <Btn tone="quiet" busy={busy} onClick={reconnect}>Reset their connection</Btn>
+          <Btn tone="quiet" busy={busy} onClick={reconnect}>Refresh their network</Btn>
         )}
         {me?.can?.wifi && wifi?.available && (!wifiOpen ? (
           <Btn tone="quiet" onClick={() => setWifiOpen(true)}>Change their WiFi name / password</Btn>
