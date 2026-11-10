@@ -1,0 +1,13 @@
+{
+  "appId": "tech.vibelink.app",
+  "appName": "Vibelink",
+  "webDir": "www",
+  "backgroundColor": "#0b0f0d",
+  "server": {
+    "androidScheme": "https",
+    "errorPath": "error.html",
+    "allowNavigation": ["vibelink.tech", "*.vibelink.tech", "vibelink.co.ke", "*.vibelink.co.ke"]
+  },
+  "android": { "allowMixedContent": false },
+  "ios": { "contentInset": "automatic" }
+}

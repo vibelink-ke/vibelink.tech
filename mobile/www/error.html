@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Vibelink</title>
+<style>
+  html, body { height: 100%; margin: 0; }
+  body { background: #0b0f0d; color: #eef2ef; font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px; }
+  main { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { margin: 0; color: #a9b4ad; font-size: 14.5px; }
+  button { height: 50px; border: 0; border-radius: 12px; background: #0f7a5f; color: #fff; font: inherit; font-weight: 600; }
+  button.quiet { background: none; color: #6fd0b0; height: 40px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Could not open Vibelink</h1>
+  <p>Check that this phone is online, then try again. If the address is wrong, choose a different company.</p>
+  <button type="button" onclick="location.replace('index.html')">Try again</button>
+  <button type="button" class="quiet" onclick="location.replace('index.html#change')">Use a different company</button>
+</main>
+</body>
+</html>

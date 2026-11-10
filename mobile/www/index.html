@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Vibelink</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: #0b0f0d; color: #eef2ef; font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex; align-items: center; justify-content: center; padding: 24px; padding-top: max(24px, env(safe-area-inset-top)); }
+  main { width: 100%; max-width: 380px; display: flex; flex-direction: column; gap: 14px; }
+  section, form { display: flex; flex-direction: column; gap: 14px; }
+  .logo { width: 64px; height: 64px; border-radius: 16px; }
+  h1 { font-size: 22px; margin: 6px 0 0; overflow-wrap: anywhere; }
+  p { margin: 0; color: #a9b4ad; font-size: 14.5px; }
+  label { font-size: 13px; color: #a9b4ad; margin-bottom: -8px; }
+  .row { display: flex; align-items: center; background: #151b18; border: 1px solid #2a332e; border-radius: 12px; overflow: hidden; }
+  input { flex: 1; min-width: 0; height: 50px; padding: 0 14px; background: none; border: 0; outline: 0; color: #eef2ef; font: inherit; }
+  .suffix { padding: 0 14px 0 0; color: #7d8a82; font-size: 14.5px; white-space: nowrap; }
+  button { height: 50px; border: 0; border-radius: 12px; background: #0f7a5f; color: #fff; font: inherit; font-weight: 600; }
+  button.quiet { background: none; color: #6fd0b0; height: 40px; }
+  .err { color: #f0a08a; font-size: 13.5px; min-height: 18px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <svg class="logo" viewBox="0 0 24 24" aria-hidden="true">
+    <rect width="24" height="24" rx="6" fill="#0f7a5f"/>
+    <path d="M4 8.5C9.5 3.5 14.5 3.5 20 8.5" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity="0.55" fill="none"/>
+    <path d="M6.8 12.3C10.5 9 13.5 9 17.2 12.3" stroke="#fff" stroke-width="2.2" stroke-linecap="round" opacity="0.8" fill="none"/>
+    <path d="M9.7 16C11.3 14.6 12.7 14.6 14.3 16" stroke="#fff" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    <circle cx="12" cy="19.3" r="1.4" fill="#fff"/>
+  </svg>
+
+  <!-- Returning: a moment to change company before the saved one opens. -->
+  <section id="opening" hidden>
+    <h1>Opening <span id="site"></span></h1>
+    <p>One moment.</p>
+    <button class="quiet" id="change" type="button">Use a different company</button>
+  </section>
+
+  <!-- First run, or changing: which company's Vibelink to open. -->
+  <form id="pick" hidden>
+    <h1>Welcome to Vibelink</h1>
+    <p>Enter your internet provider's Vibelink name. It is the first part of the address you sign in at.</p>
+    <label for="name">Company name or address</label>
+    <div class="row">
+      <input id="name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="url" placeholder="mycompany">
+      <span class="suffix" id="suffix">.vibelink.tech</span>
+    </div>
+    <div class="err" id="err"></div>
+    <button type="submit">Continue</button>
+  </form>
+</main>
+<script>
+  // The sites this app may open: the same list as server.allowNavigation in capacitor.config.json.
+  var ROOTS = ['vibelink.tech', 'vibelink.co.ke'];
+  var KEY = 'vl_site';
+  var $ = function (id) { return document.getElementById(id); };
+  // Storage can be unavailable (a private window, a blocked store): the app then simply asks each time.
+  var store = {
+    get: function () { try { return localStorage.getItem(KEY) || ''; } catch (e) { return ''; } },
+    set: function (v) { try { localStorage.setItem(KEY, v); } catch (e) { /* asked again next time */ } }
+  };
+
+  /** "mycompany" or "https://mycompany.vibelink.tech/x" to "mycompany.vibelink.tech"; null when it is not one of ours. */
+  function hostOf(text) {
+    var t = String(text || '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').split(/[\/?#]/)[0].replace(/\.$/, '');
+    if (!t) return null;
+    if (t.indexOf('.') < 0) t = t + '.' + ROOTS[0];
+    if (!/^[a-z0-9.-]+$/.test(t)) return null;
+    for (var i = 0; i < ROOTS.length; i++) {
+      if (t === ROOTS[i] || t.slice(-(ROOTS[i].length + 1)) === '.' + ROOTS[i]) return t;
+    }
+    return null;
+  }
+  function openSite(host) { window.location.replace('https://' + host + '/'); }
+  function showPick() {
+    $('opening').hidden = true; $('pick').hidden = false;
+    var saved = store.get();
+    var tail = '.' + ROOTS[0];
+    $('name').value = saved.slice(-tail.length) === tail ? saved.slice(0, -tail.length) : saved;
+    $('suffix').hidden = $('name').value.indexOf('.') >= 0;
+    $('name').focus();
+  }
+
+  var saved = hostOf(store.get());
+  var timer = null;
+  if (saved && location.hash !== '#change') {
+    $('site').textContent = saved;
+    $('opening').hidden = false;
+    timer = setTimeout(function () { openSite(saved); }, 1200);
+  } else {
+    showPick();
+  }
+  $('change').onclick = function () { clearTimeout(timer); showPick(); };
+  $('name').oninput = function () { $('suffix').hidden = $('name').value.indexOf('.') >= 0; $('err').textContent = ''; };
+  $('pick').onsubmit = function (e) {
+    e.preventDefault();
+    var host = hostOf($('name').value);
+    if (!host) { $('err').textContent = 'That is not a Vibelink address. Use the name your provider gave you, like mycompany.'; return; }
+    store.set(host);
+    openSite(host);
+  };
+</script>
+</body>
+</html>

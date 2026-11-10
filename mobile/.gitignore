@@ -1,0 +1,9 @@
+node_modules/
+# Built apps: handed over, never committed
+release/
+*.apk
+*.aab
+# The Play upload key and its passwords
+*.jks
+*.keystore
+keystore.properties
