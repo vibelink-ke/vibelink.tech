@@ -27,6 +27,9 @@ async function token(cfg, { fresh = false } = {}) {
   return flight;
 }
 
+/** A token for this till's app, for kopokopo-forward.js. */
+export const accessToken = (cfg) => token(cfg);
+
 /** Same rationale as daraja.js's testAuth: an OAuth token request is free. */
 export async function testAuth(tenantId) {
   const cfg = await config(tenantId, 'kopokopo');
@@ -41,7 +44,7 @@ export async function testAuth(tenantId) {
 /** HOTSPOT ONLY. Guarded here so a misconfiguration can't route PPPoE through KopoKopo. */
 /**
  * collectFor: the prompt goes out on tenantId's till (the platform owner's) for ANOTHER tenant's guest. The row is kept under the till's
- * owner with a platform_collect purpose, so handleStkResult applies the payment to collectFor and adds it to their settlement balance.
+ * owner with a kk_collect purpose, so handleStkResult applies the payment to collectFor and queues it to be sent on to their own till or bank.
  */
 export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, label, service, collectFor = null }) {
   if (service !== 'hotspot') throw new Error('KopoKopo STK is enabled for hotspot only');
@@ -64,7 +67,7 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, 
     `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
      values ($1,'kopokopo',$2,$3,$4,$5)`,
     [tenantId, checkoutId, phone, amount, {
-      ...(collectFor ? { type: 'platform_collect', tenant_id: collectFor } : {}),
+      ...(collectFor ? { type: 'kk_collect', tenant_id: collectFor } : {}),
       plan_id: planId, mac, router_id: routerId ?? null, label: label ?? null,
     }]
   );

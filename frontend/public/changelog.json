@@ -391,7 +391,7 @@
     "date": "2026-11-10",
     "title": "Hotspot: KopoKopo via the platform",
     "items": [
-      "New hotspot payment method: KopoKopo (via platform, settled to you). Guests pay the platform's KopoKopo till, the bundle is issued once the payment is confirmed, and the money joins your settlement balance and is paid to your payout method. For accounts on platform collection, once the platform owner has enabled it."
+      "New hotspot payment method: KopoKopo (via platform, to your till or bank). The guest's M-Pesa prompt comes from the platform's KopoKopo till, the bundle is issued once the payment is confirmed, and the money is sent on to the till, paybill or bank you registered under Payment gateways. Each transfer is listed under Payments, Settlements. Available once the platform owner has enabled it."
     ]
   }
 ]

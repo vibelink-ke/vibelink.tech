@@ -291,6 +291,7 @@ for (const method of ['use', 'get', 'post', 'put', 'patch', 'delete']) {
 // Webhooks (no auth; verified per provider, idempotent downstream)
 app.use('/webhooks/daraja', daraja);
 app.use('/webhooks/kopokopo', kopokopo);
+app.use('/webhooks/kopokopo', (req, res, next) => import('./payments/kopokopo-forward.js').then((m) => m.router(req, res, next)).catch(next));
 app.use('/webhooks/bank', bank);
 app.use('/webhooks/africa', africa);
 app.use('/webhooks/forwarder', manual);
@@ -3325,11 +3326,12 @@ const viaPlatform = (mode, platformOn, hasOwnGateway) =>
 
 /**
  * Hotspot through the PLATFORM's KopoKopo till (hotspot payment method 'platform_kopokopo'): for a tenant with no KopoKopo till or
- * paybill app of their own. The guest's prompt goes out on the platform owner's till; once KopoKopo confirms it the bundle is issued,
- * the payment is recorded for the tenant, and the amount joins their settlement balance, paid out to their own payout method by the
- * same settlement run that pays their paybill money. Three conditions, each refused with its reason:
- *   - PLATFORM_KOPOKOPO_ENABLED=true (the platform owner switches it on: payouts leave the platform paybill, so its float must cover them)
- *   - the tenant is paid out by the platform (platform_collect_enabled), which is what settlement runs on
+ * paybill app of their own. The guest's prompt goes out on the platform owner's KopoKopo till and names it; once KopoKopo confirms
+ * it the bundle is issued, the payment is recorded for the tenant, and the money is sent on from that till to the tenant's own till,
+ * paybill or bank (the one registered under Payment gateways → Till / Bank) by kopokopo-forward.js. It never joins the paybill
+ * settlement. Refused, each with its reason, unless:
+ *   - PLATFORM_KOPOKOPO_ENABLED=true (the platform owner switches it on)
+ *   - the tenant has registered where their money goes
  *   - the platform owner has a KopoKopo till saved
  */
 async function platformKopokopoBuy(tenantId, { phone, amount, planId, mac = null, routerId = null, label = null }) {
@@ -3340,9 +3342,10 @@ async function platformKopokopoBuy(tenantId, { phone, amount, planId, mac = null
   const { rows: [owner] } = await pool.query("select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
   if (!owner) throw fail(503, 'The platform KopoKopo till is not set up yet. Ask the platform owner.');
   if (owner.tenant_id === tenantId) throw fail(503, 'This is the platform account itself: pick KopoKopo STK, with your own till.');
-  const { rows: [t] } = await pool.query('select platform_collect_enabled from tenants where id=$1', [tenantId]);
-  if (!t?.platform_collect_enabled) {
-    throw fail(503, 'KopoKopo via the platform needs platform collection (and a payout destination) switched on for this account first.');
+  const { destinationFor } = await import('./payments/kopokopo-forward.js');
+  if (!(await destinationFor(tenantId))) {
+    throw fail(503, 'Hotspot is set to KopoKopo via the platform, but no till, paybill or bank is registered to receive the money. '
+      + 'Add it under Hotspot → Settings → Payment gateways → Till / Bank.');
   }
   const gw = await import('./payments/kopokopo.js');
   return gw.stkPush(owner.tenant_id, { phone, amount, planId, mac, routerId, label, service: 'hotspot', collectFor: tenantId });
@@ -12630,6 +12633,29 @@ app.get('/api/settlements', requirePermission('payments.view'), wrap(async (req,
   const { rows } = await pool.query(
     'select * from settlements where tenant_id=$1 order by created_at desc', [req.tenant.id]);
   res.json(rows);
+}));
+
+/** Hotspot money taken on the platform's KopoKopo till and sent on to the tenant's till or bank. The platform owner sees every tenant's. */
+app.get('/api/kk-forwards', requirePermission('payments.view'), wrap(async (req, res) => {
+  const all = !!req.session?.is_super_admin;
+  const { rows } = await pool.query(
+    `select f.id, f.amount, f.fee, f.status, f.reference, f.destination, f.error, f.created_at, f.sent_at, f.settled_at, t.name as tenant_name
+       from kk_forwards f join tenants t on t.id = f.tenant_id
+      where ${all ? 'true' : 'f.tenant_id = $1'}
+      order by (f.status = 'processing') desc, f.created_at desc limit 300`, all ? [] : [req.tenant.id]).catch((e) => {
+    if (e.code === '42P01') return { rows: [] };   // the table is not there yet on this server
+    throw e;
+  });
+  res.json({ rows, canResolve: all });
+}));
+/** A forward KopoKopo never answered, settled by the platform owner: paid (with the reference from the till statement), or sent again. */
+app.post('/api/kk-forwards/:id/resolve', wrap(async (req, res) => {
+  if (!req.session?.is_super_admin) return res.status(403).json({ error: 'Only the platform owner can settle a forward by hand.' });
+  const action = req.body?.action === 'paid' ? 'paid' : req.body?.action === 'retry' ? 'retry' : null;
+  if (!action) return res.status(400).json({ error: 'Choose paid or retry.' });
+  const { resolveForward } = await import('./payments/kopokopo-forward.js');
+  if (!(await resolveForward(req.params.id, action, req.body?.reference))) return res.status(409).json({ error: 'That forward is not waiting on KopoKopo.' });
+  res.json({ ok: true });
 }));
 
 /** Cancel a payout Safaricom never confirmed: it goes back to be paid again. Only after 15 minutes. */

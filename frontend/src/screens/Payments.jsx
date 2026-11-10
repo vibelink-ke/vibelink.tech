@@ -209,7 +209,20 @@ export default function Payments() {
   // store's own list stands in, so the tab is never empty.
   const [history, setHistory] = useState(null);
   const [histMonths, setHistMonths] = useState(4);
-  const [kindFilter, setKindFilter] = useState('all');   // under M-Pesa Paybill: hotspot sales or PPPoE payments
+  const [kindFilter, setKindFilter] = useState('all');
+  // Hotspot money taken on the platform's KopoKopo till and sent on to this tenant's till or bank (everyone's, for the platform owner).
+  const [kkFwd, setKkFwd] = useState({ rows: [], canResolve: false });
+  const loadKkFwd = () => api.kkForwards().then(setKkFwd).catch(() => {});
+  useEffect(() => { if (tab === 'settlements') loadKkFwd(); }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const resolveKk = async (r, action) => {
+    let reference = '';
+    if (action === 'paid') {
+      reference = window.prompt('It did reach them? Enter the M-Pesa or KopoKopo reference from the till statement:', '');
+      if (reference === null) return;
+    } else if (!window.confirm(`Send KES ${kes(r.amount)} to ${r.tenant_name} again? Only if the till statement shows it never left: otherwise they are paid twice.`)) return;
+    try { await api.resolveKkForward(r.id, action, reference); store.toast(action === 'paid' ? 'Marked paid' : 'Put back to be sent again'); loadKkFwd(); }
+    catch (e) { store.toast(e.message); }
+  };   // under M-Pesa Paybill: hotspot sales or PPPoE payments
   const loadHistory = () => api.paymentsHistory().then(setHistory).catch(() => {});
   useEffect(() => { if (tab === 'all') loadHistory(); }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
   const all = history ?? store.mpesaTx ?? [];
@@ -1125,6 +1138,41 @@ export default function Payments() {
                 },
               ]}
               />
+              {kkFwd.rows.length > 0 && (
+                <div style={{ marginTop: 18 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 8 }}>KopoKopo via the platform: sent on to {kkFwd.canResolve ? 'each tenant' : 'your till or bank'}</div>
+                  <Table
+                    rowKey={(r) => r.id}
+                    rows={kkFwd.rows}
+                    columns={[
+                      ...(kkFwd.canResolve ? [{ key: 'tenant_name', label: 'Tenant' }] : []),
+                      { key: 'amount', label: 'Amount', align: 'right', render: (r) => money(r.amount) },
+                      { key: 'fee', label: 'Fee', align: 'right', render: (r) => (Number(r.fee) > 0 ? <span style={{ color: color.amberInk }}>−{money(r.fee)}</span> : '—') },
+                      {
+                        key: 'status', label: 'Status',
+                        render: (r) => (
+                          <div>
+                            <Badge tone={r.status}>{r.status === 'pending' ? 'building up' : r.status === 'processing' ? 'sent, awaiting result' : r.status}</Badge>
+                            {r.error && <div style={{ fontSize: 11.5, color: color.muted, maxWidth: 260, marginTop: 3 }}>{r.error}</div>}
+                          </div>
+                        ),
+                      },
+                      { key: 'destination', label: 'To', render: (r) => r.destination ?? '—' },
+                      { key: 'reference', label: 'Reference', render: (r) => <span style={{ fontFamily: font.mono }}>{r.reference ?? '—'}</span> },
+                      { key: 'sent_at', label: 'Sent', render: (r) => when(r.sent_at) },
+                      ...(kkFwd.canResolve ? [{
+                        key: 'act', label: '', align: 'right',
+                        render: (r) => (r.status === 'processing' && Date.now() - new Date(r.sent_at ?? r.created_at).getTime() > 15 * 60000 ? (
+                          <span style={{ whiteSpace: 'nowrap' }}>
+                            <Button size="sm" onClick={() => resolveKk(r, 'paid')}>Mark paid</Button>{' '}
+                            <Button size="sm" onClick={() => resolveKk(r, 'retry')} style={{ color: color.rust }}>Send again</Button>
+                          </span>
+                        ) : null),
+                      }] : []),
+                    ]}
+                  />
+                </div>
+              )}
             </>
           )}
         </div>

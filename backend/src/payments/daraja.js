@@ -831,6 +831,21 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
       return;
     }
 
+    // A hotspot sale taken on the platform's KopoKopo till for another tenant: theirs, and sent on to their own till or bank by
+    // kopokopo-forward.js (straight from KopoKopo; it never joins the paybill settlement). Queued once only, like platform_collect below.
+    if (p.type === 'kk_collect') {
+      const result = await applyPayment(p.tenant_id, {
+        provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone || req.phone || null, name: tx.name ?? null,
+        rawAccount: null, payload: { checkoutId },
+        target: { type: 'hotspot', planId: p.plan_id, mac: p.mac ?? null, routerId: p.router_id ?? null, label: p.label ?? null },
+      });
+      if (!result?.duplicate) {
+        const { accrueForward } = await import('./kopokopo-forward.js');
+        await accrueForward(p.tenant_id, Number(req.amount));
+      }
+      return;
+    }
+
     if (p.type === 'platform_collect') {
       // Same replay guard as the C2B confirm handler above: Safaricom can
       // deliver this STK result callback more than once for the same
