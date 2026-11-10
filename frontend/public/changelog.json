@@ -386,5 +386,12 @@
       "The Sales leaderboard under Leads, Performance no longer shows a first place when nobody has brought in any sales this month. It says so instead of naming whoever happens to be listed first.",
       "Fixed the Owed and Paid totals (and the clients referred count) on the Referrers screen. A referrer with several clients and several commissions had their amounts multiplied; each total is now counted once."
     ]
+  },
+  {
+    "date": "2026-11-10",
+    "title": "Hotspot: KopoKopo via the platform",
+    "items": [
+      "New hotspot payment method: KopoKopo (via platform, settled to you). Guests pay the platform's KopoKopo till, the bundle is issued once the payment is confirmed, and the money joins your settlement balance and is paid to your payout method. For accounts on platform collection, once the platform owner has enabled it."
+    ]
   }
 ]
