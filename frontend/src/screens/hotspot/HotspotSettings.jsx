@@ -11,7 +11,6 @@ const PAYMENT_METHODS = [
   { value: 'bankstk', label: 'Bank STK push' },
   { value: 'till', label: 'Till / paybill without API' },
   { value: 'piggyback', label: 'Till / Bank (via platform, no API needed)' },
-  { value: 'platform_kopokopo', label: 'KopoKopo (via platform, settled to you)' },
   // Outside Kenya: pick the one you saved under Settings → Payment gateways.
   { value: 'flutterwave', label: 'Flutterwave (mobile money and cards, Africa)' },
   { value: 'paystack', label: 'Paystack (Ghana, Nigeria, South Africa, Kenya)' },
@@ -210,15 +209,6 @@ export default function HotspotSettings() {
         <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 13px' }}>
           KopoKopo is hotspot-only. The database rejects it for PPPoE
           (constraint <code>kopokopo_hotspot_only</code>), and so does the payment adapter.
-        </div>
-      )}
-
-      {f.payment_method === 'platform_kopokopo' && (
-        <div style={{ fontSize: 12.5, color: color.amberInk, background: '#fff9ec', border: '1px solid #ecd9a8', borderRadius: 8, padding: '10px 13px' }}>
-          Guests pay the platform's KopoKopo till; you need no till or API of your own. The bundle is issued once KopoKopo confirms the
-          payment, and the money is added to your settlement balance and paid to your payout method (Payments, Settlements) with the rest.
-          It needs platform collection switched on for your account, and the platform owner to have enabled it; until then purchases
-          fail with a clear message.
         </div>
       )}
 

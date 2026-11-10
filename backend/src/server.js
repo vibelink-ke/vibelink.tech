@@ -1348,14 +1348,6 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     'select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const sitePb = await sitePiggyback(tenant.id, routerId);
   const method = sitePb ? 'piggyback' : (hs?.payment_method ?? 'kopokopo');
-  if (method === 'platform_kopokopo') {
-    try {
-      const checkoutId = await platformKopokopoBuy(tenant.id, { phone, amount: Number(plan.price), planId: plan.id, routerId });
-      return res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
-    } catch (e) {
-      return res.status(e.status ?? 502).json({ error: e.status ? e.message : gatewayErrorMessage(e, 'hotspot/buy') });
-    }
-  }
   if (AFRICA_PROVIDERS.includes(method)) {
     const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
     if (!gw) {
@@ -1998,14 +1990,6 @@ app.post('/hotspot/tv-buy', stkLimiter, wrap(async (req, res) => {
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [tenant.id]);
   const sitePb = await sitePiggyback(tenant.id, routerId);
   const method = sitePb ? 'piggyback' : (hs?.payment_method ?? 'kopokopo');
-  if (method === 'platform_kopokopo') {
-    try {
-      const checkoutId = await platformKopokopoBuy(tenant.id, { phone, amount: Number(plan.price), planId: plan.id, mac, routerId: router.id, label });
-      return res.json({ checkoutId, phone, amount: Number(plan.price), plan: plan.title });
-    } catch (e) {
-      return res.status(e.status ?? 502).json({ error: e.status ? e.message : gatewayErrorMessage(e, 'hotspot/tv-buy') });
-    }
-  }
   if (AFRICA_PROVIDERS.includes(method)) {
     const gw = await findAfricaGateway(tenant.id, 'hotspot', method);
     if (!gw) {
@@ -3324,31 +3308,6 @@ const viaPlatform = (mode, platformOn, hasOwnGateway) =>
   (mode === 'platform' ? !!platformOn : mode === 'own' ? false : (!hasOwnGateway && !!platformOn));
 
 /**
- * Hotspot through the PLATFORM's KopoKopo till (hotspot payment method 'platform_kopokopo'): for a tenant with no KopoKopo till or
- * paybill app of their own. The guest's prompt goes out on the platform owner's till; once KopoKopo confirms it the bundle is issued,
- * the payment is recorded for the tenant, and the amount joins their settlement balance, paid out to their own payout method by the
- * same settlement run that pays their paybill money. Three conditions, each refused with its reason:
- *   - PLATFORM_KOPOKOPO_ENABLED=true (the platform owner switches it on: payouts leave the platform paybill, so its float must cover them)
- *   - the tenant is paid out by the platform (platform_collect_enabled), which is what settlement runs on
- *   - the platform owner has a KopoKopo till saved
- */
-async function platformKopokopoBuy(tenantId, { phone, amount, planId, mac = null, routerId = null, label = null }) {
-  const fail = (status, message) => Object.assign(new Error(message), { status });
-  if (process.env.PLATFORM_KOPOKOPO_ENABLED !== 'true') {
-    throw fail(503, 'KopoKopo via the platform is not switched on yet. Pick another payment method in Hotspot → Settings for now.');
-  }
-  const { rows: [owner] } = await pool.query("select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
-  if (!owner) throw fail(503, 'The platform KopoKopo till is not set up yet. Ask the platform owner.');
-  if (owner.tenant_id === tenantId) throw fail(503, 'This is the platform account itself: pick KopoKopo STK, with your own till.');
-  const { rows: [t] } = await pool.query('select platform_collect_enabled from tenants where id=$1', [tenantId]);
-  if (!t?.platform_collect_enabled) {
-    throw fail(503, 'KopoKopo via the platform needs platform collection (and a payout destination) switched on for this account first.');
-  }
-  const gw = await import('./payments/kopokopo.js');
-  return gw.stkPush(owner.tenant_id, { phone, amount, planId, mac, routerId, label, service: 'hotspot', collectFor: tenantId });
-}
-
-/**
  * Direct settlement ("piggyback"): the platform's own Daraja app sends the STK push, so the customer sees the platform's
  * name, but PartyB is the ISP's own till, paybill or bank account — the money settles there and never touches the
  * platform. Needs Safaricom to have allowed the platform shortcode to push to other numbers, so it stays off until
@@ -3646,10 +3605,6 @@ app.post('/portal/buy', stkLimiter, async (req, res) => {
   const { rows: [hs] } = await pool.query('select payment_method from hotspot_settings where tenant_id=$1', [req.tenant.id]);
   const method = req.body.method ?? hs?.payment_method ?? 'kopokopo';
   try {
-    if (method === 'platform_kopokopo') {
-      const id = await platformKopokopoBuy(req.tenant.id, { phone, amount: await price(planId), planId, mac });
-      return res.json({ status: 'pending', checkoutId: id });
-    }
     if (method === 'kopokopo') {
       const id = await kk.stkPush(req.tenant.id, { phone, amount: await price(planId), planId, mac, service: 'hotspot' });
       return res.json({ status: 'pending', checkoutId: id });

@@ -39,14 +39,9 @@ export async function testAuth(tenantId) {
 }
 
 /** HOTSPOT ONLY. Guarded here so a misconfiguration can't route PPPoE through KopoKopo. */
-/**
- * collectFor: the prompt goes out on tenantId's till (the platform owner's) for ANOTHER tenant's guest. The row is kept under the till's
- * owner with a platform_collect purpose, so handleStkResult applies the payment to collectFor and adds it to their settlement balance.
- */
-export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, label, service, collectFor = null }) {
+export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, label, service }) {
   if (service !== 'hotspot') throw new Error('KopoKopo STK is enabled for hotspot only');
   const cfg = await config(tenantId, 'kopokopo');
-  if (!cfg?.shortcode) throw Object.assign(new Error('No KopoKopo till is set up.'), { status: 503 });
   const { data, headers } = await axios.post(`${BASE}/api/v1/incoming_payments`, {
     payment_channel: 'M-PESA STK Push',
     till_number: cfg.shortcode,
@@ -63,10 +58,7 @@ export async function stkPush(tenantId, { phone, amount, planId, mac, routerId, 
   await pool.query(
     `insert into stk_requests (tenant_id, provider, checkout_id, phone, amount, purpose)
      values ($1,'kopokopo',$2,$3,$4,$5)`,
-    [tenantId, checkoutId, phone, amount, {
-      ...(collectFor ? { type: 'platform_collect', tenant_id: collectFor } : {}),
-      plan_id: planId, mac, router_id: routerId ?? null, label: label ?? null,
-    }]
+    [tenantId, checkoutId, phone, amount, { plan_id: planId, mac, router_id: routerId ?? null, label: label ?? null }]
   );
   return checkoutId;
 }

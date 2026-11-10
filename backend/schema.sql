@@ -3761,8 +3761,3 @@ alter table live_chats add column if not exists channel text not null default 'w
 alter table routers add column if not exists winbox_port  int;
 alter table routers add column if not exists winbox_until timestamptz;
 create unique index if not exists routers_winbox_port_uq on routers (winbox_port) where winbox_port is not null;
-
--- Hotspot through the platform's KopoKopo till ('platform_kopokopo'): collected there, settled to the tenant like platform-collect paybill money.
-alter table hotspot_settings drop constraint if exists payment_method_valid;
-alter table hotspot_settings add constraint payment_method_valid
-  check (payment_method in ('kopokopo','paybill','bankstk','till','piggyback','platform_kopokopo','flutterwave','paystack','azampay','yopayments'));
