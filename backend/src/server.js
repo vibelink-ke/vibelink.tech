@@ -4392,6 +4392,16 @@ app.post('/api/push/subscribe', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// The phone app's own token (Firebase), sent by the app once someone has signed in on it. See push.js.
+app.post('/api/push/native-token', wrap(async (req, res) => {
+  const token = String(req.body?.token ?? '').trim();
+  if (token.length < 20 || token.length > 4096) return res.status(400).json({ error: 'Not a valid device token' });
+  if (!req.session?.staff_id) return res.status(401).json({ error: 'Sign in first' });
+  const push = await import('./push.js');
+  await push.saveDevice(req.tenant.id, req.session.staff_id, token, req.body?.platform);
+  res.json({ ok: true });
+}));
+
 app.post('/api/push/unsubscribe', wrap(async (req, res) => {
   const endpoint = String(req.body?.endpoint ?? '');
   if (!endpoint) return res.status(400).json({ error: 'Missing endpoint' });

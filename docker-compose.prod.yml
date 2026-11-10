@@ -147,6 +147,8 @@ services:
       # above — the app installs and works fully without it.
       VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
       VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      # The Firebase service account (base64 of its JSON key) that sends notifications to the phone app. Unset: the app gets none.
+      FCM_SERVICE_ACCOUNT: ${FCM_SERVICE_ACCOUNT:-}
       # Checked on incoming POST /api/platform-sms/relay and
       # /api/platform-sms/buy-credits — a sibling Vibelink deployment
       # (vibelink-co-ke) sends its tenants' SMS through this platform's own

@@ -3761,3 +3761,14 @@ alter table live_chats add column if not exists channel text not null default 'w
 alter table routers add column if not exists winbox_port  int;
 alter table routers add column if not exists winbox_until timestamptz;
 create unique index if not exists routers_winbox_port_uq on routers (winbox_port) where winbox_port is not null;
+
+-- A staff member's phone running the Vibelink app (mobile/): its Firebase token, for the same alerts web push carries.
+create table if not exists push_devices (
+  token      text primary key,
+  tenant_id  uuid not null references tenants on delete cascade,
+  staff_id   uuid references staff on delete cascade,
+  platform   text not null default 'android',
+  created_at timestamptz not null default now(),
+  seen_at    timestamptz not null default now()
+);
+create index if not exists push_devices_tenant_id_idx on push_devices (tenant_id);

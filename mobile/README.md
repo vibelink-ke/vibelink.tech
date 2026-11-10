@@ -42,11 +42,28 @@ For each new store release raise `versionCode` (and `versionName`) in `android/a
 
 Needs Xcode and a paid Apple Developer account. The bundle id is `tech.vibelink.app`.
 
-## What does not work inside the app
+## Notifications (Android)
 
-It is a web view, not Chrome, so two things the browser does are missing:
+A web view gets no web push, so the app uses Firebase Cloud Messaging. It needs a Firebase project, set up once:
 
-- web push notifications (the browser's "allow notifications") do not arrive
-- files the page makes itself (the Winbox `.ovpn` profile, exports) may not save
+1. In the Firebase console create a project and add an Android app with the package name `tech.vibelink.app`.
+2. Download its `google-services.json` into `android/app/` and rebuild. Without that file the app builds and runs, with notifications off.
+3. Project settings > Service accounts > Generate new private key. On each server put that key in `.env` on one line, as base64:
+
+       echo "FCM_SERVICE_ACCOUNT=$(base64 -w0 the-key-file.json)" >> .env
+
+   then deploy. `push.js` sends every alert that web push carries to the phones as well.
+
+How it fits together: `res/raw/vl_shim.js` is run on every page of a Vibelink site. It asks the phone for its Firebase token
+(`MainActivity`) and posts it to `/api/push/native-token` once a staff member is signed in. A tapped notification opens the page it names.
+
+## Downloads (Android)
+
+Files the server sends go to the Downloads folder through the system download manager, with the page's sign-in. Files the page makes
+itself (exports, the Winbox `.ovpn` profile) are handed to the app by the same shim and written to Downloads.
+
+## Not done
+
+- iPhone: notifications and downloads above are Android only. The iOS project still needs the same two pieces (APNs for notifications).
 
 Camera and location work (they are declared in the manifests).

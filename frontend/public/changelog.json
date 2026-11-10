@@ -386,5 +386,12 @@
       "The Sales leaderboard under Leads, Performance no longer shows a first place when nobody has brought in any sales this month. It says so instead of naming whoever happens to be listed first.",
       "Fixed the Owed and Paid totals (and the clients referred count) on the Referrers screen. A referrer with several clients and several commissions had their amounts multiplied; each total is now counted once."
     ]
+  },
+  {
+    "date": "2026-11-10",
+    "title": "Phone app: notifications and downloads",
+    "items": [
+      "The Vibelink Android app can now receive the same alerts as browser notifications (routers down, jobs assigned, payments needing attention), and it saves downloads such as exports and the Winbox profile to the phone's Downloads folder. Notifications start once the platform's Firebase key is set on the server."
+    ]
   }
 ]
