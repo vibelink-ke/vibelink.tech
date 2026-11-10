@@ -12661,12 +12661,14 @@ app.get('/api/platform/pay-ins', superAdminOnly, wrap(async (req, res) => {
  */
 app.get('/api/platform/sms-revenue', superAdminOnly, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `select p.id, (p.payload->>'for_tenant')::uuid as tenant_id, coalesce(t.name, 'Unknown tenant') as tenant,
+    // A sale relayed from a sibling deployment (vibelink.co.ke) has no tenant here: it is named by where it came from.
+    `select p.id, (p.payload->>'for_tenant')::uuid as tenant_id,
+            coalesce(t.name, case when p.payload->>'type' = 'sms_credit_relay' then 'vibelink.' || coalesce(p.payload->>'source', 'co.ke') end, 'Unknown tenant') as tenant,
             (p.payload->>'quantity')::int as quantity, p.amount, p.payer_phone as phone, p.provider_ref as reference,
             p.applied_at as at
        from payments p
        left join tenants t on t.id = (p.payload->>'for_tenant')::uuid
-      where p.payload->>'type' = 'sms_credit'
+      where p.payload->>'type' in ('sms_credit', 'sms_credit_relay')
       order by p.applied_at desc
       limit 500`);
   res.json(rows);
@@ -14938,7 +14940,7 @@ app.get('/api/platform/revenue-overview', superAdminOnly, wrap(async (req, res) 
          from tenant_payments where created_at >= $1::timestamptz group by 1`, [w.start]),
     pool.query(
       `select to_char(applied_at at time zone 'Africa/Nairobi', 'YYYY-MM') as m, sum(amount) as sms
-         from payments where payload->>'type' = 'sms_credit' and applied_at >= $1::timestamptz group by 1`, [w.start]),
+         from payments where payload->>'type' in ('sms_credit', 'sms_credit_relay') and applied_at >= $1::timestamptz group by 1`, [w.start]),
     pool.query(
       `select c.tenant_id, t.name as tenant, sum(c.total) as owed, count(*)::int as statements,
               to_char(min(c.month), 'YYYY-MM') as oldest, t.billing_credit

@@ -391,7 +391,8 @@
     "date": "2026-11-10",
     "title": "Phone app: notifications and downloads",
     "items": [
-      "The Vibelink Android app can now receive the same alerts as browser notifications (routers down, jobs assigned, payments needing attention), and it saves downloads such as exports and the Winbox profile to the phone's Downloads folder. Notifications start once the platform's Firebase key is set on the server."
+      "The Vibelink Android app can now receive the same alerts as browser notifications (routers down, jobs assigned, payments needing attention), and it saves downloads such as exports and the Winbox profile to the phone's Downloads folder. Notifications start once the platform's Firebase key is set on the server.",
+      "SMS credit bought from vibelink.co.ke now shows under SMS credit sales on the platform admin, and counts in the monthly SMS revenue. Those purchases were paid and credited but never listed."
     ]
   }
 ]

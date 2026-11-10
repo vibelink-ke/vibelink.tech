@@ -898,6 +898,15 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
      * succeeded, which would be a worse lie than a late credit.
      */
     if (p.type === 'sms_credit_relay') {
+      // The sale itself, on the platform's own books: without this row the money was on the paybill but appeared nowhere under
+      // SMS credit sales, which only lists payments. Recorded before the callback, and whatever the callback does.
+      await pool.query(
+        `insert into payments (tenant_id, provider, provider_ref, amount, payer_phone, status, applied_at, payload)
+         values ($1,$2,$3,$4,$5,'applied',now(),$6)
+         on conflict (tenant_id, provider, provider_ref) do nothing`,
+        [req.tenant_id, provider, tx.ref ?? checkoutId, Number(req.amount), tx.phone || req.phone || null,
+          { type: 'sms_credit_relay', source: p.source ?? 'sibling', source_tenant_id: p.source_tenant_id ?? null, quantity: p.quantity, checkoutId }])
+        .catch((e) => console.error('sms_credit_relay: could not record the sale for checkout', checkoutId, e.message));
       const callbackUrl = process.env.SMS_CREDIT_CALLBACK_URL;
       if (!callbackUrl || !process.env.PLATFORM_SMS_RELAY_KEY) {
         console.error('sms_credit_relay: SMS_CREDIT_CALLBACK_URL/PLATFORM_SMS_RELAY_KEY not set — '
