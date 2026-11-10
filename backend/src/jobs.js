@@ -141,8 +141,6 @@ export function startJobs() {
   cron.schedule('*/2 * * * *', safely('syncTr069Devices', syncTr069DevicesJob));
   // Every minute: each tenant has their own payout time (Nairobi), midnight by default.
   cron.schedule('* * * * *', safely('settleTenants', settleTenants));
-  // Hotspot money taken on the platform's KopoKopo till, sent on to each tenant's own till or bank.
-  cron.schedule('*/5 * * * *', safely('kopokopoForwards', () => import('./payments/kopokopo-forward.js').then((m) => m.runForwards())));
   cron.schedule('*/30 * * * *', safely('watchStuckPayouts', watchStuckPayouts));
   cron.schedule('0 1 * * *', safely('generateMonthlyCharges', generateMonthlyCharges));
   // Statements are raised on the last day of the month (30th/31st, 28th/29th in February), at 23:55 Nairobi. Fires at

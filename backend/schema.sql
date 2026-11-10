@@ -3766,24 +3766,3 @@ create unique index if not exists routers_winbox_port_uq on routers (winbox_port
 alter table hotspot_settings drop constraint if exists payment_method_valid;
 alter table hotspot_settings add constraint payment_method_valid
   check (payment_method in ('kopokopo','paybill','bankstk','till','piggyback','platform_kopokopo','flutterwave','paystack','azampay','yopayments'));
-
--- Hotspot money taken on the platform's KopoKopo till for a tenant, sent on to the tenant's own till, paybill or bank
--- (backend/src/payments/kopokopo-forward.js). One pending row per tenant builds up, then goes out through KopoKopo Send Money.
-create table if not exists kk_forwards (
-  id             uuid primary key default gen_random_uuid(),
-  tenant_id      uuid not null references tenants on delete cascade,
-  amount         numeric(12,2) not null,
-  fee            numeric(12,2) not null default 0,
-  status         text not null default 'pending' check (status in ('pending','processing','paid','failed')),
-  k2_id          text,
-  reference      text,
-  destination    text,
-  error          text,
-  retry_at       timestamptz,
-  stuck_notified boolean not null default false,
-  created_at     timestamptz not null default now(),
-  sent_at        timestamptz,
-  settled_at     timestamptz
-);
-create unique index if not exists kk_forwards_one_pending on kk_forwards (tenant_id) where status = 'pending';
-create index if not exists kk_forwards_k2_idx on kk_forwards (k2_id) where k2_id is not null;

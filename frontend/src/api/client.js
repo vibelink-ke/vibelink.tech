@@ -156,8 +156,6 @@ export const api = {
   stkStatus: (checkoutId) => get(`/api/payments/stk/${checkoutId}`),
   reconcileStatement: (text) => post('/api/payments/reconcile', { text }),
   settlements: () => get('/api/settlements'),
-  kkForwards: () => get('/api/kk-forwards'),
-  resolveKkForward: (id, action, reference) => post(`/api/kk-forwards/${id}/resolve`, { action, reference }),
   requestSettlementPayout: (amount) => post('/api/settlements/payout', amount != null ? { amount } : {}),
   cancelSettlement: (id) => post(`/api/settlements/${id}/cancel`, {}),
   inFlightSettlements: () => get('/api/platform/settlements/in-flight'),
