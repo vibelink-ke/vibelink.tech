@@ -394,5 +394,12 @@
       "The Vibelink Android app can now receive the same alerts as browser notifications (routers down, jobs assigned, payments needing attention), and it saves downloads such as exports and the Winbox profile to the phone's Downloads folder. Notifications start once the platform's Firebase key is set on the server.",
       "SMS credit bought from vibelink.co.ke now shows under SMS credit sales on the platform admin, and counts in the monthly SMS revenue. Those purchases were paid and credited but never listed."
     ]
+  },
+  {
+    "date": "2026-11-11",
+    "title": "Client billing: all payments shown",
+    "items": [
+      "Fixed the Billing tab on a client's page not showing some of their payments. It was reading from the Payments screen's list, which keeps only the newest 500 per channel, so on a busy paybill a client's payment dropped off within a day or two even though it had been applied and the account renewed. The tab now loads that client's own payments directly."
+    ]
   }
 ]

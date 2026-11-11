@@ -11356,6 +11356,17 @@ app.get('/api/subscribers/:id/usage-history', requirePermission('clients.view'),
  * WhatsApp messages. SMS are matched to the client by phone number (either of theirs, last nine digits); a message
  * typed on the Messaging screen is also in the SMS log, so it is only taken from messages when the log has no copy.
  */
+// Every payment applied to one line. The client's Billing tab used to be filtered out of the Payments screen's list, which keeps only the
+// newest 500 per channel: with hundreds of hotspot sales a day on the same paybill, a PPPoE payment fell off that list within a day or two
+// and the client's page showed nothing for it although it had been applied.
+app.get('/api/subscribers/:id/payments', requirePermission('payments.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select id, subscriber_id, provider, provider_ref, amount, status, payer_name, raw_account, received_at, applied_at
+       from payments where tenant_id=$1 and subscriber_id=$2
+      order by received_at desc limit 300`, [req.tenant.id, req.params.id]);
+  res.json(rows);
+}));
+
 app.get('/api/subscribers/:id/communications', requirePermission('messaging.view'), wrap(async (req, res) => {
   const { rows } = await pool.query(
     `with s as (

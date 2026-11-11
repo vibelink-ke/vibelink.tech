@@ -543,6 +543,7 @@ export const api = {
   unscheduleTicket: (id) => del(`/api/tickets/${id}/schedule`),
   subscriberUsageHistory: (id) => get(`/api/subscribers/${id}/usage-history`),
   subscriberCommunications: (id) => get(`/api/subscribers/${id}/communications`),
+  subscriberPayments: (id) => get(`/api/subscribers/${id}/payments`),
 
   settings: () => get('/api/settings'),
   updateMe: (me) => patch('/api/me', me),

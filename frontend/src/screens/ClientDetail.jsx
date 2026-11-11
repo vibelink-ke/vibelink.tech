@@ -345,6 +345,15 @@ export default function ClientDetail() {
 
   // Communication and Billing are account-wide — every line's own messages
   // and payments, not just whichever line happens to be first.
+  // This account's own payments, asked for directly: the Payments screen's list holds only the newest few hundred of everything.
+  const [payHistory, setPayHistory] = useState(null);
+  useEffect(() => {
+    if (!siblings.length) { setPayHistory(null); return; }
+    setPayHistory(null);
+    Promise.all(siblings.map((s) => api.subscriberPayments(s.id).catch(() => [])))
+      .then((lists) => setPayHistory(lists.flat()));
+  }, [siblings.map((s) => s.id).join(','), (store.mpesaTx ?? []).length]);
+
   const [thread, setThread] = useState(null);
   useEffect(() => {
     if (!siblings.length) { setThread(null); return; }
@@ -1200,9 +1209,11 @@ export default function ClientDetail() {
           <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Payment history</div>
           {(() => {
             const ids = new Set(siblings.map((s) => s.id));
-            const history = (store.mpesaTx ?? [])
-              .filter((p) => ids.has(p.subscriber_id))
+            const seen = new Set();
+            const history = [...(payHistory ?? []), ...(store.mpesaTx ?? [])]
+              .filter((p) => ids.has(p.subscriber_id) && !seen.has(p.id) && seen.add(p.id))
               .sort((a, b) => new Date(b.received_at) - new Date(a.received_at));
+            if (!history.length && payHistory === null) return <Empty>Loading payments…</Empty>;
             if (!history.length) return <Empty>No payments recorded for this account yet.</Empty>;
             return (
               <div style={{ display: 'grid', gap: 8 }}>

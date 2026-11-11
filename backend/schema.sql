@@ -3733,6 +3733,8 @@ end $fn$;
 
 -- The Payments list reads the newest payments of each channel: this index makes that a quick lookup instead of a sort of the tenant's whole history.
 create index if not exists payments_tenant_provider_received on payments (tenant_id, provider, received_at desc);
+-- One client's own payments, for the Billing tab on their page.
+create index if not exists payments_subscriber_received on payments (subscriber_id, received_at desc) where subscriber_id is not null;
 
 -- The name of the TR069 profile to switch on for an ONU before its WiFi is set (SmartOLT's own is "SmartOLT"). Empty means that default.
 alter table smartolt_config add column if not exists tr069_profile text;
