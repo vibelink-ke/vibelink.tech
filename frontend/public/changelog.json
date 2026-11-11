@@ -400,7 +400,8 @@
     "title": "Client billing: all payments shown",
     "items": [
       "Fixed the Billing tab on a client's page not showing some of their payments. It was reading from the Payments screen's list, which keeps only the newest 500 per channel, so on a busy paybill a client's payment dropped off within a day or two even though it had been applied and the account renewed. The tab now loads that client's own payments directly.",
-      "New option under Settings, Preferences: Charge for a package change. When it is on and a client is moved to a dearer package before their expiry, the difference for the days they have left is taken from their wallet. If the wallet does not cover it, the rest comes off their expiry as days, at the new package's daily price. Moving to a cheaper package changes nothing. It is off until you switch it on, and each charge is written to the client's activity log."
+      "New option under Settings, Preferences: Charge for a package change. When it is on and a client is moved to a dearer package before their expiry, the difference for the days they have left is taken from their wallet. If the wallet does not cover it, the rest comes off their expiry as days, at the new package's daily price. Moving to a cheaper package changes nothing. It is off until you switch it on, and each charge is written to the client's activity log.",
+      "Hotspot routers now report each guest's usage every 5 minutes instead of every minute. On a busy site this cuts the reporting traffic to the server to a fifth, which reduces the RADIUS accounting request not sent warnings in the router's log. Usage figures and data-cap cut-offs for hotspot guests can be up to 5 minutes behind. Routers pick up the new interval by themselves; nothing to do on the router."
     ]
   }
 ]

@@ -407,7 +407,7 @@ export async function applyPpp(conn, { interimSeconds = 120 } = {}) {
  * below — "the hotspot package is not installed" — instead of RouterOS's raw
  * "no such command or directory (hotspot)".
  */
-export async function applyHotspot(conn, { interimSeconds = 60 } = {}) {
+export async function applyHotspot(conn, { interimSeconds = 300 } = {}) {
   const profiles = await cmd(conn, 'read hotspot profiles', '/ip/hotspot/profile/print', []);
   const fields = ['=use-radius=yes', `=radius-interim-update=${hhmmss(interimSeconds)}`];
   let changed = 0;
@@ -515,7 +515,7 @@ export function planNetwork(input) {
 export async function applyHotspotServer(conn, {
   bridge = 'bridge-lan',
   network = '10.5.50.0/24',
-  interimSeconds = 60,
+  interimSeconds = 300,
   dnsName = 'billing.spot',
 } = {}) {
   const { network: cidr, gateway, poolRange, bits } = planNetwork(network);
