@@ -11039,6 +11039,64 @@ app.post('/api/subscribers/:id/account-code', requirePermission('clients.edit'),
   }
 }));
 
+/**
+ * A line moved to a dearer package part-way through a paid period (Settings, Preferences, "Charge for a package change").
+ * The days still left were paid for at the old price, so the difference for those days is owed: it comes out of the wallet, and whatever
+ * the wallet cannot cover is taken as days off the expiry, valued at the new package's daily price. A move to a cheaper or equally priced
+ * package changes nothing. `before` is the line as it was ({ plan_id, custom_price }), `after` the row once the package was changed.
+ * Never allowed to fail the package change itself: on any error the change stands and nothing is charged.
+ */
+async function chargePlanChange(req, before, after) {
+  try {
+    if (!before?.plan_id || !after?.plan_id || before.plan_id === after.plan_id) return null;
+    if (!['active', 'grace'].includes(after.status) || !after.expires_at) return null;
+    const { rows: [pref] } = await pool.query("select prefs->>'planChangeCharge' as v from app_settings where tenant_id=$1", [req.tenant.id]);
+    if (pref?.v !== 'Yes') return null;
+    const { rows: plans } = await pool.query('select id, title, price, duration_min from plans where tenant_id=$1 and id = any($2::uuid[])', [req.tenant.id, [before.plan_id, after.plan_id]]);
+    const oldPlan = plans.find((p) => p.id === before.plan_id);
+    const newPlan = plans.find((p) => p.id === after.plan_id);
+    if (!oldPlan || !newPlan) return null;
+    const daily = (price, plan) => Number(price) / Math.max(Number(plan.duration_min) / 1440, 1 / 24);
+    const oldDaily = daily(before.custom_price ?? oldPlan.price, oldPlan);
+    const newDaily = daily(after.custom_price ?? newPlan.price, newPlan);
+    const daysLeft = (new Date(after.expires_at).getTime() - Date.now()) / 86400000;
+    if (!(daysLeft > 0) || !(newDaily > oldDaily)) return null;
+    const due = Math.round(daysLeft * (newDaily - oldDaily) * 100) / 100;
+    if (due < 1) return null;
+
+    const { withTenant } = await import('./db.js');
+    const out = await withTenant(req.tenant.id, async (c) => {
+      // The same lock a payment settling on this account takes (see applyWalletChange).
+      const { rows: [wallet] } = await c.query(
+        `insert into account_wallets (tenant_id, account_code, balance) values ($1,$2,0)
+         on conflict (tenant_id, account_code) do update set balance = account_wallets.balance returning balance`,
+        [req.tenant.id, after.account_code]);
+      const balance = Number(wallet.balance);
+      const fromWallet = Math.min(Math.max(balance, 0), due);
+      if (fromWallet > 0) {
+        await c.query('update account_wallets set balance=$3, updated_at=now() where tenant_id=$1 and account_code=$2', [req.tenant.id, after.account_code, balance - fromWallet]);
+      }
+      // Whole days, so the expiry keeps its time of day.
+      const daysReduced = Math.round((due - fromWallet) / newDaily);
+      let expiresAt = after.expires_at;
+      if (daysReduced > 0) {
+        expiresAt = new Date(Math.max(new Date(after.expires_at).getTime() - daysReduced * 86400000, Date.now()));
+        await c.query('update subscribers set expires_at=$3 where tenant_id=$1 and id=$2', [req.tenant.id, after.id, expiresAt]);
+      }
+      return { due, walletCharged: Math.round(fromWallet * 100) / 100, walletBalance: Math.round((balance - fromWallet) * 100) / 100, daysReduced, expiresAt };
+    });
+    const parts = [];
+    if (out.walletCharged > 0) parts.push(`KES ${out.walletCharged} from the wallet`);
+    if (out.daysReduced > 0) parts.push(`${out.daysReduced} day${out.daysReduced === 1 ? '' : 's'} off the expiry`);
+    await logActivity(req, after.id, after.account_code, 'Package change charged',
+      `${oldPlan.title} to ${newPlan.title}: KES ${out.due} for the ${Math.round(daysLeft)} days left${parts.length ? ` (${parts.join(', ')})` : ''}`);
+    return { ...out, from: oldPlan.title, to: newPlan.title };
+  } catch (e) {
+    console.warn('package change charge skipped:', e?.message ?? e);
+    return null;
+  }
+}
+
 app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async (req, res) => {
   const allowed = ['name', 'phone', 'phone_alt', 'status', 'plan_id', 'router_id', 'static_ip',
                    'autopay', 'expires_at', 'pppoe_user', 'pppoe_pass', 'location', 'lat', 'lng',
@@ -11162,6 +11220,11 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     previousUser = req.body.pppoe_user != null ? (old?.pppoe_user ?? null) : null;
     previousRouter = old?.router_id ?? null;
   }
+  // The package and price as they are now, for the package-change charge below.
+  let beforePlan = null;
+  if (sets.includes('plan_id')) {
+    ({ rows: [beforePlan] } = await pool.query('select plan_id, custom_price from subscribers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]));
+  }
   let s;
   try {
     ({ rows: [s] } = await pool.query(
@@ -11176,6 +11239,10 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     throw e;
   }
   if (!s) return res.status(404).json({ error: 'not found' });
+
+  // Before RADIUS is rewritten below, so a shortened expiry reaches it in the same pass. Not when the same edit sets the expiry by hand.
+  const planCharge = beforePlan && !sets.includes('expires_at') ? await chargePlanChange(req, beforePlan, s) : null;
+  if (planCharge) s.expires_at = planCharge.expiresAt;
 
   // A plan change moves the rate limit, which lives in radreply; a credential
   // change moves the password. Without this the subscriber keeps the old value
@@ -11249,7 +11316,7 @@ app.patch('/api/subscribers/:id', requirePermission('clients.edit'), wrap(async 
     if (previousRouter && previousRouter !== s.router_id) queueRouterSync(req.tenant.id, previousRouter);
   }
 
-  res.json({ ...s, ...(settingCredit ? { wallet_balance: walletBalance } : {}) });
+  res.json({ ...s, ...(settingCredit ? { wallet_balance: walletBalance } : {}), ...(planCharge ? { wallet_balance: planCharge.walletBalance, planCharge } : {}) });
 }));
 
 /**
@@ -13895,10 +13962,12 @@ app.post('/api/tickets/:id/approve-plan-change', wrap(async (req, res) => {
     'select id, title from plans where id=$1 and tenant_id=$2', [t.requested_plan_id, req.tenant.id]);
   if (!plan) return res.status(404).json({ error: 'That plan no longer exists.' });
 
+  const { rows: [beforePlan] } = await pool.query('select plan_id, custom_price from subscribers where id=$1 and tenant_id=$2', [t.subscriber_id, req.tenant.id]);
   const { rows: [sub] } = await pool.query(
-    'update subscribers set plan_id=$1 where id=$2 and tenant_id=$3 returning pppoe_user',
+    'update subscribers set plan_id=$1 where id=$2 and tenant_id=$3 returning *',
     [plan.id, t.subscriber_id, req.tenant.id]);
   if (!sub) return res.status(404).json({ error: 'That client no longer exists.' });
+  const planCharge = await chargePlanChange(req, beforePlan, sub);
 
   // Same as PATCH /api/subscribers/:id's own plan_id handling — the rate
   // limit lives in radreply and does not move on its own.
@@ -13916,7 +13985,7 @@ app.post('/api/tickets/:id/approve-plan-change', wrap(async (req, res) => {
     `insert into ticket_notes (tenant_id, ticket_id, author, body, internal)
      values ($1,$2,$3,$4,false)`,
     [req.tenant.id, req.params.id, req.session.name ?? 'Support',
-     `Approved — switched to ${plan.title}.`]);
+     `Approved — switched to ${plan.title}.${planCharge ? ` Charged KES ${planCharge.due} for the days left${planCharge.walletCharged > 0 ? `, KES ${planCharge.walletCharged} from the wallet` : ''}${planCharge.daysReduced > 0 ? `, ${planCharge.daysReduced} day${planCharge.daysReduced === 1 ? '' : 's'} off the expiry` : ''}.` : ''}`]);
 
   res.json(updated);
 }));

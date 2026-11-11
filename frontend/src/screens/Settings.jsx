@@ -292,7 +292,7 @@ export default function Settings() {
   const [smtp, setSmtp] = useState({ host: '', port: '587', security: SECURITY[0], user: '', pass: '', from: '', fromName: '' });
   const [prefs, setPrefs] = useState({
     hotspotPay: 'KopoKopo STK', pppoePay: 'M-Pesa Paybill', grace: '24 hours at 2 Mbps',
-    taxRate: '', taxInclusive: 'Yes', installationFee: '',
+    taxRate: '', taxInclusive: 'Yes', installationFee: '', planChangeCharge: 'No',
   });
   const [saving, setSaving] = useState(false);
 
@@ -1077,6 +1077,34 @@ export default function Settings() {
           </div>
           <div style={{ marginTop: 12 }}>
             <Button variant="primary" onClick={() => persist({ prefs }, 'Installation fee')} disabled={saving}>
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
+        </Card>
+      )}
+
+      {tab === 'prefs' && (
+        <Card
+          title="Charge for a package change"
+          subtitle="When a client is moved to a dearer package before their expiry, charge the difference for the days they have left. It is taken from their wallet. If the wallet does not cover it, the rest is taken as days off their expiry, at the new package's daily price. Moving to a cheaper package changes nothing."
+          style={{ marginTop: 14 }}
+        >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12 }}>
+            <Field
+              label="When a package is changed"
+              hint={prefs.planChangeCharge === 'Yes'
+                ? 'Example: 15 days left, moving from KES 1,500 to KES 2,500 a month, owes KES 500. With an empty wallet that is 6 days off the expiry.'
+                : 'The speed changes straight away and the expiry stays as it is.'}
+            >
+              <Select
+                value={prefs.planChangeCharge}
+                onChange={setP('planChangeCharge')}
+                options={[{ value: 'No', label: 'Do not charge' }, { value: 'Yes', label: 'Charge the wallet, then reduce days' }]}
+              />
+            </Field>
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <Button variant="primary" onClick={() => persist({ prefs }, 'Package change')} disabled={saving}>
               {saving ? 'Saving…' : 'Save'}
             </Button>
           </div>

@@ -638,8 +638,16 @@ export default function ClientDetail() {
         plan_id: switching.planId || null,
         custom_price: price === '' ? null : Number(price),
       });
-      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
-      store.toast('Service changed');
+      const pc = updated.planCharge;
+      store.setCollection('clients', (cs) => cs.map((c) => (c.id === updated.id ? { ...c, ...updated }
+        // The wallet is shared by every line on the account.
+        : (pc && c.account_code === updated.account_code ? { ...c, wallet_balance: updated.wallet_balance } : c))));
+      if (pc) {
+        const parts = [];
+        if (pc.walletCharged > 0) parts.push(`KES ${kes(pc.walletCharged)} taken from the wallet`);
+        if (pc.daysReduced > 0) parts.push(`${pc.daysReduced} day${pc.daysReduced === 1 ? '' : 's'} taken off the expiry`);
+        store.toast(`Service changed. KES ${kes(pc.due)} owed for the days left: ${parts.join(' and ') || 'nothing to take'}.`);
+      } else store.toast('Service changed');
       setSwitching(null);
     } catch (e) {
       store.toast(`Could not change service: ${e.message}`);
@@ -1684,7 +1692,9 @@ export default function ClientDetail() {
       >
         {switching && (
           <div style={{ display: 'grid', gap: 12 }}>
-            <Field label="Package" hint="The speed changes straight away; their expiry date stays as it is">
+            <Field label="Package" hint={store.settings?.prefs?.planChangeCharge === 'Yes'
+              ? 'The speed changes straight away. A dearer package is charged for the days left: from the wallet first, then as days off the expiry.'
+              : 'The speed changes straight away; their expiry date stays as it is'}>
               <Select
                 value={switching.planId}
                 onChange={(e) => setSwitching((s) => ({ ...s, planId: e.target.value }))}
