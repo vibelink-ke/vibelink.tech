@@ -197,13 +197,13 @@ export function normalise(input) {
     const biggest = Math.max(...links.map((l) => l.mbps));
     for (const l of links) l.weight = Math.max(1, Math.round((l.mbps / biggest) * 10));
   }
-  return { mode: input?.mode === 'failover' ? 'failover' : 'balance', protect: input?.protect !== false, links };
+  return { mode: input?.mode === 'failover' ? 'failover' : 'balance', protect: input?.protect !== false, sticky: input?.sticky === 'pair' ? 'pair' : 'customer', links };
 }
 
 /** What billing keeps of a setup: everything but the PPPoE password, plus the interface each link's traffic leaves through. */
 export function publicConfig(cfg, shaped) {
   return {
-    mode: cfg.mode, protect: cfg.protect,
+    mode: cfg.mode, protect: cfg.protect, sticky: cfg.sticky,
     links: cfg.links.map(({ password, ...l }, i) => ({ ...l, out: shaped?.[i]?.out ?? l.iface })),   // eslint-disable-line no-unused-vars
   };
 }
@@ -327,7 +327,7 @@ export function describe(st, cfg) {
   if (mode === 'balance') {
     const total = slots(links).length;
     const share = links.map((l, i) => `link ${i + 1} about ${Math.round((slots(links).filter((x) => x === i).length / total) * 100)}%`).join(', ');
-    lines.push(`${links.length === 2 ? 'Both links are' : 'All the links are'} used at the same time. New connections are shared${links.every((l) => l.mbps) ? ' by the size of each link' : ''}: ${share}. One customer talking to one site stays on one link.`);
+    lines.push(`${links.length === 2 ? 'Both links are' : 'All the links are'} used at the same time. New connections are shared${links.every((l) => l.mbps) ? ' by the size of each link' : ''}: ${share}. ${cfg.sticky === 'pair' ? 'One customer talking to one site stays on one link; different sites may use different links.' : 'Everything one customer does leaves by the same link, so sites that check the visitor\'s address (banks, games, streaming) keep working.'}`);
     lines.push('A link that stops answering is left out, and its connections move to the links that are up.');
   } else {
     lines.push(`Everything uses link 1. If it stops answering, link 2 takes over${links.length > 2 ? ', then the next' : ''}, and traffic returns to link 1 when it is back.`);
@@ -669,7 +669,7 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
       const order = slots(links);
       for (let s = 0; s < order.length; s++) {
         await m(`share ${s + 1} of ${order.length} to link ${order[s] + 1}`, ['=chain=prerouting', `=in-interface-list=!${WAN_LIST}`, '=connection-mark=no-mark',
-          '=dst-address-type=!local', `=dst-address-list=!${LOCAL_LIST}`, `=per-connection-classifier=both-addresses:${order.length}/${s}`,
+          '=dst-address-type=!local', `=dst-address-list=!${LOCAL_LIST}`, `=per-connection-classifier=${cfg.sticky === 'pair' ? 'both-addresses' : 'src-address'}:${order.length}/${s}`,
           '=action=mark-connection', `=new-connection-mark=${connMark(order[s])}`, '=passthrough=yes']);
       }
       // Every packet of the connection then leaves through its link.

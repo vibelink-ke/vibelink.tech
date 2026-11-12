@@ -21,6 +21,7 @@ export default function WanBalance({ router, onClose }) {
   const [error, setError] = useState(null);
   const [mode, setMode] = useState('balance');
   const [protect, setProtect] = useState(true);
+  const [sticky, setSticky] = useState('customer');
   const [links, setLinks] = useState([]);
   const [review, setReview] = useState(null);   // the answer to Check
   const [busy, setBusy] = useState(null);       // 'check' | 'apply' | 'remove'
@@ -35,6 +36,7 @@ export default function WanBalance({ router, onClose }) {
       const start = out.saved?.links?.length ? out.saved.links : out.candidates;
       setMode(out.saved?.mode ?? 'balance');
       setProtect(out.saved ? out.saved.protect !== false : true);
+      setSticky(out.saved?.sticky === 'pair' ? 'pair' : 'customer');
       const filled = start.map((l, i) => ({
         ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), mbps: l.mbps ? String(l.mbps) : '', probe: l.probe ?? out.probes[i] ?? '',
       }));
@@ -58,7 +60,7 @@ export default function WanBalance({ router, onClose }) {
     const used = new Set(ls.map((l) => l.probe));
     return [...ls, blankLink((info?.probes ?? []).find((p) => !used.has(p)) ?? '')];
   }));
-  const body = () => ({ mode, protect, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1, mbps: Number(l.mbps) || null })) });
+  const body = () => ({ mode, protect, sticky, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1, mbps: Number(l.mbps) || null })) });
 
   const check = async () => {
     setBusy('check'); setError(null);
@@ -200,6 +202,19 @@ export default function WanBalance({ router, onClose }) {
               ]}
             />
           </Field>
+
+          {mode === 'balance' && (
+            <Field label="How a customer's traffic is spread" hint="The first keeps banks, games and streaming from seeing a customer's address change. The second fills the links more evenly.">
+              <Select
+                value={sticky}
+                onChange={(e) => change(() => setSticky(e.target.value))}
+                options={[
+                  { value: 'customer', label: 'Each customer stays on one link (recommended)' },
+                  { value: 'pair', label: "One customer's different sites may use different links" },
+                ]}
+              />
+            </Field>
+          )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {links.map((l, i) => {
