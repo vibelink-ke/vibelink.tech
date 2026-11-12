@@ -151,8 +151,8 @@ export default function Suppliers({ suppliers, reload, categories, canEdit }) {
             <Field label="Contact person">
               <Input value={form.contactName} onChange={set('contactName')} />
             </Field>
-            <Field label="Phone">
-              <Input value={form.phone} onChange={set('phone')} />
+            <Field label="Phone (M-Pesa)" hint="Money is sent here when there is no paybill or till">
+              <Input value={form.phone} onChange={set('phone')} placeholder="07XX XXX XXX" />
             </Field>
             <Field label="Email">
               <Input value={form.email} onChange={set('email')} />
