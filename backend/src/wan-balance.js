@@ -106,32 +106,47 @@ export async function read(conn) {
 
 /** Which interface a gateway address is reached on: the one holding an address in the same network. */
 function ifaceForGateway(st, gateway) {
-  const row = st.addrs.find((a) => !yes(a.disabled) && inCidr(gateway, a.address));
+  const row = st.addrs.find((a) => !yes(a.disabled) && (inCidr(gateway, a.address) || a.network === gateway));
   return row?.interface ?? null;
 }
 
-/** The links this router already has a way out through, offered as a starting point. */
+/** Which interface a default route leaves through, from whichever field this RouterOS fills in. */
+function routeInterface(st, r) {
+  const names = new Set(st.ifaces.map((i) => i.name));
+  const raw = String(r.gateway ?? '').split(',')[0].trim();
+  const [gw, pinned] = raw.split('%');
+  const tries = [
+    pinned,
+    String(r['immediate-gw'] ?? '').split('%')[1],                       // RouterOS 7: "41.90.1.1%ether1"
+    /via\s+(\S+)\s*$/.exec(String(r['gateway-status'] ?? ''))?.[1],      // RouterOS 6: "41.90.1.1 reachable via ether1"
+    names.has(gw) ? gw : null,                                           // a dial-up route names the interface itself
+    isIpv4(gw) ? ifaceForGateway(st, gw) : null,
+  ];
+  return { gw, iface: tries.find((x) => x && names.has(x)) ?? null };
+}
+
+/**
+ * The links this router already has a way out through, offered as a starting point. Every default route is traced to its interface, so
+ * the link that is carrying traffic now is always among them, whatever kind it is; then any PPPoE or DHCP client that has no route yet.
+ */
 export function candidates(st) {
   const out = [];
   const seen = new Set();
   const push = (c) => { if (c.iface && !seen.has(c.iface) && !TUNNELS.includes(c.iface)) { seen.add(c.iface); out.push(c); } };
-  for (const p of st.pppoe) if (!yes(p.disabled)) push({ type: 'pppoe', iface: String(p.interface ?? p.name), user: String(p.user ?? '') });
-  const statics = st.mainDefaults.filter((r) => !isMine(r) && !isDynamic(r) && !yes(r.disabled))
-    .sort((a, b) => Number(a.distance ?? 1) - Number(b.distance ?? 1));
-  for (const r of statics) {
-    const raw = String(r.gateway ?? '').split(',')[0].trim();
-    const [gw, viaIface] = raw.split('%');
-    if (!isIpv4(gw)) continue;
-    const iface = viaIface || ifaceForGateway(st, gw);
-    const addr = st.addrs.find((a) => a.interface === iface && inCidr(gw, a.address));
-    push({ type: 'static', iface, gateway: gw, address: addr?.address ?? '' });
+  const defaults = st.mainDefaults.filter((r) => !isMine(r) && !yes(r.disabled))
+    .sort((a, b) => (Number(yes(b.active)) - Number(yes(a.active))) || (Number(a.distance ?? 1) - Number(b.distance ?? 1)));
+  for (const r of defaults) {
+    const { gw, iface } = routeInterface(st, r);
+    if (!iface) continue;
+    const dial = st.pppoe.find((p) => p.name === iface);
+    if (dial) { push({ type: 'pppoe', iface: String(dial.interface ?? dial.name), user: String(dial.user ?? '') }); continue; }
+    if (st.dhcp.some((d) => d.interface === iface && !yes(d.disabled)) && isDynamic(r)) { push({ type: 'dhcp', iface }); continue; }
+    const addr = st.addrs.find((a) => a.interface === iface && isIpv4(gw) && (inCidr(gw, a.address) || a.network === gw))
+      ?? st.addrs.find((a) => a.interface === iface);
+    push({ type: 'static', iface, gateway: isIpv4(gw) ? gw : iface, address: addr?.address ?? '' });
   }
+  for (const p of st.pppoe) if (!yes(p.disabled)) push({ type: 'pppoe', iface: String(p.interface ?? p.name), user: String(p.user ?? '') });
   for (const d of st.dhcp) if (!yes(d.disabled)) push({ type: 'dhcp', iface: d.interface });
-  // The main link first, whatever its kind: the one the active default route leaves through.
-  const active = st.mainDefaults.find((r) => yes(r.active) && !isMine(r));
-  const via = String(active?.['immediate-gw'] ?? '').split('%')[1] ?? /via\s+(\S+)$/.exec(String(active?.['gateway-status'] ?? ''))?.[1] ?? String(active?.gateway ?? '');
-  const main = out.findIndex((c) => c.iface === via || st.pppoe.some((p) => p.name === via && p.interface === c.iface));
-  if (main > 0) out.unshift(...out.splice(main, 1));
   return out;
 }
 
@@ -141,8 +156,7 @@ export function interfaces(st) {
   const inUse = new Set(candidates(st).map((c) => c.iface));
   return st.ifaces
     .filter((i) => !TUNNELS.includes(i.name) && !yes(i.dynamic) && !yes(i.slave)
-      && !['loopback', 'wg', 'pppoe-in', 'pppoe-out', 'ovpn-out', 'ovpn-in'].includes(String(i.type))
-      && (String(i.type) !== 'bridge' || inUse.has(i.name)))
+      && (inUse.has(i.name) || !['bridge', 'loopback', 'wg', 'pppoe-in', 'pppoe-out', 'ovpn-out', 'ovpn-in'].includes(String(i.type))))
     .map((i) => ({
       name: i.name, type: i.type, running: yes(i.running), disabled: yes(i.disabled),
       addresses: st.addrs.filter((a) => a.interface === i.name).map((a) => a.address),
@@ -238,9 +252,13 @@ export function check(st, cfg) {
 
     if (l.type === 'static') {
       if (l.address && !isCidr(l.address)) blockers.push(`Link ${n}: write the address with its size, for example 41.90.1.2/30.`);
-      if (!isIpv4(l.gateway)) blockers.push(`Link ${n}: enter the gateway address the provider gave for ${s.port}.`);
+      const selfGateway = l.gateway === s.port && /ppp|lte|l2tp|sstp/.test(String(row.type ?? ''));
+      if (selfGateway) { /* nothing to check: the interface is the way out */ }
+      else if (!isIpv4(l.gateway)) blockers.push(`Link ${n}: enter the gateway address the provider gave for ${s.port}.`);
       else {
-        const reachable = (l.address && isCidr(l.address) && inCidr(l.gateway, l.address)) || ifaceForGateway(st, l.gateway) === s.port;
+        // A gateway the router already routes through on this port is taken as it is, however the operator made it reachable.
+        const inUse = st.mainDefaults.some((r) => { const x = routeInterface(st, r); return !isMine(r) && x.gw === l.gateway && x.iface === s.port; });
+        const reachable = inUse || (l.address && isCidr(l.address) && inCidr(l.gateway, l.address)) || ifaceForGateway(st, l.gateway) === s.port;
         if (!reachable) blockers.push(`Link ${n}: the gateway ${l.gateway} is not in the network of ${l.address ? `the address ${l.address}` : `any address on ${s.port}. Enter this link's own address as well`}.`);
         if (l.address && isCidr(l.address) && l.address.split('/')[0] === l.gateway) blockers.push(`Link ${n}: the address and the gateway are the same. The address is the router's own, the gateway is the provider's.`);
       }

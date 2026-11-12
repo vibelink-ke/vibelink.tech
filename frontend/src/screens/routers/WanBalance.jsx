@@ -254,6 +254,11 @@ export default function WanBalance({ router, onClose }) {
                 </div>
               );
             })}
+            {!on && info.candidates.length === 0 && (
+              <div style={{ fontSize: 13, color: color.amberInk, lineHeight: 1.5 }}>
+                The link this router is using now could not be recognised. Add it as link 1 yourself, with the same port and details the router has, then add the other link.
+              </div>
+            )}
             {links.length < 4 && <div><Button onClick={addLink} disabled={!!busy}>Add a link</Button></div>}
             {mode === 'balance' && (
               <div style={small}>
