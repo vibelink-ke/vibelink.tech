@@ -3764,6 +3764,9 @@ alter table routers add column if not exists winbox_port  int;
 alter table routers add column if not exists winbox_until timestamptz;
 create unique index if not exists routers_winbox_port_uq on routers (winbox_port) where winbox_port is not null;
 
+-- More than one internet link on a router (backend/src/wan-balance.js): the setup that is on, and what to put back when it is removed.
+alter table routers add column if not exists wan_balance jsonb;
+
 -- A staff member's phone running the Vibelink app (mobile/): its Firebase token, for the same alerts web push carries.
 create table if not exists push_devices (
   token      text primary key,

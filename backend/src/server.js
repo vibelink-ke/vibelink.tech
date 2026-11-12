@@ -7389,6 +7389,113 @@ app.post('/api/routers/:id/system-info', requirePermission('routers.view'), wrap
   }
 }));
 
+/**
+ * More than one internet link on a router (wan-balance.js): failover, or sharing the load with failover. Its own permission,
+ * routers.balance, because a mistake here takes every customer on the router offline.
+ *
+ *   POST   /api/routers/:id/wan-links      what the router has now: its interfaces, the links it already uses, and the setup if one is on
+ *   POST   /api/routers/:id/wan-balance    { mode, links, apply }. Without apply it only answers what would change.
+ *   DELETE /api/routers/:id/wan-balance    take the setup off and put the router's own default route back
+ */
+async function wanRouter(req, res) {
+  const secrets = await import('./secrets.js');
+  const { rows: [r] } = await pool.query('select * from routers where id=$1 and tenant_id=$2', [req.params.id, req.tenant.id]);
+  if (!r) { res.status(404).json({ error: 'No such router' }); return null; }
+  const login = await routerLogin(r, req.body, secrets);
+  if (!login) { res.status(428).json({ error: 'Configure this router first.', needsAdmin: true }); return null; }
+  return { r, login, host: String(r.host).split('/')[0], port: r.api_port ?? 8728 };
+}
+
+app.post('/api/routers/:id/wan-links', requirePermission('routers.balance'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const wb = await import('./wan-balance.js');
+  const t = await wanRouter(req, res);
+  if (!t) return;
+  let conn;
+  try {
+    conn = await step('connect', () => ros.connect({ host: t.host, port: t.port, user: t.login.user, password: t.login.password }));
+    const st = await step('read the links', () => wb.read(conn), 30000);
+    const live = wb.live(st);
+    res.json({
+      version: st.version, interfaces: wb.interfaces(st), candidates: wb.candidates(st), probes: wb.DEFAULT_PROBES,
+      saved: live.active ? (t.r.wan_balance?.config ?? null) : null, live,
+    });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, t.host, t.port)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+app.post('/api/routers/:id/wan-balance', requirePermission('routers.balance'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const wb = await import('./wan-balance.js');
+  const t = await wanRouter(req, res);
+  if (!t) return;
+  const cfg = wb.normalise(req.body);
+  const open = () => ros.connect({ host: t.host, port: t.port, user: t.login.user, password: t.login.password });
+  let conn; let started = false;
+  try {
+    conn = await step('connect', open);
+    const st = await step('read the links', () => wb.read(conn), 30000);
+    const review = wb.check(st, cfg);
+    if (req.body?.apply !== true) return res.json({ applied: false, ...review, plan: wb.describe(st, cfg) });
+    if (review.blockers.length) return res.status(400).json({ error: review.blockers[0], ...review });
+    // The setup is recorded on the router's row; without the column there is nowhere to keep what to put back.
+    try { await pool.query('select wan_balance from routers where id=$1', [t.r.id]); }
+    catch { return res.status(500).json({ error: 'The database is missing the routers.wan_balance column. Run the SQL that came with this update, then try again.' }); }
+
+    started = true;
+    const out = await step('set up the links', () => wb.apply(conn, cfg, { previousUndo: t.r.wan_balance?.undo ?? null }), 120000);
+    ros.close(conn); conn = null;
+
+    // Back in through the new routes? Only then is the router's own undo cancelled. The tunnel can take a while to settle after its
+    // route changed, so this keeps trying for about a minute.
+    let live = null; let lastError = null;
+    for (let i = 0; i < 12 && !live; i++) {
+      await ros.sleep(5000);
+      let again;
+      try {
+        again = await ros.connect({ host: t.host, port: t.port, user: t.login.user, password: t.login.password, timeoutSec: 6 });
+        await wb.confirm(again);
+        live = wb.live(await wb.read(again));
+      } catch (e) { lastError = e; } finally { if (again) ros.close(again); }
+    }
+    if (!live) {
+      await pool.query('update routers set wan_balance=null where id=$1 and tenant_id=$2', [t.r.id, req.tenant.id]);
+      return res.status(502).json({ error: `The links were set up, but billing could not reach the router afterwards (${lastError?.message ?? 'no answer'}). The router undoes the whole setup by itself at ${out.revertAt} (router time). Nothing more is needed; check the gateways and try again after that.` });
+    }
+    await pool.query('update routers set wan_balance=$3 where id=$1 and tenant_id=$2',
+      [t.r.id, req.tenant.id, JSON.stringify({ config: cfg, undo: out.undo, applied_at: new Date().toISOString(), applied_by: req.session?.staff_id ?? null })]);
+    res.json({ applied: true, live, notes: out.notes, warnings: out.warnings });
+  } catch (e) {
+    if (started) await pool.query('update routers set wan_balance=null where id=$1 and tenant_id=$2', [t.r.id, req.tenant.id]).catch(() => {});
+    if (e.refused) return res.status(400).json({ error: e.message });
+    const why = atStep(e, describeRouterError(conn?.__socketError ?? e, t.host, t.port));
+    res.status(502).json({ error: started ? `${why}. Whatever was written has been taken off again, or the router takes it off by itself within 5 minutes.` : why });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
+app.delete('/api/routers/:id/wan-balance', requirePermission('routers.balance'), wrap(async (req, res) => {
+  const ros = await import('./routeros.js');
+  const wb = await import('./wan-balance.js');
+  const t = await wanRouter(req, res);
+  if (!t) return;
+  let conn;
+  try {
+    conn = await step('connect', () => ros.connect({ host: t.host, port: t.port, user: t.login.user, password: t.login.password }));
+    const out = await step('remove the link setup', () => wb.remove(conn, t.r.wan_balance?.undo ?? null), 60000);
+    await pool.query('update routers set wan_balance=null where id=$1 and tenant_id=$2', [t.r.id, req.tenant.id]).catch(() => {});
+    res.json({ ok: true, ...out });
+  } catch (e) {
+    res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, t.host, t.port)) });
+  } finally {
+    if (conn) ros.close(conn);
+  }
+}));
+
 app.post('/api/routers/:id/traffic', requirePermission('routers.configure'), wrap(async (req, res) => {
   const ros = await import('./routeros.js');
   const secrets = await import('./secrets.js');

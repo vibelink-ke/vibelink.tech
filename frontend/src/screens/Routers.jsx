@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
+import WanBalance from './routers/WanBalance';
 import { Badge, Button, Card, Field, Grid, Input, Modal, Screen, Select, Stat, Table, Textarea } from '../ui/primitives';
 
 // No secret here. The server mints one when the field arrives empty, and
@@ -713,6 +714,7 @@ export default function Routers() {
   }
 
   /** Same one-off-reading shape as Ping above, for CPU/memory/uptime/version straight off the router. */
+  const [wanFor, setWanFor] = useState(null);     // the router whose internet links are being set up
   const [sysInfo, setSysInfo] = useState(null);   // { router, result, error } while the modal is open
   async function runSystemInfo(r) {
     setSysInfo({ router: r, result: null, error: null });
@@ -1450,6 +1452,14 @@ Revoke anyway?`
                     >
                       System info
                     </MenuItem>
+                    {store.session?.perms?.['routers.balance'] && (
+                      <MenuItem
+                        onClick={() => { setMenuFor(null); setWanFor(r); }}
+                        title="For a router with more than one internet link: share the load across them, or keep one as a standby"
+                      >
+                        Internet links
+                      </MenuItem>
+                    )}
                     <MenuItem
                       onClick={() => { setMenuFor(null); openDevices(r); }}
                       title="Lock a device (a TV, anything without a browser) to a fixed IP by its MAC address"
@@ -1504,6 +1514,8 @@ Revoke anyway?`
           ]}
         />
       </Card>
+
+      {wanFor && <WanBalance router={wanFor} onClose={() => setWanFor(null)} />}
 
       <Modal
         open={!!winbox}

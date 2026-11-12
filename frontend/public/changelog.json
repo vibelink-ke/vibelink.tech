@@ -410,7 +410,8 @@
     "items": [
       "Monthly bills: choosing or changing a bill's supplier now also updates that bill's entries still waiting to be paid, so Pay via M-Pesa sends to the supplier instead of asking for a phone number.",
       "Suppliers: the Phone box is now labelled Phone (M-Pesa) and says that money is sent there when the supplier has no paybill or till.",
-      "Expenses: the list now refreshes when you come back to it from the Suppliers or Monthly bills tab, so a paybill, till or phone you just saved is used straight away."
+      "Expenses: the list now refreshes when you come back to it from the Suppliers or Monthly bills tab, so a paybill, till or phone you just saved is used straight away.",
+      "Routers: a new Internet links option in a router's menu, for a router with more than one internet link. Choose failover only (the second link takes over when the first stops) or share the load across the links by size, with a link left out while it is down. Check shows what will change before anything is written, and the router undoes the setup by itself if billing cannot reach it afterwards. Controlled by a new permission, Routers: Internet links, which only owners and managers have at first."
     ]
   }
 ]

@@ -39,6 +39,8 @@ export const DEFAULT_PERMISSIONS = {
   'routers.edit':      { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'routers.configure': { owner: true, cashier: false, technician: true,  support: false, sales: false },
   'routers.delete':    all(),
+  // Load sharing and failover across internet links: a wrong gateway takes every customer on the router offline, so not the technician's by default.
+  'routers.balance':   { owner: true, cashier: false, technician: false, support: false, sales: false },
 
   'tariffs.view':    { owner: true, cashier: true,  technician: true,  support: true,  sales: true },
   'tariffs.create':  all(),
@@ -243,6 +245,7 @@ export const PERMISSION_META = [
   { key: 'routers.edit',      page: 'Routers',         action: 'Edit' },
   { key: 'routers.configure', page: 'Routers',         action: 'Push config to a router' },
   { key: 'routers.delete',    page: 'Routers',         action: 'Delete' },
+  { key: 'routers.balance',   page: 'Routers',         action: 'Internet links: load sharing and failover' },
   { key: 'tariffs.view',   page: 'Internet tariffs', action: 'View' },
   { key: 'tariffs.create', page: 'Internet tariffs', action: 'Create' },
   { key: 'tariffs.edit',   page: 'Internet tariffs', action: 'Edit' },
