@@ -416,7 +416,8 @@
       "Internet links: each link is now set up as PPPoE (username and password), DHCP or static (address and gateway), on a port you choose. A link the router already has is used as it is; a new one is created for you. The setup also adds the firewall rules that keep open connections working on every link, clears connections tied to a link that went down or came back so they do not hang, and can close the router to the internet on those links. Using all the links together is now the first choice.",
       "Internet links: a router that already has DNS servers keeps them; a new PPPoE or DHCP link adds its provider's DNS only when the router has none. Check now says which.",
       "Internet links: instead of a share number, enter each link's speed in Mbps and the traffic is split to match, so links of different sizes fill up together.",
-      "Internet links: the link a router is already using is now always listed as link 1 when you open the window, whatever kind it is (static, DHCP, PPPoE, LTE, on a bridge or a VLAN), so its speed can be entered beside the new link's."
+      "Internet links: the link a router is already using is now always listed as link 1 when you open the window, whatever kind it is (static, DHCP, PPPoE, LTE, on a bridge or a VLAN), so its speed can be entered beside the new link's.",
+      "Internet links: the link the router is already using now asks only for its speed (its details are read from the router and shown, with a Change details button if you need them), and the card for the second link is there as soon as you open the window."
     ]
   }
 ]

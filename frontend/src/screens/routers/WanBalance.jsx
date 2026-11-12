@@ -35,9 +35,10 @@ export default function WanBalance({ router, onClose }) {
       const start = out.saved?.links?.length ? out.saved.links : out.candidates;
       setMode(out.saved?.mode ?? 'balance');
       setProtect(out.saved ? out.saved.protect !== false : true);
-      setLinks(start.map((l, i) => ({
+      const filled = start.map((l, i) => ({
         ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), mbps: l.mbps ? String(l.mbps) : '', probe: l.probe ?? out.probes[i] ?? '',
-      })));
+      }));
+      setLinks(!out.saved && filled.length === 1 ? [...filled, blankLink(out.probes[1] ?? '')] : filled);
     } catch (e) {
       setError(e.message);
     }
@@ -208,12 +209,31 @@ export default function WanBalance({ router, onClose }) {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>
                       Link {i + 1}{i === 0 ? (mode === 'failover' ? ' (main)' : ' (also carries the tunnel to billing)') : ''}
-                      {have && <span style={{ ...small, fontWeight: 400 }}> · already on the router</span>}
+                      {have && <span style={{ ...small, fontWeight: 400 }}> · in use on the router now</span>}
                     </span>
                     <Button size="sm" onClick={() => move(i, -1)} disabled={i === 0 || !!busy}>Up</Button>
                     <Button size="sm" onClick={() => move(i, 1)} disabled={i === links.length - 1 || !!busy}>Down</Button>
                     <Button size="sm" onClick={() => change(() => setLinks((ls) => ls.filter((_, n) => n !== i)))} disabled={!!busy}>Remove link</Button>
                   </div>
+                  {have && !l.edit && (
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div style={{ flex: '1 1 260px', fontSize: 13, lineHeight: 1.5 }}>
+                        {l.type === 'pppoe' ? `PPPoE on ${l.iface}${l.user ? `, user ${l.user}` : ''}`
+                          : l.type === 'dhcp' ? `DHCP on ${l.iface}`
+                            : `Static on ${l.iface}${l.address ? `, address ${l.address}` : ''}, gateway ${l.gateway}`}
+                        <div style={small}>Read from the router. It is used as it is; nothing about it is changed.</div>
+                      </div>
+                      {mode === 'balance' && (
+                        <div style={{ flex: '0 0 170px' }}>
+                          <Field label="Speed (Mbps)" hint="What this link carries">
+                            <Input type="number" min="1" value={l.mbps} onChange={(e) => setLink(i, 'mbps', e.target.value)} placeholder="e.g. 100" />
+                          </Field>
+                        </div>
+                      )}
+                      <Button size="sm" onClick={() => setLink(i, 'edit', true)} disabled={!!busy}>Change details</Button>
+                    </div>
+                  )}
+                  {(!have || l.edit) && (
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
                     <Field label="Kind">
                       <Select value={l.type} onChange={(e) => setLink(i, 'type', e.target.value)} options={TYPES} />
@@ -250,13 +270,14 @@ export default function WanBalance({ router, onClose }) {
                       <Input value={l.probe} onChange={(e) => setLink(i, 'probe', e.target.value)} style={{ fontFamily: font.mono }} />
                     </Field>
                   </div>
-                  {l.type === 'dhcp' && <div style={{ ...small, marginTop: 6 }}>Nothing to type: the provider's side hands out the address and the gateway.</div>}
+                  )}
+                  {l.type === 'dhcp' && (!have || l.edit) && <div style={{ ...small, marginTop: 6 }}>Nothing to type: the provider's side hands out the address and the gateway.</div>}
                 </div>
               );
             })}
             {!on && info.candidates.length === 0 && (
               <div style={{ fontSize: 13, color: color.amberInk, lineHeight: 1.5 }}>
-                The link this router is using now could not be recognised. Add it as link 1 yourself, with the same port and details the router has, then add the other link.
+                The link this router is using now could not be recognised. Fill it in as link 1 yourself, with the same port and details the router has, and the new link as link 2.
               </div>
             )}
             {links.length < 4 && <div><Button onClick={addLink} disabled={!!busy}>Add a link</Button></div>}
