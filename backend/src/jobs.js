@@ -124,6 +124,8 @@ export function startJobs() {
   cron.schedule('*/10 * * * *', safely('checkOnlineLines', checkOnlineLines));
   // Every 2 minutes: is each radio, switch or ONU with an address answering a ping from the router it is locked to?
   cron.schedule('*/2 * * * *', safely('checkLinkDevices', checkLinkDevices));
+  // Every 2 minutes: on routers with more than one internet link, which links are up and how much each has carried (alerts and statistics).
+  cron.schedule('*/2 * * * *', safely('watchWanLinks', () => import('./wan-watch.js').then((m) => m.watchWanLinks({ notify: notifyOwner }))));
   // Every 15 minutes: look the sign-in page's address up again and tell each hotspot router (only if it changed), so a moved or CDN-fronted portal host cannot lock guests out.
   cron.schedule('*/15 * * * *', safely('refreshWalledGardens', refreshWalledGardens));
   cron.schedule('*/10 * * * *', safely('syncHotspotLoginPages', syncHotspotLoginPages));

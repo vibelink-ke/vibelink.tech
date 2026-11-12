@@ -499,3 +499,22 @@ export async function remove(conn, undo) {
   const notes = await restore(conn, undo);
   return { removed, notes };
 }
+
+/**
+ * One light reading for the watcher: which links are carrying traffic, and the byte counters of their interfaces. Null when the setup is
+ * no longer on the router. Reads two tables only, because it runs every couple of minutes on every such router.
+ */
+export async function sample(conn, cfg) {
+  const [routes, stats] = await Promise.all([
+    conn.write('/ip/route/print', ['?dst-address=0.0.0.0/0']),
+    conn.write('/interface/print', ['=stats=']).catch(() => []),
+  ]);
+  const mine = routes.filter((r) => isMine(r) && /default via link \d+/.test(r.comment));
+  if (!mine.length) return null;
+  const num = (v) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  return (cfg?.links ?? []).map((l, i) => {
+    const route = mine.find((r) => Number(/link (\d+)/.exec(r.comment)?.[1]) === i + 1);
+    const s = stats.find((x) => x.name === l.iface);
+    return { n: i + 1, iface: l.iface, up: !!route && yes(route.active) && !yes(route.inactive), rx: num(s?.['rx-byte']), tx: num(s?.['tx-byte']) };
+  });
+}

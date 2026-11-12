@@ -3766,6 +3766,27 @@ create unique index if not exists routers_winbox_port_uq on routers (winbox_port
 
 -- More than one internet link on a router (backend/src/wan-balance.js): the setup that is on, and what to put back when it is removed.
 alter table routers add column if not exists wan_balance jsonb;
+-- Each time a link of such a router went down or came back (backend/src/wan-watch.js): the alert history, and the outage count and downtime.
+create table if not exists wan_link_events (
+  id        bigserial primary key,
+  tenant_id uuid not null references tenants on delete cascade,
+  router_id uuid not null references routers on delete cascade,
+  link      int not null,
+  iface     text not null,
+  up        boolean not null,
+  at        timestamptz not null default now()
+);
+create index if not exists wan_link_events_router_at on wan_link_events (router_id, at desc);
+-- What each link's interface carried per day (Nairobi days): rx is download, tx is upload.
+create table if not exists wan_link_usage (
+  tenant_id uuid not null references tenants on delete cascade,
+  router_id uuid not null references routers on delete cascade,
+  iface     text not null,
+  day       date not null,
+  rx_bytes  bigint not null default 0,
+  tx_bytes  bigint not null default 0,
+  primary key (router_id, iface, day)
+);
 
 -- A staff member's phone running the Vibelink app (mobile/): its Firebase token, for the same alerts web push carries.
 create table if not exists push_devices (

@@ -7416,9 +7416,12 @@ app.post('/api/routers/:id/wan-links', requirePermission('routers.balance'), wra
     conn = await step('connect', () => ros.connect({ host: t.host, port: t.port, user: t.login.user, password: t.login.password }));
     const st = await step('read the links', () => wb.read(conn), 30000);
     const live = wb.live(st);
+    // Statistics come from what the watcher has stored, not from the router. Absent until its tables exist.
+    const stats = live.active && t.r.wan_balance?.config
+      ? await (await import('./wan-watch.js')).wanStats(t.r).catch((e) => { console.warn('wan stats:', e.message); return null; }) : null;
     res.json({
       version: st.version, interfaces: wb.interfaces(st), candidates: wb.candidates(st), probes: wb.DEFAULT_PROBES,
-      saved: live.active ? (t.r.wan_balance?.config ?? null) : null, live,
+      saved: live.active ? (t.r.wan_balance?.config ?? null) : null, live, stats,
     });
   } catch (e) {
     res.status(502).json({ error: atStep(e, describeRouterError(conn?.__socketError ?? e, t.host, t.port)) });

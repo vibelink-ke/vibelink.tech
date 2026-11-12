@@ -60,8 +60,7 @@ export default function WanBalance({ router, onClose }) {
     try {
       const out = await api.routerWanBalance(router.id, { ...body(), apply: true });
       store.toast(mode === 'balance' ? 'Load sharing is on' : 'Failover is on');
-      setReview(null);
-      setInfo((p) => ({ ...p, saved: body(), live: out.live }));
+      await load();
       if (out.notes?.length) setError(out.notes.join(' '));
     } catch (e) {
       setError(e.message);
@@ -125,6 +124,56 @@ export default function WanBalance({ router, onClose }) {
             )}
           </div>
 
+          {on && info.stats && (() => {
+            const bytes = (n) => { const v = Number(n) || 0; if (v >= 1e12) return `${(v / 1e12).toFixed(2)} TB`; if (v >= 1e9) return `${(v / 1e9).toFixed(1)} GB`; if (v >= 1e6) return `${(v / 1e6).toFixed(0)} MB`; return `${(v / 1e3).toFixed(0)} KB`; };
+            const speed = (b) => (b == null ? '—' : b >= 1e6 ? `${(b / 1e6).toFixed(1)} Mbps` : `${(b / 1e3).toFixed(0)} kbps`);
+            const both = (rx, tx) => `${bytes(rx)} ↓ ${bytes(tx)} ↑`;
+            const ago = (iso) => { if (!iso) return ''; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 60 ? `${m} min` : m < 2880 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
+            const saved = info.saved?.links ?? [];
+            const total30 = info.stats.usage.reduce((n, u) => n + u.rx_30 + u.tx_30, 0);
+            const cell = { padding: '6px 8px', borderTop: `1px solid ${color.line}`, fontSize: 12.5, whiteSpace: 'nowrap' };
+            const head = { padding: '4px 8px', fontSize: 11, fontWeight: 600, letterSpacing: '.04em', textTransform: 'uppercase', color: color.muted, textAlign: 'left' };
+            return (
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Statistics</div>
+                {!info.stats.state && <div style={small}>The first reading is taken within 2 minutes of applying. Open this again after that.</div>}
+                {info.stats.state && (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                      <thead><tr>{['Link', 'State', 'Speed now', 'Today', '7 days', '30 days', 'Share', 'Outages, 30 days'].map((h) => <th key={h} style={head}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {saved.map((l, i) => {
+                          const s = info.stats.state.links.find((x) => x.n === i + 1);
+                          const u = info.stats.usage.find((x) => x.iface === l.iface) ?? {};
+                          const o = info.stats.outages[i + 1];
+                          return (
+                            <tr key={l.iface}>
+                              <td style={cell}><b>{i + 1}</b> {l.iface}</td>
+                              <td style={cell}>{s ? `${s.up ? 'Up' : 'Down'} for ${ago(s.since)}` : '—'}</td>
+                              <td style={{ ...cell, fontFamily: font.mono }}>{s ? `${speed(s.rxBps)} ↓ ${speed(s.txBps)} ↑` : '—'}</td>
+                              <td style={{ ...cell, fontFamily: font.mono }}>{both(u.rx_today, u.tx_today)}</td>
+                              <td style={{ ...cell, fontFamily: font.mono }}>{both(u.rx_7, u.tx_7)}</td>
+                              <td style={{ ...cell, fontFamily: font.mono }}>{both(u.rx_30, u.tx_30)}</td>
+                              <td style={{ ...cell, fontFamily: font.mono }}>{total30 ? `${Math.round((((u.rx_30 ?? 0) + (u.tx_30 ?? 0)) / total30) * 100)}%` : '—'}</td>
+                              <td style={cell}>{o?.count ? `${o.count}, ${o.minutes >= 120 ? `${(o.minutes / 60).toFixed(1)} h` : `${o.minutes} min`} down` : 'None'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {info.stats.recent.length > 0 && (
+                  <div style={{ ...small, marginTop: 8 }}>
+                    {info.stats.recent.slice(0, 6).map((e) => (
+                      <div key={`${e.at}${e.link}`}>{new Date(e.at).toLocaleString('en-KE', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: link {e.link} ({e.iface}) {e.up ? 'came back' : 'went down'}</div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ ...small, marginTop: 6 }}>Read from the router every 2 minutes. When a link goes down or comes back, the alert goes to the same phone as the router-offline alert.</div>
+              </div>
+            );
+          })()}
           <Field label="What the links are for">
             <Select
               value={mode}
