@@ -25,7 +25,7 @@ export default function WanBalance({ router, onClose }) {
   const [review, setReview] = useState(null);   // the answer to Check
   const [busy, setBusy] = useState(null);       // 'check' | 'apply' | 'remove'
 
-  const blankLink = (probe = '') => ({ type: 'pppoe', iface: '', address: '', gateway: '', user: '', password: '', weight: '1', probe });
+  const blankLink = (probe = '') => ({ type: 'pppoe', iface: '', address: '', gateway: '', user: '', password: '', weight: '1', mbps: '', probe });
 
   const load = async () => {
     setError(null); setInfo(null); setReview(null);
@@ -36,7 +36,7 @@ export default function WanBalance({ router, onClose }) {
       setMode(out.saved?.mode ?? 'balance');
       setProtect(out.saved ? out.saved.protect !== false : true);
       setLinks(start.map((l, i) => ({
-        ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), probe: l.probe ?? out.probes[i] ?? '',
+        ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), mbps: l.mbps ? String(l.mbps) : '', probe: l.probe ?? out.probes[i] ?? '',
       })));
     } catch (e) {
       setError(e.message);
@@ -57,7 +57,7 @@ export default function WanBalance({ router, onClose }) {
     const used = new Set(ls.map((l) => l.probe));
     return [...ls, blankLink((info?.probes ?? []).find((p) => !used.has(p)) ?? '')];
   }));
-  const body = () => ({ mode, protect, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1 })) });
+  const body = () => ({ mode, protect, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1, mbps: Number(l.mbps) || null })) });
 
   const check = async () => {
     setBusy('check'); setError(null);
@@ -242,8 +242,8 @@ export default function WanBalance({ router, onClose }) {
                       </>
                     )}
                     {mode === 'balance' && (
-                      <Field label="Share" hint="1 to 10">
-                        <Input type="number" min="1" max="10" value={l.weight} onChange={(e) => setLink(i, 'weight', e.target.value)} />
+                      <Field label="Speed (Mbps)" hint="What the provider sells you on this link">
+                        <Input type="number" min="1" value={l.mbps} onChange={(e) => setLink(i, 'mbps', e.target.value)} placeholder="e.g. 100" />
                       </Field>
                     )}
                     <Field label="Test address" hint="Pinged through this link only">
@@ -257,7 +257,7 @@ export default function WanBalance({ router, onClose }) {
             {links.length < 4 && <div><Button onClick={addLink} disabled={!!busy}>Add a link</Button></div>}
             {mode === 'balance' && (
               <div style={small}>
-                Share is the size of each link compared with the others: for a 100 Mbps link and a 50 Mbps link, enter 2 and 1.
+                Enter each link's speed and traffic is split to match, so both fill up together: a 200 Mbps link gets twice the connections of a 100 Mbps one. Leave the speeds empty to split evenly.
               </div>
             )}
           </div>

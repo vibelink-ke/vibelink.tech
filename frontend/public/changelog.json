@@ -414,7 +414,8 @@
       "Routers: a new Internet links option in a router's menu, for a router with more than one internet link. Choose failover only (the second link takes over when the first stops) or share the load across the links by size, with a link left out while it is down. Check shows what will change before anything is written, and the router undoes the setup by itself if billing cannot reach it afterwards. Controlled by a new permission, Routers: Internet links, which only owners and managers have at first.",
       "Internet links: you are now alerted when a link goes down and when it comes back, on the same phone as the router-offline alert. The Internet links window also shows statistics for each link: whether it is up and for how long, its speed now, the data it carried today, in 7 days and in 30 days, its share of the traffic, and how often and how long it was down.",
       "Internet links: each link is now set up as PPPoE (username and password), DHCP or static (address and gateway), on a port you choose. A link the router already has is used as it is; a new one is created for you. The setup also adds the firewall rules that keep open connections working on every link, clears connections tied to a link that went down or came back so they do not hang, and can close the router to the internet on those links. Using all the links together is now the first choice.",
-      "Internet links: a router that already has DNS servers keeps them; a new PPPoE or DHCP link adds its provider's DNS only when the router has none. Check now says which."
+      "Internet links: a router that already has DNS servers keeps them; a new PPPoE or DHCP link adds its provider's DNS only when the router has none. Check now says which.",
+      "Internet links: instead of a share number, enter each link's speed in Mbps and the traffic is split to match, so links of different sizes fill up together."
     ]
   }
 ]

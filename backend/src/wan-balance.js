@@ -174,9 +174,15 @@ export function normalise(input) {
       user: type === 'pppoe' ? String(l?.user ?? '').trim() : '',
       password: type === 'pppoe' ? String(l?.password ?? '') : '',
       weight: Math.min(10, Math.max(1, Math.round(Number(l?.weight) || 1))),
+      mbps: Number(l?.mbps) > 0 ? Math.min(100000, Number(l.mbps)) : null,
       probe: String(l?.probe ?? '').trim() || DEFAULT_PROBES[i] || '',
     };
   });
+  // When every link's size is given, the shares follow from the sizes: 200 and 100 Mbps become 2 and 1. Nobody has to work out a ratio.
+  if (links.length && links.every((l) => l.mbps)) {
+    const biggest = Math.max(...links.map((l) => l.mbps));
+    for (const l of links) l.weight = Math.max(1, Math.round((l.mbps / biggest) * 10));
+  }
   return { mode: input?.mode === 'failover' ? 'failover' : 'balance', protect: input?.protect !== false, links };
 }
 
@@ -303,7 +309,7 @@ export function describe(st, cfg) {
   if (mode === 'balance') {
     const total = slots(links).length;
     const share = links.map((l, i) => `link ${i + 1} about ${Math.round((slots(links).filter((x) => x === i).length / total) * 100)}%`).join(', ');
-    lines.push(`${links.length === 2 ? 'Both links are' : 'All the links are'} used at the same time. New connections are shared: ${share}. One customer talking to one site stays on one link.`);
+    lines.push(`${links.length === 2 ? 'Both links are' : 'All the links are'} used at the same time. New connections are shared${links.every((l) => l.mbps) ? ' by the size of each link' : ''}: ${share}. One customer talking to one site stays on one link.`);
     lines.push('A link that stops answering is left out, and its connections move to the links that are up.');
   } else {
     lines.push(`Everything uses link 1. If it stops answering, link 2 takes over${links.length > 2 ? ', then the next' : ''}, and traffic returns to link 1 when it is back.`);
