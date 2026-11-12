@@ -69,7 +69,11 @@ export default function Expenses() {
     if (!perms['suppliers.view']) return;
     try { setSuppliers(await api.suppliers()); } catch { setSuppliers([]); }
   };
-  useEffect(() => { loadSuppliers(); }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
+  // Coming back to the log re-reads it: a supplier or a monthly bill edited on the other tabs changes who each entry is paid to.
+  useEffect(() => {
+    loadSuppliers();
+    if (tab === 'log') api.expenses().then((rows) => store.setCollection('expenses', rows)).catch(() => {});
+  }, [tab]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (k) => (e) => setForm((s) => ({ ...s, [k]: e.target?.value ?? e }));
 
