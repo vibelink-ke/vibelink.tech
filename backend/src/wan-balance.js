@@ -269,6 +269,8 @@ export function check(st, cfg) {
   }
   if (st.pppoe.some((p) => !isMine(p) && yes(p['add-default-route']) && Number(p['default-route-distance'] ?? 1) < PARKED))
     warnings.push('A PPPoE uplink already on the router has its own default route. Changing it may make that uplink reconnect once, for a few seconds.');
+  if (!st.dnsServers.length)
+    warnings.push('This router has no DNS server set. A new PPPoE or DHCP link will bring its provider\'s; with static links only, set one under IP > DNS on the router (for example 8.8.8.8 and 1.1.1.1).');
   if (cfg.protect)
     warnings.push('The router will refuse new connections from the internet on these links (ping stays open). If you open Winbox on the router\'s public address, or run a VPN server on the router, add your own rule for it first or untick the protection. Billing and Winbox (VPN) are not affected: they come through the tunnel.');
   else
@@ -307,6 +309,7 @@ export function describe(st, cfg) {
     lines.push(`Everything uses link 1. If it stops answering, link 2 takes over${links.length > 2 ? ', then the next' : ''}, and traffic returns to link 1 when it is back.`);
   }
   lines.push("The router's own traffic, including the tunnel to billing, uses link 1 and fails over in the same order.");
+  if (st.dnsServers.length) lines.push(`DNS is left as it is (${st.dnsServers.join(', ')}); the new links do not add servers of their own.`);
   const parked = st.mainDefaults.filter((r) => !isMine(r) && !isDynamic(r) && !yes(r.disabled) && Number(r.distance ?? 1) < PARKED).length;
   if (parked) lines.push(`The ${parked === 1 ? 'default route' : `${parked} default routes`} already on the router ${parked === 1 ? 'is' : 'are'} kept as a last resort (distance ${PARKED}), and put back when you remove this.`);
   const needNat = shaped.filter((s) => !hasMasquerade(st, s.out)).map((s) => s.out);
@@ -465,7 +468,9 @@ export async function confirm(conn) { await disarm(conn); }
 const dhcpScript = (n) => `:if ($bound=1) do={ :do { /ip route set [find comment~"^${LB} test address link ${n} "] gateway=$"gateway-address" } on-error={} }`;
 
 /** Make the uplinks that are not there yet, and settle each link's gateway. Returns the links as the rest of the setup uses them. */
-async function prepareUplinks(conn, cfg, shaped, undo, notes) {
+async function prepareUplinks(conn, cfg, shaped, undo, notes, st) {
+  // The router keeps the DNS servers it has. Only a router with none takes them from a new link's provider.
+  const peerDns = st.dnsServers.length ? 'no' : 'yes';
   const out = [];
   for (let i = 0; i < cfg.links.length; i++) {
     const l = cfg.links[i]; const s = shaped[i];
@@ -477,7 +482,7 @@ async function prepareUplinks(conn, cfg, shaped, undo, notes) {
       if (s.makeClient) {
         await conn.write('/interface/pppoe-client/add', [
           `=name=${s.out}`, `=interface=${s.port}`, `=user=${l.user}`, `=password=${l.password}`,
-          '=add-default-route=no', '=use-peer-dns=no', '=disabled=no', `=comment=${tag(`uplink PPPoE link ${s.n}`)}`,
+          '=add-default-route=no', `=use-peer-dns=${peerDns}`, '=disabled=no', `=comment=${tag(`uplink PPPoE link ${s.n}`)}`,
         ]);
       } else if (l.password) {
         await conn.write('/interface/pppoe-client/set', [`=.id=${idOf(s.client)}`, `=user=${l.user || s.client.user}`, `=password=${l.password}`]);
@@ -486,7 +491,7 @@ async function prepareUplinks(conn, cfg, shaped, undo, notes) {
     if (s.type === 'dhcp') {
       if (s.makeClient) {
         await conn.write('/ip/dhcp-client/add', [
-          `=interface=${s.port}`, '=add-default-route=no', '=use-peer-dns=no', '=use-peer-ntp=no', '=disabled=no',
+          `=interface=${s.port}`, '=add-default-route=no', `=use-peer-dns=${peerDns}`, '=use-peer-ntp=no', '=disabled=no',
           `=script=${dhcpScript(s.n)}`, `=comment=${tag(`uplink DHCP link ${s.n}`)}`,
         ]);
       } else if (undo.scripts.includes(s.port)) {
@@ -535,7 +540,7 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
 
   try {
     await clear(conn);   // an earlier setup on this router; its parked routes carry traffic meanwhile
-    const links = await prepareUplinks(conn, cfg, shaped, undo, notes);
+    const links = await prepareUplinks(conn, cfg, shaped, undo, notes, st);
 
     await add('interface list', '/interface/list', [`=name=${WAN_LIST}`, `=comment=${tag('the internet links')}`]);
     for (const l of links) await add(`list member ${l.iface}`, '/interface/list/member', [`=list=${WAN_LIST}`, `=interface=${l.iface}`, `=comment=${tag(`link ${l.n}`)}`]);
