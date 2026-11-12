@@ -5736,6 +5736,16 @@ app.put('/api/bills/:id', requirePermission('bills.edit'), wrap(async (req, res)
       where id=$1 and tenant_id=$2 returning *`,
     [req.params.id, req.tenant.id, v.name, v.category, v.supplierId, v.amount, v.day, v.notes, v.payee, v.paidIn]);
   if (!bill) return res.status(404).json({ error: 'No such bill' });
+  // An entry copies the bill's supplier on the day it is made. One made before the supplier was chosen kept nobody to pay, so
+  // "Pay via M-Pesa" asked for a phone number although the bill now names a supplier. Entries still waiting to be paid follow the bill.
+  await pool.query(
+    `update expenses e
+        set supplier_id = b.supplier_id,
+            paid_to = coalesce((select sp.name from suppliers sp where sp.id = b.supplier_id), b.payee, e.paid_to)
+       from recurring_bills b
+      where b.id = $1 and b.tenant_id = $2 and e.recurring_bill_id = b.id and e.tenant_id = b.tenant_id
+        and e.status in ('pending','approved') and e.pay_state is null`,
+    [bill.id, req.tenant.id]);
   res.json(bill);
 }));
 
