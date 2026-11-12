@@ -4,18 +4,28 @@ import { useStore } from '../../state/store';
 import { api } from '../../api/client';
 import { Badge, Button, Field, Input, Modal, Select } from '../../ui/primitives';
 
+const TYPES = [
+  { value: 'pppoe', label: 'PPPoE (username and password)' },
+  { value: 'dhcp', label: 'DHCP (automatic address)' },
+  { value: 'static', label: 'Static (fixed address)' },
+];
+
 /**
- * Internet links of one router: failover, or sharing the load with failover. The router is read when this opens, so the links it already
- * has are offered as a start. Nothing is written until Apply, and Apply is only offered after Check has shown what will change.
+ * Internet links of one router: sharing the load with failover, or failover only. Each link is PPPoE, DHCP or static, and can be one the
+ * router already has or one this sets up. The router is read when this opens, so the links it already has are offered as a start.
+ * Nothing is written until Apply, and Apply is only offered after Check has shown what will change.
  */
 export default function WanBalance({ router, onClose }) {
   const store = useStore();
   const [info, setInfo] = useState(null);       // what the router has, read when this opens
   const [error, setError] = useState(null);
-  const [mode, setMode] = useState('failover');
+  const [mode, setMode] = useState('balance');
+  const [protect, setProtect] = useState(true);
   const [links, setLinks] = useState([]);
   const [review, setReview] = useState(null);   // the answer to Check
   const [busy, setBusy] = useState(null);       // 'check' | 'apply' | 'remove'
+
+  const blankLink = (probe = '') => ({ type: 'pppoe', iface: '', address: '', gateway: '', user: '', password: '', weight: '1', probe });
 
   const load = async () => {
     setError(null); setInfo(null); setReview(null);
@@ -23,9 +33,10 @@ export default function WanBalance({ router, onClose }) {
       const out = await api.routerWanLinks(router.id);
       setInfo(out);
       const start = out.saved?.links?.length ? out.saved.links : out.candidates;
-      setMode(out.saved?.mode ?? 'failover');
+      setMode(out.saved?.mode ?? 'balance');
+      setProtect(out.saved ? out.saved.protect !== false : true);
       setLinks(start.map((l, i) => ({
-        iface: l.iface ?? '', gateway: l.gateway ?? '', weight: String(l.weight ?? 1), probe: l.probe ?? out.probes[i] ?? '',
+        ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), probe: l.probe ?? out.probes[i] ?? '',
       })));
     } catch (e) {
       setError(e.message);
@@ -44,9 +55,9 @@ export default function WanBalance({ router, onClose }) {
   }));
   const addLink = () => change(() => setLinks((ls) => {
     const used = new Set(ls.map((l) => l.probe));
-    return [...ls, { iface: '', gateway: '', weight: '1', probe: (info?.probes ?? []).find((p) => !used.has(p)) ?? '' }];
+    return [...ls, blankLink((info?.probes ?? []).find((p) => !used.has(p)) ?? '')];
   }));
-  const body = () => ({ mode, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1 })) });
+  const body = () => ({ mode, protect, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1 })) });
 
   const check = async () => {
     setBusy('check'); setError(null);
@@ -67,32 +78,34 @@ export default function WanBalance({ router, onClose }) {
     } finally { setBusy(null); }
   };
   const remove = async () => {
-    if (!window.confirm(`Remove the link setup from ${router.name}?\n\nThe router goes back to the default route it had before. Customers may lose their connection for a few seconds.`)) return;
+    if (!window.confirm(`Remove the link setup from ${router.name}?\n\nThe router goes back to the default route it had before, and any link this set up for you (a PPPoE or DHCP client, an address) is taken off again. Customers may lose their connection for a few seconds.`)) return;
     setBusy('remove'); setError(null);
     try {
       const out = await api.removeRouterWanBalance(router.id);
       store.toast('Link setup removed');
-      if (out.notes?.length) setError(out.notes.join(' '));
       await load();
+      if (out.notes?.length) setError(out.notes.join(' '));
     } catch (e) {
       setError(e.message);
     } finally { setBusy(null); }
   };
 
-  const ifaceOptions = [
+  const portOptions = [
     { value: '', label: 'Choose…' },
     ...(info?.interfaces ?? []).map((i) => ({
       value: i.name,
-      label: `${i.name}${i.addresses?.length ? ` (${i.addresses[0]})` : ''}${i.running ? '' : ' · not running'}`,
+      label: `${i.name}${i.addresses?.length ? ` (${i.addresses[0]})` : ''}${i.running ? '' : ' · nothing plugged in'}`,
     })),
   ];
+  // What the router already has on a port, so the form can say "already there" instead of asking for it again.
+  const existing = (l) => (info?.candidates ?? []).find((c) => c.iface === l.iface && c.type === l.type);
   const on = info?.live?.active;
   const small = { fontSize: 12, color: color.muted, lineHeight: 1.5 };
 
   return (
     <Modal
       open
-      width={760}
+      width={780}
       title={`Internet links: ${router.name}`}
       onClose={busy ? () => {} : onClose}
       footer={(
@@ -143,12 +156,13 @@ export default function WanBalance({ router, onClose }) {
                       <thead><tr>{['Link', 'State', 'Speed now', 'Today', '7 days', '30 days', 'Share', 'Outages, 30 days'].map((h) => <th key={h} style={head}>{h}</th>)}</tr></thead>
                       <tbody>
                         {saved.map((l, i) => {
+                          const name = l.out ?? l.iface;
                           const s = info.stats.state.links.find((x) => x.n === i + 1);
-                          const u = info.stats.usage.find((x) => x.iface === l.iface) ?? {};
+                          const u = info.stats.usage.find((x) => x.iface === name) ?? {};
                           const o = info.stats.outages[i + 1];
                           return (
-                            <tr key={l.iface}>
-                              <td style={cell}><b>{i + 1}</b> {l.iface}</td>
+                            <tr key={name}>
+                              <td style={cell}><b>{i + 1}</b> {name}</td>
                               <td style={cell}>{s ? `${s.up ? 'Up' : 'Down'} for ${ago(s.since)}` : '—'}</td>
                               <td style={{ ...cell, fontFamily: font.mono }}>{s ? `${speed(s.rxBps)} ↓ ${speed(s.txBps)} ↑` : '—'}</td>
                               <td style={{ ...cell, fontFamily: font.mono }}>{both(u.rx_today, u.tx_today)}</td>
@@ -174,46 +188,72 @@ export default function WanBalance({ router, onClose }) {
               </div>
             );
           })()}
+
           <Field label="What the links are for">
             <Select
               value={mode}
               onChange={(e) => change(() => setMode(e.target.value))}
               options={[
+                { value: 'balance', label: 'Use all the links together, and leave out a link that stops' },
                 { value: 'failover', label: 'Failover only: use link 1, switch to the next when it stops' },
-                { value: 'balance', label: 'Share the load across the links, and leave out a link that stops' },
               ]}
             />
           </Field>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {links.map((l, i) => (
-              <div key={i} style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>
-                    Link {i + 1}{i === 0 ? (mode === 'failover' ? ' (main)' : ' (also carries the tunnel to billing)') : ''}
-                  </span>
-                  <Button size="sm" onClick={() => move(i, -1)} disabled={i === 0 || !!busy}>Up</Button>
-                  <Button size="sm" onClick={() => move(i, 1)} disabled={i === links.length - 1 || !!busy}>Down</Button>
-                  <Button size="sm" onClick={() => change(() => setLinks((ls) => ls.filter((_, n) => n !== i)))} disabled={!!busy}>Remove link</Button>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: mode === 'balance' ? '1.4fr 1.2fr .6fr 1.1fr' : '1.4fr 1.2fr 1.1fr', gap: 10 }}>
-                  <Field label="Interface">
-                    <Select value={l.iface} onChange={(e) => setLink(i, 'iface', e.target.value)} options={ifaceOptions} />
-                  </Field>
-                  <Field label="Gateway" hint="From the provider. For a PPPoE uplink, its interface name">
-                    <Input value={l.gateway} onChange={(e) => setLink(i, 'gateway', e.target.value)} placeholder="e.g. 41.90.1.1" style={{ fontFamily: font.mono }} />
-                  </Field>
-                  {mode === 'balance' && (
-                    <Field label="Share" hint="1 to 10">
-                      <Input type="number" min="1" max="10" value={l.weight} onChange={(e) => setLink(i, 'weight', e.target.value)} />
+            {links.map((l, i) => {
+              const have = existing(l);
+              return (
+                <div key={i} style={{ border: `1px solid ${color.line}`, borderRadius: 8, padding: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>
+                      Link {i + 1}{i === 0 ? (mode === 'failover' ? ' (main)' : ' (also carries the tunnel to billing)') : ''}
+                      {have && <span style={{ ...small, fontWeight: 400 }}> · already on the router</span>}
+                    </span>
+                    <Button size="sm" onClick={() => move(i, -1)} disabled={i === 0 || !!busy}>Up</Button>
+                    <Button size="sm" onClick={() => move(i, 1)} disabled={i === links.length - 1 || !!busy}>Down</Button>
+                    <Button size="sm" onClick={() => change(() => setLinks((ls) => ls.filter((_, n) => n !== i)))} disabled={!!busy}>Remove link</Button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+                    <Field label="Kind">
+                      <Select value={l.type} onChange={(e) => setLink(i, 'type', e.target.value)} options={TYPES} />
                     </Field>
-                  )}
-                  <Field label="Test address" hint="Pinged through this link only">
-                    <Input value={l.probe} onChange={(e) => setLink(i, 'probe', e.target.value)} style={{ fontFamily: font.mono }} />
-                  </Field>
+                    <Field label="Port" hint="Where the provider's cable is plugged in">
+                      <Select value={l.iface} onChange={(e) => setLink(i, 'iface', e.target.value)} options={portOptions} />
+                    </Field>
+                    {l.type === 'pppoe' && (
+                      <>
+                        <Field label="PPPoE username">
+                          <Input value={l.user} onChange={(e) => setLink(i, 'user', e.target.value)} autoComplete="off" />
+                        </Field>
+                        <Field label="PPPoE password" hint={have ? 'Leave empty to keep the one on the router' : 'Sent to the router only, never stored here'}>
+                          <Input type="password" value={l.password} onChange={(e) => setLink(i, 'password', e.target.value)} autoComplete="new-password" />
+                        </Field>
+                      </>
+                    )}
+                    {l.type === 'static' && (
+                      <>
+                        <Field label="Address" hint={have ? 'Already on the port' : "The router's own, with its size"}>
+                          <Input value={l.address} onChange={(e) => setLink(i, 'address', e.target.value)} placeholder="e.g. 41.90.1.2/30" style={{ fontFamily: font.mono }} />
+                        </Field>
+                        <Field label="Gateway" hint="The provider's side">
+                          <Input value={l.gateway} onChange={(e) => setLink(i, 'gateway', e.target.value)} placeholder="e.g. 41.90.1.1" style={{ fontFamily: font.mono }} />
+                        </Field>
+                      </>
+                    )}
+                    {mode === 'balance' && (
+                      <Field label="Share" hint="1 to 10">
+                        <Input type="number" min="1" max="10" value={l.weight} onChange={(e) => setLink(i, 'weight', e.target.value)} />
+                      </Field>
+                    )}
+                    <Field label="Test address" hint="Pinged through this link only">
+                      <Input value={l.probe} onChange={(e) => setLink(i, 'probe', e.target.value)} style={{ fontFamily: font.mono }} />
+                    </Field>
+                  </div>
+                  {l.type === 'dhcp' && <div style={{ ...small, marginTop: 6 }}>Nothing to type: the provider's side hands out the address and the gateway.</div>}
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {links.length < 4 && <div><Button onClick={addLink} disabled={!!busy}>Add a link</Button></div>}
             {mode === 'balance' && (
               <div style={small}>
@@ -221,6 +261,14 @@ export default function WanBalance({ router, onClose }) {
               </div>
             )}
           </div>
+
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
+            <input type="checkbox" checked={protect} onChange={(e) => change(() => setProtect(e.target.checked))} style={{ marginTop: 3 }} />
+            <span>
+              Close the router to the internet on these links
+              <div style={small}>New connections from the internet to the router itself are refused, except ping. Customers' traffic, billing and Winbox (VPN) are not affected. The rules that keep open connections working on every link are added either way.</div>
+            </span>
+          </label>
 
           {review && (
             <div style={{ borderTop: `1px solid ${color.line}`, paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, lineHeight: 1.5 }}>

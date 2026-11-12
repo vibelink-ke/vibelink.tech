@@ -7469,7 +7469,7 @@ app.post('/api/routers/:id/wan-balance', requirePermission('routers.balance'), w
       return res.status(502).json({ error: `The links were set up, but billing could not reach the router afterwards (${lastError?.message ?? 'no answer'}). The router undoes the whole setup by itself at ${out.revertAt} (router time). Nothing more is needed; check the gateways and try again after that.` });
     }
     await pool.query('update routers set wan_balance=$3 where id=$1 and tenant_id=$2',
-      [t.r.id, req.tenant.id, JSON.stringify({ config: cfg, undo: out.undo, applied_at: new Date().toISOString(), applied_by: req.session?.staff_id ?? null })]);
+      [t.r.id, req.tenant.id, JSON.stringify({ config: out.config, undo: out.undo, applied_at: new Date().toISOString(), applied_by: req.session?.staff_id ?? null })]);
     res.json({ applied: true, live, notes: out.notes, warnings: out.warnings });
   } catch (e) {
     if (started) await pool.query('update routers set wan_balance=null where id=$1 and tenant_id=$2', [t.r.id, req.tenant.id]).catch(() => {});
