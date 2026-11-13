@@ -611,7 +611,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
     </form>
     <!--RECON-START-->
     <div style="margin-top:8px">
-      <button type="button" id="reconnectBtn" style="background:transparent;color:var(--green);border:1px solid var(--green);margin-top:0;padding:9px;font-size:14px">I already have an active bundle: connect me</button>
+      <button type="button" id="reconnectBtn" style="background:transparent;color:var(--green);border:1px solid var(--green);margin-top:0;padding:5px 8px;font-size:12px;font-weight:600;border-radius:8px">I already have an active bundle: connect me</button>
       <p class="hint" id="reconnectNote" style="margin-top:4px"></p>
     </div>
     <!--RECON-END-->

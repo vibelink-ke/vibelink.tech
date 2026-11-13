@@ -14,7 +14,7 @@ import { normPhone } from './loyalty.js';
  * credited. Spending does: a phone number is not a secret, so the visitor proves the number is theirs with a code sent
  * to it by SMS, once per device. The device then holds a sign-in that lasts 60 days.
  *
- * Off until the tenant turns it on. Turning it off stops top-ups; money already in a wallet can still be spent.
+ * On unless the tenant turns it off. Turning it off stops top-ups; money already in a wallet can still be spent.
  */
 
 const SESSION_DAYS = 60;
@@ -31,11 +31,14 @@ const hashToken = (t) => crypto.createHash('sha256').update(String(t)).digest('h
 const isMac = (m) => /^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(m) && m !== '00:00:00:00:00:00';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
 
-/** The tenant's wallet rules; the defaults when nothing is saved or the table is not there yet. */
+/**
+ * The tenant's wallet rules. The wallet is on unless the tenant has turned it off, so a tenant who has never opened the settings has it.
+ * Off when the tables are not there yet, so nothing is offered that could not work.
+ */
 export async function walletSettings(pool, tenantId) {
   try {
     const { rows: [s] } = await pool.query('select enabled, min_topup, max_topup from visitor_wallet_settings where tenant_id=$1', [tenantId]);
-    return { enabled: !!s?.enabled, minTopup: Number(s?.min_topup ?? 10), maxTopup: Number(s?.max_topup ?? 5000) };
+    return { enabled: s ? !!s.enabled : true, minTopup: Number(s?.min_topup ?? 10), maxTopup: Number(s?.max_topup ?? 5000) };
   } catch { return { enabled: false, minTopup: 10, maxTopup: 5000 }; }
 }
 

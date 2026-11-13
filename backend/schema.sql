@@ -3823,10 +3823,10 @@ create table if not exists push_devices (
 create index if not exists push_devices_tenant_id_idx on push_devices (tenant_id);
 
 -- A wallet for hotspot visitors, known by phone number (normalised to 254XXXXXXXXX): pay now by M-Pesa, buy bundles from it later.
--- Off until a tenant turns it on. See visitor-wallet.js.
+-- On unless a tenant turns it off (no row means on). See visitor-wallet.js.
 create table if not exists visitor_wallet_settings (
   tenant_id uuid primary key references tenants on delete cascade,
-  enabled   boolean not null default false,
+  enabled   boolean not null default true,
   min_topup numeric(12,2) not null default 10 check (min_topup >= 1),
   max_topup numeric(12,2) not null default 5000
 );
