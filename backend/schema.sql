@@ -3078,6 +3078,29 @@ alter table mpesa_balances add column if not exists source text not null default
 alter table mpesa_balances add column if not exists as_of timestamptz;
 create unique index if not exists mpesa_balances_c2b_idx on mpesa_balances (tenant_id, shortcode) where source = 'c2b';
 
+-- A code put to Safaricom to confirm before it is applied (backend/src/payments/daraja-verify.js). The answer comes by callback, so each
+-- question is a row: pending, then applied | unmatched | duplicate | not_found | not_ours | failed.
+create table if not exists mpesa_confirmations (
+  id              uuid primary key default gen_random_uuid(),
+  tenant_id       uuid not null references tenants on delete cascade,
+  code            text not null,
+  status          text not null default 'pending',
+  detail          text,
+  account         text,                    -- the customer's account number given with the code, if any
+  phone           text,
+  shortcodes      text[] not null default '{}',   -- paybills still to ask, in order
+  shortcode       text,                    -- the paybill being asked now
+  conversation_id text,
+  amount          numeric(12,2),
+  payer           text,
+  result          jsonb,
+  requested_by    uuid,
+  created_at      timestamptz not null default now(),
+  resolved_at     timestamptz
+);
+create unique index if not exists mpesa_confirmations_conv_idx on mpesa_confirmations (conversation_id) where conversation_id is not null;
+create index if not exists mpesa_confirmations_tenant_idx on mpesa_confirmations (tenant_id, created_at desc);
+
 -- Let a bought code that nobody has typed in expire instead of sitting unused for ever.
 -- With "expire from first login" a code's clock only starts at login, so an unredeemed
 -- one never runs out on its own. These say how many days after purchase such a code

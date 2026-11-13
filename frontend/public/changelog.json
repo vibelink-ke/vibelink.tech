@@ -425,7 +425,8 @@
     "date": "2026-11-13",
     "title": "Internet links: hold-down, second test address, fixed traffic",
     "items": [
-      "Internet links: four additions that stop links being switched for no good reason. A link that comes back is used again only after it has answered steadily for a few minutes (you choose how many). Each link has a second test address, and counts as down only when both stop. Chosen customers or sites can be made to always use one link. And traffic the router sends from a link's own address leaves by that link."
+      "Internet links: four additions that stop links being switched for no good reason. A link that comes back is used again only after it has answered steadily for a few minutes (you choose how many). Each link has a second test address, and counts as down only when both stop. Chosen customers or sites can be made to always use one link. And traffic the router sends from a link's own address leaves by that link.",
+      "Payments: Reconcile statement can now confirm each code with M-Pesa before applying it. Tick the new box and a code is applied only if M-Pesa says it was paid to your paybill, for the amount M-Pesa gives. A line can be just the code, or the code and the customer's account number. Needs the initiator name and password on the paybill under Settings, Payment gateways."
     ]
   }
 ]

@@ -953,3 +953,6 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
 }
 
 export const normalise = (m) => String(m).replace(/^\+?(?:254)?0?/, '254');
+
+// For payments/daraja-verify.js, which asks Safaricom about a code and takes the answer on its own callback.
+export { token as darajaToken, BASE as DARAJA_BASE, withSecret, verifyWebhook };

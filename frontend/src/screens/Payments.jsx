@@ -422,6 +422,13 @@ export default function Payments() {
   const [selectedInvoices, setSelectedInvoices] = useState(() => new Set());
   const [recordForm, setRecordForm] = useState(null);
   const [reconcileText, setReconcileText] = useState(null);
+  // Ask M-Pesa about each code before applying it. Remembered on this browser, since whoever wants it wants it every time.
+  const [reconcileVerify, setReconcileVerify] = useState(() => { try { return localStorage.getItem('reconcileVerify') === '1'; } catch { return false; } });
+  const [confirmations, setConfirmations] = useState(null);   // { can, rows }: codes put to M-Pesa lately
+  useEffect(() => {
+    if (reconcileText === null) return;
+    api.mpesaConfirmations().then(setConfirmations).catch(() => setConfirmations(null));
+  }, [reconcileText === null]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const createInvoice = async () => {
     if (!invoiceForm.amount) return store.toast('Enter an amount');
@@ -508,11 +515,11 @@ export default function Payments() {
       // twice, and this is the one action whose result decides what an operator
       // does next — chase the unmatched, or re-read the unreadable lines.
       await action.run('Reconciling the statement', async () => {
-        const r = await api.reconcileStatement(reconcileText);
+        const r = await api.reconcileStatement(reconcileText, reconcileVerify);
         await store.reload();
         return r;
       }, {
-        working: 'Reading each line and matching it to an account…',
+        working: reconcileVerify ? 'Asking M-Pesa about each code. This can take up to half a minute…' : 'Reading each line and matching it to an account…',
         describe: (r) => ({
           lines: [
             `${r.parsed} line(s) understood`,
@@ -520,6 +527,7 @@ export default function Payments() {
             `${r.unmatched} could not be matched — these need a person`,
             `${r.duplicate} already recorded`,
             `${r.skipped} unreadable`,
+            ...(r.verified ? [`${r.refused} not confirmed by M-Pesa, so not applied`, `${r.waiting} still waiting for M-Pesa's answer`] : []),
             ...(r.lines ?? []).slice(0, 25).map((l) => (l.ref ? `${l.ref}  KES ${l.amount}: ${l.outcome}` : `"${l.line}": ${l.outcome}`)),
           ],
         }),
@@ -1466,6 +1474,24 @@ export default function Payments() {
             UJC3IALXI1, 20, 0702222048). Each is parsed and applied, and a hotspot payment gets its voucher and SMS the normal way;
             codes already in the ledger, from any channel, are skipped.
           </span>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={reconcileVerify}
+              onChange={(e) => { setReconcileVerify(e.target.checked); try { localStorage.setItem('reconcileVerify', e.target.checked ? '1' : '0'); } catch { /* private window */ } }}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              Confirm each code with M-Pesa before applying it
+              <div style={{ fontSize: 12, color: color.neutralInk, lineHeight: 1.5 }}>
+                A code is applied only if M-Pesa says it was paid to your paybill, and for the amount M-Pesa gives. With this on, a line can be just the code,
+                or the code and the customer's account number (for example UKCAC1X7XH 858738). Paybill payments only; a till or KopoKopo code cannot be checked this way.
+              </div>
+              {reconcileVerify && confirmations?.can && !confirmations.can.ok && (
+                <div style={{ fontSize: 12, color: color.rust, lineHeight: 1.5, marginTop: 4 }}>{confirmations.can.why}</div>
+              )}
+            </span>
+          </label>
           <Textarea
             value={reconcileText ?? ''}
             onChange={(e) => setReconcileText(e.target.value)}
@@ -1473,6 +1499,19 @@ export default function Payments() {
             style={{ fontFamily: font.mono, fontSize: 12 }}
             placeholder={'SJ71M4PL8Q Confirmed. You have received Ksh2,500.00 from JOHN M NJUGUNA 0722118340 on 1/8/26 for account ZN-1042'}
           />
+          {confirmations?.rows?.length > 0 && (
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Codes put to M-Pesa lately</div>
+              <div style={{ maxHeight: 160, overflowY: 'auto', fontSize: 12, lineHeight: 1.6 }}>
+                {confirmations.rows.map((c) => (
+                  <div key={c.id} style={{ color: c.status === 'applied' ? color.ink : c.status === 'pending' ? color.neutralInk : color.rust }}>
+                    <span style={{ fontFamily: font.mono }}>{c.code}</span>{' '}
+                    {c.status === 'pending' ? 'waiting for M-Pesa' : c.detail}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </Modal>
 

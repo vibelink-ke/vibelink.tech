@@ -290,6 +290,8 @@ for (const method of ['use', 'get', 'post', 'put', 'patch', 'delete']) {
 
 // Webhooks (no auth; verified per provider, idempotent downstream)
 app.use('/webhooks/daraja', daraja);
+// The answers to "is this M-Pesa code real?" (payments/daraja-verify.js). Loaded here so its callbacks exist from the first request.
+import('./payments/daraja-verify.js').then((m) => app.use('/webhooks/daraja', m.verifyRouter)).catch((e) => console.error('daraja-verify not loaded:', e.message));
 app.use('/webhooks/kopokopo', kopokopo);
 app.use('/webhooks/bank', bank);
 app.use('/webhooks/africa', africa);
@@ -12631,6 +12633,16 @@ app.get('/api/payments/stk/:checkoutId', requirePermission('payments.view'), wra
   res.json(r ?? { status: 'unknown' });
 }));
 
+/** The codes that were put to M-Pesa lately, and what came of each. An answer can arrive after the Reconcile window has closed. */
+app.get('/api/payments/confirmations', requirePermission('payments.view'), wrap(async (req, res) => {
+  const dv = await import('./payments/daraja-verify.js');
+  await dv.expireConfirmations().catch(() => {});
+  const { rows } = await pool.query(
+    `select c.id, c.code, c.status, c.detail, c.amount, c.payer, c.account, c.created_at, c.resolved_at, st.name as asked_by
+       from mpesa_confirmations c left join staff st on st.id = c.requested_by
+      where c.tenant_id = $1 order by c.created_at desc limit 40`, [req.tenant.id]);
+  res.json({ can: await dv.canConfirm(req.tenant.id), rows });
+}));
 /** Paste a block of forwarded M-Pesa SMS; each parseable line is applied. */
 app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(async (req, res) => {
   const { text } = req.body;
@@ -12648,6 +12660,46 @@ app.post('/api/payments/reconcile', requirePermission('payments.apply'), wrap(as
     return { ref: m[1].toUpperCase(), amount: Number(m[2].replace(/,/g, '')), name: null, rawAccount: null,
              phone: digits.length === 9 ? '254' + digits : digits.replace(/^0/, '254') };
   };
+  // Confirm each code with Safaricom first (payments/daraja-verify.js). Nothing is applied on the pasted line's word alone: the amount
+  // and the payer are Safaricom's, and a code that was not paid to this account's paybill is refused.
+  if (req.body?.verify === true) {
+    const dv = await import('./payments/daraja-verify.js');
+    const can = await dv.canConfirm(req.tenant.id);
+    if (!can.ok) return res.status(400).json({ error: can.why });
+    await dv.expireConfirmations().catch(() => {});
+    const out = { verified: true, parsed: 0, applied: 0, unmatched: 0, duplicate: 0, skipped: 0, waiting: 0, refused: 0, lines: [] };
+    const ids = []; const seen = new Set();
+    for (const raw of String(text).split(/\r?\n/).slice(0, 500)) {
+      const line = plain(raw);
+      if (!line) continue;
+      // Besides a forwarded message or "CODE amount phone", a bare code is enough here, optionally with the customer's account number
+      // after it: Safaricom supplies the amount and the payer.
+      const bare = /^([A-Z0-9]{10})(?:[\s,;\t]+([A-Za-z0-9\-_/.]{1,40}))?$/i.exec(line);
+      const tx = parseMpesaSms(line) ?? asRow(line) ?? (bare ? { ref: bare[1].toUpperCase(), rawAccount: bare[2] ?? null, phone: null } : null);
+      if (!tx) { out.skipped++; out.lines.push({ line: line.slice(0, 60), outcome: 'unreadable' }); continue; }
+      const ref = String(tx.ref).toUpperCase();
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      out.parsed++;
+      const { rows: [have] } = await pool.query('select 1 from payments where tenant_id=$1 and upper(provider_ref)=$2 limit 1', [req.tenant.id, ref]);
+      if (have) { out.duplicate++; out.lines.push({ ref, outcome: 'already recorded' }); continue; }
+      if (ids.length >= 40) { out.refused++; out.lines.push({ ref, outcome: 'not asked: at most 40 codes at a time. Paste the rest again.' }); continue; }
+      try {
+        ids.push(await dv.requestConfirmation(req.tenant.id, { code: ref, account: tx.rawAccount ?? null, phone: tx.phone ?? null, staffId: req.session?.staff_id ?? null }));
+      } catch (e) {
+        out.refused++; out.lines.push({ ref, outcome: e.message });
+      }
+    }
+    for (const r of await dv.awaitConfirmations(ids)) {
+      if (r.status === 'pending') { out.waiting++; out.lines.push({ ref: r.code, outcome: 'still waiting for M-Pesa. It is applied by itself when the answer comes; see the list under Reconcile statement.' }); continue; }
+      if (r.status === 'applied') out.applied++;
+      else if (r.status === 'unmatched') out.unmatched++;
+      else if (r.status === 'duplicate') out.duplicate++;
+      else out.refused++;
+      out.lines.push({ ref: r.code, amount: r.amount, outcome: r.detail });
+    }
+    return res.json(out);
+  }
   for (const raw of String(text).split(/\r?\n/)) {
     const line = plain(raw);
     if (!line) continue;
