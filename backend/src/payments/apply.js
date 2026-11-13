@@ -1,6 +1,7 @@
 import { withTenant, pool } from '../db.js';
 import { activateSubscriber, issueVoucherAccess } from '../radius.js';
 import { awardForPayment, pointsLine } from '../loyalty.js';
+import { creditTopup } from '../visitor-wallet.js';
 import { send } from '../sms.js';
 import { fmtNairobi } from '../nairobi-time.js';
 
@@ -240,6 +241,24 @@ async function applyPaymentOnce(tenantId, tx) {
         company: own?.name ?? '',
       });
       return { paymentId, applied: true, ...r };
+    }
+
+    // Money put into a hotspot visitor's wallet (visitor-wallet.js): kept for later, nothing is switched on now. It is hotspot money taken today,
+    // so it counts as hotspot revenue now; the bundles bought with it later are not payments and are not counted again.
+    if (target.type === 'visitor_wallet') {
+      const w = await creditTopup(c, tenantId, { paymentId, phone: target.phone ?? tx.phone, amount: tx.amount });
+      await c.query("update payments set status='applied', service='hotspot', applied_at=now() where id=$1", [paymentId]);
+      const loyalty = await awardForPayment(c, tenantId, { paymentId, phone: w.phone, amount: tx.amount });
+      const { rows: [t] } = await c.query('select name, subdomain, currency from tenants where id=$1', [tenantId]);
+      const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
+      const cur = String(t?.currency ?? 'KES').trim();
+      const link = t?.subdomain ? ` Use it: https://${t.subdomain}.${root}/hotspot/wallet` : '';
+      // Not waited for: a text that cannot be sent must never undo money that has arrived.
+      send(tenantId, w.phone, 'custom', {
+        company: t?.name ?? '',
+        body: `${t?.name ?? 'WiFi'}: ${cur} ${Number(w.amount).toLocaleString('en-KE')} added to your WiFi wallet (${tx.ref}). Balance ${cur} ${Number(w.balance).toLocaleString('en-KE')}.${link}${pointsLine(loyalty)}`,
+      }).catch(() => {});
+      return { paymentId, applied: true, wallet: w };
     }
 
     // A phone that started this purchase from the login page: its device is known, so the voucher is tied to it from the start and the

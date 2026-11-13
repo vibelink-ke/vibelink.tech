@@ -11,6 +11,7 @@ import { passkeyRouter } from './passkeys.js';
 import { skyplanOpenRouter, newKey } from './skyplan-open.js';
 import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
+import { registerVisitorWallet, registerVisitorWalletPublic, walletSettings, topupRequest, markTopup } from './visitor-wallet.js';
 import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
@@ -995,6 +996,7 @@ app.get(['/hotspot/login', '/hotspot/login.html'], wrap(async (req, res) => {
     // This phone's own address, carried from the router's copy through the redirect, so a purchase made on this copy can sign the same phone in.
     deviceMac: /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(String(req.query.mac ?? '')) ? String(req.query.mac).toUpperCase() : null,
     loyalty: await selfServeOn(pool, tenant.id),
+    wallet: (await walletSettings(pool, tenant.id)).enabled,
     // The tap-to-connect link in the payment SMS — see notifyVoucher in
     // apply.js. Digits/letters/hyphen only: this becomes the literal RADIUS
     // username on submit, so anything else is dropped rather than trusted.
@@ -1292,6 +1294,19 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
   let phone = String(req.body?.phone ?? '').trim();
   if (!phone) return res.status(400).json({ error: 'Enter the M-Pesa number to pay from' });
 
+  // A wallet top-up (visitor-wallet.js) is the same prompt through the same gateway, for an amount instead of a bundle. The prompt is marked
+  // as a top-up before this answers, which is before the visitor can have entered their PIN, so the money is put in the wallet when it arrives.
+  const topup = req.body?.wallet ? await topupRequest(pool, tenant.id, req.body) : null;
+  if (topup?.error) return res.status(topup.status).json({ error: topup.error });
+  if (topup) {
+    const answer = res.json.bind(res);
+    res.json = (body) => {
+      if (!body?.checkoutId) return answer(body);
+      markTopup(pool, tenant.id, body.checkoutId).catch((e) => console.error('wallet top-up could not be marked:', body.checkoutId, e.message)).then(() => answer(body));
+      return res;
+    };
+  }
+
   // The phone this purchase is made from. Remembered against the payment's checkout id once the gateway has one, so that when the
   // money arrives the voucher can be tied to this device and the router signs it in by itself. A bad or missing address changes nothing.
   const deviceMac = String(req.body?.mac ?? '').trim().toUpperCase();
@@ -1329,7 +1344,7 @@ app.post('/hotspot/buy', stkLimiter, wrap(async (req, res) => {
     if (!r) routerId = null;
   }
 
-  const { rows: [plan] } = await pool.query(
+  const { rows: [plan] } = topup ? { rows: [{ id: null, title: 'Wallet top-up', price: topup.amount }] } : await pool.query(
     `select id, title, price from plans
       where id=$1 and tenant_id=$2 and service='hotspot' and active`,
     [planId, tenant.id]);
@@ -1587,6 +1602,8 @@ app.get('/hotspot/voucher-status', pollLimiter, wrap(async (req, res) => {
 
 // The visitor's own loyalty points on the hotspot login page (see loyalty.js): SMS code, then check and redeem.
 registerLoyaltyPublic(app, { pool, tenantByHost, wrap });
+// The visitor's wallet page: pay now, buy bundles from it later (visitor-wallet.js).
+registerVisitorWalletPublic(app, { pool, tenantByHost, wrap, loginLimiter, pollLimiter });
 // Sign in with the phone number that paid: an SMS code to that number, then the bundle it bought (phone-login.js).
 registerPhoneLogin(app, { pool, tenantByHost, wrap, limiter: loginLimiter });
 
@@ -13340,6 +13357,8 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
 
 // Loyalty points for hotspot visitors (see loyalty.js).
 registerLoyalty(app, { pool, requirePermission, wrap });
+// Hotspot visitor wallets, staff side (visitor-wallet.js).
+registerVisitorWallet(app, { pool, requirePermission, wrap });
 
 /**
  * Text vouchers to a number typed in: the codes just generated for somebody who is not here, or a few picked from

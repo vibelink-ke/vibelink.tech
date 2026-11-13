@@ -153,6 +153,11 @@ export const DEFAULT_PERMISSIONS = {
   'loyalty.view':   { owner: true, cashier: true,  technician: false, support: true,  sales: false },
   'loyalty.manage': all(),
 
+  // Hotspot visitor wallets (money visitors paid ahead): seeing them is for anyone who serves customers; changing the rules or
+  // a balance by hand is the business's money, so it is owner-level by default.
+  'visitor_wallets.view':   { owner: true, cashier: true,  technician: false, support: true,  sales: false },
+  'visitor_wallets.manage': all(),
+
   'staff.view':               all(),
   'staff.create':             all(),
   'staff.edit':               all(),
@@ -310,6 +315,8 @@ export const PERMISSION_META = [
   { key: 'audit.view',  page: 'Audit log', action: 'View who did what' },
   { key: 'loyalty.view',   page: 'Loyalty', action: 'View points and rewards' },
   { key: 'loyalty.manage', page: 'Loyalty', action: 'Change the rules, redeem and adjust points' },
+  { key: 'visitor_wallets.view',   page: 'Visitor wallets', action: 'View wallets and their history' },
+  { key: 'visitor_wallets.manage', page: 'Visitor wallets', action: 'Turn the wallet on or off, set limits and adjust a balance' },
   { key: 'issues.view', page: 'Issues',    action: 'View failed and unmatched things' },
   { key: 'settings.view', page: 'Settings', action: 'View' },
   { key: 'settings.edit', page: 'Settings', action: 'Edit' },

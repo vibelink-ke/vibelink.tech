@@ -167,7 +167,7 @@ export function loginPage(opts = {}) {
 }
 
 function loginPageRaw({
-  company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false,
+  company = 'WiFi', plans = [], supportPhone = null, portalUrl = null, preview = false, loyalty = false, wallet = false,
   headline = null, subtext = null, forRouter = false, template = 'sleek', tvMode = false,
   redirectUrl = null, prefillCode = null, routerId = null, hotspotDns = 'billing.spot',
   hotspotGateway = null, adText = null, adUrl = null, deviceMac = null, currency = 'KES',
@@ -709,6 +709,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       asks for, so nothing here needs to know it in advance.
     -->
     <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">Add TV / console</a><span style="display:block;margin-top:6px">Pay for a TV or console package, or activate a TV voucher.</span></p>
+    ${wallet ? `<p class="hint"><a href="${esc(apiBase)}/hotspot/wallet?${routerId ? `router=${encodeURIComponent(routerId)}&` : ''}mac=${macToken || esc(deviceMac ?? '')}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">My wallet</a><span style="display:block;margin-top:6px">Pay now, use it later: keep money in your wallet and buy bundles from it with no M-Pesa prompt.</span></p>` : ''}
     ${loyalty ? `<button type="button" class="chat-open" id="loyOpen">My loyalty points</button>
     <div class="chat" id="loyPanel">
       <div id="loyStep1">

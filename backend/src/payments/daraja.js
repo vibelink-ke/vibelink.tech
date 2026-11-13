@@ -844,6 +844,7 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
         rawAccount: null, payload: { checkoutId },
         target: p.subscriber_id
           ? { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null }
+          : p.wallet_topup ? { type: 'visitor_wallet', phone: req.phone }
           : { type: 'hotspot', planId: p.plan_id, mac: p.mac ?? null, routerId: p.router_id ?? null, label: p.label ?? null },
       });
       if (!result?.duplicate) {
@@ -942,6 +943,7 @@ export async function handleStkResult(provider, checkoutId, code, desc, tx) {
       provider, ref: tx.ref, amount: Number(req.amount), phone: tx.phone || req.phone || null, name: tx.name ?? null,
       rawAccount: null, payload: { checkoutId },
       target: p.subscriber_id ? { type: 'subscriber', id: p.subscriber_id, invoiceId: p.invoice_id ?? null }
+                              : p.wallet_topup ? { type: 'visitor_wallet', phone: req.phone }
                               : { type: 'hotspot', planId: p.plan_id, mac: p.mac, routerId: p.router_id, label: p.label }
     });
   } catch (e) {

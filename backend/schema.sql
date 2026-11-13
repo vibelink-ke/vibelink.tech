@@ -3821,3 +3821,44 @@ create table if not exists push_devices (
   seen_at    timestamptz not null default now()
 );
 create index if not exists push_devices_tenant_id_idx on push_devices (tenant_id);
+
+-- A wallet for hotspot visitors, known by phone number (normalised to 254XXXXXXXXX): pay now by M-Pesa, buy bundles from it later.
+-- Off until a tenant turns it on. See visitor-wallet.js.
+create table if not exists visitor_wallet_settings (
+  tenant_id uuid primary key references tenants on delete cascade,
+  enabled   boolean not null default false,
+  min_topup numeric(12,2) not null default 10 check (min_topup >= 1),
+  max_topup numeric(12,2) not null default 5000
+);
+create table if not exists visitor_wallets (
+  tenant_id  uuid not null references tenants on delete cascade,
+  phone      text not null,
+  balance    numeric(12,2) not null default 0 check (balance >= 0),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (tenant_id, phone)
+);
+-- Every change to a balance, so a balance can always be explained. payment_id is unique so a payment is credited once.
+create table if not exists visitor_wallet_ledger (
+  id            bigserial primary key,
+  tenant_id     uuid not null references tenants on delete cascade,
+  phone         text not null,
+  delta         numeric(12,2) not null,
+  balance_after numeric(12,2) not null,
+  reason        text not null,          -- topup | purchase | adjust
+  payment_id    uuid unique references payments on delete set null,
+  voucher_id    uuid,
+  plan_id       uuid,
+  note          text,
+  created_by    uuid,
+  created_at    timestamptz not null default now()
+);
+create index if not exists visitor_wallet_ledger_phone on visitor_wallet_ledger (tenant_id, phone, created_at desc);
+-- A visitor's sign-in on one device, made after an SMS code. Only the hash of the token is kept.
+create table if not exists visitor_wallet_sessions (
+  token_hash text primary key,
+  tenant_id  uuid not null references tenants on delete cascade,
+  phone      text not null,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null
+);
