@@ -539,10 +539,17 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
   .popup h3 { margin:0 0 6px; font-size:18px; }
   .popup p { margin:0; color:var(--muted); font-size:14.5px; }
   .popup button { margin-top:16px; }
+  /* The wallet line that scrolls across the top of the card. It stands still for anyone who has asked their phone for less motion. */
+  .wticker { display:block; overflow:hidden; white-space:nowrap; margin:0 0 12px; padding:7px 0; border-radius:8px;
+             font-size:13.5px; font-weight:600; text-decoration:none; color:inherit; border:1px solid currentColor; }
+  .wticker span { display:inline-block; padding-left:100%; animation:wticker 16s linear infinite; }
+  @keyframes wticker { from { transform:translateX(0); } to { transform:translateX(-100%); } }
+  @media (prefers-reduced-motion: reduce) { .wticker { white-space:normal; padding:7px 10px; text-align:center; } .wticker span { padding-left:0; animation:none; } }
 </style>
 </head>
 <body>
   <div class="card">
+    ${wallet ? `<a class="wticker" href="${esc(apiBase)}/hotspot/wallet?${routerId ? `router=${encodeURIComponent(routerId)}&` : ''}mac=${macToken || esc(deviceMac ?? '')}" aria-label="My wallet"><span>Pay now, use it later: keep money in your wallet and buy bundles from it with no M-Pesa prompt.</span></a>` : ''}
     <!-- Both come from Hotspot -> Settings, so the operator can change what a
          guest reads without anyone touching this file. Falling back to the
          company name and a plain instruction means an operator who sets neither
@@ -709,7 +716,7 @@ ${apiBase ? `<link rel="icon" href="${esc(apiBase)}/api/public/favicon">` : ''}
       asks for, so nothing here needs to know it in advance.
     -->
     <p class="hint"><a href="${esc(apiBase)}/hotspot/devices${routerId ? `?router=${encodeURIComponent(routerId)}` : ''}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">Add TV / console</a><span style="display:block;margin-top:6px">Pay for a TV or console package, or activate a TV voucher.</span></p>
-    ${wallet ? `<p class="hint"><a href="${esc(apiBase)}/hotspot/wallet?${routerId ? `router=${encodeURIComponent(routerId)}&` : ''}mac=${macToken || esc(deviceMac ?? '')}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">My wallet</a><span style="display:block;margin-top:6px">Pay now, use it later: keep money in your wallet and buy bundles from it with no M-Pesa prompt.</span></p>` : ''}
+    ${wallet ? `<p class="hint"><a href="${esc(apiBase)}/hotspot/wallet?${routerId ? `router=${encodeURIComponent(routerId)}&` : ''}mac=${macToken || esc(deviceMac ?? '')}" style="display:block;padding:12px;border:1px solid currentColor;border-radius:10px;font-weight:600;text-decoration:none;text-align:center">My wallet</a></p>` : ''}
     ${loyalty ? `<button type="button" class="chat-open" id="loyOpen">My loyalty points</button>
     <div class="chat" id="loyPanel">
       <div id="loyStep1">
