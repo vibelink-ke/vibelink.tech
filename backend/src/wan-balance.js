@@ -59,6 +59,100 @@ const table = (i) => `ispLbT${i + 1}`;
 /** Test addresses offered by default. Chosen because they answer pings and are rarely anyone's main DNS server. */
 export const DEFAULT_PROBES = ['1.1.1.2', '149.112.112.112', '1.0.0.2', '208.67.220.220'];
 export const MAX_LINKS = 4;
+/** A second test address per link. A link counts as down only when both stop answering, so one of them having a bad day changes nothing. */
+export const DEFAULT_PROBES2 = ['9.9.9.10', '149.112.112.10', '208.67.222.123', '76.76.2.0'];
+const pinSrc = (i) => `ispLbPinSrc${i + 1}`;
+const pinDst = (i) => `ispLbPinDst${i + 1}`;
+const watchName = (n) => `ispLbWatch${n}`;
+
+/**
+ * The script the router runs every 15 seconds for one link. It does three things the routes cannot do by themselves.
+ *   - Hold-down. A link that stopped answering is taken out (its default routes are disabled), and it is put back only after it has
+ *     answered on every round for the hold time. A link that flaps is therefore not used until it is steady, instead of dragging
+ *     customers back and forth each time it blinks.
+ *   - It asks both test addresses, and only calls the link dead when neither answers, twice in a row.
+ *   - It clears the connections tied to the link when it is taken out or put back, so they start again on a working link.
+ * The counters are global variables. If a router did not keep them between runs, the counts would never reach their thresholds and the
+ * script would simply never act; the routes' own ping check would still fail the link over. It cannot get a link stuck out by miscounting.
+ */
+function watchScript(i, link, cfg) {
+  const n = i + 1;
+  const routes = `[find where comment~"^${LB} (default via|only) link ${n} "]`;
+  const need = Math.max(1, cfg.hold * 4);
+  let wipe;
+  if (cfg.mode === 'balance') wipe = `:do { /ip firewall connection remove [find connection-mark=${connMark(i)}] } on-error={}`;
+  else if (n === 1) wipe = ':do { /ip firewall connection remove [find where srcnat] } on-error={}';
+  else {
+    // Failover: connections only need restarting when this link is, or becomes, the one in use: when no link ahead of it is working.
+    const ahead = Array.from({ length: n - 1 }, (_, k) => k + 1).join('|');
+    wipe = `:do { :if ([:len [/ip route find where comment~"^${LB} default via link (${ahead}) " and active=yes]] = 0) do={ /ip firewall connection remove [find where srcnat] } } on-error={}`;
+  }
+  const second = link.probe2 ? ` :if (!$alive) do={ :if ([/ping ${link.probe2} count=2] > 0) do={ :set alive true } };` : '';
+  return [
+    `:global ispLbOk${n}; :global ispLbBad${n};`,
+    `:if ([:typeof $ispLbOk${n}] != "num") do={ :set ispLbOk${n} 0 };`,
+    `:if ([:typeof $ispLbBad${n}] != "num") do={ :set ispLbBad${n} 0 };`,
+    `:local alive false; :if ([/ping ${link.probe} count=2] > 0) do={ :set alive true };${second}`,
+    `:local held ([:len [/ip route find where comment~"^${LB} (default via|only) link ${n} " and disabled=yes]] > 0);`,
+    `:if ($alive) do={ :set ispLbBad${n} 0; :if ($held) do={ :set ispLbOk${n} ($ispLbOk${n} + 1); :if ($ispLbOk${n} >= ${need}) do={ :set ispLbOk${n} 0; /ip route enable ${routes}; :delay 12s; ${wipe}; :log warning "ispLb: internet link ${n} is steady again and back in use" } } }`,
+    `else={ :set ispLbOk${n} 0; :if (!$held) do={ :set ispLbBad${n} ($ispLbBad${n} + 1); :if ($ispLbBad${n} >= 2) do={ :set ispLbBad${n} 0; /ip route disable ${routes}; ${wipe}; :log warning "ispLb: internet link ${n} stopped answering and is held out" } } }`,
+  ].join(' ');
+}
+
+/** Policy-routing rules live in a different menu on RouterOS 6 and 7. Returns the one this router has, with its rows. */
+async function ruleMenu(conn) {
+  try { return { path: '/routing/rule', rows: await conn.write('/routing/rule/print', []) }; }
+  catch { return { path: '/ip/route/rule', rows: await conn.write('/ip/route/rule/print', []) }; }
+}
+
+/** The address each link has right now on the interface its traffic leaves through. */
+async function ownAddresses(conn, links) {
+  const addrs = await conn.write('/ip/address/print', []);
+  return links.map((l) => {
+    const iface = l.out ?? l.iface;
+    const row = addrs.find((a) => a.interface === iface && !yes(a.disabled) && !yes(a.invalid));
+    const ip = String(row?.address ?? '').split('/')[0];
+    return isIpv4(ip) ? ip : null;
+  });
+}
+
+/**
+ * Traffic the router itself sends from a link's own address leaves by that link (a service answering on that address, a tunnel bound to
+ * it). Without this such traffic follows the main route and can leave by the other provider, who drops it as not theirs. Traffic to the
+ * customers' side is told to stay on the main table first, so an answer to a customer is never pushed out of a link.
+ */
+async function ownAddressRules(conn, links) {
+  const { path } = await ruleMenu(conn);
+  for (const c of PRIVATE.filter((x) => x !== '224.0.0.0/4')) {
+    await conn.write(`${path}/add`, [`=dst-address=${c}`, '=action=lookup', '=table=main', `=comment=${tag('local stays local')}`]);
+  }
+  const ips = await ownAddresses(conn, links);
+  for (let i = 0; i < links.length; i++) {
+    if (!ips[i]) continue;   // a dial-up link that is not connected yet: the watcher in billing adds it once it has an address
+    await conn.write(`${path}/add`, [`=src-address=${ips[i]}/32`, '=action=lookup', `=table=${table(i)}`, `=comment=${tag(`own address link ${i + 1}`)}`]);
+  }
+}
+
+/**
+ * A DHCP or PPPoE link's address changes when the provider says so. Billing's watcher calls this on every pass and brings the
+ * "own address" rules up to date. Changes nothing when they already match.
+ */
+export async function refreshOwnAddress(conn, cfg) {
+  if (cfg?.mode !== 'balance') return 0;
+  const { path, rows } = await ruleMenu(conn);
+  if (!rows.some((r) => isMine(r) && /local stays local/.test(r.comment))) return 0;   // set up before these rules existed: left alone
+  const ips = await ownAddresses(conn, cfg.links);
+  let changed = 0;
+  for (let i = 0; i < cfg.links.length; i++) {
+    const rule = rows.find((r) => isMine(r) && new RegExp(`own address link ${i + 1} `).test(r.comment));
+    const have = String(rule?.['src-address'] ?? '').split('/')[0];
+    if (!ips[i] || have === ips[i]) continue;
+    if (rule) await conn.write(`${path}/set`, [`=.id=${idOf(rule)}`, `=src-address=${ips[i]}/32`]);
+    else await conn.write(`${path}/add`, [`=src-address=${ips[i]}/32`, '=action=lookup', `=table=${table(i)}`, `=comment=${tag(`own address link ${i + 1}`)}`]);
+    changed += 1;
+  }
+  return changed;
+}
 
 const isIpv4 = (s) => /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.test(String(s)) && String(s).split('.').every((x) => Number(x) <= 255);
 const isCidr = (s) => { const [ip, bits] = String(s).split('/'); return isIpv4(ip) && /^\d{1,2}$/.test(bits ?? '') && Number(bits) >= 8 && Number(bits) <= 32; };
@@ -166,10 +260,17 @@ export function interfaces(st) {
 /** What is on the router now from an earlier setup, and whether each link is carrying traffic. */
 export function live(st) {
   const mine = st.mainDefaults.filter((r) => isMine(r) && /default via link \d+/.test(r.comment));
-  const links = mine.map((r) => {
+  const byLink = new Map();
+  for (const r of mine) {
     const n = Number(/link (\d+)/.exec(r.comment)?.[1] ?? 0);
-    return { n, probe: String(r.gateway ?? ''), up: yes(r.active) && !yes(r.inactive), distance: Number(r.distance ?? 1) };
-  }).filter((l) => l.n > 0).sort((a, b) => a.n - b.n);
+    if (!n) continue;
+    const l = byLink.get(n) ?? { n, probes: [], up: false, held: false };
+    l.probes.push(String(r.gateway ?? ''));
+    if (yes(r.disabled)) l.held = true;
+    else if (yes(r.active) && !yes(r.inactive)) l.up = true;
+    byLink.set(n, l);
+  }
+  const links = [...byLink.values()].sort((a, b) => a.n - b.n);
   const mode = st.mangle.some((r) => isMine(r) && r['per-connection-classifier']) ? 'balance' : 'failover';
   return { active: links.length > 0, mode: links.length ? mode : null, links };
 }
@@ -190,6 +291,8 @@ export function normalise(input) {
       weight: Math.min(10, Math.max(1, Math.round(Number(l?.weight) || 1))),
       mbps: Number(l?.mbps) > 0 ? Math.min(100000, Number(l.mbps)) : null,
       probe: String(l?.probe ?? '').trim() || DEFAULT_PROBES[i] || '',
+      // Left out means "the usual second one"; given as an empty box means "just one test address".
+      probe2: l?.probe2 === '' ? '' : (String(l?.probe2 ?? '').trim() || DEFAULT_PROBES2[i] || ''),
     };
   });
   // When every link's size is given, the shares follow from the sizes: 200 and 100 Mbps become 2 and 1. Nobody has to work out a ratio.
@@ -197,13 +300,20 @@ export function normalise(input) {
     const biggest = Math.max(...links.map((l) => l.mbps));
     for (const l of links) l.weight = Math.max(1, Math.round((l.mbps / biggest) * 10));
   }
-  return { mode: input?.mode === 'failover' ? 'failover' : 'balance', protect: input?.protect !== false, sticky: input?.sticky === 'pair' ? 'pair' : 'customer', links };
+  // Minutes a link must answer steadily before it is used again. 0 means at once.
+  const hold = input?.hold === undefined || input?.hold === null || input?.hold === '' ? 3 : Math.min(30, Math.max(0, Math.round(Number(input.hold) || 0)));
+  // Traffic that always uses one link: a customer's address (or network), or a site's.
+  const seenPin = new Set();
+  const pins = (Array.isArray(input?.pins) ? input.pins : []).slice(0, 40)
+    .map((p) => ({ match: p?.match === 'site' ? 'site' : 'customer', address: String(p?.address ?? '').trim(), link: Math.round(Number(p?.link) || 0) }))
+    .filter((p) => p.address && !seenPin.has(`${p.match} ${p.address}`) && seenPin.add(`${p.match} ${p.address}`));
+  return { mode: input?.mode === 'failover' ? 'failover' : 'balance', protect: input?.protect !== false, sticky: input?.sticky === 'pair' ? 'pair' : 'customer', hold, pins, links };
 }
 
 /** What billing keeps of a setup: everything but the PPPoE password, plus the interface each link's traffic leaves through. */
 export function publicConfig(cfg, shaped) {
   return {
-    mode: cfg.mode, protect: cfg.protect, sticky: cfg.sticky,
+    mode: cfg.mode, protect: cfg.protect, sticky: cfg.sticky, hold: cfg.hold, pins: cfg.pins,
     links: cfg.links.map(({ password, ...l }, i) => ({ ...l, out: shaped?.[i]?.out ?? l.iface })),   // eslint-disable-line no-unused-vars
   };
 }
@@ -280,8 +390,22 @@ export function check(st, cfg) {
         blockers.push(`Link ${n}: ${l.probe} is one of this router's own DNS servers. A test address is reached through one link only, so the router would lose that DNS server whenever link ${n} is down. Choose another.`);
       if (links.some((o) => o.gateway === l.probe)) blockers.push(`Link ${n}: the test address cannot be a gateway.`);
     }
+    if (l.probe2) {
+      if (!isIpv4(l.probe2) || isPrivate(l.probe2)) blockers.push(`Link ${n}: the second test address must be a public internet address, for example ${DEFAULT_PROBES2[i] ?? '9.9.9.10'}, or leave it empty.`);
+      else {
+        if (usedProbe.has(l.probe2)) blockers.push(`Link ${n}: every test address must be used once only; ${l.probe2} is used twice.`);
+        usedProbe.add(l.probe2);
+        if (st.dnsServers.includes(l.probe2)) blockers.push(`Link ${n}: ${l.probe2} is one of this router's own DNS servers, so it cannot be a test address. Choose another.`);
+        if (links.some((o) => o.gateway === l.probe2)) blockers.push(`Link ${n}: the second test address cannot be a gateway.`);
+      }
+    }
     if (!yes(row.running)) warnings.push(`Link ${n}: nothing is plugged into ${s.port} right now, so it will start out as down.`);
   });
+  cfg.pins.forEach((p, i) => {
+    if (!isIpv4(p.address) && !isCidr(p.address)) blockers.push(`Fixed traffic ${i + 1}: "${p.address}" is not an address or a network. Write it like 10.5.0.20 or 41.90.64.0/24.`);
+    if (!(p.link >= 1 && p.link <= links.length)) blockers.push(`Fixed traffic ${i + 1}: choose which link ${p.address} uses.`);
+  });
+  if (cfg.pins.length && mode !== 'balance') warnings.push('Fixed traffic is only used when the links work together. In failover everything uses one link anyway, so it is ignored.');
   if (mode === 'balance') {
     const foreign = st.mangle.filter((r) => !isMine(r) && !yes(r.disabled) && !isDynamic(r)
       && ['mark-connection', 'mark-routing'].includes(String(r.action))
@@ -322,7 +446,7 @@ export function describe(st, cfg) {
       : l.type === 'dhcp'
         ? (s.makeClient ? `a new DHCP client on ${s.port}` : `the DHCP client already on ${s.port}${s.gateway ? `, gateway ${s.gateway} for now` : ''}`)
         : `${s.port} through ${l.gateway}${s.makeAddress ? `, with the address ${l.address} added to it` : ''}`;
-    lines.push(`Link ${i + 1} is ${how}. It counts as up while ${l.probe} answers through it.`);
+    lines.push(`Link ${i + 1} is ${how}. It counts as up while ${l.probe}${l.probe2 ? ` or ${l.probe2}` : ''} answers through it.`);
   });
   if (mode === 'balance') {
     const total = slots(links).length;
@@ -342,6 +466,11 @@ export function describe(st, cfg) {
   if (cfg.protect) lines.push('Firewall: new connections from the internet to the router itself are refused on these links, except ping.');
   else if (st.dnsOpen) lines.push('Firewall: DNS queries arriving from the internet on each link are dropped, so the router is not an open resolver.');
   lines.push('When a link goes down or comes back, the connections that were tied to it are cleared on the router, so they start again on a working link instead of hanging.');
+  lines.push(cfg.hold ? `A link that comes back is used again only after it has answered steadily for ${cfg.hold} minute${cfg.hold === 1 ? '' : 's'}, so a link that keeps blinking does not drag customers back and forth.` : 'A link that comes back is used again at once.');
+  if (mode === 'balance') {
+    for (const p of cfg.pins) lines.push(`${p.match === 'site' ? 'Traffic to' : 'The customer at'} ${p.address} always uses link ${p.link} while that link is up.`);
+    lines.push("Traffic the router itself sends from a link's own address leaves by that link.");
+  }
   if (shaped.some((s) => s.type === 'pppoe')) lines.push('TCP packet size is adjusted on the PPPoE link (MSS clamp), so large pages do not stall.');
   lines.push('If billing cannot reach the router after applying, the router undoes all of it by itself within 5 minutes.');
   return lines;
@@ -388,8 +517,10 @@ function planUndo(st, cfg, previous) {
 }
 
 const MENUS = [
-  ['/ip/firewall/mangle', []], ['/tool/netwatch', []], ['/ip/route', []], ['/routing/table', []], ['/ip/firewall/nat', []], ['/ip/firewall/filter', []],
-  ['/ip/firewall/address-list', [`?list=${LOCAL_LIST}`]], ['/interface/list/member', [`?list=${WAN_LIST}`]], ['/interface/list', [`?name=${WAN_LIST}`]],
+  ['/system/scheduler', []], ['/ip/firewall/mangle', []], ['/tool/netwatch', []], ['/routing/rule', []], ['/ip/route/rule', []],
+  ['/ip/route', []], ['/routing/table', []], ['/ip/firewall/nat', []], ['/ip/firewall/filter', []],
+  ['/ip/firewall/address-list', [`?list=${LOCAL_LIST}`]],
+  ...Array.from({ length: MAX_LINKS }, (_, i) => [['/ip/firewall/address-list', [`?list=${pinSrc(i)}`]], ['/ip/firewall/address-list', [`?list=${pinDst(i)}`]]]).flat(), ['/interface/list/member', [`?list=${WAN_LIST}`]], ['/interface/list', [`?name=${WAN_LIST}`]],
 ];
 const UPLINK_MENUS = ['/ip/dhcp-client', '/ip/address', '/interface/pppoe-client'];
 
@@ -399,7 +530,7 @@ async function clear(conn) {
   for (const [path, query] of MENUS) {
     let rows;
     try { rows = await conn.write(`${path}/print`, query); } catch { continue; }   // /routing/table does not exist on RouterOS 6
-    for (const r of rows.filter((x) => isMine(x) && !isUplink(x) && !isDynamic(x))) {
+    for (const r of rows.filter((x) => isMine(x) && !isUplink(x) && !isDynamic(x) && x.name !== REVERT)) {
       await conn.write(`${path}/remove`, [`=.id=${idOf(r)}`]);
       removed += 1;
     }
@@ -450,7 +581,8 @@ function revertScript(undo) {
   const safely = (c) => `:do { ${c} } on-error={}`;
   const mine = `[find comment~"^${LB} "]`;
   const lines = [
-    `/ip firewall mangle remove ${mine}`, `/tool netwatch remove ${mine}`, `/ip route remove ${mine}`, `/routing table remove ${mine}`, `/ip firewall nat remove ${mine}`,
+    '/system scheduler remove [find name~"^ispLbWatch"]', `/ip firewall mangle remove ${mine}`, `/tool netwatch remove ${mine}`,
+    `/routing rule remove ${mine}`, `/ip route rule remove ${mine}`, `/ip route remove ${mine}`, `/routing table remove ${mine}`, `/ip firewall nat remove ${mine}`,
     `/ip firewall filter remove ${mine}`, `/ip firewall address-list remove ${mine}`, `/interface list member remove ${mine}`, `/interface list remove ${mine}`,
     `/ip dhcp-client remove ${mine}`, `/ip address remove ${mine}`, `/interface pppoe-client remove ${mine}`,
   ];
@@ -529,7 +661,7 @@ async function prepareUplinks(conn, cfg, shaped, undo, notes, st) {
       }
       if (!gateway) throw new Error(`link ${s.n}: no DHCP answer on ${s.port}. Check the cable and that the provider's side hands out addresses`);
     }
-    out.push({ n: s.n, type: s.type, iface: s.out, gateway, weight: l.weight, probe: l.probe });
+    out.push({ n: s.n, type: s.type, iface: s.out, gateway, weight: l.weight, probe: l.probe, probe2: l.probe2 });
   }
   if (out.some((l, i) => isIpv4(l.gateway) && out.findIndex((o) => o.gateway === l.gateway) !== i))
     notes.push('Two links have the same gateway address. If they are not really the same provider network, one of them will not work.');
@@ -590,12 +722,18 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
     // The test address of each link, reachable only through that link.
     for (let i = 0; i < links.length; i++) {
       await add(`test route link ${i + 1}`, '/ip/route', [`=dst-address=${links[i].probe}/32`, `=gateway=${links[i].gateway}`, '=scope=10', `=comment=${tag(`test address link ${i + 1}`)}`]);
+      if (links[i].probe2) await add(`second test route link ${i + 1}`, '/ip/route', [`=dst-address=${links[i].probe2}/32`, `=gateway=${links[i].gateway}`, '=scope=10', `=comment=${tag(`test address link ${i + 1} second`)}`]);
     }
     if (mode === 'balance') {
       for (let i = 0; i < links.length; i++) {
+        const inTable = st.major >= 7 ? `=routing-table=${table(i)}` : `=routing-mark=${table(i)}`;
         await add(`route for link ${i + 1}`, '/ip/route', [
           '=dst-address=0.0.0.0/0', `=gateway=${links[i].probe}`, '=check-gateway=ping', '=target-scope=11', '=distance=1',
-          st.major >= 7 ? `=routing-table=${table(i)}` : `=routing-mark=${table(i)}`, `=comment=${tag(`only link ${i + 1}`)}`,
+          inTable, `=comment=${tag(`only link ${i + 1}`)}`,
+        ]);
+        if (links[i].probe2) await add(`second route for link ${i + 1}`, '/ip/route', [
+          '=dst-address=0.0.0.0/0', `=gateway=${links[i].probe2}`, '=check-gateway=ping', '=target-scope=11', '=distance=2',
+          inTable, `=comment=${tag(`only link ${i + 1} second`)}`,
         ]);
       }
     }
@@ -634,9 +772,14 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
 
     // The way out for everything that is not steered: link 1, then the next, in order.
     for (let i = 0; i < links.length; i++) {
+      // Link 1 has distances 1 and 2 (its two test addresses), link 2 has 3 and 4, and so on: a link is passed over only when both fail.
       await add(`default route link ${i + 1}`, '/ip/route', [
-        '=dst-address=0.0.0.0/0', `=gateway=${links[i].probe}`, '=check-gateway=ping', '=target-scope=11', `=distance=${i + 1}`,
+        '=dst-address=0.0.0.0/0', `=gateway=${links[i].probe}`, '=check-gateway=ping', '=target-scope=11', `=distance=${(i * 2) + 1}`,
         `=comment=${tag(`default via link ${i + 1}`)}`,
+      ]);
+      if (links[i].probe2) await add(`second default route link ${i + 1}`, '/ip/route', [
+        '=dst-address=0.0.0.0/0', `=gateway=${links[i].probe2}`, '=check-gateway=ping', '=target-scope=11', `=distance=${(i * 2) + 2}`,
+        `=comment=${tag(`default via link ${i + 1} second`)}`,
       ]);
     }
 
@@ -665,6 +808,21 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
         await m(`arrived on link ${i + 1}`, ['=chain=prerouting', `=in-interface=${links[i].iface}`, '=connection-state=new', '=connection-mark=no-mark',
           '=action=mark-connection', `=new-connection-mark=${connMark(i)}`, '=passthrough=yes']);
       }
+      // Traffic that must always use one link is marked first; the sharing rules below only touch what is still unmarked.
+      for (let i = 0; i < links.length; i++) {
+        const fixed = cfg.pins.filter((p) => p.link === i + 1);
+        for (const p of fixed) {
+          await add(`fixed ${p.address}`, '/ip/firewall/address-list', [`=list=${p.match === 'site' ? pinDst(i) : pinSrc(i)}`, `=address=${p.address}`, `=comment=${tag(`always link ${i + 1}`)}`]);
+        }
+        if (fixed.some((p) => p.match === 'customer')) {
+          await m(`fixed customers to link ${i + 1}`, ['=chain=prerouting', `=in-interface-list=!${WAN_LIST}`, '=connection-mark=no-mark', '=dst-address-type=!local',
+            `=dst-address-list=!${LOCAL_LIST}`, `=src-address-list=${pinSrc(i)}`, '=action=mark-connection', `=new-connection-mark=${connMark(i)}`, '=passthrough=yes']);
+        }
+        if (fixed.some((p) => p.match === 'site')) {
+          await m(`fixed sites to link ${i + 1}`, ['=chain=prerouting', `=in-interface-list=!${WAN_LIST}`, '=connection-mark=no-mark', '=dst-address-type=!local',
+            `=dst-address-list=${pinDst(i)}`, '=action=mark-connection', `=new-connection-mark=${connMark(i)}`, '=passthrough=yes']);
+        }
+      }
       // A new connection from a customer to the internet is given a link, by share.
       const order = slots(links);
       for (let s = 0; s < order.length; s++) {
@@ -684,21 +842,22 @@ export async function apply(conn, cfg, { previousUndo = null, revertMinutes = 5 
       }
     }
 
-    // The watcher that clears connections tied to a link that changed state. It waits for the route to have followed, and on "down" asks
-    // again before clearing, so one lost ping does not disturb anyone. Not fatal if the router will not take it.
+    if (mode === 'balance') {
+      try { await ownAddressRules(conn, links); }
+      catch (e) { notes.push(`The rules that send a link's own address out of that link could not be added (${e.message}). Everything else is in place.`); }
+    }
+
+    // The watcher: one small script per link, run by the router every 15 seconds (see watchScript). Not fatal if the router will not
+    // take it: the routes still fail over by their own ping check, only without the hold-down and the clearing of old connections.
     try {
       for (let i = 0; i < links.length; i++) {
-        const which = mode === 'balance' ? `[find connection-mark=${connMark(i)}]` : '[find where srcnat]';
-        const wipe = `:do { /ip firewall connection remove ${which} } on-error={}`;
-        await conn.write('/tool/netwatch/add', [
-          `=host=${links[i].probe}`, '=interval=10s', '=timeout=2s',
-          `=down-script=:delay 25s; :if ([/ping ${links[i].probe} count=3] = 0) do={ ${wipe} }`,
-          `=up-script=:delay 25s; ${wipe}`,
-          `=comment=${tag(`clear old connections link ${i + 1}`)}`,
+        await conn.write('/system/scheduler/add', [
+          `=name=${watchName(i + 1)}`, '=interval=15s', '=policy=read,write,test,policy',
+          `=on-event=${watchScript(i, links[i], cfg)}`, `=comment=${tag(`watch link ${i + 1}`)}`,
         ]);
       }
     } catch (e) {
-      notes.push(`The watcher that clears stale connections could not be added (${e.message}). Failover still works; some open connections may hang for a few minutes when a link changes.`);
+      notes.push(`The watcher that holds back an unsteady link and clears stale connections could not be added (${e.message}). Failover still works without it.`);
     }
   } catch (e) {
     await clear(conn).catch(() => {});
@@ -736,9 +895,12 @@ export async function sample(conn, cfg) {
   if (!mine.length) return null;
   const num = (v) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
   return (cfg?.links ?? []).map((l, i) => {
-    const route = mine.find((r) => Number(/link (\d+)/.exec(r.comment)?.[1]) === i + 1);
+    const mineHere = mine.filter((r) => Number(/link (\d+)/.exec(r.comment)?.[1]) === i + 1);
     const iface = l.out ?? l.iface;
     const s = stats.find((x) => x.name === iface);
-    return { n: i + 1, iface, up: !!route && yes(route.active) && !yes(route.inactive), rx: num(s?.['rx-byte']), tx: num(s?.['tx-byte']) };
+    return {
+      n: i + 1, iface, up: mineHere.some((r) => yes(r.active) && !yes(r.inactive) && !yes(r.disabled)), held: mineHere.some((r) => yes(r.disabled)),
+      rx: num(s?.['rx-byte']), tx: num(s?.['tx-byte']),
+    };
   });
 }

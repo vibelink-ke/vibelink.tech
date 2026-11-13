@@ -7420,7 +7420,7 @@ app.post('/api/routers/:id/wan-links', requirePermission('routers.balance'), wra
     const stats = live.active && t.r.wan_balance?.config
       ? await (await import('./wan-watch.js')).wanStats(t.r).catch((e) => { console.warn('wan stats:', e.message); return null; }) : null;
     res.json({
-      version: st.version, interfaces: wb.interfaces(st), candidates: wb.candidates(st), probes: wb.DEFAULT_PROBES,
+      version: st.version, interfaces: wb.interfaces(st), candidates: wb.candidates(st), probes: wb.DEFAULT_PROBES, probes2: wb.DEFAULT_PROBES2,
       saved: live.active ? (t.r.wan_balance?.config ?? null) : null, live, stats,
     });
   } catch (e) {

@@ -420,5 +420,12 @@
       "Internet links: the link the router is already using now asks only for its speed (its details are read from the router and shown, with a Change details button if you need them), and the card for the second link is there as soon as you open the window.",
       "Internet links: when links are used together, each customer now stays on one link by default, so banks, games and streaming do not see the customer's address change between links. Spreading one customer's sites across links is still available as a choice."
     ]
+  },
+  {
+    "date": "2026-11-13",
+    "title": "Internet links: hold-down, second test address, fixed traffic",
+    "items": [
+      "Internet links: four additions that stop links being switched for no good reason. A link that comes back is used again only after it has answered steadily for a few minutes (you choose how many). Each link has a second test address, and counts as down only when both stop. Chosen customers or sites can be made to always use one link. And traffic the router sends from a link's own address leaves by that link."
+    ]
   }
 ]

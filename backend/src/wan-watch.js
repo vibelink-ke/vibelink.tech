@@ -40,6 +40,8 @@ export async function watchWanLinks({ notify }) {
           continue;
         }
         await record(r, now, notify);
+        // A DHCP or PPPoE link whose address changed: keep the rule that sends that address out of its own link in step.
+        await wb.refreshOwnAddress(conn, r.wan_balance.config).catch((e) => console.warn('watchWanLinks: own-address rules on', r.name, '-', e.message));
       } catch (e) {
         console.warn('watchWanLinks:', r.name, '-', e.message);
       } finally {

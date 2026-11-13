@@ -22,11 +22,13 @@ export default function WanBalance({ router, onClose }) {
   const [mode, setMode] = useState('balance');
   const [protect, setProtect] = useState(true);
   const [sticky, setSticky] = useState('customer');
+  const [hold, setHold] = useState('3');        // minutes a returning link must stay steady before it is used again
+  const [pins, setPins] = useState([]);         // traffic that always uses one link
   const [links, setLinks] = useState([]);
   const [review, setReview] = useState(null);   // the answer to Check
   const [busy, setBusy] = useState(null);       // 'check' | 'apply' | 'remove'
 
-  const blankLink = (probe = '') => ({ type: 'pppoe', iface: '', address: '', gateway: '', user: '', password: '', weight: '1', mbps: '', probe });
+  const blankLink = (probe = '', probe2 = '') => ({ type: 'pppoe', iface: '', address: '', gateway: '', user: '', password: '', weight: '1', mbps: '', probe, probe2 });
 
   const load = async () => {
     setError(null); setInfo(null); setReview(null);
@@ -37,10 +39,13 @@ export default function WanBalance({ router, onClose }) {
       setMode(out.saved?.mode ?? 'balance');
       setProtect(out.saved ? out.saved.protect !== false : true);
       setSticky(out.saved?.sticky === 'pair' ? 'pair' : 'customer');
+      setHold(String(out.saved?.hold ?? 3));
+      setPins((out.saved?.pins ?? []).map((x) => ({ ...x, link: String(x.link) })));
       const filled = start.map((l, i) => ({
         ...blankLink(), ...l, password: '', weight: String(l.weight ?? 1), mbps: l.mbps ? String(l.mbps) : '', probe: l.probe ?? out.probes[i] ?? '',
+        probe2: l.probe2 ?? out.probes2?.[i] ?? '',
       }));
-      setLinks(!out.saved && filled.length === 1 ? [...filled, blankLink(out.probes[1] ?? '')] : filled);
+      setLinks(!out.saved && filled.length === 1 ? [...filled, blankLink(out.probes[1] ?? '', out.probes2?.[1] ?? '')] : filled);
     } catch (e) {
       setError(e.message);
     }
@@ -57,10 +62,10 @@ export default function WanBalance({ router, onClose }) {
     return out;
   }));
   const addLink = () => change(() => setLinks((ls) => {
-    const used = new Set(ls.map((l) => l.probe));
-    return [...ls, blankLink((info?.probes ?? []).find((p) => !used.has(p)) ?? '')];
+    const used = new Set(ls.flatMap((l) => [l.probe, l.probe2]));
+    return [...ls, blankLink((info?.probes ?? []).find((p) => !used.has(p)) ?? '', (info?.probes2 ?? []).find((p) => !used.has(p)) ?? '')];
   }));
-  const body = () => ({ mode, protect, sticky, links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1, mbps: Number(l.mbps) || null })) });
+  const body = () => ({ mode, protect, sticky, hold: hold === '' ? 3 : Number(hold), pins: pins.map((x) => ({ ...x, link: Number(x.link) || 0 })), links: links.map((l) => ({ ...l, weight: Number(l.weight) || 1, mbps: Number(l.mbps) || null })) });
 
   const check = async () => {
     setBusy('check'); setError(null);
@@ -131,7 +136,7 @@ export default function WanBalance({ router, onClose }) {
               <>
                 <span style={{ fontWeight: 600 }}>{info.live.mode === 'balance' ? 'Load sharing is on.' : 'Failover is on.'}</span>
                 {info.live.links.map((l) => (
-                  <Badge key={l.n} tone={l.up ? 'up' : 'down'}>Link {l.n} {l.up ? 'up' : 'down'}</Badge>
+                  <Badge key={l.n} tone={l.up ? 'up' : l.held ? 'pending' : 'down'}>Link {l.n} {l.up ? 'up' : l.held ? 'held back until steady' : 'down'}</Badge>
                 ))}
                 <Button size="sm" onClick={load} disabled={!!busy}>Refresh</Button>
               </>
@@ -284,6 +289,9 @@ export default function WanBalance({ router, onClose }) {
                     <Field label="Test address" hint="Pinged through this link only">
                       <Input value={l.probe} onChange={(e) => setLink(i, 'probe', e.target.value)} style={{ fontFamily: font.mono }} />
                     </Field>
+                    <Field label="Second test address" hint="The link is down only when both stop. Empty for one">
+                      <Input value={l.probe2} onChange={(e) => setLink(i, 'probe2', e.target.value)} style={{ fontFamily: font.mono }} />
+                    </Field>
                   </div>
                   )}
                   {l.type === 'dhcp' && (!have || l.edit) && <div style={{ ...small, marginTop: 6 }}>Nothing to type: the provider's side hands out the address and the gateway.</div>}
@@ -302,6 +310,41 @@ export default function WanBalance({ router, onClose }) {
               </div>
             )}
           </div>
+
+          <div style={{ maxWidth: 360 }}>
+            <Field label="Wait before using a link that came back (minutes)" hint="The link must answer steadily for this long first, so a link that keeps blinking is left out. 0 uses it again at once.">
+              <Input type="number" min="0" max="30" value={hold} onChange={(e) => change(() => setHold(e.target.value))} />
+            </Field>
+          </div>
+
+          {mode === 'balance' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontWeight: 600, fontSize: 13 }}>Traffic that always uses one link</div>
+              <div style={small}>For a customer with a public address, a VoIP provider, or a bank that only accepts one of your addresses. If that link is down, the traffic uses another link until it is back.</div>
+              {pins.map((x, i) => (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.4fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                  <Select
+                    value={x.match}
+                    onChange={(e) => change(() => setPins((ps) => ps.map((y, n) => (n === i ? { ...y, match: e.target.value } : y))))}
+                    options={[{ value: 'customer', label: "A customer's address" }, { value: 'site', label: "A site's address" }]}
+                  />
+                  <Input
+                    value={x.address}
+                    onChange={(e) => change(() => setPins((ps) => ps.map((y, n) => (n === i ? { ...y, address: e.target.value } : y))))}
+                    placeholder="10.5.0.20 or 41.90.64.0/24"
+                    style={{ fontFamily: font.mono }}
+                  />
+                  <Select
+                    value={x.link}
+                    onChange={(e) => change(() => setPins((ps) => ps.map((y, n) => (n === i ? { ...y, link: e.target.value } : y))))}
+                    options={links.map((_, n) => ({ value: String(n + 1), label: `Link ${n + 1}` }))}
+                  />
+                  <Button size="sm" onClick={() => change(() => setPins((ps) => ps.filter((_, n) => n !== i)))} disabled={!!busy}>Remove</Button>
+                </div>
+              ))}
+              <div><Button onClick={() => change(() => setPins((ps) => [...ps, { match: 'customer', address: '', link: '1' }]))} disabled={!!busy || pins.length >= 40}>Add fixed traffic</Button></div>
+            </div>
+          )}
 
           <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, cursor: 'pointer' }}>
             <input type="checkbox" checked={protect} onChange={(e) => change(() => setProtect(e.target.checked))} style={{ marginTop: 3 }} />
