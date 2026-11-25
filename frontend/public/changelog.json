@@ -447,7 +447,8 @@
       "Online sign-up: a public page where new customers check coverage on a map, pick a package and pay the installation fee by M-Pesa. Turn it on under Leads, Online sign-up.",
       "Installation agreement: the customer signs with a finger on the technician's phone, with the equipment listed. Their copy is texted to them, shows whether it was changed after signing, and saves as a PDF. Edit the wording under Installations.",
       "Fixed: editing a lead no longer fails after saving, a lead marked won raises its installation ticket again, the won date is recorded, and a lost lead keeps its reason.",
-      "Fixed: the speed test, the visitor wallet page, online sign-up and signed agreement links now open on the live site (the web server was sending them to the wrong place)."
+      "Fixed: the speed test, the visitor wallet page, online sign-up and signed agreement links now open on the live site (the web server was sending them to the wrong place).",
+      "Speed test: home customers' results are now measured by their MikroTik on their own line and compared with the speed cap the router enforces. The test downloads from Cloudflare's servers in Kenya, for 10 seconds each way."
     ]
   }
 ]

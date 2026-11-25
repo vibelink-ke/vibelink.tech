@@ -370,10 +370,14 @@ export default function CustomerPortal() {
       if (!window.vlSpeedTest) {
         await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = '/speedtest/client.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
       }
-      const r = await window.vlSpeedTest({ onProgress: (p) => setSpeed(p) });
-      const k = await api.speedResult(r).catch(() => ({}));
-      const plan = k.planMbps ?? speedHist?.planMbps;
-      if (plan) setSpeedNote(`${Math.round((r.down / plan) * 100)}% of your ${plan} Mbps package.${k.ticket ? ` We have opened ticket ${k.ticket} to look into it.` : ''}`);
+      const r = await window.vlSpeedTest({ onProgress: (p) => setSpeed(p), router: true });
+      const k = await api.speedResult({ down: r.down, up: r.up, ping: r.ping, jitter: r.jitter, server: r.server, sampler: r.sampler, windows: r.windows }).catch(() => ({}));
+      // The router's own reading of this line replaces the browser's figures when there is one.
+      if (k.measuredBy === 'router') setSpeed((p) => ({ ...p, phase: 'done', down: k.down, up: k.up }));
+      const cap = k.capMbps ?? speedHist?.planMbps;
+      const by = k.measuredBy === 'router' ? 'Measured by your router.' : (k.routerNote || r.routerNote || 'Measured by this device.');
+      if (cap) setSpeedNote(`${Math.round(((k.down ?? r.down) / cap) * 100)}% of your ${cap}${k.capUpMbps ? `/${k.capUpMbps}` : ''} Mbps ${k.capFromRouter ? 'speed cap' : 'package'}. ${by}${k.ticket ? ` We have opened ticket ${k.ticket} to look into it.` : ''}`);
+      else setSpeedNote(by);
       api.speedTests().then(setSpeedHist).catch(() => {});
     } catch {
       setSpeed(null);

@@ -3918,3 +3918,10 @@ create table if not exists agreements (
   hash          text not null
 );
 create index if not exists agreements_subscriber on agreements (tenant_id, subscriber_id, signed_at desc);
+
+-- Speed tests measured on the customer's MikroTik (speedtest.js): who measured, the browser's own figures, and the cap read from the router.
+alter table speed_tests add column if not exists measured_by text;
+alter table speed_tests add column if not exists browser_down_mbps numeric(10,2);
+alter table speed_tests add column if not exists browser_up_mbps numeric(10,2);
+alter table speed_tests add column if not exists cap_up_kbps int;
+alter table speed_tests add column if not exists server text;
