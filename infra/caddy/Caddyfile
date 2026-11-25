@@ -136,7 +136,10 @@
 	# curl — and fell straight through to index.html in production, which
 	# looks exactly like the button that calls it doing nothing at all,
 	# because that is precisely what a guest clicking it sees.
-	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/* /hotspot/devices /hotspot/connected /hotspot/voucher-status /hotspot/voucher-by-mpesa /hotspot/loyalty/* /hotspot/voucher-for-mac /hotspot/nearby-devices /hotspot/nearby-devices/bind /hotspot/tv-options /hotspot/tv-buy /hotspot/phone-login/otp /hotspot/phone-login/verify
+	# Also here, though not under /hotspot: the other public pages the API serves itself. /hotspot/wallet* is the visitor
+	# wallet (the admin's own screen is /hotspot/wallets, with an s, and stays with the app), /speedtest/* the customer
+	# speed test, /join the online sign-up page and /agreement/* a customer's signed agreement.
+	@captive path /hotspot/login /hotspot/login.html /hotspot/buy /hotspot/buy/* /hotspot/devices /hotspot/connected /hotspot/voucher-status /hotspot/voucher-by-mpesa /hotspot/loyalty/* /hotspot/voucher-for-mac /hotspot/nearby-devices /hotspot/nearby-devices/bind /hotspot/tv-options /hotspot/tv-buy /hotspot/phone-login/otp /hotspot/phone-login/verify /hotspot/wallet /hotspot/wallet/* /hotspot/wallet.webmanifest /hotspot/wallet-sw.js /hotspot/wallet-icon-192.png /hotspot/wallet-icon-512.png /speedtest/* /join /join/* /agreement/*
 	handle @captive {
 		reverse_proxy net:8080
 	}
