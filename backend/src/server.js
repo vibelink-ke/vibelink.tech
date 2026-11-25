@@ -14210,10 +14210,6 @@ app.patch('/api/tickets/:id', requirePermission('tickets.edit'), wrap(async (req
   const { rows: [before] } = sets.includes('assigned_to')
     ? await pool.query('select assigned_to from tickets where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
     : { rows: [null] };
-  // Whether this save is the one that makes it won — read first, since the update below overwrites it.
-  const { rows: [wonBefore] } = sets.includes('status') && req.body.status === 'won'
-    ? await pool.query('select status from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
-    : { rows: [] };
   const vals = [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])];
   const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
   if (sets.includes('status')) {
@@ -14336,16 +14332,20 @@ app.patch('/api/leads/:id', requirePermission('leads.edit'), wrap(async (req, re
    * won, or any other status change, leaves it alone. Reopening a lead (moving it off 'won') clears it, so a
    * reopened-then-rewon lead counts again, in the month it is actually won.
    */
+  // Whether this save is the one that makes it won — read first, since the update below overwrites it.
+  const { rows: [wonBefore] } = sets.includes('status') && req.body.status === 'won'
+    ? await pool.query('select status from leads where tenant_id=$1 and id=$2', [req.tenant.id, req.params.id])
+    : { rows: [] };
   const vals = [req.tenant.id, req.params.id, ...sets.map((k) => req.body[k])];
   const setClauses = sets.map((k, i) => `${k}=$${i + 3}`);
   if (sets.includes('status')) {
     // Only when status is actually part of this update — the same $n placeholder status itself already got above.
-    setClauses.push(`won_at = case when ${sets.indexOf('status') + 3}::text = 'won' then coalesce(won_at, now()) else null end`);
+    setClauses.push(`won_at = case when $${sets.indexOf('status') + 3}::text = 'won' then coalesce(won_at, now()) else null end`);
     // The first time anyone reached them: moving off 'new' for the first time is the best signal there is.
-    setClauses.push(`first_contacted_at = case when ${sets.indexOf('status') + 3}::text <> 'new' then coalesce(first_contacted_at, now()) else first_contacted_at end`);
+    setClauses.push(`first_contacted_at = case when $${sets.indexOf('status') + 3}::text <> 'new' then coalesce(first_contacted_at, now()) else first_contacted_at end`);
     // A reason belongs to a lost lead only: reopening it drops the old one (unless a new one came with this save).
     if (!sets.includes('lost_reason')) {
-      setClauses.push(`lost_reason = case when ${sets.indexOf('status') + 3}::text = 'lost' then lost_reason else null end`);
+      setClauses.push(`lost_reason = case when $${sets.indexOf('status') + 3}::text = 'lost' then lost_reason else null end`);
     }
   }
   // A follow-up date on a lead that is still 'new' means it has been dealt with: it becomes 'contacted' (unless the same save sets a stage).
