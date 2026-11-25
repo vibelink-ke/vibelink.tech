@@ -444,7 +444,8 @@
       "Search everything with Ctrl K (Cmd K on a Mac): clients, any payment by M-Pesa code, invoices, leads, vouchers, routers, pages and quick actions.",
       "A 'Today' home screen: money in today against yesterday, who expires today, sites offline and what needs a person. The full dashboard is under Dashboard.",
       "Customer experience: a 0 to 10 score for each home customer and site from reconnects, short sessions, speed tests and tickets, with a list of customers likely to leave. Also on Client details, Statistics.",
-      "Online sign-up: a public page where new customers check coverage on a map, pick a package and pay the installation fee by M-Pesa. Turn it on under Leads, Online sign-up."
+      "Online sign-up: a public page where new customers check coverage on a map, pick a package and pay the installation fee by M-Pesa. Turn it on under Leads, Online sign-up.",
+      "Installation agreement: the customer signs with a finger on the technician's phone, with the equipment listed. Their copy is texted to them, shows whether it was changed after signing, and saves as a PDF. Edit the wording under Installations."
     ]
   }
 ]

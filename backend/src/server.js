@@ -16,6 +16,7 @@ import { registerSearch } from './search.js';
 import { registerToday } from './today.js';
 import { registerExperience } from './experience.js';
 import { registerSignup } from './signup.js';
+import { registerAgreements, registerAgreementPage } from './agreement.js';
 import { registerVisitorWallet, registerVisitorWalletPublic, walletSettings, topupRequest, markTopup, spend as walletSpend, textCode, accountAvailable } from './visitor-wallet.js';
 import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
@@ -1648,6 +1649,8 @@ registerVisitorWalletPublic(app, { pool, tenantByHost, wrap, loginLimiter, pollL
 registerPhoneLogin(app, { pool, tenantByHost, wrap, limiter: loginLimiter });
 // Customers' own speed tests: portal, wallet and the "You're connected" page (speedtest.js).
 registerSpeedTest(app, { pool, tenantByHost, wrap, portalSession });
+// A customer's signed agreement, from the link texted to them (agreement.js).
+registerAgreementPage(app, { pool, wrap, tenantByHost });
 // The public sign-up page and its coverage check (signup.js).
 registerSignup(app, { pool, tenantByHost, wrap, requirePermission, limiter: pollLimiter, stkLimiter, msisdnFor, stkPushForSubscriber, publicOnly: true });
 
@@ -2939,6 +2942,8 @@ app.use('/api', (req, res, next) => {
 });
 
 // The field technician app's API (field.js). After the sign-in guard above: every route needs a session.
+// The service agreement signed on the technician's phone (agreement.js).
+registerAgreements(app, { pool, requirePermission, wrap });
 registerField(app, {
   pool, requirePermission, hasPermission, wrap, ensureStaffReferrer, refreshNetwork,
   radius: { disconnectSubscriberSession: async (...a) => (await import('./radius.js')).disconnectSubscriberSession(...a) },

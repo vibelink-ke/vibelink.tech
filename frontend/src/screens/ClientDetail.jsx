@@ -15,6 +15,7 @@ import { useInvoiceEditor } from './clients/invoiceEditor';
 import { useInvoiceActions } from './clients/ClientInvoices';
 import Troubleshoot from './clients/Troubleshoot';
 import ClientSpeedTests from './clients/SpeedTests';
+import ClientAgreements from './clients/Agreements';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -1213,6 +1214,7 @@ export default function ClientDetail() {
         </div>
       )}
 
+      {tab === 'info' && <ClientAgreements clientId={client.id} />}
       {tab === 'billing' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 14px' }}>
           <div style={{ fontSize: 13, fontWeight: 600, padding: '14px 0 8px' }}>Payment history</div>

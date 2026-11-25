@@ -3895,3 +3895,26 @@ alter table leads add column if not exists fee_due numeric(12,2);
 alter table leads add column if not exists fee_paid numeric(12,2) not null default 0;
 alter table leads add column if not exists fee_paid_at timestamptz;
 create unique index if not exists leads_signup_ref on leads (tenant_id, signup_ref) where signup_ref is not null;
+
+-- Service agreements signed on the technician's phone at installation (agreement.js). hash is the SHA-256 of the
+-- wording, name, moment and signature as signed, so the copy can show whether anything changed afterwards.
+create table if not exists agreement_settings (
+  tenant_id uuid primary key references tenants on delete cascade,
+  body      text
+);
+create table if not exists agreements (
+  id            uuid primary key default gen_random_uuid(),
+  tenant_id     uuid not null references tenants on delete cascade,
+  subscriber_id uuid references subscribers on delete set null,
+  ticket_id     uuid references tickets on delete set null,
+  token         text not null unique,
+  body          text not null,
+  signed_name   text not null,
+  signature     text not null,
+  signed_at     timestamptz not null,
+  staff_id      uuid references staff on delete set null,
+  lat           numeric(9,6),
+  lng           numeric(9,6),
+  hash          text not null
+);
+create index if not exists agreements_subscriber on agreements (tenant_id, subscriber_id, signed_at desc);

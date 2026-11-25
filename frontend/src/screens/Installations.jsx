@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { Badge, Button, Empty, Screen, Table } from '../ui/primitives';
+import AgreementWording from './AgreementWording';
 
 /**
  * Every router and every customer, newest first — a plain list next to the Map's picture of the
@@ -54,6 +55,7 @@ export default function Installations() {
       subtitle="Every router and client, newest first — filter to see what was recently added."
       actions={<Button onClick={() => navigate('/map')}>Open on the map</Button>}
     >
+      <AgreementWording />
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         {RANGES.map((r) => (
           <span

@@ -6,6 +6,7 @@ import { useStore } from '../../state/store';
 import { useField } from './fieldContext';
 import { Btn, Chip, Dot, getAccuratePosition, getPosition, mapsLink, page, panel, resizePhoto, timeAgo } from './fieldKit';
 import AddEquipment from './FieldEquipment';
+import FieldAgreement from './FieldAgreement';
 import { cachedGet, doOrQueue, queueRemove, useQueue } from './offline';
 
 const KINDS = [
@@ -229,6 +230,8 @@ export default function FieldJob() {
         {!resolved && job.mine && !addingEquipment && <Btn tone="quiet" onClick={() => setAddingEquipment(true)}>Add equipment</Btn>}
         {addingEquipment && <AddEquipment job={job} onCancel={() => setAddingEquipment(false)} onDone={() => { setAddingEquipment(false); load(); }} />}
       </div>
+
+      {install && job.customer_id && <FieldAgreement jobId={id} customerName={job.customer_name} />}
 
       <div style={panel}>
         <div style={{ fontWeight: 600 }}>Notes</div>

@@ -109,6 +109,8 @@ export const DEFAULT_PERMISSIONS = {
   'leads.delete':    all(),
   // The public sign-up page: opening it and setting the installation fee is the owner's call.
   'signup.manage':   all(),
+  // The wording of the agreement customers sign at installation.
+  'agreements.manage': all(),
 
   'messaging.view':      { owner: true, cashier: true,  technician: false, support: true,  sales: false },
   'messaging.send':      { owner: true, cashier: false, technician: false, support: true,  sales: false },
@@ -294,6 +296,7 @@ export const PERMISSION_META = [
   { key: 'leads.edit',     page: 'Leads', action: 'Edit' },
   { key: 'leads.delete',   page: 'Leads', action: 'Delete' },
   { key: 'signup.manage',  page: 'Leads', action: 'Open online sign-up and set the installation fee' },
+  { key: 'agreements.manage', page: 'Installations', action: 'Edit the service agreement wording' },
   { key: 'messaging.view',      page: 'Messaging', action: 'View history' },
   { key: 'messaging.send',      page: 'Messaging', action: 'Send' },
   { key: 'messaging.send_bulk', page: 'Messaging', action: 'Send bulk' },
