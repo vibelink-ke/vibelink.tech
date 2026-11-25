@@ -40,6 +40,10 @@ const api = {
   payInvoice: (invoiceNumber, phone, amount) =>
     api.call('POST', '/portal/pay-invoice', { invoiceNumber, phone, amount }),
   payStatus: (checkoutId) => api.call('GET', `/portal/status/${checkoutId}`),
+  hotspotBundles: () => api.call('GET', '/portal/hotspot-bundles'),
+  speedTests: () => api.call('GET', '/portal/speed-tests'),
+  speedResult: (r) => api.call('POST', '/speedtest/result', { ...r, source: 'portal' }),
+  hotspotBundle: (planId, toPhone) => api.call('POST', '/portal/hotspot-bundle', { planId, toPhone }),
 };
 
 /**
@@ -321,6 +325,61 @@ export default function CustomerPortal() {
     if (!me || me.service !== 'pppoe') return;
     api.pppoePlans().then(setPppoePlans).catch(() => setPppoePlans([]));
   }, [me]);
+
+  // Hotspot bundles paid from this account's wallet: for themselves when away from home, or sent to another number.
+  const [hsb, setHsb] = useState(null);           // { plans, available, phone }
+  const [hsbPlan, setHsbPlan] = useState('');
+  const [hsbTo, setHsbTo] = useState('');
+  const [hsbBusy, setHsbBusy] = useState(false);
+  const [hsbMsg, setHsbMsg] = useState(null);     // { ok, text, code }
+  useEffect(() => {
+    if (!me || me.service === 'hotspot') return;
+    api.hotspotBundles().then((d) => { setHsb(d); setHsbPlan((p) => p || d.plans[0]?.id || ''); }).catch(() => setHsb(null));
+  }, [me]);
+  const buyHotspot = async (forSomeoneElse) => {
+    const plan = hsb?.plans.find((p) => p.id === hsbPlan);
+    if (!plan) return;
+    if (forSomeoneElse && hsbTo.replace(/[^0-9]/g, '').length < 9) return setHsbMsg({ ok: false, text: 'Enter their phone number.' });
+    const who = forSomeoneElse ? hsbTo : 'you';
+    if (!window.confirm(`${plan.title} for ${cur()} ${plan.price}, paid from your account wallet and texted to ${who}?`)) return;
+    setHsbBusy(true); setHsbMsg(null);
+    try {
+      const out = await api.hotspotBundle(plan.id, forSomeoneElse ? hsbTo : undefined);
+      setHsbMsg({ ok: true, code: out.gift ? null : out.code, text: out.gift
+        ? `${plan.title} sent to ${hsbTo}.${out.texted ? ' They will get the code by SMS.' : ` The SMS did not go: give them the code ${out.code}.`}`
+        : `${plan.title} is ready. It starts when you connect to the hotspot.${out.texted ? ' We also texted you the code.' : ''}` });
+      if (forSomeoneElse) setHsbTo('');
+      setHsb(await api.hotspotBundles());
+      load();
+    } catch (err) {
+      setHsbMsg({ ok: false, text: err.message });
+    } finally {
+      setHsbBusy(false);
+    }
+  };
+
+  // Speed test (backend speedtest.js): the browser measures; the result is kept on the client so support can see it.
+  const [speed, setSpeed] = useState(null);       // { phase, mbps, ping, down, up }
+  const [speedHist, setSpeedHist] = useState(null);
+  const [speedNote, setSpeedNote] = useState('');
+  useEffect(() => { if (me) api.speedTests().then(setSpeedHist).catch(() => setSpeedHist(null)); }, [me]);
+  const runSpeed = async () => {
+    setSpeedNote('');
+    setSpeed({ phase: 'ping' });
+    try {
+      if (!window.vlSpeedTest) {
+        await new Promise((ok, no) => { const sc = document.createElement('script'); sc.src = '/speedtest/client.js'; sc.onload = ok; sc.onerror = no; document.head.appendChild(sc); });
+      }
+      const r = await window.vlSpeedTest({ onProgress: (p) => setSpeed(p) });
+      const k = await api.speedResult(r).catch(() => ({}));
+      const plan = k.planMbps ?? speedHist?.planMbps;
+      if (plan) setSpeedNote(`${Math.round((r.down / plan) * 100)}% of your ${plan} Mbps package.${k.ticket ? ` We have opened ticket ${k.ticket} to look into it.` : ''}`);
+      api.speedTests().then(setSpeedHist).catch(() => {});
+    } catch {
+      setSpeed(null);
+      setSpeedNote('The test could not finish. Check your connection and try again.');
+    }
+  };
 
   const requestPlan = async (planId) => {
     setPlanBusy(true);
@@ -780,6 +839,57 @@ export default function CustomerPortal() {
             <span style={{ fontSize: 11.5, color: pc.muted }}>
               Bars are days — taller means more data that day. Hover a bar for the exact figure.
             </span>
+          </div>
+        )}
+
+        <div style={card}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>Test my speed</span>
+          <span style={{ fontSize: 12.5, color: pc.muted }}>Measures your connection to us: download, upload and ping. Run it on a device connected to your home WiFi.</span>
+          {speed && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
+              {[['Down', speed.phase === 'down' ? speed.mbps : speed.down, 'Mbps'], ['Up', speed.phase === 'up' ? speed.mbps : speed.up, 'Mbps'], ['Ping', speed.ping, 'ms']].map(([k, v, u]) => (
+                <div key={k} style={{ border: `1px solid ${pc.line}`, borderRadius: 12, padding: '8px 4px' }}>
+                  <div style={{ fontSize: 20, fontWeight: 700 }}>{v == null ? '–' : (v >= 100 ? Math.round(v) : Math.round(v * 10) / 10)}</div>
+                  <div style={{ fontSize: 11.5, color: pc.muted }}>{k} · {u}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {speed && speed.phase !== 'done' && <span style={{ fontSize: 12.5, color: pc.muted }}>{speed.phase === 'ping' ? 'Checking ping…' : speed.phase === 'down' ? 'Testing download…' : 'Testing upload…'}</span>}
+          {speedNote && <span style={{ fontSize: 13, color: pc.ink }}>{speedNote}</span>}
+          <button type="button" style={button(true)} disabled={!!speed && speed.phase !== 'done'} onClick={runSpeed}>
+            {speed && speed.phase !== 'done' ? 'Testing…' : speed ? 'Test again' : 'Start the test'}
+          </button>
+          {speedHist?.tests?.length > 0 && (
+            <span style={{ fontSize: 12, color: pc.muted }}>
+              Last tests: {speedHist.tests.map((t) => `${Number(t.down_mbps)} Mbps`).join(' · ')}
+            </span>
+          )}
+        </div>
+
+        {hsb && hsb.plans.length > 0 && (
+          <div style={card}>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>Hotspot bundles from your wallet</span>
+            <span style={{ fontSize: 12.5, color: pc.muted }}>
+              Away from home? Buy a hotspot bundle for yourself, or send one to someone else. It is paid from your account wallet:
+              {' '}<b>{cur()} {hsb.available}</b> can be spent. Money you use here no longer pays for your home internet.
+            </span>
+            <select value={hsbPlan} onChange={(e) => setHsbPlan(e.target.value)} style={{ ...input, fontFamily: font.sans }} aria-label="Bundle">
+              {hsb.plans.map((p) => <option key={p.id} value={p.id}>{p.title} · {cur()} {p.price}</option>)}
+            </select>
+            <button type="button" style={button(true)} disabled={hsbBusy || !(Number(hsb.plans.find((p) => p.id === hsbPlan)?.price) <= hsb.available)} onClick={() => buyHotspot(false)}>
+              {hsbBusy ? 'Working…' : 'Buy for me'}
+            </button>
+            <input value={hsbTo} onChange={(e) => setHsbTo(e.target.value)} placeholder="Their phone number, e.g. 0722 000 111" inputMode="tel" style={input} aria-label="Their phone number" />
+            <button type="button" style={button(false)} disabled={hsbBusy || !(Number(hsb.plans.find((p) => p.id === hsbPlan)?.price) <= hsb.available)} onClick={() => buyHotspot(true)}>
+              Send to this number
+            </button>
+            {hsbMsg && (
+              <div style={{ fontSize: 13, color: hsbMsg.ok ? pc.teal : pc.rust }}>
+                {hsbMsg.text}
+                {hsbMsg.code && <div style={{ fontFamily: font.mono, fontSize: 20, fontWeight: 700, letterSpacing: '.05em', color: pc.ink, marginTop: 4 }}>{hsbMsg.code}</div>}
+              </div>
+            )}
           </div>
         )}
 

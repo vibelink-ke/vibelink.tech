@@ -179,6 +179,7 @@ export default function Wallets() {
                   <span>
                     {r.reason === 'topup' ? `Top-up${r.mpesa_code ? ` · ${r.mpesa_code}` : ''}`
                       : r.reason === 'purchase' ? `Bought ${r.note ?? 'a bundle'}${r.voucher_code ? ` · code ${r.voucher_code}` : ''}`
+                      : r.reason === 'gift' ? `${r.note ?? 'A bundle sent'}${r.voucher_code ? ` · code ${r.voucher_code}` : ''}`
                         : `Adjusted${r.staff_name ? ` by ${r.staff_name}` : ''}${r.note ? `: ${r.note}` : ''}`}
                     <div style={{ color: color.muted }}>{when(r.created_at)} · balance after {amount(r.balance_after)}</div>
                   </span>

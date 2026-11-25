@@ -14,6 +14,7 @@ import { useInvoicePay } from '../ui/invoicePay';
 import { useInvoiceEditor } from './clients/invoiceEditor';
 import { useInvoiceActions } from './clients/ClientInvoices';
 import Troubleshoot from './clients/Troubleshoot';
+import ClientSpeedTests from './clients/SpeedTests';
 
 const fmtBytes = (n) => {
   const v = Number(n) || 0;
@@ -1431,6 +1432,7 @@ export default function ClientDetail() {
           })()}
         </div>
       )}
+      {tab === 'statistics' && <ClientSpeedTests clientId={client.id} />}
       {tab === 'fibre' && <ClientOnu client={client} />}
       {tab === 'live' && (
         <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '4px 20px 20px' }}>

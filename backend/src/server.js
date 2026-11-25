@@ -11,7 +11,9 @@ import { passkeyRouter } from './passkeys.js';
 import { skyplanOpenRouter, newKey } from './skyplan-open.js';
 import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
-import { registerVisitorWallet, registerVisitorWalletPublic, walletSettings, topupRequest, markTopup } from './visitor-wallet.js';
+import { registerSpeedTest, speedPanel } from './speedtest.js';
+import { registerSearch } from './search.js';
+import { registerVisitorWallet, registerVisitorWalletPublic, walletSettings, topupRequest, markTopup, spend as walletSpend, textCode, accountAvailable } from './visitor-wallet.js';
 import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
 import { DEMO_SUBDOMAIN } from './demo-tenant.js';
@@ -1289,6 +1291,7 @@ app.get('/hotspot/connected', wrap(async (req, res) => {
   const root = (process.env.ROOT_DOMAIN ?? 'vibelink.tech').toLowerCase();
   const iconTag = tenant?.subdomain
     ? `<link rel="icon" href="https://${tenant.subdomain}.${root}/api/public/favicon">` : '';
+  const sp = speedPanel({ apiBase: tenant?.subdomain ? `https://${tenant.subdomain}.${root}` : '', source: 'connected' });
   res.type('html').send(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Connected</title>
@@ -1297,11 +1300,15 @@ ${iconTag}
 background:#f5f6f3;color:#161a17;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:20px}
 .card{max-width:360px;text-align:center;background:#fff;border:1px solid rgba(128,128,128,.25);
 border-radius:14px;padding:34px 26px}
-h1{margin:0 0 8px;font-size:22px}p{margin:0;color:#8a9186;font-size:14.5px}</style>
+h1{margin:0 0 8px;font-size:22px}p{margin:0;color:#8a9186;font-size:14.5px}
+button{width:100%;padding:11px;font-size:15px;font-weight:600;color:#fff;background:#0f7a5f;border:0;border-radius:9px;cursor:pointer;font-family:inherit}
+button:disabled{opacity:.55}.sp{margin-top:22px;padding-top:18px;border-top:1px solid rgba(128,128,128,.25)}
+${sp.css}</style>
 </head><body><div class="card">
 <h1>You're connected</h1>
 <p>${tenant?.name ? `Enjoy your internet from ${tenant.name}.` : 'Enjoy your internet.'}</p>
-</div></body></html>`);
+<div class="sp">${sp.html}</div>
+</div><script>${sp.js}</script></body></html>`);
 }));
 
 /**
@@ -1636,6 +1643,8 @@ registerLoyaltyPublic(app, { pool, tenantByHost, wrap });
 registerVisitorWalletPublic(app, { pool, tenantByHost, wrap, loginLimiter, pollLimiter });
 // Sign in with the phone number that paid: an SMS code to that number, then the bundle it bought (phone-login.js).
 registerPhoneLogin(app, { pool, tenantByHost, wrap, limiter: loginLimiter });
+// Customers' own speed tests: portal, wallet and the "You're connected" page (speedtest.js).
+registerSpeedTest(app, { pool, tenantByHost, wrap, portalSession });
 
 /**
  * Recover a voucher code from the M-Pesa transaction code alone — for a
@@ -3302,6 +3311,53 @@ app.get('/portal/me', wrap(async (req, res) => {
  * one number, for the customer who wants to see which day their month
  * actually went.
  */
+/**
+ * Hotspot bundles paid from a home customer's account wallet (visitor-wallet.js): for themselves when they are away from home, or
+ * sent to someone else's number. The code is texted to whoever it is for. Only what the account can spare is offered: its wallet
+ * less what its lines still owe.
+ */
+app.get('/portal/hotspot-bundles', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  if (!s.account_code) return res.json({ plans: [], available: 0 });
+  const { rows: plans } = await pool.query(
+    `select id, title, price, duration_min from plans p
+      where tenant_id=$1 and service='hotspot' and active and visible and device_class <> 'tv'
+        and not exists (select 1 from plan_sites ps where ps.plan_id = p.id)
+      order by price limit 40`, [s.tenant_id]);
+  const a = await accountAvailable(pool, s.tenant_id, s.account_code);
+  res.json({ plans, available: a.available, phone: s.phone ?? null });
+}));
+
+app.post('/portal/hotspot-bundle', stkLimiter, wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  if (!s.account_code) return res.status(400).json({ error: 'This account has no wallet.' });
+  const { normPhone } = await import('./loyalty.js');
+  const own = normPhone(s.phone);
+  const asked = String(req.body?.toPhone ?? '').trim();
+  try {
+    const out = await walletSpend(s.tenant_id, {
+      buyer: null, account: { account_code: s.account_code, subscriber_id: s.subscriber_id },
+      planId: String(req.body?.planId ?? ''), toPhone: asked || own, ownPhone: own, by: s.name ?? 'customer',
+    });
+    const texted = await textCode(s.tenant_id, out, { from: own });
+    res.json({ ok: true, ...out, texted });
+  } catch (e) {
+    if (e.status) return res.status(e.status).json({ error: e.message });
+    throw e;
+  }
+}));
+
+app.get('/portal/speed-tests', wrap(async (req, res) => {
+  const s = await portalSession(req);
+  if (!s) return res.status(401).json({ error: 'not signed in' });
+  const { rows } = await pool.query(
+    `select down_mbps, up_mbps, ping_ms, created_at from speed_tests where tenant_id=$1 and subscriber_id=$2 order by created_at desc limit 5`,
+    [s.tenant_id, s.subscriber_id]).catch(() => ({ rows: [] }));
+  res.json({ tests: rows, planMbps: s.rate_down ? Number(s.rate_down) / 1000 : null });
+}));
+
 app.get('/portal/usage', wrap(async (req, res) => {
   const s = await portalSession(req);
   if (!s) return res.status(401).json({ error: 'not signed in' });
@@ -11112,6 +11168,14 @@ async function notifySubscriber(tenantId, subscriberId, template, extra = {}) {
  * operator's mistake, deducting for damaged equipment — anywhere "what
  * changed and why" matters as much as the new number.
  */
+/** The speed tests a customer ran themselves (speedtest.js), newest first. */
+app.get('/api/subscribers/:id/speed-tests', requirePermission('clients.view'), wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `select id, down_mbps, up_mbps, ping_ms, jitter_ms, plan_down_kbps, source, created_at from speed_tests
+      where tenant_id=$1 and subscriber_id=$2 order by created_at desc limit 50`, [req.tenant.id, req.params.id]).catch(() => ({ rows: [] }));
+  res.json(rows);
+}));
+
 app.post('/api/subscribers/:id/wallet-adjustment', requirePermission('clients.wallet_adjust'), wrap(async (req, res) => {
   // Either { balance } — the wallet becomes exactly that (0 clears it) — or the older
   // { amount }, a signed amount added to whatever is there.
@@ -13386,6 +13450,8 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
 
 // Loyalty points for hotspot visitors (see loyalty.js).
 registerLoyalty(app, { pool, requirePermission, wrap });
+// Ctrl K: search what the screens have not loaded (search.js). Each kind is checked against the staff member's role.
+registerSearch(app, { pool, wrap });
 // Hotspot visitor wallets, staff side (visitor-wallet.js).
 registerVisitorWallet(app, { pool, requirePermission, wrap });
 

@@ -92,6 +92,8 @@ export const api = {
     password ? { password } : {}),
   subscriberCredentials: (id) => get(`/api/subscribers/${id}/credentials`),
   subscriberUsage: (id) => get(`/api/subscribers/${id}/usage`),
+  subscriberSpeedTests: (id) => get(`/api/subscribers/${id}/speed-tests`),
+  search: (q) => get(`/api/search?q=${encodeURIComponent(q)}`),
   subscriberQueue: (id) => get(`/api/subscribers/${id}/queue`),
   subscriberLiveTraffic: (id) => get(`/api/subscribers/${id}/live-traffic`),
   subscriberActivity: (id) => get(`/api/subscribers/${id}/activity`),

@@ -8,6 +8,7 @@ import { api } from '../api/client';
 import useLicence from './useLicence';
 import { isPlatformHost } from './host';
 import { Button, Drawer, Field, Input, Textarea } from '../ui/primitives';
+import CommandPalette from './CommandPalette';
 
 const chip = {
   display: 'flex',
@@ -23,44 +24,6 @@ const chip = {
   fontSize: 12,
 };
 
-/**
- * Global search across the loaded collections — the React version of
- * searchMatches() in the mockup.
- */
-function useSearchResults(q, store) {
-  return useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    if (!needle) return [];
-    const hit = (v) => String(v ?? '').toLowerCase().includes(needle);
-    const out = [];
-
-    for (const c of store.clients) {
-      if (hit(c.name) || hit(c.phone) || hit(c.account_code) || hit(c.static_ip) || hit(c.pppoe_user))
-        out.push({ kind: 'Client', title: c.name, detail: `${c.account_code ?? ''} · ${c.phone ?? ''}`, to: `/clients/${c.id}` });
-    }
-    for (const p of store.unmatched) {
-      if (hit(p.provider_ref) || hit(p.payer_phone) || hit(p.payer_name) || hit(p.raw_account))
-        out.push({ kind: 'Payment', title: p.provider_ref, detail: `${cur()} ${p.amount} · ${p.payer_phone ?? ''}`, to: `/payments?open=${p.id}` });
-    }
-    for (const t of store.tickets) {
-      if (hit(t.subject) || hit(t.number))
-        out.push({ kind: 'Ticket', title: t.subject, detail: t.number, to: `/tickets?open=${t.id}` });
-    }
-    for (const r of store.routers) {
-      if (hit(r.name) || hit(r.host) || hit(r.nas_identifier))
-        out.push({ kind: 'Router', title: r.name, detail: String(r.host ?? ''), to: `/routers?open=${r.id}` });
-    }
-    for (const v of store.vouchers) {
-      if (hit(v.code) || hit(v.phone))
-        out.push({ kind: 'Voucher', title: v.code, detail: v.status, to: `/hotspot/vouchers?open=${encodeURIComponent(v.code)}` });
-    }
-    for (const i of store.inventory ?? []) {
-      if (hit(i.name) || hit(i.mac_address) || hit(i.serial_number) || hit(i.category))
-        out.push({ kind: 'Inventory', title: i.name, detail: i.mac_address || i.serial_number || `${i.quantity ?? 1}${i.unit ? ` ${i.unit}` : ''}`, to: `/inventory?open=${i.id}` });
-    }
-    return out.slice(0, 40);
-  }, [q, store.clients, store.unmatched, store.tickets, store.routers, store.vouchers, store.inventory]);
-}
 
 /**
  * "What's new" — see platform_updates in schema.sql. A tenant admin sees
@@ -180,37 +143,17 @@ export default function Topbar() {
   const licence = useLicence();
   const [, setNow] = useState(0);   // re-render every 30s so the licence countdown keeps counting
   useEffect(() => { const t = setInterval(() => setNow((n) => n + 1), 30000); return () => clearInterval(t); }, []);
-  const { searchQuery, setSearchQuery } = store;
-  const results = useSearchResults(searchQuery, store);
-  const hasQuery = searchQuery.trim().length > 0;
+  // The search window (CommandPalette): the box below opens it, and so does Ctrl K (Cmd K on a Mac) from any screen.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && String(e.key).toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((o) => !o); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-  /**
-   * The dropdown is portaled to <body> and positioned with `fixed`, not
-   * rendered inline where it visually sits.
-   *
-   * The header it used to live inside sets overflow-y:hidden — needed so
-   * the chips scroll sideways on a narrow screen without wrapping onto a
-   * second line — and that clips any absolutely-positioned child that
-   * extends past the header's own height, dropdown included. The search box
-   * itself worked fine; every result was rendering, just invisible, which
-   * is indistinguishable from search being broken.
-   */
-  const searchBoxRef = useRef(null);
-  const [dropdownRect, setDropdownRect] = useState(null);
-  useLayoutEffect(() => {
-    if (!hasQuery || !searchBoxRef.current) return;
-    const update = () => {
-      const r = searchBoxRef.current.getBoundingClientRect();
-      setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
-    };
-    update();
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [hasQuery]);
 
   const sms = store.smsCredits;             // null until the first read comes back
   const known = sms != null;
@@ -260,106 +203,26 @@ export default function Topbar() {
         </button>
       )}
 
-      <div ref={searchBoxRef} style={{ position: 'relative', flex: '1 1 auto', minWidth: 110, maxWidth: 380 }}>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            padding: '6px 10px',
-            border: `1px solid ${color.line}`,
-            borderRadius: radius.md,
-            background: color.subtleBg,
-          }}
-        >
-          <span style={{ color: color.mutedSoft, fontSize: 13 }}>⌕</span>
-          <input
-            size="1"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search account, phone, IP or M-Pesa code…"
-            aria-label="Search"
-            style={{
-              flex: '1 1 0',
-              minWidth: 0,
-              width: '100%',
-              border: 'none',
-              outline: 'none',
-              background: 'transparent',
-              fontSize: 13,
-              color: color.ink,
-            }}
-          />
-          {hasQuery && (
-            <span onClick={() => setSearchQuery('')} style={{ color: color.mutedSoft, fontSize: 14, cursor: 'pointer' }}>
-              ×
-            </span>
-          )}
-        </div>
-
-        {hasQuery && dropdownRect && createPortal(
-          <div
-            style={{
-              position: 'fixed',
-              top: dropdownRect.top,
-              left: dropdownRect.left,
-              width: dropdownRect.width,
-              zIndex: 500,
-              background: '#fff',
-              border: `1px solid ${color.line}`,
-              borderRadius: 10,
-              padding: 6,
-              boxShadow: '0 16px 36px rgba(18,23,21,.16)',
-              maxHeight: 380,
-              overflowY: 'auto',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-            }}
-          >
-            {results.length === 0 ? (
-              <div style={{ padding: 12, fontSize: 12.5, color: color.muted }}>No matches for "{searchQuery}"</div>
-            ) : (
-              results.map((r, i) => (
-                <div
-                  key={`${r.kind}-${i}`}
-                  onClick={() => {
-                    setSearchQuery('');
-                    navigate(r.to);
-                  }}
-                  style={{
-                    padding: '9px 11px',
-                    borderRadius: radius.md,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>{r.title}</span>
-                    <span style={{ fontSize: 11.5, color: color.muted, fontFamily: font.mono }}>{r.detail}</span>
-                  </div>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      color: color.neutralInk,
-                      background: color.tileBg,
-                      padding: '3px 8px',
-                      borderRadius: radius.pill,
-                      fontWeight: 600,
-                    }}
-                  >
-                    {r.kind}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>,
-          document.body
+      <button
+        type="button"
+        onClick={() => setPaletteOpen(true)}
+        aria-label="Search"
+        aria-keyshortcuts="Control+K Meta+K"
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', flex: '1 1 auto', minWidth: 110, maxWidth: 380,
+          border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.subtleBg, cursor: 'text', textAlign: 'left',
+          font: 'inherit', color: color.mutedSoft,
+        }}
+      >
+        <span style={{ fontSize: 13 }}>⌕</span>
+        <span style={{ flex: '1 1 0', minWidth: 0, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Search account, phone, M-Pesa code…</span>
+        {!isMobile && (
+          <kbd style={{ font: `500 11px ${font.mono}`, padding: '1px 6px', border: `1px solid ${color.line}`, borderRadius: 5, color: color.muted, flex: 'none' }}>
+            {isMac ? '⌘ K' : 'Ctrl K'}
+          </kbd>
         )}
-      </div>
+      </button>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       <div style={{ flex: '1 1 0', minWidth: 0 }} />
 

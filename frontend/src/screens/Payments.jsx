@@ -423,6 +423,13 @@ export default function Payments() {
   const [recordForm, setRecordForm] = useState(null);
   const [reconcileText, setReconcileText] = useState(null);
   // Ask M-Pesa about each code before applying it. Remembered on this browser, since whoever wants it wants it every time.
+  // From the search window: "Reconcile a statement" (?reconcile=1) or "Confirm <code> with M-Pesa" (?reconcile=CODE).
+  const reconcileParam = params.get('reconcile');
+  useEffect(() => {
+    if (!reconcileParam) return;
+    setReconcileText(reconcileParam === '1' ? '' : `${reconcileParam} `);
+    const next = new URLSearchParams(params); next.delete('reconcile'); setParams(next, { replace: true });
+  }, [reconcileParam]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reconcileVerify, setReconcileVerify] = useState(() => { try { return localStorage.getItem('reconcileVerify') === '1'; } catch { return false; } });
   const [confirmations, setConfirmations] = useState(null);   // { can, rows }: codes put to M-Pesa lately
   useEffect(() => {

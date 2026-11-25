@@ -437,7 +437,11 @@
     "title": "SMS credit price follows the assigned gateway",
     "items": [
       "SMS credit price: a deployment assigned to a platform SMS gateway other than the default now sees and pays that gateway's price, so a price change on it shows straight away.",
-      "Buying SMS credit now asks how much you want to spend, not how many SMS. It shows how many SMS that buys, and you pay exactly the amount you typed."
+      "Buying SMS credit now asks how much you want to spend, not how many SMS. It shows how many SMS that buys, and you pay exactly the amount you typed.",
+      "Visitor wallet: shortcuts for recharge, buy, send, my codes, speed test, history, install and help. Visitors can send a bundle to another number, install the wallet as an app, and home customers can pay for hotspot bundles from their home account.",
+      "Customer portal: buy a hotspot bundle from your account wallet, or send one to someone else's number.",
+      "Speed test for customers in their portal, the visitor wallet and the 'You're connected' page. Results are kept under Client details, Statistics; two slow tests in a day open a ticket.",
+      "Search everything with Ctrl K (Cmd K on a Mac): clients, any payment by M-Pesa code, invoices, leads, vouchers, routers, pages and quick actions."
     ]
   }
 ]

@@ -3862,3 +3862,20 @@ create table if not exists visitor_wallet_sessions (
   created_at timestamptz not null default now(),
   expires_at timestamptz not null
 );
+
+-- Speed tests customers ran themselves (speedtest.js): from the portal, the visitor wallet or the "You're connected" page.
+create table if not exists speed_tests (
+  id             bigserial primary key,
+  tenant_id      uuid not null references tenants on delete cascade,
+  subscriber_id  uuid references subscribers on delete cascade,
+  voucher_code   text,
+  down_mbps      numeric(10,2) not null,
+  up_mbps        numeric(10,2),
+  ping_ms        numeric(10,2),
+  jitter_ms      numeric(10,2),
+  plan_down_kbps int,
+  source         text not null default 'other',
+  ip             text,
+  created_at     timestamptz not null default now()
+);
+create index if not exists speed_tests_subscriber on speed_tests (tenant_id, subscriber_id, created_at desc);
