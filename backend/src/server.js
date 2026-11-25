@@ -393,13 +393,27 @@ app.post('/api/platform-sms/relay', wrap(async (req, res) => {
  * actual price (which is what /api/platform-sms/buy-credits above actually
  * charges).
  */
+/**
+ * The per-credit price for a sibling deployment: the price of the platform gateway it is assigned to (Tenants -> SMS gateways ->
+ * the deployment's own assignment, platform_sms_relay_sources), else the default gateway's. The same gateway sms.js sends its
+ * messages through, so a price changed on that gateway is the price quoted and charged. Before this, only the default gateway's
+ * price was ever used here, so a sibling assigned to another gateway never saw that gateway's price change.
+ */
+async function relayPrice(source) {
+  const { rows: [cfg] } = await pool.query(
+    `select coalesce(
+       (select g.price_per_credit from platform_sms_relay_sources r join platform_sms_gateways g on g.id = r.gateway_id where r.source = $1),
+       (select price_per_credit from platform_sms_gateways where is_default limit 1)) as price_per_credit`,
+    [String(source ?? 'co.ke')]);
+  return Number(cfg?.price_per_credit ?? 2);
+}
+
 app.get('/api/platform-sms/price', wrap(async (req, res) => {
   const key = req.get('x-platform-api-key');
   if (!process.env.PLATFORM_SMS_RELAY_KEY || key !== process.env.PLATFORM_SMS_RELAY_KEY) {
     return res.status(401).json({ error: 'unauthorized' });
   }
-  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_gateways where is_default');
-  res.json({ pricePerCredit: Number(cfg?.price_per_credit ?? 2) });
+  res.json({ pricePerCredit: await relayPrice(req.query.source) });
 }));
 
 app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
@@ -418,8 +432,7 @@ app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
     return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
   }
 
-  const { rows: [cfg] } = await pool.query('select price_per_credit from platform_sms_gateways where is_default');
-  const price = Number(cfg?.price_per_credit ?? 2);
+  const price = await relayPrice(req.body?.source);
   const amount = Math.round(quantity * price);
 
   const { rows: [owner] } = await pool.query(
