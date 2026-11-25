@@ -399,6 +399,25 @@ app.post('/api/platform-sms/relay', wrap(async (req, res) => {
  * messages through, so a price changed on that gateway is the price quoted and charged. Before this, only the default gateway's
  * price was ever used here, so a sibling assigned to another gateway never saw that gateway's price change.
  */
+/**
+ * What a purchase of platform SMS credit buys and costs. The buyer gives the money they want to spend (amount, whole shillings) and
+ * gets as many whole SMS as that buys at the price; the amount they typed is what they pay. A request that still gives a number of
+ * SMS (quantity) is priced as before. Answers { quantity, amount } or { error }.
+ */
+function smsPurchase(body, price) {
+  const p = Number(price) > 0 ? Number(price) : 2;
+  if (body?.amount != null && body.amount !== '') {
+    const amount = Math.round(Number(body.amount));
+    const least = Math.ceil(p);
+    if (!(amount >= least)) return { error: `Enter how much to spend: at least KES ${least}.` };
+    if (amount > 150000) return { error: 'The most you can spend at once is KES 150,000.' };
+    return { quantity: Math.floor(amount / p + 1e-9), amount };
+  }
+  const quantity = Math.round(Number(body?.quantity));
+  if (!(quantity > 0)) return { error: 'Enter how much to spend.' };
+  return { quantity, amount: Math.round(quantity * p) };
+}
+
 async function relayPrice(source) {
   const { rows: [cfg] } = await pool.query(
     `select coalesce(
@@ -422,18 +441,16 @@ app.post('/api/platform-sms/buy-credits', wrap(async (req, res) => {
     return res.status(401).json({ error: 'unauthorized' });
   }
   const sourceTenantId = String(req.body?.sourceTenantId ?? '').trim();
-  const quantity = Math.round(Number(req.body?.quantity));
-  if (!sourceTenantId || !(quantity > 0)) {
-    return res.status(400).json({ error: 'sourceTenantId and a positive quantity are required' });
-  }
+  if (!sourceTenantId) return res.status(400).json({ error: 'sourceTenantId is required' });
   let phone = String(req.body?.phone ?? '').trim();
   phone = phone.replace(/[^0-9+]/g, '').replace(/^\+?(?:254)?0?/, '254');
   if (!/^254[17]\d{8}$/.test(phone)) {
     return res.status(400).json({ error: 'That does not look like a Kenyan mobile number' });
   }
 
-  const price = await relayPrice(req.body?.source);
-  const amount = Math.round(quantity * price);
+  const buy = smsPurchase(req.body, await relayPrice(req.body?.source));
+  if (buy.error) return res.status(400).json({ error: buy.error });
+  const { quantity, amount } = buy;
 
   const { rows: [owner] } = await pool.query(
     "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");
@@ -4345,8 +4362,6 @@ app.get('/api/sms/gateways', wrap(async (req, res) => {
  * they need the fallback in the first place.
  */
 app.post('/api/sms/buy-credits', wrap(async (req, res) => {
-  const quantity = Math.round(Number(req.body?.quantity));
-  if (!(quantity > 0)) return res.status(400).json({ error: 'Enter how many credits to buy.' });
 
   const { rows: [cfg] } = await pool.query(
     `select coalesce(g.price_per_credit, d.price_per_credit) as price_per_credit
@@ -4355,8 +4370,9 @@ app.post('/api/sms/buy-credits', wrap(async (req, res) => {
        left join platform_sms_gateways d on d.is_default
       where t.id = $1`,
     [req.tenant.id]);
-  const price = Number(cfg?.price_per_credit ?? 2);
-  const amount = Math.round(quantity * price);
+  const buy = smsPurchase(req.body, cfg?.price_per_credit ?? 2);
+  if (buy.error) return res.status(400).json({ error: buy.error });
+  const { quantity, amount } = buy;
 
   const { rows: [owner] } = await pool.query(
     "select tenant_id from staff where is_super_admin and tenant_id is not null limit 1");

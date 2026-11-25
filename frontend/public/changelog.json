@@ -436,7 +436,8 @@
     "date": "2026-11-25",
     "title": "SMS credit price follows the assigned gateway",
     "items": [
-      "SMS credit price: a deployment assigned to a platform SMS gateway other than the default now sees and pays that gateway's price, so a price change on it shows straight away."
+      "SMS credit price: a deployment assigned to a platform SMS gateway other than the default now sees and pays that gateway's price, so a price change on it shows straight away.",
+      "Buying SMS credit now asks how much you want to spend, not how many SMS. It shows how many SMS that buys, and you pay exactly the amount you typed."
     ]
   }
 ]

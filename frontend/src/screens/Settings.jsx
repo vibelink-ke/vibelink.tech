@@ -544,7 +544,7 @@ export default function Settings() {
   };
 
   const [buyOpen, setBuyOpen] = useState(false);
-  const [buyQty, setBuyQty] = useState('50');
+  const [buyAmount, setBuyAmount] = useState('100');   // shillings to spend
   const [buyPhone, setBuyPhone] = useState('');
   const [buyBusy, setBuyBusy] = useState(false);
   const [buyMsg, setBuyMsg] = useState('');
@@ -552,16 +552,18 @@ export default function Settings() {
   useEffect(() => () => clearInterval(buyPoll.current), []);
 
   const pricePerCredit = gw?.platformPricePerCredit ?? 2;
-  const buyCost = Math.round((Number(buyQty) || 0) * pricePerCredit);
+  const buyCost = Math.round(Number(buyAmount) || 0);
+  // What the money buys, worked out the same way the server does: whole SMS only.
+  const buyGets = pricePerCredit > 0 ? Math.floor(buyCost / pricePerCredit + 1e-9) : 0;
 
   const buyCredits = async () => {
-    const qty = Math.round(Number(buyQty));
-    if (!(qty > 0)) return setBuyMsg('Enter how many credits to buy.');
+    if (!(buyGets > 0)) return setBuyMsg(`Enter how much to spend: at least KES ${Math.ceil(pricePerCredit)}.`);
     if (!buyPhone.trim()) return setBuyMsg('Enter the M-Pesa number to pay from.');
     setBuyBusy(true);
     setBuyMsg('');
     try {
-      const r = await api.buySmsCredits(qty, buyPhone.trim());
+      const r = await api.buySmsCredits(buyCost, buyPhone.trim());
+      const qty = r.quantity ?? buyGets;
       setBuyMsg('Check your phone and enter your M-Pesa PIN.');
       clearInterval(buyPoll.current);
       let elapsed = 0;
@@ -924,8 +926,8 @@ export default function Settings() {
         }
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <Field label="How many credits" hint={`KES ${pricePerCredit} per credit`}>
-            <Input type="number" min="1" value={buyQty} onChange={(e) => setBuyQty(e.target.value)} />
+          <Field label="How much to spend (KES)" hint={buyGets > 0 ? `Buys ${buyGets.toLocaleString('en-KE')} SMS at KES ${pricePerCredit} each` : `KES ${pricePerCredit} per SMS`}>
+            <Input type="number" min="1" inputMode="numeric" value={buyAmount} onChange={(e) => setBuyAmount(e.target.value)} />
           </Field>
           <Field label="M-Pesa phone number">
             <Input value={buyPhone} onChange={(e) => setBuyPhone(e.target.value)} placeholder="07xx xxx xxx" />
