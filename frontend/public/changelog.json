@@ -441,7 +441,10 @@
       "Visitor wallet: shortcuts for recharge, buy, send, my codes, speed test, history, install and help. Visitors can send a bundle to another number, install the wallet as an app, and home customers can pay for hotspot bundles from their home account.",
       "Customer portal: buy a hotspot bundle from your account wallet, or send one to someone else's number.",
       "Speed test for customers in their portal, the visitor wallet and the 'You're connected' page. Results are kept under Client details, Statistics; two slow tests in a day open a ticket.",
-      "Search everything with Ctrl K (Cmd K on a Mac): clients, any payment by M-Pesa code, invoices, leads, vouchers, routers, pages and quick actions."
+      "Search everything with Ctrl K (Cmd K on a Mac): clients, any payment by M-Pesa code, invoices, leads, vouchers, routers, pages and quick actions.",
+      "A 'Today' home screen: money in today against yesterday, who expires today, sites offline and what needs a person. The full dashboard is under Dashboard.",
+      "Customer experience: a 0 to 10 score for each home customer and site from reconnects, short sessions, speed tests and tickets, with a list of customers likely to leave. Also on Client details, Statistics.",
+      "Online sign-up: a public page where new customers check coverage on a map, pick a package and pay the installation fee by M-Pesa. Turn it on under Leads, Online sign-up."
     ]
   }
 ]

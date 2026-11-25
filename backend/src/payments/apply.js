@@ -245,6 +245,26 @@ async function applyPaymentOnce(tenantId, tx) {
 
     // Money put into a hotspot visitor's wallet (visitor-wallet.js): kept for later, nothing is switched on now. It is hotspot money taken today,
     // so it counts as hotspot revenue now; the bundles bought with it later are not payments and are not counted again.
+    // An installation fee from the online sign-up page (signup.js): credited to the lead, and the customer told.
+    if (target.type === 'signup') {
+      const { rows: [l] } = await c.query(
+        `update leads set fee_paid = coalesce(fee_paid, 0) + $3, fee_paid_at = now(), last_activity_at = now()
+          where id=$1 and tenant_id=$2 returning name, phone, signup_ref, fee_due, fee_paid`, [target.leadId, tenantId, tx.amount]);
+      if (!l) {
+        await c.query("update payments set status='unmatched' where id=$1", [paymentId]);
+        return { paymentId, unmatched: true };
+      }
+      await c.query("update payments set status='applied', applied_at=now(), payload = coalesce(payload, '{}'::jsonb) || $2::jsonb where id=$1",
+        [paymentId, JSON.stringify({ signup_lead_id: target.leadId, signup_ref: l.signup_ref })]);
+      const { rows: [t] } = await c.query('select name from tenants where id=$1', [tenantId]);
+      send(tenantId, l.phone, 'custom', {
+        company: t?.name ?? '',
+        body: `${t?.name ?? ''}: we have received KES ${Number(tx.amount).toLocaleString('en-KE')} for your installation (${l.signup_ref}). We will call you to book a day.`,
+      }).catch(() => {});
+      import('../jobs.js').then((m) => m.notifyOwner(tenantId, `Installation fee paid: ${l.name}, KES ${Number(tx.amount).toLocaleString('en-KE')} (${l.signup_ref}).`, { url: '/work/signup', title: 'Sign-up paid' })).catch(() => {});
+      return { paymentId, applied: true, lead: target.leadId };
+    }
+
     if (target.type === 'visitor_wallet') {
       const w = await creditTopup(c, tenantId, { paymentId, phone: target.phone ?? tx.phone, amount: tx.amount });
       await c.query("update payments set status='applied', service='hotspot', applied_at=now() where id=$1", [paymentId]);
@@ -702,6 +722,12 @@ async function creditReferral(c, tenantId, sub, subId, amount, paymentId) {
 
 /** Fuzzy match for till/typo'd references. Learns the payer phone on success. */
 async function match(c, tenantId, tx) {
+  // A sign-up reference (JOIN12345, from the online sign-up page) typed as the account: the installation fee of that sign-up.
+  const joinRef = String(tx.rawAccount ?? '').toUpperCase().replace(/[^A-Z0-9]/g, '').match(/JOIN\d{5}$/)?.[0];
+  if (joinRef) {
+    const { rows: [l] } = await c.query('select id from leads where tenant_id=$1 and signup_ref=$2', [tenantId, joinRef]).catch(() => ({ rows: [] }));
+    if (l) return { type: 'signup', leadId: l.id };
+  }
   if (tx.rawAccount) {
     // What was typed, letters and digits only. Compared as it is first, and only then with the
     // look-alikes folded (O to 0, I and L to 1): the fold used to be applied to the typed side alone,

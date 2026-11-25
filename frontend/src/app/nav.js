@@ -6,7 +6,8 @@ export const NAV_SECTIONS = [
   {
     heading: 'OPERATIONS',
     items: [
-      { to: '/', label: 'Dashboard', end: true },
+      { to: '/', label: 'Today', end: true },
+      { to: '/dashboard', label: 'Dashboard' },
       { to: '/clients', label: 'Clients', count: (s) => s.clients.length },
       { to: '/hotspot', label: 'Hotspot', count: (s) => s.vouchers.length },
       { to: '/networks', label: 'Networks' },
@@ -25,6 +26,7 @@ export const NAV_SECTIONS = [
       { to: '/field-team', label: 'Field', perm: 'field.locations' },
       { to: '/field', label: 'Field app', perm: 'field.use', hideIfPerm: 'field.locations' },
       { to: '/analytics', label: 'Analytics', perm: 'analytics.view' },
+      { to: '/experience', label: 'Customer experience', perm: 'clients.view' },
     ],
   },
   {

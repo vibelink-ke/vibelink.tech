@@ -6,6 +6,7 @@ import Leads from './Leads';
 import FieldTech from './FieldTech';
 import FieldSales from './FieldSales';
 import TeamJobs from './TeamJobs';
+import OnlineSignup from './OnlineSignup';
 
 /**
  * Leads, My jobs and Team jobs together — one place for "who's chasing a sale" and "who's doing the work", rather
@@ -22,6 +23,7 @@ const TABS = [
   { to: '/work/my-jobs', label: 'My jobs' },
   { to: '/work/my-leads', label: 'My leads', perm: 'leads.edit' },
   { to: '/work/team-jobs', label: 'Team jobs', perm: 'tickets.view_team' },
+  { to: '/work/signup', label: 'Online sign-up', perm: 'leads.view' },
 ];
 
 export default function Work() {
@@ -67,6 +69,7 @@ export default function Work() {
         <Route path="my-jobs" element={<FieldTech />} />
         <Route path="my-leads" element={<FieldSales />} />
         <Route path="team-jobs" element={<TeamJobs />} />
+        <Route path="signup" element={<OnlineSignup />} />
         {/* Absolute for the same reason the tabs above are — recovers a URL stuck on a bad relative path. */}
         <Route path="*" element={<Navigate to="/work" replace />} />
       </Routes>

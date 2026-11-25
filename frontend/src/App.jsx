@@ -21,6 +21,8 @@ import { api } from './api/client';
 import { color, font } from './theme/tokens';
 
 import Dashboard from './screens/Dashboard';
+import Today from './screens/Today';
+import Experience from './screens/Experience';
 import Clients from './screens/Clients';
 import ClientDetail from './screens/ClientDetail';
 import AddClient from './screens/AddClient';
@@ -323,7 +325,8 @@ export default function App() {
           <ErrorBoundary resetKey={pathname}>
           <Suspense fallback={null}>
             <Routes>
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<Today />} />
+            <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/clients" element={<Clients />} />
             <Route path="/clients/new" element={<AddClient />} />
             <Route path="/clients/:id" element={<ClientDetail />} />
@@ -342,6 +345,7 @@ export default function App() {
             <Route path="/issues" element={<Issues />} />
             <Route path="/platform" element={<PlatformMonitor />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/experience" element={<Experience />} />
 
             <Route path="/tickets" element={<Tickets />} />
             <Route path="/schedule" element={<Schedule />} />

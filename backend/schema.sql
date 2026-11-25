@@ -3879,3 +3879,19 @@ create table if not exists speed_tests (
   created_at     timestamptz not null default now()
 );
 create index if not exists speed_tests_subscriber on speed_tests (tenant_id, subscriber_id, created_at desc);
+
+-- Online sign-up with a coverage check (signup.js): the public /join page. Closed until a tenant opens it.
+create table if not exists signup_settings (
+  tenant_id   uuid primary key references tenants on delete cascade,
+  enabled     boolean not null default false,
+  install_fee numeric(12,2) not null default 0,
+  wireless_m  int not null default 3000,
+  fibre_m     int not null default 300,
+  note        text
+);
+alter table leads add column if not exists address text;
+alter table leads add column if not exists signup_ref text;
+alter table leads add column if not exists fee_due numeric(12,2);
+alter table leads add column if not exists fee_paid numeric(12,2) not null default 0;
+alter table leads add column if not exists fee_paid_at timestamptz;
+create unique index if not exists leads_signup_ref on leads (tenant_id, signup_ref) where signup_ref is not null;

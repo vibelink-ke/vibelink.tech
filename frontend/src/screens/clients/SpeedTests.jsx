@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { color, radius } from '../../theme/tokens';
 import { api } from '../../api/client';
+import { Score } from '../Experience';
 
 /**
  * The speed tests this customer ran themselves (portal, wallet, "You're connected" page), newest first, against the speed
@@ -10,9 +11,11 @@ const when = (iso) => new Date(iso).toLocaleString('en-KE', { day: '2-digit', mo
 
 export default function ClientSpeedTests({ clientId }) {
   const [rows, setRows] = useState(null);
+  const [xp, setXp] = useState(null);
   useEffect(() => {
     let live = true;
     api.subscriberSpeedTests(clientId).then((r) => live && setRows(r)).catch(() => live && setRows([]));
+    api.subscriberExperience(clientId).then((r) => live && setXp(r)).catch(() => {});
     return () => { live = false; };
   }, [clientId]);
 
@@ -22,6 +25,16 @@ export default function ClientSpeedTests({ clientId }) {
     return share >= 0.7 ? color.green : share >= 0.4 ? '#a86a00' : color.rust;
   };
   return (
+    <>
+    {xp && (
+      <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '14px 20px', marginTop: 14, display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Score value={xp.score} />
+        <div style={{ flex: '1 1 240px', minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>Experience this week{xp.risk ? ' · likely to leave' : ''}</div>
+          <div style={{ fontSize: 12.5, color: color.muted }}>{xp.score == null ? 'No sessions this week, so no score.' : xp.reasons.length ? xp.reasons.join('; ') : 'No drops, short sessions, slow tests or tickets.'}</div>
+        </div>
+      </div>
+    )}
     <div style={{ background: color.cardBg, border: `1px solid ${color.line}`, borderRadius: radius.lg, padding: '14px 20px 16px', marginTop: 14 }}>
       <div style={{ fontSize: 13, fontWeight: 600 }}>Speed tests</div>
       <div style={{ fontSize: 12, color: color.muted, paddingBottom: 10 }}>
@@ -60,5 +73,6 @@ export default function ClientSpeedTests({ clientId }) {
             </div>
           )}
     </div>
+    </>
   );
 }

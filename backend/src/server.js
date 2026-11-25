@@ -13,6 +13,9 @@ import { totpRouter, totpEnabled, issueChallenge } from './totp.js';
 import { registerLoyalty, registerLoyaltyPublic, selfServeOn } from './loyalty.js';
 import { registerSpeedTest, speedPanel } from './speedtest.js';
 import { registerSearch } from './search.js';
+import { registerToday } from './today.js';
+import { registerExperience } from './experience.js';
+import { registerSignup } from './signup.js';
 import { registerVisitorWallet, registerVisitorWalletPublic, walletSettings, topupRequest, markTopup, spend as walletSpend, textCode, accountAvailable } from './visitor-wallet.js';
 import { registerPhoneLogin } from './phone-login.js';
 import { fmtNairobi, fmtNairobiIso, nairobiMidnight, nairobiMonthStart } from './nairobi-time.js';
@@ -1645,6 +1648,8 @@ registerVisitorWalletPublic(app, { pool, tenantByHost, wrap, loginLimiter, pollL
 registerPhoneLogin(app, { pool, tenantByHost, wrap, limiter: loginLimiter });
 // Customers' own speed tests: portal, wallet and the "You're connected" page (speedtest.js).
 registerSpeedTest(app, { pool, tenantByHost, wrap, portalSession });
+// The public sign-up page and its coverage check (signup.js).
+registerSignup(app, { pool, tenantByHost, wrap, requirePermission, limiter: pollLimiter, stkLimiter, msisdnFor, stkPushForSubscriber, publicOnly: true });
 
 /**
  * Recover a voucher code from the M-Pesa transaction code alone — for a
@@ -13452,6 +13457,12 @@ app.post('/api/vouchers', requirePermission('hotspot.vouchers'), wrap(async (req
 registerLoyalty(app, { pool, requirePermission, wrap });
 // Ctrl K: search what the screens have not loaded (search.js). Each kind is checked against the staff member's role.
 registerSearch(app, { pool, wrap });
+// The "Today" home screen's figures (today.js), each part by the staff member's role.
+registerToday(app, { pool, wrap });
+// Customer experience scores (experience.js).
+registerExperience(app, { pool, requirePermission, wrap });
+// Online sign-up, staff side (signup.js). The public /join routes are registered with the other public pages.
+registerSignup(app, { pool, tenantByHost, wrap, requirePermission, limiter: pollLimiter, stkLimiter, msisdnFor, stkPushForSubscriber, staffOnly: true });
 // Hotspot visitor wallets, staff side (visitor-wallet.js).
 registerVisitorWallet(app, { pool, requirePermission, wrap });
 
