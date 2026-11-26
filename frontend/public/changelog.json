@@ -450,5 +450,12 @@
       "Fixed: the speed test, the visitor wallet page, online sign-up and signed agreement links now open on the live site (the web server was sending them to the wrong place).",
       "Speed test: home customers' results are now measured by their MikroTik on their own line and compared with the speed cap the router enforces. The test downloads from Cloudflare's servers in Kenya, for 10 seconds each way."
     ]
+  },
+  {
+    "date": "2026-11-26",
+    "title": "x",
+    "items": [
+      "The Today page is folded into the main dashboard: Collected today shows how it compares with yesterday by this time, with tiles for Expire today, Sites offline and Open tickets, and Needs a person and Expiring today lists."
+    ]
   }
 ]

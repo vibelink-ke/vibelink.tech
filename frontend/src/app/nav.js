@@ -6,8 +6,7 @@ export const NAV_SECTIONS = [
   {
     heading: 'OPERATIONS',
     items: [
-      { to: '/', label: 'Today', end: true },
-      { to: '/dashboard', label: 'Dashboard' },
+      { to: '/', label: 'Dashboard', end: true },
       { to: '/clients', label: 'Clients', count: (s) => s.clients.length },
       { to: '/hotspot', label: 'Hotspot', count: (s) => s.vouchers.length },
       { to: '/networks', label: 'Networks' },

@@ -62,6 +62,14 @@ export default function Dashboard() {
   // be read, since everything else on it comes from elsewhere.
   // Data moved through the routers in the last 24 hours, refreshed every minute.
   const [usage, setUsage] = useState(null);
+  // Today's figures (backend today.js): money in against yesterday by now, who expires today, sites offline, what needs a person.
+  const [day, setDay] = useState(null);
+  useEffect(() => {
+    const load = () => api.today().then(setDay).catch(() => {});
+    load();
+    const id = setInterval(() => { if (!document.hidden) load(); }, 60000);
+    return () => clearInterval(id);
+  }, []);
   useEffect(() => {
     const load = () => api.usage24h().then(setUsage).catch(() => {});
     load();   // the first read regardless of tab visibility; only the repeats wait for the tab to be showing
@@ -389,7 +397,20 @@ export default function Dashboard() {
             <Tile
               label="COLLECTED TODAY"
               value={`${cur()} ${kes(collected)}`}
-              hint={collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'} (paybill/till)` : 'no collections yet'}
+              hint={(() => {
+                // Against yesterday up to this same time of day, so a morning is not compared with a whole day.
+                const y = day?.moneyYesterdaySoFar;
+                const t = day?.money?.today;
+                const pct = y > 0 && t != null ? Math.round(((t - y) / y) * 100) : null;
+                const channels = collected ? `across ${channelsUsed} channel${channelsUsed === 1 ? '' : 's'}` : 'no collections yet';
+                if (pct == null) return channels;
+                return (
+                  <>
+                    <span style={{ color: pct < 0 ? color.rust : color.green, fontWeight: 600 }}>{pct >= 0 ? '+' : '−'}{Math.abs(pct)}% on yesterday by now</span>
+                    {' · '}{channels}
+                  </>
+                );
+              })()}
             />
             <Tile
               label="PPPOE INCOME TODAY"
@@ -408,6 +429,32 @@ export default function Dashboard() {
           value={activeN}
           hint="paid & valid — online or not"
         />
+        {day?.expiring && (
+          <Tile
+            label="EXPIRE TODAY"
+            value={day.expiring.count}
+            hint={day.expiredYesterday ? `${day.expiredYesterday} expired yesterday, not renewed` : 'not yet renewed'}
+            onClick={() => navigate('/clients')}
+          />
+        )}
+        {day?.sitesDown && (
+          <Tile
+            label="SITES OFFLINE"
+            value={day.sitesDown.length}
+            valueColor={day.sitesDown.length ? color.rust : undefined}
+            hint={day.sitesDown.length ? `${day.sitesDown[0].name}${day.sitesDown.length > 1 ? ` and ${day.sitesDown.length - 1} more` : ''} →` : `all ${day.sitesTotal} online`}
+            onClick={() => navigate('/routers')}
+          />
+        )}
+        {day?.tickets && (
+          <Tile
+            label="OPEN TICKETS"
+            value={day.tickets.open}
+            valueColor={day.tickets.old ? color.amberInk : undefined}
+            hint={day.tickets.old ? `${day.tickets.old} over 24 h →` : 'none waiting long'}
+            onClick={() => navigate('/tickets')}
+          />
+        )}
         <Tile
           label="NEW SERVICES THIS MONTH"
           value={newServices.cur}
@@ -469,6 +516,59 @@ export default function Dashboard() {
           onClick={() => navigate('/payments')}
         />
       </div>
+
+      {day && (() => {
+        // What needs a person today, worst first, plus a low SMS balance (the same balance the top bar shows).
+        const sms = store.smsCredits;
+        const smsLeft = sms == null ? null : sms.configured ? (sms.credits ?? 0) : (store.smsGateways?.platformBalance ?? 0);
+        const items = [...(day.attention ?? [])];
+        if (smsLeft != null && smsLeft < 200) items.push({ level: smsLeft < 50 ? 'high' : 'medium', text: `SMS balance: ${smsLeft} left`, to: '/settings?tab=sms' });
+        // One line per account: a customer with two lines expiring today is one call, not two.
+        const byAccount = new Map();
+        for (const c of day.expiring?.first ?? []) {
+          const k = c.account_code ?? c.id;
+          const x = byAccount.get(k) ?? { ...c, lines: 0 };
+          x.lines += 1; byAccount.set(k, x);
+        }
+        const expiring = [...byAccount.values()];
+        const dot = { high: color.rust, medium: color.amberInk, low: color.green };
+        const row = { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.cardBg, cursor: 'pointer', fontSize: 13.5 };
+        const head = { fontSize: 11.5, fontWeight: 600, letterSpacing: '.06em', color: color.muted, marginBottom: 6 };
+        if (!items.length && !expiring.length) return null;
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14 }}>
+            <div>
+              <div style={head}>NEEDS A PERSON</div>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {items.length === 0 && <div style={{ fontSize: 13, color: color.muted }}>Nothing waiting.</div>}
+                {items.map((a, i) => (
+                  <div key={i} role="button" tabIndex={0} onClick={() => navigate(a.to)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(a.to); }} style={row}>
+                    <span aria-hidden="true" style={{ width: 9, height: 9, borderRadius: '50%', background: dot[a.level] ?? color.muted, flex: 'none' }} />
+                    <span style={{ flex: 1 }}>{a.text}</span>
+                    <span style={{ color: color.green, fontWeight: 600, fontSize: 12.5 }}>Open</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {expiring.length > 0 && (
+              <div>
+                <div style={head}>EXPIRING TODAY</div>
+                <div style={{ display: 'grid', gap: 6 }}>
+                  {expiring.map((c) => (
+                    <div key={c.account_code ?? c.id} role="button" tabIndex={0} onClick={() => navigate(`/clients/${c.id}`)} onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/clients/${c.id}`); }} style={{ ...row, justifyContent: 'space-between' }}>
+                      <span>{c.name}{c.lines > 1 ? <span style={{ color: color.muted }}> · {c.lines} lines</span> : null}</span>
+                      <span style={{ fontFamily: font.mono, color: color.muted }}>{c.account_code}</span>
+                    </div>
+                  ))}
+                  {day.expiring.count > (day.expiring.first?.length ?? 0) && (
+                    <span style={{ fontSize: 12.5, color: color.muted }}>and {day.expiring.count - day.expiring.first.length} more</span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {(canSeeFinance || store.isPlatformOwner) && (
       <div style={{ display: 'grid', gridTemplateColumns: canSeeFinance && store.isPlatformOwner ? 'minmax(0, 1.55fr) minmax(0, 1fr)' : '1fr', gap: 14 }}>
