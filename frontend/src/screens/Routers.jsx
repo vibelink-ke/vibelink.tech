@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { color, font, radius } from '../theme/tokens';
 import { useStore } from '../state/store';
 import { api } from '../api/client';
@@ -312,6 +312,36 @@ function formatBytes(n) {
 export default function Routers() {
   const store = useStore();
   const [ovpn, setOvpn] = useState(null); // { script, nasIp, username, defaultApiPort }
+  const navigate = useNavigate();
+  // Clients on each MikroTik and how many are online now, from the clients list the app already holds.
+  const clientsByRouter = new Map();
+  for (const c of store.clients ?? []) {
+    if (!c.router_id) continue;
+    const x = clientsByRouter.get(c.router_id) ?? { total: 0, online: 0 };
+    x.total += 1; if (c.online) x.online += 1;
+    clientsByRouter.set(c.router_id, x);
+  }
+  // While a script is shown: whether it has been copied, whether the MikroTik answers on its tunnel address yet, and what
+  // to install on it once it does (PPPoE, Hotspot or both) under which nickname.
+  const [onboard, setOnboard] = useState(null);   // { copied, reachable, ms, pppoe, hotspot, name }
+  // A router added from that step with Hotspot ticked: its hotspot is pushed right after Configure succeeds, on the same ports.
+  const [chain, setChain] = useState(null);       // { routerId }
+  useEffect(() => {
+    setOnboard(ovpn ? { copied: false, reachable: false, ms: null, pppoe: false, hotspot: false, name: '' } : null);
+  }, [ovpn?.script]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Ask every 4 seconds until it answers. Nothing is sent to the router; the server only opens and closes a connection to its API port.
+  const probeHost = ovpn?.nasIp ? String(ovpn.nasIp).split('/')[0] : null;
+  const probePort = ovpn?.existingRouter?.api_port ?? ovpn?.defaultApiPort ?? 8728;
+  useEffect(() => {
+    if (!probeHost || onboard?.reachable) return undefined;
+    let live = true;
+    const tick = () => api.probeRouter(probeHost, probePort)
+      .then((r) => { if (live && r.reachable) setOnboard((o) => (o ? { ...o, reachable: true, ms: r.ms } : o)); })
+      .catch(() => {});
+    tick();
+    const id = setInterval(tick, 4000);
+    return () => { live = false; clearInterval(id); };
+  }, [probeHost, probePort, onboard?.reachable]);
   const [form, setForm] = useState(null); // blankRouter() when the confirm modal is open
   const [busy, setBusy] = useState(false);
   const [edit, setEdit] = useState(null);         // the router row open for editing
@@ -571,6 +601,7 @@ export default function Routers() {
   const copyScript = async () => {
     try {
       await navigator.clipboard.writeText(ovpn.script);
+      setOnboard((o) => (o ? { ...o, copied: true } : o));
       store.toast('Script copied — paste it into the MikroTik terminal');
     } catch {
       store.toast('Copy failed — select the text and copy manually');
@@ -583,6 +614,7 @@ export default function Routers() {
     a.href = URL.createObjectURL(blob);
     a.download = `${ovpn.username.replace(/[^\w.-]+/g, '-')}.rsc`;
     a.click();
+    setOnboard((o) => (o ? { ...o, copied: true } : o));
     URL.revokeObjectURL(a.href);
   };
 
@@ -908,6 +940,7 @@ export default function Routers() {
       const res = await api.autoconfigRouter(r.id, opts ?? {});
       setAdminPrompt(null);
       setResult({ router: r, state: 'ok', applied: res.applied ?? [], version: res.version, opts });
+      if (chain?.routerId === r.id) { setChain(null); runHotspot(r, opts); }
       store.setCollection('routers', (rs) =>
         rs.map((x) => (x.id === r.id
           ? { ...x, autoconfig_last_ok: true, autoconfig_last_at: new Date().toISOString(), ros_version: res.version }
@@ -1156,6 +1189,26 @@ Revoke anyway?`
     }
   };
 
+  const installRouter = async () => {
+    const name = onboard?.name.trim();
+    if (!name) return store.toast('Give the router a nickname');
+    if (!onboard.pppoe && !onboard.hotspot) return store.toast('Tick PPPoE, Hotspot, or both');
+    const role = onboard.pppoe && onboard.hotspot ? 'both' : onboard.pppoe ? 'pppoe' : 'hotspot';
+    setBusy(true);
+    try {
+      const created = await api.createRouter({ name, host: probeHost, apiPort: Number(probePort) || 8728, role, wgPeerId: ovpn?.wgPeerId });
+      store.setCollection('routers', (rs) => [...rs, created]);
+      setOvpn(null);
+      setChain(role === 'pppoe' ? null : { routerId: created.id });
+      store.toast(`${created.name} added. Choose its LAN ports to install ${role === 'both' ? 'PPPoE and Hotspot' : role === 'pppoe' ? 'PPPoE' : 'the Hotspot'}`);
+      openConfigure(created);
+    } catch (e) {
+      store.toast(`Could not add the router: ${e.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const confirmRouter = async () => {
     if (!form.name.trim() || !form.host.trim())
       return store.toast('Nickname and NAS address are both required');
@@ -1333,6 +1386,22 @@ Revoke anyway?`
             { key: 'host', label: 'NAS address', render: (r) => <span style={{ fontFamily: font.mono, fontSize: 12 }}>{r.host}</span> },
             { key: 'api_port', label: 'API port', align: 'right', render: (r) => <span style={{ fontFamily: font.mono }}>{r.api_port}</span> },
             { key: 'role', label: 'Role' },
+            {
+              key: 'clients', label: 'Clients',
+              render: (r) => {
+                const n = clientsByRouter.get(r.id) ?? { total: 0, online: 0 };
+                const link = { border: 0, background: 'none', padding: 0, cursor: 'pointer', font: 'inherit' };
+                return (
+                  <span style={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+                    <button type="button" style={{ ...link, fontWeight: 600, color: color.ink, textDecoration: 'underline' }} title={`See ${r.name}'s clients`}
+                      onClick={() => navigate(`/clients?router=${encodeURIComponent(r.id)}`)}>{n.total}</button>
+                    <span style={{ color: color.muted }}> · </span>
+                    <button type="button" style={{ ...link, color: n.online ? color.green : color.muted, textDecoration: 'underline' }} title={`See who is online on ${r.name}`}
+                      onClick={() => navigate(`/clients?router=${encodeURIComponent(r.id)}&status=online`)}>{n.online} online</button>
+                  </span>
+                );
+              },
+            },
             {
               key: 'upstream_provider', label: 'Upstream',
               render: (r) => r.upstream_provider
@@ -1761,14 +1830,19 @@ Revoke anyway?`
             <>
               <Button onClick={copyScript}>Copy</Button>
               <Button onClick={downloadScript}>Download .rsc</Button>
-              <Button variant="primary" onClick={() => setOvpn(null)}>Done</Button>
+              <Button variant={onboard?.reachable ? 'primary' : undefined} onClick={() => setOvpn(null)}>{onboard?.reachable ? 'Done' : 'Close'}</Button>
             </>
           ) : (
             <>
               <Button onClick={copyScript}>Copy</Button>
               <Button onClick={downloadScript}>Download .rsc</Button>
-              <Button variant="primary" onClick={() => setForm({ ...blankRouter(), host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}>
-                Tunnel is up — continue
+              <Button
+                variant="primary"
+                disabled={!onboard?.reachable || !(onboard?.pppoe || onboard?.hotspot) || !onboard?.name.trim() || busy}
+                onClick={installRouter}
+                title={!onboard?.reachable ? 'Waiting for the MikroTik to connect' : undefined}
+              >
+                {busy ? 'Adding…' : !onboard?.reachable ? 'Waiting for MikroTik…' : 'Install'}
               </Button>
             </>
           )
@@ -1817,6 +1891,78 @@ Revoke anyway?`
                     Copy
                   </Button>
                 </div>
+              </div>
+            )}
+            {onboard && (
+              <div style={{ display: 'grid', gap: 8, padding: '10px 12px', border: `1px solid ${color.line}`, borderRadius: radius.md, background: color.subtleBg }}>
+                {[
+                  { ok: onboard.copied, text: onboard.copied ? 'Script copied' : 'Copy the script and paste it into the MikroTik terminal' },
+                  {
+                    ok: onboard.reachable,
+                    wait: !onboard.reachable,
+                    text: onboard.reachable
+                      ? `MikroTik connected at ${probeHost}${onboard.ms != null ? ` (answered in ${onboard.ms} ms)` : ''}`
+                      : `Waiting for MikroTik to connect on ${probeHost}… checking every few seconds`,
+                  },
+                ].map((st, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        width: 18, height: 18, borderRadius: '50%', flex: 'none', display: 'grid', placeItems: 'center', fontSize: 11, fontWeight: 700,
+                        background: st.ok ? color.green : st.wait ? color.amberBg : color.cardBg,
+                        color: st.ok ? '#fff' : color.amberInk, border: st.ok ? 'none' : `1px solid ${st.wait ? '#ecd9a8' : color.line}`,
+                      }}
+                    >
+                      {st.ok ? '✓' : st.wait ? '…' : i + 1}
+                    </span>
+                    <span style={{ color: st.ok ? color.ink : color.inkSoft ?? color.ink, fontWeight: st.wait ? 600 : 400 }}>{st.text}</span>
+                  </div>
+                ))}
+                {onboard.reachable && !ovpn.existingRouter && (
+                  <div style={{ display: 'grid', gap: 10, marginTop: 4, paddingTop: 10, borderTop: `1px solid ${color.line}` }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>What should be installed on this router?</div>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {[
+                        { key: 'pppoe', label: 'PPPoE', hint: 'home customers who dial in with a username' },
+                        { key: 'hotspot', label: 'Hotspot', hint: 'guests who buy a voucher on the login page' },
+                      ].map((o) => (
+                        <label
+                          key={o.key}
+                          style={{
+                            flex: '1 1 200px', display: 'flex', gap: 8, alignItems: 'flex-start', padding: '9px 11px', cursor: 'pointer',
+                            border: `1px solid ${onboard[o.key] ? color.green : color.line}`, borderRadius: radius.md,
+                            background: onboard[o.key] ? '#e7f5ef' : color.cardBg,
+                          }}
+                        >
+                          <input type="checkbox" checked={onboard[o.key]} onChange={(e) => setOnboard((x) => ({ ...x, [o.key]: e.target.checked }))} style={{ marginTop: 2 }} />
+                          <span>
+                            <span style={{ fontWeight: 600, fontSize: 13.5 }}>{o.label}</span>
+                            <span style={{ display: 'block', fontSize: 12, color: color.muted }}>{o.hint}</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <span style={{ fontSize: 12, color: color.muted }}>
+                      {onboard.pppoe && onboard.hotspot ? 'Both: the PPPoE server and the hotspot are installed, on the ports you pick next.'
+                        : onboard.pppoe ? 'PPPoE only: RADIUS, the PPPoE server and its address pool. No hotspot.'
+                          : onboard.hotspot ? 'Hotspot only: RADIUS, the hotspot, its login page and walled garden. No PPPoE server.'
+                            : 'Tick one, or both.'}
+                    </span>
+                    <Field label="Nickname">
+                      <Input value={onboard.name} onChange={(e) => setOnboard((x) => ({ ...x, name: e.target.value }))} placeholder="Kimumu tower" />
+                    </Field>
+                  </div>
+                )}
+                {!onboard.reachable && !ovpn.existingRouter && (
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...blankRouter(), host: ovpn.nasIp, apiPort: String(ovpn.defaultApiPort ?? 8728) })}
+                    style={{ justifySelf: 'start', border: 0, background: 'none', padding: 0, color: color.muted, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}
+                  >
+                    The tunnel is up but this never turns green? Add the router anyway
+                  </button>
+                )}
               </div>
             )}
             <Textarea
@@ -2601,8 +2747,12 @@ Revoke anyway?`
           <div style={{ display: 'grid', gap: 12 }}>
             {result.state === 'running' && (
               <span style={{ fontSize: 13 }}>
-                Talking to the router over the tunnel. This takes a few seconds — RADIUS, CoA,
-                accounting, and the bridge and PPPoE server if you chose ports.
+                Talking to the router over the tunnel. This takes a few seconds:{' '}
+                {result.hotspot
+                  ? 'the bridge, the hotspot, its login page and walled garden.'
+                  : result.router?.role === 'hotspot'
+                    ? `RADIUS, CoA and accounting${chain?.routerId === result.router?.id ? ', then the hotspot' : ''}.`
+                    : `RADIUS, CoA, accounting, and the bridge and PPPoE server if you chose ports${chain?.routerId === result.router?.id ? ', then the hotspot' : ''}.`}
               </span>
             )}
 
@@ -2732,8 +2882,10 @@ Revoke anyway?`
           <div style={{ display: 'grid', gap: 14 }}>
             <span style={{ fontSize: 12.5, color: color.muted }}>
               {plan.identity ? `${plan.identity} · ` : ''}RouterOS {plan.version ?? '?'} · RADIUS,
-              accounting and CoA will be set regardless. Ports below are optional: pick them and a
-              PPPoE server is built on a bridge of those ports.
+              accounting and CoA will be set regardless. Pick the ports customers plug into: they are bridged, and
+              {plan.router?.role === 'hotspot' ? ' the hotspot is built on that bridge.'
+                : plan.router?.role === 'both' ? ' the PPPoE server and then the hotspot are built on that bridge.'
+                  : ' a PPPoE server is built on that bridge.'}
             </span>
 
             <Field label="LAN ports for subscribers">

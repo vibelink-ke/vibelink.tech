@@ -303,9 +303,12 @@ export default function Clients() {
   useEffect(() => {
     const status = params.get('status');
     const q = params.get('q');
+    // From the Routers table: one MikroTik's customers (?router=<id>), optionally only those online (?status=online).
+    const router = params.get('router');
+    if (router) setRouterFilter(router);
     if (status && FILTERS.some((f) => f.key === status)) setFilter(status);
     if (q) t.search(q);
-    if (status || q) setParams((sp) => { sp.delete('status'); sp.delete('q'); return sp; }, { replace: true });
+    if (status || q || router) setParams((sp) => { sp.delete('status'); sp.delete('q'); sp.delete('router'); return sp; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const pageAccounts = t.pageRows;

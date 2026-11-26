@@ -515,6 +515,7 @@ export const api = {
   routerCleanupApply: (id, keys) => post(`/api/routers/${id}/cleanup-apply`, { keys }),
   pushHotspot: (id, opts = {}) => post(`/api/routers/${id}/hotspot`, opts),
   routerTunnels: () => get('/api/routers/tunnels'),
+  probeRouter: (host, port) => get(`/api/routers/probe?host=${encodeURIComponent(host)}&port=${encodeURIComponent(port)}`),
   routerTraffic: (id) => post(`/api/routers/${id}/traffic`, {}),
   routerPing: (id) => post(`/api/routers/${id}/ping`, {}),
   routerSystemInfo: (id) => post(`/api/routers/${id}/system-info`, {}),

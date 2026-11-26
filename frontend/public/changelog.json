@@ -455,7 +455,8 @@
     "date": "2026-11-26",
     "title": "x",
     "items": [
-      "The Today page is folded into the main dashboard: Collected today shows how it compares with yesterday by this time, with tiles for Expire today, Sites offline and Open tickets, and Needs a person and Expiring today lists."
+      "The Today page is folded into the main dashboard: Collected today shows how it compares with yesterday by this time, with tiles for Expire today, Sites offline and Open tickets, and Needs a person and Expiring today lists.",
+      "Adding a MikroTik: after the script is copied it waits for the router to connect, then asks whether to install PPPoE, Hotspot or both, and installs only that. The Routers list shows each router's clients and how many are online; click either to see them."
     ]
   }
 ]

@@ -6922,6 +6922,32 @@ app.post('/api/routers/:id/radius-check', wrap(async (req, res) => {
  * two disagreed. Every push then failed with a connection timeout, which reads
  * as "the router is down" rather than "you are calling the wrong number".
  */
+/**
+ * Is a MikroTik answering yet? Used while a new router's script is being pasted: a plain TCP connection to its API port on
+ * its tunnel address, so "waiting" turns into "connected" by itself the moment the tunnel and the API are both up. Nothing is
+ * sent and no login is tried.
+ *
+ * Only private addresses (where tunnels hand out addresses), never a public one: this must not become a way to scan the
+ * internet from the server.
+ */
+app.get('/api/routers/probe', requirePermission('routers.configure'), wrap(async (req, res) => {
+  const net = await import('node:net');
+  const host = String(req.query.host ?? '').trim().split('/')[0];
+  const port = Math.round(Number(req.query.port) || 8728);
+  const o = host.split('.').map(Number);
+  const privateV4 = net.isIPv4(host) && (o[0] === 10 || (o[0] === 172 && o[1] >= 16 && o[1] <= 31) || (o[0] === 192 && o[1] === 168) || (o[0] === 100 && o[1] >= 64 && o[1] <= 127));
+  if (!privateV4 || port < 1 || port > 65535) return res.status(400).json({ error: 'Only a tunnel (private) address can be checked.' });
+  const t0 = Date.now();
+  const reachable = await new Promise((done) => {
+    const sock = net.connect({ host, port });
+    const end = (ok) => { sock.destroy(); done(ok); };
+    sock.setTimeout(3000, () => end(false));
+    sock.once('connect', () => end(true));
+    sock.once('error', () => end(false));
+  });
+  res.json({ reachable, ms: reachable ? Date.now() - t0 : null });
+}));
+
 app.get('/api/routers/tunnels', wrap(async (req, res) => {
   const { liveTunnels } = await import('./tunnel.js');
   const { rows: routers } = await pool.query(
